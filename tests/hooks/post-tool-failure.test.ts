@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -249,7 +249,7 @@ describe('post-tool-failure: edge cases', () => {
   it('works when no state file exists yet (fresh project)', async () => {
     // init() already created state; remove state file to simulate fresh project
     const stateFile = join(tmpRoot, '.motive', 'state.json');
-    require('node:fs').unlinkSync(stateFile);
+    unlinkSync(stateFile);
 
     const result = await processPostToolFailure({ tool_name: 'Bash' }, tmpRoot);
     expect(result.failureCount).toBe(1);

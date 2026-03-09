@@ -8,6 +8,15 @@ export { PriorityScoringEngine } from './engines/priority-scoring.js';
 export { TaskGenerationEngine } from './engines/task-generation.js';
 export { SatisficingEngine } from './engines/satisficing.js';
 export { StallDetectionEngine } from './engines/stall-detection.js';
+export { CuriosityEngine } from './engines/curiosity.js';
+export type { CuriosityResult, ExplorationGoal } from './engines/curiosity.js';
+
+// Phase 4 — collaboration + learning
+export * from './collaboration/trust.js';
+export * from './collaboration/behavior.js';
+export * from './collaboration/irreversible.js';
+export * from './learning/logger.js';
+export * from './learning/pattern-analyzer.js';
 
 // Context injector
 export { ContextInjector } from './context/injector.js';
