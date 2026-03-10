@@ -4,68 +4,43 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Motive Layer — TypeScript framework that gives AI agents "motivation" via Claude Code Hooks. Intercepts lifecycle events (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop) as Node.js CLI subprocesses, maintaining goal/gap/constraint state to drive autonomous task selection and completion judgment.
+Motiva — AI agent orchestrator that gives existing agents "motivation." Instead of being a plugin inside an agent, Motiva sits above agents and drives them: selecting goals, spawning agent sessions, observing results, and judging completion. Motiva doesn't think — it makes agents think.
 
 ## Status
 
-PoC phase on `poc/motive-layer` branch. `main` branch preserves the pre-implementation state for rollback. Global settings backup at `~/.claude/settings.json.pre-motive`.
+Architecture pivot complete. Redesign phase — no implementation code yet. Previous PoC (Hooks-based plugin) archived in `archive/`.
+
+## Core Concept
+
+- 4-element model: Goal (with thresholds) → Current State (observation + confidence) → Gap → Constraints
+- Orchestrator loop: goal → spawn agent session → observe results → update state → next task (NEVER STOP)
+- Adapter pattern: agent-agnostic (Claude Code CLI, Claude API, custom adapters)
+- Motiva calls LLMs (for goal decomposition, observation) — it is the caller, not the callee
 
 ## Tech Stack
 
-- Node.js 18+, TypeScript 5.3+, zod>=3.22, yaml>=2.3, commander>=12.0
-- No LLM SDK — this package is called BY Claude Code, not the caller
-- State persistence: file-based JSON (no HTTP daemon)
+- Node.js 18+, TypeScript 5.3+
+- Will need LLM SDK (Anthropic SDK etc.) — TBD during implementation
+- State persistence: file-based JSON
 
 ## Build & Test
 
+No implementation code yet. When available:
 ```bash
-npm install                     # install dependencies
-npm run build                   # compile TypeScript → dist/
-npx vitest run                  # run all tests
-npx vitest run tests/engines/   # run engine tests only
-node dist/hooks/session-start.js  # test individual hook via stdin JSON
+npm install
+npm run build
+npx vitest run
 ```
 
-## Architecture
+## Key Documents
 
-### Integration: Claude Code Hooks → `node dist/hooks/*.js`
-Each hook reads/writes `.motive/state.json` (atomic temp-file-rename). Hook config goes in the **host project's** `.claude/settings.json`.
-
-### Package Layout
-```
-src/
-├── cli.ts                 # motive init|status|add-goal|goals|log|gc|reset
-├── index.ts               # package entry point
-├── hooks/                 # 6 modules (session-start, user-prompt, pre-tool-use, post-tool-use, post-tool-failure, stop)
-├── engines/               # gap-analysis, task-generation, stall-detection, satisficing, priority-scoring, curiosity
-├── state/                 # manager (atomic persistence), models (Zod schemas)
-├── collaboration/         # trust, behavior, irreversible action detection
-├── context/               # injector — generates .claude/rules/motive.md (≤500 tokens)
-└── learning/              # logger (log.jsonl), pattern-analyzer
-```
-
-### State Files (in host project)
-- `.motive/state.json` — session state, trust balance, active goals
-- `.motive/goals/*.json` — individual goal definitions
-- `.motive/log.jsonl` — action log (state_before → action → state_after)
-- `.motive/config.yaml` — user-configurable thresholds
-
-### Build Order (design.md §9)
-Phase 1 (state models + gap analysis + CLI) → Phase 2 (engines) → Phase 3 (hooks) → Phase 4 (trust + learning) → Phase 5 (integration tests)
+- `vision.md` — why Motiva exists, what world it creates
+- `concept.md` — core mechanisms (4-element model, orchestration, scoring, satisficing, stall detection, trust)
+- `memory/impl-research-*.md` — integration/delivery/adoption research
 
 ## Key Constraints
 
-- Each hook must complete in <300ms (SessionStart <200ms) — Node.js process spawn overhead is a known risk
-- Irreversible actions (git push, rm -rf, deploy, DROP TABLE) always require human approval regardless of trust/confidence
-- `.motive/` should be in `.gitignore` of host projects
-- `motive.md` context injection must stay ≤500 tokens
-
-## Design References
-
-- `concept.md` — concept definition (4-element model, motivation types, satisficing)
-- `design.md` — full architecture spec (state schema, hook specs, engine pseudocode, scoring formulas)
-
-
-# PoC がダメだった場合の復元コマンド
-  cp ~/.claude/settings.json.pre-motive ~/.claude/settings.json
-  cd ~/Documents/dev/Motiva && git checkout main
+- Evidence-based progress observation (never count tool calls as progress)
+- Irreversible actions always require human approval regardless of trust/confidence
+- Trust balance: asymmetric (failure penalty > success reward)
+- Satisficing: stop when "good enough," don't pursue perfection

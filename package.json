@@ -1,7 +1,7 @@
 {
-  "name": "motiva-layer",
+  "name": "motiva",
   "version": "0.1.0",
-  "description": "Motivation framework for AI agents via Claude Code Hooks",
+  "description": "AI agent orchestrator that gives existing agents motivation — goal-driven task selection, progress observation, and completion judgment",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,7 +9,7 @@
     "motiva": "dist/cli.js"
   },
   "scripts": {
-    "build": "tsc && node -e \"const{mkdirSync,copyFileSync}=require('fs');const{join}=require('path');mkdirSync('dist/templates',{recursive:true});copyFileSync('src/templates/motiva-usage.md','dist/templates/motiva-usage.md');\"",
+    "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src/",
