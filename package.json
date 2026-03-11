@@ -5,6 +5,9 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "motiva": "dist/cli-runner.js"
+  },
   "scripts": {
     "build": "tsc",
     "test": "vitest run",

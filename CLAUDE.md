@@ -8,7 +8,7 @@ Motiva — AI agent orchestrator that gives existing agents "motivation." Motiva
 
 ## Status
 
-Implementation Phase — Stage 1-5 complete, Stage 6 next.
+Implementation Phase — Stage 1-6 complete (MVP).
 
 ### Stage 1 (complete)
 - Type definitions: 14 Zod schema files in `src/types/`
@@ -27,10 +27,10 @@ Implementation Phase — Stage 1-5 complete, Stage 6 next.
 
 ### Stage 5 (complete)
 - Layer 5: `src/reporting-engine.ts` (3 report types, Markdown output, CLI display, 5 notification types), `src/core-loop.ts` (observe→gap→score→completion→stall→task→report loop)
-- 922 tests passing across 17 test files
 
-### Stage 6 (next)
-- Layer 6: CLIRunner (`src/cli-runner.ts`, `src/index.ts`)
+### Stage 6 (complete)
+- Layer 6: `src/cli-runner.ts` (5 subcommands: run, goal add, goal list, status, report), `src/index.ts` (full module exports)
+- 983 tests passing across 18 test files
 
 ## Core Concept
 
@@ -58,7 +58,7 @@ npx vitest run
 
 ## Architecture
 
-See `memory/impl-roadmap-research.md` for module dependency graph and implementation order.
+See `memory/archive/impl-roadmap-research.md` for module dependency graph and implementation order.
 
 ### Implementation Layers (bottom-up)
 
