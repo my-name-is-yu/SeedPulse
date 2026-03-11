@@ -506,11 +506,28 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "motiva-generate-test-"));
 // LLMGeneratedTaskSchema に合わせたレスポンス
 const VALID_TASK_RESPONSE = JSON.stringify({
   work_description: "Increase test coverage to 80% by adding unit tests for gap-calculator.ts",
-  success_criteria: ["Test coverage reaches >= 80%", "All new tests pass"],
-  estimated_duration: "2 hours",
-  task_category: "testing",
+  rationale: "Low test coverage increases risk of regressions in the gap calculation pipeline",
+  approach: "Identify untested branches in gap-calculator.ts, write vitest unit tests for each threshold type",
+  success_criteria: [
+    {
+      description: "Test coverage reaches >= 80%",
+      verification_method: "npx vitest run --coverage",
+      is_blocking: true
+    },
+    {
+      description: "All new tests pass without errors",
+      verification_method: "npx vitest run",
+      is_blocking: true
+    }
+  ],
+  scope_boundary: {
+    in_scope: ["src/gap-calculator.ts", "tests/gap-calculator.test.ts"],
+    out_of_scope: ["src/state-manager.ts", "src/types/"],
+    blast_radius: "gap calculation logic only"
+  },
+  constraints: ["Do not modify existing passing tests", "Use vitest framework only"],
   reversibility: "reversible",
-  primary_dimension: "test_coverage",
+  estimated_duration: { value: 2, unit: "hours" }
 });
 
 // MockLLMClient: ```json コードフェンス形式で返す
@@ -544,9 +561,8 @@ const task = await lifecycle.generateTask("goal-001", "test_coverage");
 console.log("task.id:", task.id, "(UUID形式であること)");
 console.log("task.goal_id:", task.goal_id, "(期待値: goal-001)");
 console.log("task.work_description:", task.work_description);
-console.log("task.task_category:", task.task_category, "(期待値: testing)");
 console.log("task.reversibility:", task.reversibility, "(期待値: reversible)");
-console.log("task.primary_dimension:", task.primary_dimension, "(期待値: test_coverage)");
+console.log("task.primary_dimension:", task.primary_dimension, "(期待値: test_coverage — generateTask引数から設定)");
 console.log("task.status:", task.status, "(期待値: pending)");
 console.log("task.consecutive_failure_count:", task.consecutive_failure_count, "(期待値: 0)");
 
@@ -585,10 +601,10 @@ const lifecycle2 = new TaskLifecycle(
   new StrategyManager(stateManager, capturingLLM),
   stallDetector
 );
-await lifecycle2.generateTask("goal-001", "test_coverage", "strategy-explicit-001");
-const hasStrategyId = capturedPrompt.includes("strategy-explicit-001");
-console.log("プロンプトに strategy_id が含まれる:", hasStrategyId ? "✓" : "✗（strategy_idの埋め込みを確認）");
-console.log("プロンプト先頭300文字:", capturedPrompt.slice(0, 300));
+const task3 = await lifecycle2.generateTask("goal-001", "test_coverage", "strategy-explicit-001");
+const strategyIdMatches = task3.strategy_id === "strategy-explicit-001";
+console.log("task.strategy_id:", task3.strategy_id, "(期待値: strategy-explicit-001)");
+console.log("strategy_id がタスクオブジェクトに正しく設定:", strategyIdMatches ? "✓" : "✗");
 
 fs.rmSync(tmpDir, { recursive: true, force: true });
 console.log("\nクリーンアップ完了");
@@ -597,10 +613,12 @@ EOF
 
 **確認ポイント**:
 - [ ] タスクに UUID形式の `id` が付与される
-- [ ] `goal_id`、`task_category`、`reversibility`、`primary_dimension` がLLMレスポンスから正しくパースされる
+- [ ] `goal_id`、`reversibility` がLLMレスポンスから正しくパースされる
+- [ ] `primary_dimension` が `generateTask` の引数 (`"test_coverage"`) から設定される
+- [ ] `success_criteria` がオブジェクト配列形式（`description`/`verification_method`/`is_blocking`）でパースされる
 - [ ] `status` が `"pending"`、`consecutive_failure_count` が `0` である
 - [ ] `tasks/<goal_id>/<task_id>.json` にタスクが永続化される
-- [ ] 明示した `strategy_id` がプロンプトに含まれる（または strategy_id 解決が動作する）
+- [ ] `strategy_id` がタスクオブジェクトに正しくセットされる（メタデータのみ、プロンプトには含まない）
 
 ---
 
@@ -631,8 +649,8 @@ function makeTask(reversibility, category = "testing") {
     id: "task-test-001",
     goal_id: "goal-001",
     work_description: "test task",
-    success_criteria: ["pass"],
-    estimated_duration: "1 hour",
+    success_criteria: [{ description: "pass", verification_method: "manual", is_blocking: true }],
+    estimated_duration: { value: 1, unit: "hours" },
     task_category: category,
     reversibility: reversibility,
     primary_dimension: "test_coverage",
@@ -643,8 +661,12 @@ function makeTask(reversibility, category = "testing") {
   };
 }
 
-// ─── テスト A: reversible タスク — approvalFn 不要 ───
-console.log("=== A. reversible — approvalFn 不要 ===");
+// ─── テスト A: reversible タスク — 初期トラスト残高 0 では approvalFn が呼ばれる ───
+// NOTE: reversibility="reversible" でも TrustManager.requiresApproval() は
+//       トラスト残高 0 (初期値) ではドメインが autonomous 象限にならないため
+//       approvalFn を呼び出す。reversible が irreversible と異なるのは
+//       「高トラスト時に approvalFn が不要になる」点である。
+console.log("=== A. reversible + 低トラスト — approvalFn が呼ばれ true を返す ===");
 const tmpDir1 = fs.mkdtempSync(path.join(os.tmpdir(), "motiva-approval-a-"));
 const stateManager1 = new StateManager(tmpDir1);
 let approvalCalled = false;
@@ -657,9 +679,9 @@ const lifecycle1 = new TaskLifecycle(
   { approvalFn: async (task) => { approvalCalled = true; return true; } }
 );
 const resultA = await lifecycle1.checkIrreversibleApproval(makeTask("reversible"), 0.9);
-console.log("result:", resultA, "(期待値: true — 承認不要)");
-console.log("approvalFn called:", approvalCalled, "(期待値: false — 呼ばれない)");
-console.log(resultA === true && !approvalCalled ? "✓" : "✗");
+console.log("result:", resultA, "(期待値: true — approvalFn が true を返すため)");
+console.log("approvalFn called:", approvalCalled, "(期待値: true — 低トラストでは呼ばれる)");
+console.log(resultA === true && approvalCalled ? "✓" : "✗");
 fs.rmSync(tmpDir1, { recursive: true, force: true });
 
 // ─── テスト B: irreversible タスク — approvalFn が呼ばれる ───
@@ -739,7 +761,7 @@ EOF
 ```
 
 **確認ポイント**:
-- [ ] `reversible` タスクでは `approvalFn` が呼ばれず `true` が返る
+- [ ] `reversible` + 低トラスト（初期値 0）では `approvalFn` が呼ばれ、`true` を返せば `true` になる
 - [ ] `irreversible` タスクでは `approvalFn` が呼ばれる
 - [ ] `approvalFn` が `false` を返した場合に `false` が返る
 - [ ] `approvalFn` 未指定（デフォルト）の場合に `false` が返る（安全側デフォルト）
@@ -780,8 +802,8 @@ const baseTask = {
   id: "task-execute-001",
   goal_id: "goal-001",
   work_description: "Run tests and check coverage",
-  success_criteria: ["Coverage >= 80%"],
-  estimated_duration: "2 hours",
+  success_criteria: [{ description: "Coverage >= 80%", verification_method: "npx vitest run --coverage", is_blocking: true }],
+  estimated_duration: { value: 2, unit: "hours" },
   task_category: "testing",
   reversibility: "reversible",
   primary_dimension: "test_coverage",
@@ -859,10 +881,10 @@ console.log(!result3.success && result3.stopped_reason === "timeout" ? "✓" : "
 // ─── 4. estimated_duration の変換確認 ───
 console.log("\n=== 4. estimated_duration 変換 ===");
 const durations = [
-  { estimated_duration: "30 minutes", expected_ms: 1800000 },
-  { estimated_duration: "2 hours",    expected_ms: 7200000 },
-  { estimated_duration: "1 day",      expected_ms: 86400000 },
-  { estimated_duration: null,         expected_ms: 1800000 }, // デフォルト30分
+  { estimated_duration: { value: 30, unit: "minutes" }, expected_ms: 1800000 },
+  { estimated_duration: { value: 2, unit: "hours" },    expected_ms: 7200000 },
+  { estimated_duration: { value: 1, unit: "days" },     expected_ms: 86400000 },
+  { estimated_duration: null,                           expected_ms: 1800000 }, // デフォルト30分
 ];
 for (const d of durations) {
   const instantAdapter = {
@@ -947,8 +969,8 @@ const baseTask = {
   id: "task-verify-001",
   goal_id: "goal-001",
   work_description: "Add unit tests",
-  success_criteria: ["Coverage >= 80%"],
-  estimated_duration: "1 hour",
+  success_criteria: [{ description: "Coverage >= 80%", verification_method: "npx vitest run --coverage", is_blocking: true }],
+  estimated_duration: { value: 1, unit: "hours" },
   task_category: "testing",
   reversibility: "reversible",
   primary_dimension: "test_coverage",
@@ -1001,7 +1023,7 @@ console.log(result3.verdict === "partial" ? "✓" : "✗");
 
 // ─── 4. L1 適用確認: npmコマンドが含まれる場合 ───
 console.log("\n=== 4. L1 機械的チェック (npm prefix) ===");
-const npmTask = { ...baseTask, id: "task-l1-" + Date.now(), success_criteria: ["npm test passes"] };
+const npmTask = { ...baseTask, id: "task-l1-" + Date.now(), success_criteria: [{ description: "npm test passes", verification_method: "npm test", is_blocking: true }] };
 const npmExecution = {
   success: true,
   output: "npm test result: PASS",
@@ -1093,8 +1115,8 @@ const baseTask = {
   id: "task-verdict-001",
   goal_id: "goal-001",
   work_description: "Add unit tests",
-  success_criteria: ["pass"],
-  estimated_duration: "1 hour",
+  success_criteria: [{ description: "pass", verification_method: "manual", is_blocking: true }],
+  estimated_duration: { value: 1, unit: "hours" },
   task_category: "testing",
   reversibility: "reversible",
   primary_dimension: "test_coverage",
@@ -1232,8 +1254,8 @@ function makeTask(failureCount, reversibility = "reversible") {
     id: "task-fail-" + Date.now(),
     goal_id: "goal-001",
     work_description: "failing task",
-    success_criteria: ["pass"],
-    estimated_duration: "1 hour",
+    success_criteria: [{ description: "pass", verification_method: "manual", is_blocking: true }],
+    estimated_duration: { value: 1, unit: "hours" },
     task_category: "testing",
     reversibility: reversibility,
     primary_dimension: "test_coverage",
@@ -1336,11 +1358,28 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "motiva-cycle-test-"));
 // 3回目: verifyTask (L3 自己申告) → 実行レポートJSON
 const GENERATE_RESPONSE = JSON.stringify({
   work_description: "Run npm test to verify coverage",
-  success_criteria: ["npm test exits 0", "Coverage >= 80%"],
-  estimated_duration: "30 minutes",
-  task_category: "testing",
+  rationale: "Verifying test coverage ensures the codebase meets the quality threshold",
+  approach: "Execute npm test with coverage flag and inspect the output",
+  success_criteria: [
+    {
+      description: "npm test exits with code 0",
+      verification_method: "npm test",
+      is_blocking: true
+    },
+    {
+      description: "Coverage reaches >= 80%",
+      verification_method: "npx vitest run --coverage",
+      is_blocking: true
+    }
+  ],
+  scope_boundary: {
+    in_scope: ["src/", "tests/"],
+    out_of_scope: [],
+    blast_radius: "test execution only"
+  },
+  constraints: [],
   reversibility: "reversible",
-  primary_dimension: "test_coverage",
+  estimated_duration: { value: 30, unit: "minutes" }
 });
 const REVIEW_RESPONSE   = JSON.stringify({ verdict: "pass", reasoning: "All criteria met", criteria_met: 2, criteria_total: 2 });
 const SELFREPORT_RESPONSE = JSON.stringify({ completed: true, summary: "Tests passed at 85% coverage", partial_results: [], blockers: [] });
@@ -1434,11 +1473,23 @@ const denyingLLM = {
     let content;
     if (callIndex === 1) content = "```json\n" + JSON.stringify({
       work_description: "Deploy to production",
-      success_criteria: ["deploy success"],
-      estimated_duration: "1 hour",
-      task_category: "deployment",
+      rationale: "The production deployment is required to release the latest changes",
+      approach: "Run the deployment pipeline and verify the release",
+      success_criteria: [
+        {
+          description: "Deployment completes successfully",
+          verification_method: "check deployment status",
+          is_blocking: true
+        }
+      ],
+      scope_boundary: {
+        in_scope: ["deployment pipeline"],
+        out_of_scope: [],
+        blast_radius: "production environment"
+      },
+      constraints: [],
       reversibility: "irreversible",
-      primary_dimension: "test_coverage",
+      estimated_duration: { value: 1, unit: "hours" }
     }) + "\n```";
     else content = REVIEW_RESPONSE;
     return { content, usage: { input_tokens: 1, output_tokens: 1 }, stop_reason: "end_turn" };

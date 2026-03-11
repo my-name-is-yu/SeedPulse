@@ -218,6 +218,7 @@ export const ReportTypeEnum = z.enum([
   "goal_completion",
   "strategy_change",
   "capability_escalation",
+  "execution_summary",
 ]);
 export type ReportType = z.infer<typeof ReportTypeEnum>;
 

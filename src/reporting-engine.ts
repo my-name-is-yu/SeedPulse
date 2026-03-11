@@ -1,0 +1,448 @@
+import * as crypto from "node:crypto";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { StateManager } from "./state-manager.js";
+import { ReportSchema } from "./types/report.js";
+import type { Report } from "./types/report.js";
+
+// ─── Types ───
+
+export type ExecutionSummaryParams = {
+  goalId: string;
+  loopIndex: number;
+  observation: { dimensionName: string; progress: number; confidence: number }[];
+  gapAggregate: number;
+  taskResult: { taskId: string; action: string; dimension: string } | null;
+  stallDetected: boolean;
+  pivotOccurred: boolean;
+  elapsedMs: number;
+};
+
+export type NotificationType =
+  | "urgent"
+  | "approval_required"
+  | "stall_escalation"
+  | "completed"
+  | "capability_insufficient";
+
+export type NotificationContext = {
+  goalId: string;
+  message: string;
+  details?: string;
+};
+
+// ─── ReportingEngine ───
+
+export class ReportingEngine {
+  private readonly stateManager: StateManager;
+
+  constructor(stateManager: StateManager) {
+    this.stateManager = stateManager;
+  }
+
+  // ─── generateExecutionSummary ───
+
+  generateExecutionSummary(params: ExecutionSummaryParams): Report {
+    const {
+      goalId,
+      loopIndex,
+      observation,
+      gapAggregate,
+      taskResult,
+      stallDetected,
+      pivotOccurred,
+      elapsedMs,
+    } = params;
+
+    const now = new Date().toISOString();
+    const elapsedSec = (elapsedMs / 1000).toFixed(1);
+
+    // Build observation table
+    let obsTable = "| Dimension | Progress | Confidence |\n|---|---|---|\n";
+    if (observation.length === 0) {
+      obsTable += "| (none) | — | — |\n";
+    } else {
+      for (const obs of observation) {
+        const progress = (obs.progress * 100).toFixed(1) + "%";
+        const confidence = (obs.confidence * 100).toFixed(1) + "%";
+        obsTable += `| ${obs.dimensionName} | ${progress} | ${confidence} |\n`;
+      }
+    }
+
+    // Task result section
+    let taskSection = "_No task executed this loop._";
+    if (taskResult !== null) {
+      taskSection =
+        `- **Task ID**: ${taskResult.taskId}\n` +
+        `- **Action**: ${taskResult.action}\n` +
+        `- **Dimension**: ${taskResult.dimension}`;
+    }
+
+    // Status flags
+    const stallStatus = stallDetected ? "Yes" : "No";
+    const pivotStatus = pivotOccurred ? "Yes" : "No";
+
+    const content =
+      `## Execution Summary — Loop ${loopIndex}\n\n` +
+      `**Timestamp**: ${now}\n\n` +
+      `### Observation Results\n\n${obsTable}\n` +
+      `### Gap Aggregate\n\n` +
+      `**Score**: ${gapAggregate.toFixed(4)}\n\n` +
+      `### Task Result\n\n${taskSection}\n\n` +
+      `### Status\n\n` +
+      `- **Stall detected**: ${stallStatus}\n` +
+      `- **Strategy pivot**: ${pivotStatus}\n\n` +
+      `### Elapsed Time\n\n${elapsedSec}s`;
+
+    const report = ReportSchema.parse({
+      id: crypto.randomUUID(),
+      report_type: "execution_summary",
+      goal_id: goalId,
+      title: `Execution Summary — Loop ${loopIndex}`,
+      content,
+      verbosity: "standard",
+      generated_at: now,
+      delivered_at: null,
+      read: false,
+    });
+
+    return report;
+  }
+
+  // ─── generateDailySummary ───
+
+  generateDailySummary(goalId: string): Report {
+    const now = new Date();
+    const todayPrefix = now.toISOString().slice(0, 10); // "YYYY-MM-DD"
+
+    // Load all reports for this goal
+    const allReports = this.listReports(goalId);
+
+    // Filter to execution summaries generated today
+    const todayReports = allReports.filter((r) => {
+      return (
+        r.report_type === "execution_summary" &&
+        r.generated_at.startsWith(todayPrefix)
+      );
+    });
+
+    const loopsRun = todayReports.length;
+
+    // Compute progress change from first to last loop
+    let progressChange: string;
+    if (loopsRun === 0) {
+      progressChange = "N/A";
+    } else if (loopsRun === 1) {
+      progressChange = "Single loop (no change to compute)";
+    } else {
+      // Parse gap aggregate from content — look for "**Score**: <number>"
+      const parseGap = (content: string): number | null => {
+        const match = content.match(/\*\*Score\*\*:\s*([\d.]+)/);
+        return match ? parseFloat(match[1]) : null;
+      };
+      const firstGap = parseGap(todayReports[0].content);
+      const lastGap = parseGap(todayReports[loopsRun - 1].content);
+      if (firstGap !== null && lastGap !== null) {
+        const delta = firstGap - lastGap;
+        progressChange =
+          delta >= 0
+            ? `▼ ${delta.toFixed(4)} (gap reduced)`
+            : `▲ ${Math.abs(delta).toFixed(4)} (gap grew)`;
+      } else {
+        progressChange = "Could not parse gap data";
+      }
+    }
+
+    // Count stalls and pivots
+    const stallCount = todayReports.filter((r) =>
+      r.content.includes("**Stall detected**: Yes")
+    ).length;
+
+    const pivotCount = todayReports.filter((r) =>
+      r.content.includes("**Strategy pivot**: Yes")
+    ).length;
+
+    const reportNow = now.toISOString();
+
+    const content =
+      `## Daily Summary — ${todayPrefix}\n\n` +
+      `**Goal**: ${goalId}\n\n` +
+      `### Activity\n\n` +
+      `- **Loops run**: ${loopsRun}\n` +
+      `- **Stalls detected**: ${stallCount}\n` +
+      `- **Strategy pivots**: ${pivotCount}\n\n` +
+      `### Progress\n\n` +
+      `- **Overall gap change**: ${progressChange}\n\n` +
+      `_Generated at ${reportNow}_`;
+
+    const report = ReportSchema.parse({
+      id: crypto.randomUUID(),
+      report_type: "daily_summary",
+      goal_id: goalId,
+      title: `Daily Summary — ${todayPrefix}`,
+      content,
+      verbosity: "standard",
+      generated_at: reportNow,
+      delivered_at: null,
+      read: false,
+    });
+
+    return report;
+  }
+
+  // ─── generateWeeklyReport ───
+
+  generateWeeklyReport(goalId: string): Report {
+    const now = new Date();
+    const reportNow = now.toISOString();
+
+    // Collect daily summaries for the last 7 days
+    const allReports = this.listReports(goalId);
+
+    const dailySummaries = allReports.filter((r) => {
+      if (r.report_type !== "daily_summary") return false;
+      const generatedAt = new Date(r.generated_at);
+      const diffDays =
+        (now.getTime() - generatedAt.getTime()) / (1000 * 60 * 60 * 24);
+      return diffDays <= 7;
+    });
+
+    const daysWithActivity = dailySummaries.length;
+
+    // Sum up total loops from daily summaries
+    const parseLoops = (content: string): number => {
+      const match = content.match(/\*\*Loops run\*\*:\s*(\d+)/);
+      return match ? parseInt(match[1], 10) : 0;
+    };
+
+    const totalLoops = dailySummaries.reduce(
+      (acc, r) => acc + parseLoops(r.content),
+      0
+    );
+
+    const totalStalls = dailySummaries.reduce((acc, r) => {
+      const match = r.content.match(/\*\*Stalls detected\*\*:\s*(\d+)/);
+      return acc + (match ? parseInt(match[1], 10) : 0);
+    }, 0);
+
+    const totalPivots = dailySummaries.reduce((acc, r) => {
+      const match = r.content.match(/\*\*Strategy pivots\*\*:\s*(\d+)/);
+      return acc + (match ? parseInt(match[1], 10) : 0);
+    }, 0);
+
+    // Build trend lines from daily summaries (sorted chronologically)
+    let trendSection = "_No daily activity in the last 7 days._";
+    if (dailySummaries.length > 0) {
+      const sortedSummaries = [...dailySummaries].sort((a, b) =>
+        a.generated_at.localeCompare(b.generated_at)
+      );
+      const trendLines = sortedSummaries.map((r) => {
+        const date = r.generated_at.slice(0, 10);
+        const loops = parseLoops(r.content);
+        const progressMatch = r.content.match(
+          /\*\*Overall gap change\*\*:\s*(.+)/
+        );
+        const progress = progressMatch ? progressMatch[1].trim() : "N/A";
+        return `- **${date}**: ${loops} loops | Gap change: ${progress}`;
+      });
+      trendSection = trendLines.join("\n");
+    }
+
+    const content =
+      `## Weekly Report\n\n` +
+      `**Goal**: ${goalId}\n` +
+      `**Period**: Last 7 days (ending ${reportNow.slice(0, 10)})\n\n` +
+      `### Summary\n\n` +
+      `- **Days with activity**: ${daysWithActivity}\n` +
+      `- **Total loops run**: ${totalLoops}\n` +
+      `- **Total stalls**: ${totalStalls}\n` +
+      `- **Total pivots**: ${totalPivots}\n\n` +
+      `### Daily Trend\n\n${trendSection}\n\n` +
+      `_Generated at ${reportNow}_`;
+
+    const report = ReportSchema.parse({
+      id: crypto.randomUUID(),
+      report_type: "weekly_report",
+      goal_id: goalId,
+      title: `Weekly Report — ${reportNow.slice(0, 10)}`,
+      content,
+      verbosity: "standard",
+      generated_at: reportNow,
+      delivered_at: null,
+      read: false,
+    });
+
+    return report;
+  }
+
+  // ─── saveReport ───
+
+  saveReport(report: Report): void {
+    const goalId = report.goal_id ?? "_global";
+    const relativePath = `reports/${goalId}/${report.id}.json`;
+    this.stateManager.writeRaw(relativePath, report);
+  }
+
+  // ─── getReport ───
+
+  getReport(reportId: string): Report | null {
+    const allReports = this.listReports();
+    const found = allReports.find((r) => r.id === reportId);
+    return found ?? null;
+  }
+
+  // ─── listReports ───
+
+  listReports(goalId?: string): Report[] {
+    const results: Report[] = [];
+    const baseDir = this.stateManager.getBaseDir();
+    const reportsDir = `${baseDir}/reports`;
+
+    if (!fs.existsSync(reportsDir)) return [];
+
+    if (goalId !== undefined) {
+      this._loadReportsFromAbsDir(`${reportsDir}/${goalId}`, results);
+    } else {
+      // Scan all subdirectories under reports/
+      const entries = fs.readdirSync(reportsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          this._loadReportsFromAbsDir(`${reportsDir}/${entry.name}`, results);
+        }
+      }
+    }
+
+    // Sort by generated_at ascending
+    results.sort((a, b) => a.generated_at.localeCompare(b.generated_at));
+    return results;
+  }
+
+  private _loadReportsFromAbsDir(absDir: string, results: Report[]): void {
+    if (!fs.existsSync(absDir)) return;
+    const entries = fs.readdirSync(absDir);
+    for (const entry of entries) {
+      if (!entry.endsWith(".json")) continue;
+      // Use readRaw relative path
+      const baseDir = this.stateManager.getBaseDir();
+      const relativePath = path.relative(baseDir, path.join(absDir, entry));
+      const raw = this.stateManager.readRaw(relativePath);
+      if (raw === null) continue;
+      try {
+        const report = ReportSchema.parse(raw);
+        results.push(report);
+      } catch {
+        // Skip malformed files
+      }
+    }
+  }
+
+  // ─── formatForCLI ───
+
+  formatForCLI(report: Report): string {
+    if (report.report_type === "execution_summary") {
+      // Parse loop index from title
+      const loopMatch = report.title.match(/Loop (\d+)/);
+      const loopNum = loopMatch ? loopMatch[1] : "?";
+
+      // Parse gap from content
+      const gapMatch = report.content.match(/\*\*Score\*\*:\s*([\d.]+)/);
+      const gap = gapMatch ? parseFloat(gapMatch[1]).toFixed(2) : "?.??";
+
+      // Parse task from content
+      const taskIdMatch = report.content.match(/\*\*Task ID\*\*:\s*(.+)/);
+      const actionMatch = report.content.match(/\*\*Action\*\*:\s*(.+)/);
+      const taskPart =
+        taskIdMatch && actionMatch
+          ? `task: ${taskIdMatch[1].trim()} (${actionMatch[1].trim()})`
+          : "no task";
+
+      // Parse elapsed from content
+      const elapsedMatch = report.content.match(/^([\d.]+)s$/m);
+      const elapsed = elapsedMatch ? `${elapsedMatch[1]}s` : "?s";
+
+      const goalId = report.goal_id ?? "(no goal)";
+      return `[Loop ${loopNum}] ${goalId} | gap: ${gap} | ${taskPart} | ${elapsed}`;
+    }
+
+    if (report.report_type === "daily_summary") {
+      const dateMatch = report.title.match(/(\d{4}-\d{2}-\d{2})/);
+      const date = dateMatch ? dateMatch[1] : "?";
+      const loopsMatch = report.content.match(/\*\*Loops run\*\*:\s*(\d+)/);
+      const loops = loopsMatch ? loopsMatch[1] : "?";
+      const goalId = report.goal_id ?? "(no goal)";
+      return `[Daily ${date}] ${goalId} | ${loops} loops`;
+    }
+
+    if (report.report_type === "weekly_report") {
+      const dateMatch = report.title.match(/(\d{4}-\d{2}-\d{2})/);
+      const date = dateMatch ? dateMatch[1] : "?";
+      const totalLoopsMatch = report.content.match(
+        /\*\*Total loops run\*\*:\s*(\d+)/
+      );
+      const totalLoops = totalLoopsMatch ? totalLoopsMatch[1] : "?";
+      const goalId = report.goal_id ?? "(no goal)";
+      return `[Weekly ${date}] ${goalId} | ${totalLoops} total loops`;
+    }
+
+    // Notification types / fallback
+    return `[${report.report_type}] ${report.goal_id ?? "(no goal)"} | ${report.title}`;
+  }
+
+  // ─── generateNotification ───
+
+  generateNotification(
+    type: NotificationType,
+    context: NotificationContext
+  ): Report {
+    const now = new Date().toISOString();
+    const { goalId, message, details } = context;
+
+    let reportType: Report["report_type"];
+    let title: string;
+
+    switch (type) {
+      case "urgent":
+        reportType = "urgent_alert";
+        title = `Urgent: ${message}`;
+        break;
+      case "approval_required":
+        reportType = "approval_request";
+        title = `Approval Required: ${message}`;
+        break;
+      case "stall_escalation":
+        reportType = "stall_escalation";
+        title = `Stall Escalation: ${message}`;
+        break;
+      case "completed":
+        reportType = "goal_completion";
+        title = `Goal Completed: ${message}`;
+        break;
+      case "capability_insufficient":
+        reportType = "capability_escalation";
+        title = `Capability Insufficient: ${message}`;
+        break;
+    }
+
+    const detailsSection = details ? `\n\n### Details\n\n${details}` : "";
+
+    const content =
+      `## ${title}\n\n` +
+      `**Goal**: ${goalId}\n\n` +
+      `### Message\n\n${message}${detailsSection}\n\n` +
+      `_Generated at ${now}_`;
+
+    const report = ReportSchema.parse({
+      id: crypto.randomUUID(),
+      report_type: reportType,
+      goal_id: goalId,
+      title,
+      content,
+      verbosity: "standard",
+      generated_at: now,
+      delivered_at: null,
+      read: false,
+    });
+
+    return report;
+  }
+}

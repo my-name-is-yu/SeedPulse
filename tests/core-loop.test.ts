@@ -1,0 +1,1487 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as os from "node:os";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import {
+  CoreLoop,
+  buildDriveContext,
+  type LoopConfig,
+  type CoreLoopDeps,
+  type GapCalculatorModule,
+  type DriveScorerModule,
+  type ReportingEngine,
+  type LoopIterationResult,
+} from "../src/core-loop.js";
+import { StateManager } from "../src/state-manager.js";
+import type { ObservationEngine } from "../src/observation-engine.js";
+import type { TaskLifecycle, TaskCycleResult } from "../src/task-lifecycle.js";
+import type { SatisficingJudge } from "../src/satisficing-judge.js";
+import type { StallDetector } from "../src/stall-detector.js";
+import type { StrategyManager } from "../src/strategy-manager.js";
+import type { DriveSystem } from "../src/drive-system.js";
+import type { AdapterRegistry, IAdapter } from "../src/adapter-layer.js";
+import type { Goal } from "../src/types/goal.js";
+import type { GapVector } from "../src/types/gap.js";
+import type { CompletionJudgment } from "../src/types/satisficing.js";
+import type { StallReport } from "../src/types/stall.js";
+import type { DriveScore } from "../src/types/drive.js";
+
+// ─── Test Helpers ───
+
+function makeTempDir(): string {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "motiva-core-loop-test-"));
+}
+
+function makeGoal(overrides: Partial<Goal> = {}): Goal {
+  const now = new Date().toISOString();
+  return {
+    id: "goal-1",
+    parent_id: null,
+    node_type: "goal",
+    title: "Test Goal",
+    description: "A test goal",
+    status: "active",
+    dimensions: [
+      {
+        name: "dim1",
+        label: "Dimension 1",
+        current_value: 5,
+        threshold: { type: "min", value: 10 },
+        confidence: 0.8,
+        observation_method: {
+          type: "mechanical",
+          source: "test",
+          schedule: null,
+          endpoint: null,
+          confidence_tier: "mechanical",
+        },
+        last_updated: now,
+        history: [],
+        weight: 1.0,
+        uncertainty_weight: null,
+        state_integrity: "ok",
+      },
+      {
+        name: "dim2",
+        label: "Dimension 2",
+        current_value: 3,
+        threshold: { type: "min", value: 8 },
+        confidence: 0.7,
+        observation_method: {
+          type: "mechanical",
+          source: "test",
+          schedule: null,
+          endpoint: null,
+          confidence_tier: "mechanical",
+        },
+        last_updated: now,
+        history: [],
+        weight: 1.0,
+        uncertainty_weight: null,
+        state_integrity: "ok",
+      },
+    ],
+    gap_aggregation: "max",
+    dimension_mapping: null,
+    constraints: [],
+    children_ids: [],
+    target_date: null,
+    origin: null,
+    pace_snapshot: null,
+    deadline: null,
+    confidence_flag: null,
+    user_override: false,
+    feasibility_note: null,
+    uncertainty_weight: 1.0,
+    created_at: now,
+    updated_at: now,
+    ...overrides,
+  };
+}
+
+function makeGapVector(goalId = "goal-1"): GapVector {
+  return {
+    goal_id: goalId,
+    gaps: [
+      {
+        dimension_name: "dim1",
+        raw_gap: 5,
+        normalized_gap: 0.5,
+        normalized_weighted_gap: 0.5,
+        confidence: 0.8,
+        uncertainty_weight: 1.0,
+      },
+      {
+        dimension_name: "dim2",
+        raw_gap: 5,
+        normalized_gap: 0.625,
+        normalized_weighted_gap: 0.625,
+        confidence: 0.7,
+        uncertainty_weight: 1.0,
+      },
+    ],
+    timestamp: new Date().toISOString(),
+  };
+}
+
+function makeDriveScores(): DriveScore[] {
+  return [
+    {
+      dimension_name: "dim1",
+      dissatisfaction: 0.5,
+      deadline: 0,
+      opportunity: 0,
+      final_score: 0.5,
+      dominant_drive: "dissatisfaction",
+    },
+    {
+      dimension_name: "dim2",
+      dissatisfaction: 0.625,
+      deadline: 0,
+      opportunity: 0,
+      final_score: 0.625,
+      dominant_drive: "dissatisfaction",
+    },
+  ];
+}
+
+function makeCompletionJudgment(
+  overrides: Partial<CompletionJudgment> = {}
+): CompletionJudgment {
+  return {
+    is_complete: false,
+    blocking_dimensions: ["dim1", "dim2"],
+    low_confidence_dimensions: [],
+    needs_verification_task: false,
+    checked_at: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+function makeTaskCycleResult(
+  overrides: Partial<TaskCycleResult> = {}
+): TaskCycleResult {
+  return {
+    task: {
+      id: "task-1",
+      goal_id: "goal-1",
+      strategy_id: null,
+      target_dimensions: ["dim1"],
+      primary_dimension: "dim1",
+      work_description: "Test task",
+      rationale: "Test rationale",
+      approach: "Test approach",
+      success_criteria: [
+        {
+          description: "Test criterion",
+          verification_method: "manual check",
+          is_blocking: true,
+        },
+      ],
+      scope_boundary: {
+        in_scope: ["test"],
+        out_of_scope: [],
+        blast_radius: "none",
+      },
+      constraints: [],
+      plateau_until: null,
+      estimated_duration: null,
+      consecutive_failure_count: 0,
+      reversibility: "reversible",
+      task_category: "normal",
+      status: "completed",
+      started_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+      timeout_at: null,
+      heartbeat_at: null,
+      created_at: new Date().toISOString(),
+    },
+    verificationResult: {
+      task_id: "task-1",
+      verdict: "pass",
+      confidence: 0.9,
+      evidence: [
+        {
+          layer: "mechanical",
+          description: "Pass",
+          confidence: 0.9,
+        },
+      ],
+      dimension_updates: [],
+      timestamp: new Date().toISOString(),
+    },
+    action: "completed",
+    ...overrides,
+  };
+}
+
+function makeStallReport(overrides: Partial<StallReport> = {}): StallReport {
+  return {
+    stall_type: "dimension_stall",
+    goal_id: "goal-1",
+    dimension_name: "dim1",
+    task_id: null,
+    detected_at: new Date().toISOString(),
+    escalation_level: 0,
+    suggested_cause: "approach_failure",
+    decay_factor: 0.6,
+    ...overrides,
+  };
+}
+
+// ─── Mock Factories ───
+
+function createMockAdapter(): IAdapter {
+  return {
+    adapterType: "claude_api",
+    execute: vi.fn().mockResolvedValue({
+      success: true,
+      output: "Task completed",
+      error: null,
+      exit_code: null,
+      elapsed_ms: 1000,
+      stopped_reason: "completed",
+    }),
+  };
+}
+
+function createMockDeps(tmpDir: string): {
+  deps: CoreLoopDeps;
+  mocks: {
+    stateManager: StateManager;
+    observationEngine: Record<string, ReturnType<typeof vi.fn>>;
+    gapCalculator: Record<string, ReturnType<typeof vi.fn>>;
+    driveScorer: Record<string, ReturnType<typeof vi.fn>>;
+    taskLifecycle: Record<string, ReturnType<typeof vi.fn>>;
+    satisficingJudge: Record<string, ReturnType<typeof vi.fn>>;
+    stallDetector: Record<string, ReturnType<typeof vi.fn>>;
+    strategyManager: Record<string, ReturnType<typeof vi.fn>>;
+    reportingEngine: Record<string, ReturnType<typeof vi.fn>>;
+    driveSystem: Record<string, ReturnType<typeof vi.fn>>;
+    adapterRegistry: Record<string, ReturnType<typeof vi.fn>>;
+    adapter: IAdapter;
+  };
+} {
+  const stateManager = new StateManager(tmpDir);
+
+  const adapter = createMockAdapter();
+
+  const observationEngine = {
+    observe: vi.fn(),
+    applyObservation: vi.fn(),
+    createObservationEntry: vi.fn(),
+    getObservationLog: vi.fn(),
+    saveObservationLog: vi.fn(),
+    applyProgressCeiling: vi.fn(),
+    getConfidenceTier: vi.fn(),
+    resolveContradiction: vi.fn(),
+    needsVerificationTask: vi.fn(),
+  };
+
+  const gapCalculator = {
+    calculateGapVector: vi.fn().mockReturnValue(makeGapVector()),
+    aggregateGaps: vi.fn().mockReturnValue(0.625),
+  };
+
+  const driveScorer = {
+    scoreAllDimensions: vi.fn().mockReturnValue(makeDriveScores()),
+    rankDimensions: vi.fn().mockImplementation((scores: DriveScore[]) =>
+      [...scores].sort((a, b) => b.final_score - a.final_score)
+    ),
+  };
+
+  const taskLifecycle = {
+    runTaskCycle: vi.fn().mockResolvedValue(makeTaskCycleResult()),
+    selectTargetDimension: vi.fn(),
+    generateTask: vi.fn(),
+    checkIrreversibleApproval: vi.fn(),
+    executeTask: vi.fn(),
+    verifyTask: vi.fn(),
+    handleVerdict: vi.fn(),
+    handleFailure: vi.fn(),
+  };
+
+  const satisficingJudge = {
+    isGoalComplete: vi.fn().mockReturnValue(makeCompletionJudgment()),
+    isDimensionSatisfied: vi.fn(),
+    applyProgressCeiling: vi.fn(),
+    selectDimensionsForIteration: vi.fn(),
+    detectThresholdAdjustmentNeeded: vi.fn(),
+    propagateSubgoalCompletion: vi.fn(),
+  };
+
+  const stallDetector = {
+    checkDimensionStall: vi.fn().mockReturnValue(null),
+    checkGlobalStall: vi.fn().mockReturnValue(null),
+    checkTimeExceeded: vi.fn().mockReturnValue(null),
+    checkConsecutiveFailures: vi.fn().mockReturnValue(null),
+    getEscalationLevel: vi.fn().mockReturnValue(0),
+    incrementEscalation: vi.fn().mockReturnValue(1),
+    resetEscalation: vi.fn(),
+    getStallState: vi.fn(),
+    saveStallState: vi.fn(),
+    classifyStallCause: vi.fn(),
+    computeDecayFactor: vi.fn(),
+    isSuppressed: vi.fn(),
+  };
+
+  const strategyManager = {
+    onStallDetected: vi.fn().mockResolvedValue(null),
+    getActiveStrategy: vi.fn().mockReturnValue(null),
+    getPortfolio: vi.fn(),
+    generateCandidates: vi.fn(),
+    activateBestCandidate: vi.fn(),
+    updateState: vi.fn(),
+    getStrategyHistory: vi.fn(),
+  };
+
+  const reportingEngine = {
+    generateExecutionSummary: vi.fn().mockReturnValue({ type: "execution_summary" }),
+    saveReport: vi.fn(),
+  };
+
+  const driveSystem = {
+    shouldActivate: vi.fn().mockReturnValue(true),
+    processEvents: vi.fn().mockReturnValue([]),
+    readEventQueue: vi.fn().mockReturnValue([]),
+    archiveEvent: vi.fn(),
+    getSchedule: vi.fn(),
+    updateSchedule: vi.fn(),
+    isScheduleDue: vi.fn(),
+    createDefaultSchedule: vi.fn(),
+    prioritizeGoals: vi.fn(),
+  };
+
+  const adapterRegistry = {
+    getAdapter: vi.fn().mockReturnValue(adapter),
+    register: vi.fn(),
+    listAdapters: vi.fn().mockReturnValue(["claude_api"]),
+  };
+
+  const deps: CoreLoopDeps = {
+    stateManager,
+    observationEngine: observationEngine as unknown as ObservationEngine,
+    gapCalculator: gapCalculator as unknown as GapCalculatorModule,
+    driveScorer: driveScorer as unknown as DriveScorerModule,
+    taskLifecycle: taskLifecycle as unknown as TaskLifecycle,
+    satisficingJudge: satisficingJudge as unknown as SatisficingJudge,
+    stallDetector: stallDetector as unknown as StallDetector,
+    strategyManager: strategyManager as unknown as StrategyManager,
+    reportingEngine: reportingEngine as unknown as ReportingEngine,
+    driveSystem: driveSystem as unknown as DriveSystem,
+    adapterRegistry: adapterRegistry as unknown as AdapterRegistry,
+  };
+
+  return {
+    deps,
+    mocks: {
+      stateManager,
+      observationEngine,
+      gapCalculator,
+      driveScorer,
+      taskLifecycle,
+      satisficingJudge,
+      stallDetector,
+      strategyManager,
+      reportingEngine,
+      driveSystem,
+      adapterRegistry,
+      adapter,
+    },
+  };
+}
+
+// ─── Tests ───
+
+describe("CoreLoop", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = makeTempDir();
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // ─── buildDriveContext ───
+
+  describe("buildDriveContext", () => {
+    it("builds context from goal with dimensions", () => {
+      const goal = makeGoal();
+      const ctx = buildDriveContext(goal);
+
+      expect(ctx.time_since_last_attempt).toHaveProperty("dim1");
+      expect(ctx.time_since_last_attempt).toHaveProperty("dim2");
+      expect(ctx.deadlines.dim1).toBeNull();
+      expect(ctx.deadlines.dim2).toBeNull();
+      expect(ctx.opportunities).toEqual({});
+    });
+
+    it("computes deadline hours remaining when goal has deadline", () => {
+      const futureDate = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+      const goal = makeGoal({ deadline: futureDate });
+      const ctx = buildDriveContext(goal);
+
+      expect(ctx.deadlines.dim1).toBeGreaterThan(47);
+      expect(ctx.deadlines.dim1).toBeLessThanOrEqual(48);
+    });
+
+    it("returns negative deadline hours when overdue", () => {
+      const pastDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const goal = makeGoal({ deadline: pastDate });
+      const ctx = buildDriveContext(goal);
+
+      expect(ctx.deadlines.dim1).toBeLessThan(0);
+    });
+
+    it("sets large time_since_last_attempt when no last_updated", () => {
+      const goal = makeGoal();
+      goal.dimensions[0]!.last_updated = null;
+      const ctx = buildDriveContext(goal);
+
+      expect(ctx.time_since_last_attempt.dim1).toBe(168);
+    });
+
+    it("computes time_since_last_attempt from last_updated", () => {
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      const goal = makeGoal();
+      goal.dimensions[0]!.last_updated = twoHoursAgo;
+      const ctx = buildDriveContext(goal);
+
+      expect(ctx.time_since_last_attempt.dim1).toBeGreaterThan(1.9);
+      expect(ctx.time_since_last_attempt.dim1).toBeLessThan(2.1);
+    });
+
+    it("handles goal with no dimensions", () => {
+      const goal = makeGoal({ dimensions: [] });
+      const ctx = buildDriveContext(goal);
+
+      expect(ctx.time_since_last_attempt).toEqual({});
+      expect(ctx.deadlines).toEqual({});
+    });
+  });
+
+  // ─── Constructor & Config ───
+
+  describe("constructor", () => {
+    it("creates CoreLoop with default config", () => {
+      const { deps } = createMockDeps(tmpDir);
+      const loop = new CoreLoop(deps);
+      expect(loop).toBeDefined();
+    });
+
+    it("accepts custom config", () => {
+      const { deps } = createMockDeps(tmpDir);
+      const config: LoopConfig = {
+        maxIterations: 5,
+        maxConsecutiveErrors: 2,
+        delayBetweenLoopsMs: 0,
+        adapterType: "test_adapter",
+      };
+      const loop = new CoreLoop(deps, config);
+      expect(loop).toBeDefined();
+    });
+  });
+
+  // ─── stop() ───
+
+  describe("stop()", () => {
+    it("sets stopped flag", () => {
+      const { deps } = createMockDeps(tmpDir);
+      const loop = new CoreLoop(deps);
+
+      expect(loop.isStopped()).toBe(false);
+      loop.stop();
+      expect(loop.isStopped()).toBe(true);
+    });
+
+    it("stops the loop on next iteration", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      const goal = makeGoal();
+      mocks.stateManager.saveGoal(goal);
+
+      const loop = new CoreLoop(deps, { maxIterations: 100, delayBetweenLoopsMs: 0 });
+
+      // Stop after first iteration
+      let iterationCount = 0;
+      mocks.taskLifecycle.runTaskCycle.mockImplementation(async () => {
+        iterationCount++;
+        if (iterationCount >= 1) {
+          loop.stop();
+        }
+        return makeTaskCycleResult();
+      });
+
+      const result = await loop.run("goal-1");
+      expect(result.finalStatus).toBe("stopped");
+      expect(result.totalIterations).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  // ─── runOneIteration ───
+
+  describe("runOneIteration", () => {
+    it("calls each step in correct order", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      const goal = makeGoal();
+      mocks.stateManager.saveGoal(goal);
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      // Gap calculation was called
+      expect(mocks.gapCalculator.calculateGapVector).toHaveBeenCalledWith(
+        "goal-1",
+        goal.dimensions,
+        goal.uncertainty_weight
+      );
+      expect(mocks.gapCalculator.aggregateGaps).toHaveBeenCalled();
+
+      // Drive scoring was called
+      expect(mocks.driveScorer.scoreAllDimensions).toHaveBeenCalled();
+      expect(mocks.driveScorer.rankDimensions).toHaveBeenCalled();
+
+      // Completion check was called
+      expect(mocks.satisficingJudge.isGoalComplete).toHaveBeenCalledWith(goal);
+
+      // Task cycle was called
+      expect(mocks.taskLifecycle.runTaskCycle).toHaveBeenCalled();
+
+      // Report was generated
+      expect(mocks.reportingEngine.generateExecutionSummary).toHaveBeenCalled();
+      expect(mocks.reportingEngine.saveReport).toHaveBeenCalled();
+
+      expect(result.error).toBeNull();
+    });
+
+    it("returns error when goal not found", async () => {
+      const { deps } = createMockDeps(tmpDir);
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("nonexistent", 0);
+
+      expect(result.error).toContain("not found");
+      expect(result.goalId).toBe("nonexistent");
+    });
+
+    it("populates gapAggregate from gap calculator", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+      mocks.gapCalculator.aggregateGaps.mockReturnValue(0.75);
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.gapAggregate).toBe(0.75);
+    });
+
+    it("populates driveScores", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.driveScores.length).toBe(2);
+    });
+
+    it("populates loopIndex", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 7);
+
+      expect(result.loopIndex).toBe(7);
+    });
+
+    it("records elapsed time", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it("persists gap history entry", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      await loop.runOneIteration("goal-1", 0);
+
+      const history = mocks.stateManager.loadGapHistory("goal-1");
+      expect(history.length).toBe(1);
+      expect(history[0]!.iteration).toBe(0);
+    });
+  });
+
+  // ─── Completion detection ───
+
+  describe("completion detection", () => {
+    it("returns completed result when goal is complete", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      mocks.satisficingJudge.isGoalComplete.mockReturnValue(
+        makeCompletionJudgment({ is_complete: true, blocking_dimensions: [] })
+      );
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.completionJudgment.is_complete).toBe(true);
+      // Task cycle should NOT be called when goal is already complete
+      expect(mocks.taskLifecycle.runTaskCycle).not.toHaveBeenCalled();
+    });
+
+    it("stops the loop when goal is complete", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      mocks.satisficingJudge.isGoalComplete.mockReturnValue(
+        makeCompletionJudgment({ is_complete: true, blocking_dimensions: [] })
+      );
+
+      const loop = new CoreLoop(deps, { maxIterations: 100, delayBetweenLoopsMs: 0 });
+      const result = await loop.run("goal-1");
+
+      expect(result.finalStatus).toBe("completed");
+      expect(result.totalIterations).toBe(1);
+    });
+
+    it("stops loop when post-task completion check passes", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      const goal = makeGoal();
+      mocks.stateManager.saveGoal(goal);
+
+      // First call: not complete. Second call (post-task): complete.
+      let callCount = 0;
+      mocks.satisficingJudge.isGoalComplete.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return makeCompletionJudgment({ is_complete: false });
+        }
+        return makeCompletionJudgment({ is_complete: true, blocking_dimensions: [] });
+      });
+
+      const loop = new CoreLoop(deps, { maxIterations: 100, delayBetweenLoopsMs: 0 });
+      const result = await loop.run("goal-1");
+
+      expect(result.finalStatus).toBe("completed");
+    });
+  });
+
+  // ─── Error handling ───
+
+  describe("error handling", () => {
+    it("handles gap calculation failure gracefully", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+      mocks.gapCalculator.calculateGapVector.mockImplementation(() => {
+        throw new Error("Gap calculation error");
+      });
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.error).toContain("Gap calculation");
+      // Task cycle should not be called
+      expect(mocks.taskLifecycle.runTaskCycle).not.toHaveBeenCalled();
+    });
+
+    it("handles drive scoring failure gracefully", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+      mocks.driveScorer.scoreAllDimensions.mockImplementation(() => {
+        throw new Error("Drive scoring error");
+      });
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.error).toContain("Drive scoring");
+    });
+
+    it("handles completion check failure gracefully", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+      mocks.satisficingJudge.isGoalComplete.mockImplementation(() => {
+        throw new Error("Completion check error");
+      });
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.error).toContain("Completion check");
+    });
+
+    it("handles task cycle failure gracefully", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+      mocks.taskLifecycle.runTaskCycle.mockRejectedValue(
+        new Error("Task cycle error")
+      );
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.error).toContain("Task cycle");
+    });
+
+    it("stall detection failure does not crash the iteration", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+      mocks.stallDetector.checkDimensionStall.mockImplementation(() => {
+        throw new Error("Stall detection error");
+      });
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      // Task cycle should still run
+      expect(mocks.taskLifecycle.runTaskCycle).toHaveBeenCalled();
+      expect(result.error).toBeNull();
+    });
+
+    it("report generation failure does not crash the iteration", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+      mocks.reportingEngine.generateExecutionSummary.mockImplementation(() => {
+        throw new Error("Report error");
+      });
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      // Iteration should still complete successfully
+      expect(result.taskResult).not.toBeNull();
+    });
+  });
+
+  // ─── Consecutive error limit ───
+
+  describe("consecutive error limit", () => {
+    it("stops loop after maxConsecutiveErrors", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+      mocks.taskLifecycle.runTaskCycle.mockRejectedValue(
+        new Error("Persistent error")
+      );
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 100,
+        maxConsecutiveErrors: 3,
+        delayBetweenLoopsMs: 0,
+      });
+      const result = await loop.run("goal-1");
+
+      expect(result.finalStatus).toBe("error");
+      expect(result.totalIterations).toBe(3);
+    });
+
+    it("resets consecutive errors on success", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      let callCount = 0;
+      mocks.taskLifecycle.runTaskCycle.mockImplementation(async () => {
+        callCount++;
+        // Fail on calls 1-2, succeed on 3, fail on 4-5, succeed on 6
+        if (callCount <= 2 || (callCount >= 4 && callCount <= 5)) {
+          throw new Error("Temporary error");
+        }
+        return makeTaskCycleResult();
+      });
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 7,
+        maxConsecutiveErrors: 3,
+        delayBetweenLoopsMs: 0,
+      });
+      const result = await loop.run("goal-1");
+
+      // Should not stop with "error" because errors are interspersed with successes
+      expect(result.finalStatus).toBe("max_iterations");
+      expect(result.totalIterations).toBe(7);
+    });
+
+    it("accumulates consecutive errors correctly", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      let callCount = 0;
+      mocks.taskLifecycle.runTaskCycle.mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) return makeTaskCycleResult(); // success
+        throw new Error("Error"); // fail from 2 onward
+      });
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 100,
+        maxConsecutiveErrors: 3,
+        delayBetweenLoopsMs: 0,
+      });
+      const result = await loop.run("goal-1");
+
+      expect(result.finalStatus).toBe("error");
+      // 1 success + 3 errors = 4 iterations
+      expect(result.totalIterations).toBe(4);
+    });
+  });
+
+  // ─── Max iterations ───
+
+  describe("max iterations", () => {
+    it("stops loop at maxIterations", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 5,
+        delayBetweenLoopsMs: 0,
+      });
+      const result = await loop.run("goal-1");
+
+      expect(result.finalStatus).toBe("max_iterations");
+      expect(result.totalIterations).toBe(5);
+    });
+
+    it("respects maxIterations of 1", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 1,
+        delayBetweenLoopsMs: 0,
+      });
+      const result = await loop.run("goal-1");
+
+      expect(result.totalIterations).toBe(1);
+    });
+  });
+
+  // ─── Stall detection + pivot ───
+
+  describe("stall detection", () => {
+    it("detects dimension stall", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      mocks.stallDetector.checkDimensionStall.mockReturnValue(makeStallReport());
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.stallDetected).toBe(true);
+      expect(result.stallReport).not.toBeNull();
+    });
+
+    it("calls strategyManager.onStallDetected when stall detected", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      mocks.stallDetector.checkDimensionStall.mockReturnValue(makeStallReport());
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      await loop.runOneIteration("goal-1", 0);
+
+      expect(mocks.strategyManager.onStallDetected).toHaveBeenCalledWith(
+        "goal-1",
+        expect.any(Number)
+      );
+    });
+
+    it("records pivot when strategy manager returns new strategy", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      mocks.stallDetector.checkDimensionStall.mockReturnValue(makeStallReport());
+      mocks.strategyManager.onStallDetected.mockResolvedValue({
+        id: "strategy-2",
+        state: "active",
+      });
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.pivotOccurred).toBe(true);
+    });
+
+    it("does not record pivot when strategy manager returns null", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      mocks.stallDetector.checkDimensionStall.mockReturnValue(makeStallReport());
+      mocks.strategyManager.onStallDetected.mockResolvedValue(null);
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.pivotOccurred).toBe(false);
+    });
+
+    it("increments escalation on stall", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      mocks.stallDetector.checkDimensionStall.mockReturnValue(makeStallReport());
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      await loop.runOneIteration("goal-1", 0);
+
+      expect(mocks.stallDetector.incrementEscalation).toHaveBeenCalledWith(
+        "goal-1",
+        "dim1"
+      );
+    });
+
+    it("detects global stall when no dimension stall", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      mocks.stallDetector.checkDimensionStall.mockReturnValue(null);
+      mocks.stallDetector.checkGlobalStall.mockReturnValue(
+        makeStallReport({ stall_type: "global_stall", dimension_name: null })
+      );
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.stallDetected).toBe(true);
+      expect(result.stallReport!.stall_type).toBe("global_stall");
+    });
+
+    it("stops loop on high escalation level stall", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      mocks.stallDetector.checkDimensionStall.mockReturnValue(
+        makeStallReport({ escalation_level: 3 })
+      );
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 100,
+        delayBetweenLoopsMs: 0,
+      });
+      const result = await loop.run("goal-1");
+
+      expect(result.finalStatus).toBe("stalled");
+    });
+
+    it("does not stop loop on low escalation level stall", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      mocks.stallDetector.checkDimensionStall.mockReturnValue(
+        makeStallReport({ escalation_level: 1 })
+      );
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 3,
+        delayBetweenLoopsMs: 0,
+      });
+      const result = await loop.run("goal-1");
+
+      expect(result.finalStatus).toBe("max_iterations");
+    });
+  });
+
+  // ─── Task cycle results ───
+
+  describe("task cycle results", () => {
+    it("records completed action", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+      mocks.taskLifecycle.runTaskCycle.mockResolvedValue(
+        makeTaskCycleResult({ action: "completed" })
+      );
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.taskResult!.action).toBe("completed");
+    });
+
+    it("records keep action", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+      mocks.taskLifecycle.runTaskCycle.mockResolvedValue(
+        makeTaskCycleResult({ action: "keep" })
+      );
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.taskResult!.action).toBe("keep");
+    });
+
+    it("records discard action", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+      mocks.taskLifecycle.runTaskCycle.mockResolvedValue(
+        makeTaskCycleResult({ action: "discard" })
+      );
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.taskResult!.action).toBe("discard");
+    });
+
+    it("records escalate action", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+      mocks.taskLifecycle.runTaskCycle.mockResolvedValue(
+        makeTaskCycleResult({ action: "escalate" })
+      );
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.taskResult!.action).toBe("escalate");
+    });
+
+    it("records approval_denied action", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+      mocks.taskLifecycle.runTaskCycle.mockResolvedValue(
+        makeTaskCycleResult({ action: "approval_denied" })
+      );
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.taskResult!.action).toBe("approval_denied");
+    });
+  });
+
+  // ─── LoopResult construction ───
+
+  describe("LoopResult construction", () => {
+    it("populates all fields in LoopResult", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 2,
+        delayBetweenLoopsMs: 0,
+      });
+      const result = await loop.run("goal-1");
+
+      expect(result.goalId).toBe("goal-1");
+      expect(result.totalIterations).toBe(2);
+      expect(result.finalStatus).toBe("max_iterations");
+      expect(result.iterations).toHaveLength(2);
+      expect(result.startedAt).toBeDefined();
+      expect(result.completedAt).toBeDefined();
+    });
+
+    it("startedAt is before completedAt", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 1,
+        delayBetweenLoopsMs: 0,
+      });
+      const result = await loop.run("goal-1");
+
+      const started = new Date(result.startedAt).getTime();
+      const completed = new Date(result.completedAt).getTime();
+      expect(completed).toBeGreaterThanOrEqual(started);
+    });
+
+    it("iterations array contains correct number of results", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 3,
+        delayBetweenLoopsMs: 0,
+      });
+      const result = await loop.run("goal-1");
+
+      expect(result.iterations.length).toBe(3);
+      expect(result.iterations[0]!.loopIndex).toBe(0);
+      expect(result.iterations[1]!.loopIndex).toBe(1);
+      expect(result.iterations[2]!.loopIndex).toBe(2);
+    });
+
+    it("returns error status when goal not found", async () => {
+      const { deps } = createMockDeps(tmpDir);
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.run("nonexistent-goal");
+
+      expect(result.finalStatus).toBe("error");
+      expect(result.totalIterations).toBe(0);
+      expect(result.iterations).toHaveLength(0);
+    });
+
+    it("returns error status when goal has terminal status", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal({ status: "completed" }));
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.run("goal-1");
+
+      expect(result.finalStatus).toBe("error");
+      expect(result.totalIterations).toBe(0);
+    });
+
+    it("accepts waiting status goals", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal({ status: "waiting" }));
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 1,
+        delayBetweenLoopsMs: 0,
+      });
+      const result = await loop.run("goal-1");
+
+      expect(result.totalIterations).toBe(1);
+    });
+  });
+
+  // ─── Report generation ───
+
+  describe("report generation", () => {
+    it("calls reportingEngine.generateExecutionSummary", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      await loop.runOneIteration("goal-1", 0);
+
+      expect(mocks.reportingEngine.generateExecutionSummary).toHaveBeenCalledWith({
+        goalId: "goal-1",
+        loopIndex: 0,
+        observation: expect.arrayContaining([
+          expect.objectContaining({ dimensionName: "dim1" }),
+          expect.objectContaining({ dimensionName: "dim2" }),
+        ]),
+        gapAggregate: expect.any(Number),
+        taskResult: expect.objectContaining({ taskId: "task-1", action: "completed", dimension: "dim1" }),
+        stallDetected: false,
+        pivotOccurred: false,
+        elapsedMs: expect.any(Number),
+      });
+    });
+
+    it("calls reportingEngine.saveReport with generated report", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+      const mockReport = { type: "test_report" };
+      mocks.reportingEngine.generateExecutionSummary.mockReturnValue(mockReport);
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      await loop.runOneIteration("goal-1", 0);
+
+      expect(mocks.reportingEngine.saveReport).toHaveBeenCalledWith(mockReport);
+    });
+
+    it("generates report on completion", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+      mocks.satisficingJudge.isGoalComplete.mockReturnValue(
+        makeCompletionJudgment({ is_complete: true, blocking_dimensions: [] })
+      );
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      await loop.runOneIteration("goal-1", 0);
+
+      expect(mocks.reportingEngine.generateExecutionSummary).toHaveBeenCalled();
+    });
+
+    it("generates report on task cycle error", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+      mocks.taskLifecycle.runTaskCycle.mockRejectedValue(new Error("fail"));
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      await loop.runOneIteration("goal-1", 0);
+
+      expect(mocks.reportingEngine.generateExecutionSummary).toHaveBeenCalled();
+    });
+  });
+
+  // ─── Adapter resolution ───
+
+  describe("adapter resolution", () => {
+    it("gets adapter from registry using configured adapterType", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      const loop = new CoreLoop(deps, {
+        delayBetweenLoopsMs: 0,
+        adapterType: "test_adapter",
+      });
+      await loop.runOneIteration("goal-1", 0);
+
+      expect(mocks.adapterRegistry.getAdapter).toHaveBeenCalledWith("test_adapter");
+    });
+
+    it("uses default adapter type (claude_api)", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      await loop.runOneIteration("goal-1", 0);
+
+      expect(mocks.adapterRegistry.getAdapter).toHaveBeenCalledWith("claude_api");
+    });
+
+    it("passes adapter to taskLifecycle.runTaskCycle", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      await loop.runOneIteration("goal-1", 0);
+
+      expect(mocks.taskLifecycle.runTaskCycle).toHaveBeenCalledWith(
+        "goal-1",
+        expect.any(Object), // gapVector
+        expect.any(Object), // driveContext
+        mocks.adapter
+      );
+    });
+  });
+
+  // ─── Full integration-like tests ───
+
+  describe("multi-iteration scenarios", () => {
+    it("runs multiple iterations before completion", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      let iterCount = 0;
+      mocks.satisficingJudge.isGoalComplete.mockImplementation(() => {
+        iterCount++;
+        // Complete after 3rd iteration (called twice per iteration: pre and post task)
+        if (iterCount >= 6) {
+          return makeCompletionJudgment({ is_complete: true, blocking_dimensions: [] });
+        }
+        return makeCompletionJudgment();
+      });
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 100,
+        delayBetweenLoopsMs: 0,
+      });
+      const result = await loop.run("goal-1");
+
+      expect(result.finalStatus).toBe("completed");
+      expect(result.totalIterations).toBe(3);
+    });
+
+    it("mixes errors and successes correctly", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      let callCount = 0;
+      mocks.taskLifecycle.runTaskCycle.mockImplementation(async () => {
+        callCount++;
+        if (callCount === 2) throw new Error("Error on iteration 2");
+        return makeTaskCycleResult();
+      });
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 4,
+        delayBetweenLoopsMs: 0,
+      });
+      const result = await loop.run("goal-1");
+
+      expect(result.totalIterations).toBe(4);
+      expect(result.iterations[0]!.error).toBeNull();
+      expect(result.iterations[1]!.error).toContain("Task cycle");
+      expect(result.iterations[2]!.error).toBeNull();
+      expect(result.iterations[3]!.error).toBeNull();
+    });
+
+    it("handles stall then recovery", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      let callCount = 0;
+      mocks.stallDetector.checkDimensionStall.mockImplementation(() => {
+        callCount++;
+        if (callCount <= 2) {
+          return makeStallReport({ escalation_level: 1 });
+        }
+        return null;
+      });
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 4,
+        delayBetweenLoopsMs: 0,
+      });
+      const result = await loop.run("goal-1");
+
+      expect(result.totalIterations).toBe(4);
+      expect(result.iterations[0]!.stallDetected).toBe(true);
+      // Later iterations should not detect stalls (checkDimensionStall returns null)
+    });
+  });
+
+  // ─── Gap history persistence ───
+
+  describe("gap history", () => {
+    it("appends gap history across iterations", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 3,
+        delayBetweenLoopsMs: 0,
+      });
+      await loop.run("goal-1");
+
+      const history = mocks.stateManager.loadGapHistory("goal-1");
+      expect(history.length).toBe(3);
+      expect(history[0]!.iteration).toBe(0);
+      expect(history[1]!.iteration).toBe(1);
+      expect(history[2]!.iteration).toBe(2);
+    });
+
+    it("gap history entries contain correct dimension data", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 1,
+        delayBetweenLoopsMs: 0,
+      });
+      await loop.run("goal-1");
+
+      const history = mocks.stateManager.loadGapHistory("goal-1");
+      expect(history[0]!.gap_vector).toHaveLength(2);
+      expect(history[0]!.gap_vector[0]!.dimension_name).toBe("dim1");
+      expect(history[0]!.gap_vector[1]!.dimension_name).toBe("dim2");
+      expect(history[0]!.confidence_vector).toHaveLength(2);
+    });
+  });
+
+  // ─── Edge cases ───
+
+  describe("edge cases", () => {
+    it("handles goal with single dimension", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      const goal = makeGoal();
+      goal.dimensions = [goal.dimensions[0]!];
+      mocks.stateManager.saveGoal(goal);
+
+      mocks.gapCalculator.calculateGapVector.mockReturnValue({
+        goal_id: "goal-1",
+        gaps: [makeGapVector().gaps[0]!],
+        timestamp: new Date().toISOString(),
+      });
+      mocks.driveScorer.scoreAllDimensions.mockReturnValue([makeDriveScores()[0]!]);
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 1,
+        delayBetweenLoopsMs: 0,
+      });
+      const result = await loop.run("goal-1");
+
+      expect(result.totalIterations).toBe(1);
+    });
+
+    it("handles goal with many dimensions", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      const goal = makeGoal();
+      goal.dimensions = Array.from({ length: 10 }, (_, i) => ({
+        ...goal.dimensions[0]!,
+        name: `dim${i}`,
+        label: `Dimension ${i}`,
+      }));
+      mocks.stateManager.saveGoal(goal);
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 1,
+        delayBetweenLoopsMs: 0,
+      });
+      const result = await loop.run("goal-1");
+
+      expect(result.totalIterations).toBe(1);
+    });
+
+    it("handles cancelled goal status", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal({ status: "cancelled" }));
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.run("goal-1");
+
+      expect(result.finalStatus).toBe("error");
+      expect(result.totalIterations).toBe(0);
+    });
+
+    it("handles archived goal status", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal({ status: "archived" }));
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.run("goal-1");
+
+      expect(result.finalStatus).toBe("error");
+      expect(result.totalIterations).toBe(0);
+    });
+
+    it("re-checks completion after task cycle", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 1,
+        delayBetweenLoopsMs: 0,
+      });
+      await loop.runOneIteration("goal-1", 0);
+
+      // isGoalComplete should be called at least twice: once pre-task, once post-task
+      expect(mocks.satisficingJudge.isGoalComplete.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  // ─── DriveContext passed to task cycle ───
+
+  describe("DriveContext usage", () => {
+    it("passes correctly built DriveContext to task cycle", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      const deadline = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
+      mocks.stateManager.saveGoal(makeGoal({ deadline }));
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      await loop.runOneIteration("goal-1", 0);
+
+      const callArgs = mocks.taskLifecycle.runTaskCycle.mock.calls[0];
+      const driveContext = callArgs![2];
+
+      expect(driveContext.time_since_last_attempt).toHaveProperty("dim1");
+      expect(driveContext.time_since_last_attempt).toHaveProperty("dim2");
+      expect(driveContext.deadlines.dim1).toBeGreaterThan(0);
+    });
+  });
+
+  // ─── Concurrent stop() during run ───
+
+  describe("concurrent stop()", () => {
+    it("stops between iterations", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      mocks.stateManager.saveGoal(makeGoal());
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 100,
+        delayBetweenLoopsMs: 10,
+      });
+
+      // Stop after a short delay
+      setTimeout(() => loop.stop(), 5);
+
+      const result = await loop.run("goal-1");
+      expect(result.finalStatus).toBe("stopped");
+      expect(result.totalIterations).toBeGreaterThanOrEqual(1);
+    });
+  });
+});

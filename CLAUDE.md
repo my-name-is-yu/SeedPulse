@@ -8,20 +8,29 @@ Motiva — AI agent orchestrator that gives existing agents "motivation." Motiva
 
 ## Status
 
-Implementation Phase — Stage 1 & 2 complete, Stage 3 next.
+Implementation Phase — Stage 1-5 complete, Stage 6 next.
 
 ### Stage 1 (complete)
-- Type definitions: 13 Zod schema files in `src/types/`
+- Type definitions: 14 Zod schema files in `src/types/`
 - `src/state-manager.ts` — file-based JSON persistence (~/.motiva/, atomic writes)
 - `src/gap-calculator.ts` — 5-threshold-type pipeline (raw→normalized→weighted)
 
 ### Stage 2 (complete)
 - Layer 1: `src/drive-system.ts` (event queue, scheduling, activation checks), `src/trust-manager.ts` (trust balance, 4-quadrant action matrix, permanent gates)
 - Layer 2: `src/observation-engine.ts` (3-layer observation, progress ceiling, contradiction resolution), `src/drive-scorer.ts` (3 drive scores: dissatisfaction/deadline/opportunity), `src/satisficing-judge.ts` (completion judgment, dimension satisfaction, threshold adjustment), `src/stall-detector.ts` (4 stall types, cause classification, escalation, decay factor)
-- 405 tests passing across 8 test files
 
-### Stage 3 (next)
-- Layer 3: SessionManager, GoalNegotiator, StrategyManager
+### Stage 3 (complete)
+- Layer 3: `src/llm-client.ts`, `src/ethics-gate.ts`, `src/session-manager.ts`, `src/strategy-manager.ts`, `src/goal-negotiator.ts`
+
+### Stage 4 (complete)
+- Layer 0+4: `src/adapter-layer.ts`, `src/adapters/claude-code-cli.ts`, `src/adapters/claude-api.ts`, `src/task-lifecycle.ts`
+
+### Stage 5 (complete)
+- Layer 5: `src/reporting-engine.ts` (3 report types, Markdown output, CLI display, 5 notification types), `src/core-loop.ts` (observe→gap→score→completion→stall→task→report loop)
+- 922 tests passing across 17 test files
+
+### Stage 6 (next)
+- Layer 6: CLIRunner (`src/cli-runner.ts`, `src/index.ts`)
 
 ## Core Concept
 
