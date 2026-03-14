@@ -38,3 +38,13 @@ export const ThresholdAdjustmentProposalSchema = z.object({
   evidence: z.string(),
 });
 export type ThresholdAdjustmentProposal = z.infer<typeof ThresholdAdjustmentProposalSchema>;
+
+export const MappingProposalSchema = z.object({
+  subgoal_dimension: z.string(),
+  parent_dimension: z.string(),
+  similarity_score: z.number().min(0).max(1),
+  suggested_aggregation: z.enum(["min", "avg", "max", "all_required"]),
+  confidence: z.number().min(0).max(1),
+  reasoning: z.string(),
+});
+export type MappingProposal = z.infer<typeof MappingProposalSchema>;

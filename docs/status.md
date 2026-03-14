@@ -77,3 +77,41 @@ Implementation Phase — Stage 1-11 complete (1749 tests, 35 test files).
 - New test files: `tests/curiosity-engine.test.ts`, `tests/character-config.test.ts`, `tests/character-separation.test.ts`
 - Updates to: `tests/core-loop.test.ts`, `tests/ethics-gate.test.ts`, `tests/event-server.test.ts`, `tests/goal-negotiator.test.ts`, `tests/reporting-engine.test.ts`, `tests/satisficing-judge.test.ts`, `tests/stall-detector.test.ts`, `tests/task-lifecycle.test.ts`
 - 1749 tests passing across 35 test files
+
+## Stage 12 (complete)
+
+**Status**: 完了（1919テスト、40テストファイル）
+
+### 12.1 埋め込み基盤 (Part C)
+- `src/types/embedding.ts` — EmbeddingConfig, EmbeddingEntry, VectorSearchResult Zodスキーマ
+- `src/embedding-client.ts` — IEmbeddingClient インターフェース、MockEmbeddingClient（テスト用）、OllamaEmbeddingClient、OpenAIEmbeddingClient、cosineSimilarity
+- `src/vector-index.ts` — VectorIndex（インメモリMap + JSONファイル永続化、atomic write、cosine similarity検索）
+
+### 12.2 知識獲得 Phase 2 (Part D)
+- `src/knowledge-graph.ts` — KnowledgeGraph（概念ノード・関係エッジCRUD、循環検出、JSON永続化）
+- `src/types/knowledge.ts` — embedding_id フィールド追加、KnowledgeEdge/KnowledgeRelationType 型追加
+- `src/knowledge-manager.ts` — VectorIndex DI追加、searchKnowledge()/searchAcrossGoals() ベクトル検索メソッド
+
+### 12.3 好奇心 Phase 2 (Part E)
+- `src/curiosity-engine.ts` — VectorIndex DI追加、detectSemanticTransfer()、checkUndefinedProblems() 埋め込みベース強化
+- `src/types/curiosity.ts` — detection_method に "embedding_similarity" 追加
+
+### 12.4 満足化マッピング (Part D/F)
+- `src/types/satisficing.ts` — MappingProposal 型追加
+- `src/satisficing-judge.ts` — proposeDimensionMapping()（埋め込み類似度による自動マッピング提案）、onSatisficingJudgment コールバック
+
+### 12.5 状態ベクトル Phase 2 (Part A)
+- `src/types/state.ts` — RescheduleOptions 型追加
+- `src/state-manager.ts` — getMilestones(), evaluatePace(), generateRescheduleOptions(), getOverdueMilestones(), savePaceSnapshot()
+- `src/core-loop.ts` — マイルストーン期限チェック、LoopIterationResult に milestoneAlerts 追加
+
+### 12.6 セッション・コンテキスト Phase 2 (Part B/F)
+- `src/types/dependency.ts` — DependencyEdge, DependencyGraph, DependencyType Zodスキーマ
+- `src/goal-dependency-graph.ts` — GoalDependencyGraph（DAG管理、循環検出、LLM自動検出、スケジューリング影響計算）
+- `src/types/session.ts` — コンテキストバジェット設定型追加
+- `src/session-manager.ts` — 動的バジェット選択、injectSemanticKnowledgeContext()
+- `src/goal-negotiator.ts` — SatisficingJudge DI追加、decompose() 内で自動マッピング提案活用
+
+### 12.7 記憶ライフサイクル Phase 2 (Part E)
+- `src/types/memory-lifecycle.ts` — RelevanceScore, CompressionPolicy 型追加、embedding_id フィールド
+- `src/memory-lifecycle.ts` — Drive-based管理（getCompressionDelay, getDeadlineBonus, markForEarlyCompression）、selectForWorkingMemorySemantic()

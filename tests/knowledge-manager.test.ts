@@ -4,6 +4,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { StateManager } from "../src/state-manager.js";
 import { KnowledgeManager } from "../src/knowledge-manager.js";
+import { VectorIndex } from "../src/vector-index.js";
+import { MockEmbeddingClient } from "../src/embedding-client.js";
 import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../src/llm-client.js";
 import type { KnowledgeEntry } from "../src/types/knowledge.js";
 import type { ZodSchema } from "zod";
@@ -609,5 +611,96 @@ describe("getRelevantKnowledge", () => {
 
     const result = await manager.getRelevantKnowledge("goal-1", "churn_rate");
     expect(result).toEqual([]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════
+// Semantic Search (Phase 2)
+// ═══════════════════════════════════════════════════════
+
+describe("Semantic Search (Phase 2)", () => {
+  function makeVectorIndex(dir: string): VectorIndex {
+    const embeddingClient = new MockEmbeddingClient(8); // small dims for tests
+    return new VectorIndex(path.join(dir, "vector-index.json"), embeddingClient);
+  }
+
+  it("searchKnowledge returns results via vector search", async () => {
+    const vectorIndex = makeVectorIndex(tempDir);
+    const manager = new KnowledgeManager(
+      stateManager,
+      createMockLLMClient([]),
+      vectorIndex
+    );
+
+    const e1 = makeKnowledgeEntry({
+      entry_id: "e1",
+      question: "What is the churn rate benchmark?",
+      answer: "Industry average SaaS churn is around 5% annually.",
+      tags: ["churn_rate", "saas"],
+    });
+    await manager.saveKnowledge("goal-1", e1);
+
+    const results = await manager.searchKnowledge("churn rate SaaS benchmark");
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0]!.entry_id).toBe("e1");
+  });
+
+  it("searchKnowledge falls back to empty array when no vectorIndex", async () => {
+    const manager = new KnowledgeManager(stateManager, createMockLLMClient([]));
+    const e1 = makeKnowledgeEntry({ entry_id: "e1", tags: ["churn_rate"] });
+    await manager.saveKnowledge("goal-1", e1);
+
+    const results = await manager.searchKnowledge("churn rate");
+    expect(results).toEqual([]);
+  });
+
+  it("addKnowledge (saveKnowledge) also indexes in VectorIndex when available", async () => {
+    const vectorIndex = makeVectorIndex(tempDir);
+    const manager = new KnowledgeManager(
+      stateManager,
+      createMockLLMClient([]),
+      vectorIndex
+    );
+
+    const e1 = makeKnowledgeEntry({ entry_id: "e1", tags: ["nps"] });
+    await manager.saveKnowledge("goal-1", e1);
+
+    // The vector index should now have the entry
+    expect(vectorIndex.size).toBe(1);
+    const entry = vectorIndex.getEntry("e1");
+    expect(entry).toBeDefined();
+    expect(entry!.metadata["goal_id"]).toBe("goal-1");
+  });
+
+  it("searchAcrossGoals returns entries from multiple goals", async () => {
+    const vectorIndex = makeVectorIndex(tempDir);
+    const manager = new KnowledgeManager(
+      stateManager,
+      createMockLLMClient([]),
+      vectorIndex
+    );
+
+    const e1 = makeKnowledgeEntry({
+      entry_id: "e1",
+      question: "Breathing rate for a dog?",
+      answer: "15-30 breaths per minute.",
+      tags: ["breathing_rate"],
+    });
+    const e2 = makeKnowledgeEntry({
+      entry_id: "e2",
+      question: "Breathing rate for a cat?",
+      answer: "20-30 breaths per minute.",
+      tags: ["breathing_rate"],
+    });
+
+    await manager.saveKnowledge("goal-dog", e1);
+    await manager.saveKnowledge("goal-cat", e2);
+
+    // Both entries are indexed globally; cross-goal search should find both
+    const results = await manager.searchAcrossGoals("breathing rate", 10);
+    expect(results.length).toBeGreaterThanOrEqual(2);
+    const ids = results.map((r) => r.entry_id);
+    expect(ids).toContain("e1");
+    expect(ids).toContain("e2");
   });
 });

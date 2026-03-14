@@ -30,6 +30,7 @@ export const KnowledgeEntrySchema = z.object({
   acquisition_task_id: z.string(),
   superseded_by: z.string().nullable().default(null),
   tags: z.array(z.string()),
+  embedding_id: z.string().nullable().default(null),
 });
 export type KnowledgeEntry = z.infer<typeof KnowledgeEntrySchema>;
 
@@ -70,3 +71,22 @@ export const ContradictionResultSchema = z.object({
   resolution: z.string().nullable().default(null),
 });
 export type ContradictionResult = z.infer<typeof ContradictionResultSchema>;
+
+// --- KnowledgeGraph types ---
+
+export const KnowledgeRelationTypeEnum = z.enum([
+  "supports",
+  "contradicts",
+  "refines",
+  "depends_on",
+]);
+export type KnowledgeRelationType = z.infer<typeof KnowledgeRelationTypeEnum>;
+
+export const KnowledgeEdgeSchema = z.object({
+  from_id: z.string(),
+  to_id: z.string(),
+  relation: KnowledgeRelationTypeEnum,
+  confidence: z.number().min(0).max(1),
+  created_at: z.string(),
+});
+export type KnowledgeEdge = z.infer<typeof KnowledgeEdgeSchema>;

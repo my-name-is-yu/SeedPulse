@@ -17,6 +17,7 @@ import type {
   KnowledgeGapSignal,
   ContradictionResult,
 } from "./types/knowledge.js";
+import type { VectorIndex } from "./vector-index.js";
 
 // ─── LLM response schemas ───
 
@@ -62,10 +63,16 @@ const ContradictionCheckResponseSchema = z.object({
 export class KnowledgeManager {
   private readonly stateManager: StateManager;
   private readonly llmClient: ILLMClient;
+  private readonly vectorIndex?: VectorIndex;
 
-  constructor(stateManager: StateManager, llmClient: ILLMClient) {
+  constructor(
+    stateManager: StateManager,
+    llmClient: ILLMClient,
+    vectorIndex?: VectorIndex
+  ) {
     this.stateManager = stateManager;
     this.llmClient = llmClient;
+    this.vectorIndex = vectorIndex;
   }
 
   // ─── detectKnowledgeGap ───
@@ -271,6 +278,15 @@ Respond with JSON:
       `goals/${goalId}/domain_knowledge.json`,
       validated
     );
+
+    // Phase 2: also index in VectorIndex when available
+    if (this.vectorIndex) {
+      await this.vectorIndex.add(
+        parsed.entry_id,
+        `${parsed.question} ${parsed.answer}`,
+        { goal_id: goalId, tags: parsed.tags }
+      );
+    }
   }
 
   // ─── loadKnowledge ───
@@ -381,6 +397,57 @@ Determine if there is a factual contradiction. Respond with JSON:
     dimensionName: string
   ): Promise<KnowledgeEntry[]> {
     return this.loadKnowledge(goalId, [dimensionName]);
+  }
+
+  // ─── searchKnowledge (Phase 2) ───
+
+  /**
+   * Semantic search within a single goal's knowledge entries via VectorIndex.
+   * Falls back to an empty array when no VectorIndex is configured.
+   */
+  async searchKnowledge(
+    query: string,
+    topK: number = 5
+  ): Promise<KnowledgeEntry[]> {
+    if (!this.vectorIndex) {
+      return [];
+    }
+
+    const results = await this.vectorIndex.search(query, topK);
+    const entries: KnowledgeEntry[] = [];
+
+    for (const result of results) {
+      // Load the full entry from the goal stored in metadata
+      const goalId = result.metadata["goal_id"] as string | undefined;
+      if (!goalId) continue;
+
+      const domainKnowledge = await this.loadDomainKnowledge(goalId);
+      const entry = domainKnowledge.entries.find(
+        (e) => e.entry_id === result.id
+      );
+      if (entry) {
+        entries.push(entry);
+      }
+    }
+
+    return entries;
+  }
+
+  // ─── searchAcrossGoals (Phase 2) ───
+
+  /**
+   * Cross-goal semantic search. Leverages the VectorIndex which is global
+   * across all goals. Returns entries from any goal ordered by similarity.
+   * Falls back to an empty array when no VectorIndex is configured.
+   */
+  async searchAcrossGoals(
+    query: string,
+    topK: number = 5
+  ): Promise<KnowledgeEntry[]> {
+    // The VectorIndex is goal-agnostic — entries from all goals are indexed
+    // together, so this is semantically equivalent to searchKnowledge but
+    // explicitly documents cross-goal intent.
+    return this.searchKnowledge(query, topK);
   }
 
   // ─── Private Helpers ───

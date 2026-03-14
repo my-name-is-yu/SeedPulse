@@ -516,6 +516,89 @@ describe("SessionManager", () => {
     });
   });
 
+  // ─── filterSlotsByBudget ───
+
+  describe("dynamic budget filtering", () => {
+    it("returns all slots when budget is large enough to fit everything", () => {
+      const slots = manager.buildTaskExecutionContext("goal-1", "task-1");
+      const result = manager.filterSlotsByBudget(slots, 1_000_000);
+      expect(result).toHaveLength(slots.length);
+    });
+
+    it("drops lower-priority slots when budget is tight", () => {
+      const slots: import("../src/types/session.js").ContextSlot[] = [
+        { priority: 1, label: "slot-A", content: "a".repeat(400), token_estimate: 100 },
+        { priority: 2, label: "slot-B", content: "b".repeat(400), token_estimate: 100 },
+        { priority: 3, label: "slot-C", content: "c".repeat(400), token_estimate: 100 },
+        { priority: 4, label: "slot-D", content: "d".repeat(400), token_estimate: 100 },
+      ];
+      // Budget fits only 2 slots (200 tokens)
+      const result = manager.filterSlotsByBudget(slots, 200);
+      expect(result).toHaveLength(2);
+      const labels = result.map((s) => s.label);
+      expect(labels).toContain("slot-A");
+      expect(labels).toContain("slot-B");
+      expect(labels).not.toContain("slot-C");
+      expect(labels).not.toContain("slot-D");
+    });
+
+    it("keeps higher-priority slots over lower-priority slots", () => {
+      const slots: import("../src/types/session.js").ContextSlot[] = [
+        { priority: 5, label: "low-priority", content: "x".repeat(400), token_estimate: 100 },
+        { priority: 1, label: "high-priority", content: "y".repeat(400), token_estimate: 100 },
+      ];
+      const result = manager.filterSlotsByBudget(slots, 100);
+      expect(result).toHaveLength(1);
+      expect(result[0]?.label).toBe("high-priority");
+    });
+
+    it("returns empty array when budget is zero", () => {
+      const slots: import("../src/types/session.js").ContextSlot[] = [
+        { priority: 1, label: "slot-A", content: "content", token_estimate: 10 },
+      ];
+      const result = manager.filterSlotsByBudget(slots, 0);
+      expect(result).toHaveLength(0);
+    });
+
+    it("returns empty array when input is empty", () => {
+      const result = manager.filterSlotsByBudget([], 50_000);
+      expect(result).toHaveLength(0);
+    });
+
+    it("uses content.length / 4 to estimate tokens when token_estimate is 0", () => {
+      // 400 chars / 4 = 100 token estimate
+      const slots: import("../src/types/session.js").ContextSlot[] = [
+        { priority: 1, label: "slot-A", content: "a".repeat(400), token_estimate: 0 },
+        { priority: 2, label: "slot-B", content: "b".repeat(400), token_estimate: 0 },
+        { priority: 3, label: "slot-C", content: "c".repeat(400), token_estimate: 0 },
+      ];
+      // Budget = 250 tokens → fits slot-A (100) + slot-B (100), total 200 ≤ 250; slot-C pushes to 300 > 250
+      const result = manager.filterSlotsByBudget(slots, 250);
+      expect(result).toHaveLength(2);
+      const labels = result.map((s) => s.label);
+      expect(labels).toContain("slot-A");
+      expect(labels).toContain("slot-B");
+      expect(labels).not.toContain("slot-C");
+    });
+
+    it("fits exactly at budget boundary", () => {
+      const slots: import("../src/types/session.js").ContextSlot[] = [
+        { priority: 1, label: "slot-A", content: "a", token_estimate: 50 },
+        { priority: 2, label: "slot-B", content: "b", token_estimate: 50 },
+      ];
+      // Budget = 100 exactly fits both slots
+      const result = manager.filterSlotsByBudget(slots, 100);
+      expect(result).toHaveLength(2);
+    });
+
+    it("DEFAULT_CONTEXT_BUDGET is large enough for all standard slots", () => {
+      const slots = manager.buildTaskExecutionContext("goal-1", "task-1");
+      const result = manager.filterSlotsByBudget(slots, DEFAULT_CONTEXT_BUDGET);
+      // All slots have short content, so they should all fit
+      expect(result).toHaveLength(slots.length);
+    });
+  });
+
   // ─── Context slot priority ordering ───
 
   describe("context slot priority ordering", () => {

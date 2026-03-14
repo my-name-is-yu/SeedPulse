@@ -3,6 +3,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
 import type { ILLMClient } from "./llm-client.js";
+import type { IEmbeddingClient } from "./embedding-client.js";
+import type { VectorIndex } from "./vector-index.js";
 import {
   ShortTermEntrySchema,
   LessonEntrySchema,
@@ -66,16 +68,25 @@ export class MemoryLifecycleManager {
   private readonly memoryDir: string;
   private readonly llmClient: ILLMClient;
   private readonly config: RetentionConfig;
+  private readonly embeddingClient?: IEmbeddingClient;
+  private readonly vectorIndex?: VectorIndex;
+
+  // Phase 2: internal map for early compression candidates
+  private readonly earlyCompressionCandidates: Map<string, Set<string>> = new Map();
 
   constructor(
     baseDir: string,
     llmClient: ILLMClient,
-    config?: Partial<RetentionConfig>
+    config?: Partial<RetentionConfig>,
+    embeddingClient?: IEmbeddingClient,
+    vectorIndex?: VectorIndex
   ) {
     this.baseDir = baseDir;
     this.memoryDir = path.join(baseDir, "memory");
     this.llmClient = llmClient;
     this.config = RetentionConfigSchema.parse(config ?? {});
+    this.embeddingClient = embeddingClient;
+    this.vectorIndex = vectorIndex;
   }
 
   // ─── Directory Initialization ───
@@ -168,7 +179,21 @@ export class MemoryLifecycleManager {
       entry_id: entry.id,
       last_accessed: now,
       access_count: 0,
+      embedding_id: null,
     });
+
+    // Phase 2: fire-and-forget embedding indexing
+    if (this.vectorIndex) {
+      const textToEmbed = `${dataType}: ${JSON.stringify(data).slice(0, 500)}`;
+      this.vectorIndex
+        .add(entry.id, textToEmbed, { goal_id: goalId, data_type: dataType })
+        .then(() => {
+          entry.embedding_id = entry.id;
+        })
+        .catch(() => {
+          // Non-fatal: embedding failures are ignored
+        });
+    }
 
     return entry;
   }
@@ -374,6 +399,157 @@ export class MemoryLifecycleManager {
     }
 
     // 2. Query long-term lessons matching tags (cross-goal OK for lessons)
+    const lessons = this.queryLessons(tags, dimensions, maxEntries);
+
+    return { shortTerm: shortTermEntries, lessons };
+  }
+
+  // ─── Phase 2: Drive-based Memory Management ───
+
+  /**
+   * Dissatisfaction drive: delay compression up to 2x for high-dissatisfaction dimensions.
+   * For each dimension, if dissatisfaction > 0.7, delay_factor = 1 + dissatisfaction (max 2.0).
+   * Returns map of dimension -> delay_factor.
+   */
+  getCompressionDelay(
+    driveScores: Array<{ dimension: string; dissatisfaction: number }>
+  ): Map<string, number> {
+    const result = new Map<string, number>();
+    for (const { dimension, dissatisfaction } of driveScores) {
+      if (dissatisfaction > 0.7) {
+        const delayFactor = Math.min(2.0, 1 + dissatisfaction);
+        result.set(dimension, delayFactor);
+      } else {
+        result.set(dimension, 1.0);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Deadline drive: boost Working Memory priority up to 30%.
+   * For each dimension, bonus = min(deadline * 0.3, 0.3).
+   * Returns map of dimension -> bonus_factor.
+   */
+  getDeadlineBonus(
+    driveScores: Array<{ dimension: string; deadline: number }>
+  ): Map<string, number> {
+    const result = new Map<string, number>();
+    for (const { dimension, deadline } of driveScores) {
+      result.set(dimension, Math.min(deadline * 0.3, 0.3));
+    }
+    return result;
+  }
+
+  /**
+   * SatisficingJudge hook: mark satisfied dimensions for early compression.
+   * Records these dimensions as candidates for early compression.
+   */
+  markForEarlyCompression(goalId: string, satisfiedDimensions: string[]): void {
+    if (!this.earlyCompressionCandidates.has(goalId)) {
+      this.earlyCompressionCandidates.set(goalId, new Set());
+    }
+    const candidates = this.earlyCompressionCandidates.get(goalId)!;
+    for (const dim of satisfiedDimensions) {
+      candidates.add(dim);
+    }
+  }
+
+  /**
+   * Return the set of dimensions marked for early compression for a goal.
+   */
+  getEarlyCompressionCandidates(goalId: string): Set<string> {
+    return this.earlyCompressionCandidates.get(goalId) ?? new Set();
+  }
+
+  // ─── Phase 2: Semantic Working Memory Selection ───
+
+  /**
+   * Semantic variant of selectForWorkingMemory.
+   * Uses VectorIndex.search() to find semantically relevant entries.
+   * Applies deadline bonus to relevance scores.
+   * Falls back to existing sync method if no vectorIndex available.
+   */
+  async selectForWorkingMemorySemantic(
+    goalId: string,
+    query: string,
+    dimensions: string[],
+    tags: string[],
+    maxEntries: number = 10,
+    driveScores?: Array<{ dimension: string; dissatisfaction: number; deadline: number }>
+  ): Promise<{ shortTerm: ShortTermEntry[]; lessons: LessonEntry[] }> {
+    // Fall back to sync method if no vectorIndex
+    if (!this.vectorIndex) {
+      return this.selectForWorkingMemory(goalId, dimensions, tags, maxEntries);
+    }
+
+    // Compute deadline bonuses per dimension
+    const deadlineBonus = driveScores
+      ? this.getDeadlineBonus(driveScores.map((d) => ({ dimension: d.dimension, deadline: d.deadline })))
+      : new Map<string, number>();
+
+    const maxBonus = deadlineBonus.size > 0
+      ? Math.max(...Array.from(deadlineBonus.values()))
+      : 0;
+
+    // Search vector index for semantically similar entries
+    const searchResults = await this.vectorIndex.search(query, maxEntries * 2, 0.0);
+
+    // Filter to this goal's entries
+    const goalResults = searchResults.filter(
+      (r) => r.metadata.goal_id === goalId
+    );
+
+    // Load short-term index for recency data
+    const stIndex = this.loadIndex("short-term");
+    const indexEntryMap = new Map(
+      stIndex.entries.map((ie) => [ie.entry_id, ie])
+    );
+
+    // Score entries by combining semantic score + recency + deadline bonus
+    const now = Date.now();
+    const scoredEntries: Array<{ entry: ShortTermEntry; combinedScore: number }> = [];
+    const seenEntryIds = new Set<string>();
+
+    for (const result of goalResults) {
+      if (seenEntryIds.has(result.id)) continue;
+
+      const idxEntry = indexEntryMap.get(result.id);
+      if (!idxEntry) continue;
+
+      // Compute recency score: normalize last_accessed relative to now
+      const ageMs = now - new Date(idxEntry.last_accessed).getTime();
+      const ageHours = ageMs / (1000 * 60 * 60);
+      const recencyScore = Math.max(0, 1 - ageHours / (24 * 7)); // decay over 1 week
+
+      const combinedScore = result.similarity + recencyScore * 0.3 + maxBonus;
+
+      // Load the actual entry from disk
+      const dataFilePath = path.join(
+        this.memoryDir,
+        "short-term",
+        idxEntry.data_file
+      );
+      const allEntries =
+        this.readJsonFile<ShortTermEntry[]>(
+          dataFilePath,
+          z.array(ShortTermEntrySchema)
+        ) ?? [];
+      const found = allEntries.find((e) => e.id === idxEntry.entry_id);
+      if (found) {
+        scoredEntries.push({ entry: found, combinedScore });
+        seenEntryIds.add(result.id);
+        this.touchIndexEntry("short-term", idxEntry.id);
+      }
+    }
+
+    // Sort by combined score descending and take top maxEntries
+    scoredEntries.sort((a, b) => b.combinedScore - a.combinedScore);
+    const shortTermEntries = scoredEntries
+      .slice(0, maxEntries)
+      .map((s) => s.entry);
+
+    // Still use tag/dimension-based lesson query for long-term
     const lessons = this.queryLessons(tags, dimensions, maxEntries);
 
     return { shortTerm: shortTermEntries, lessons };
@@ -817,6 +993,7 @@ export class MemoryLifecycleManager {
         entry_id: lesson.lesson_id,
         last_accessed: now,
         access_count: 0,
+        embedding_id: null,
       });
     }
   }

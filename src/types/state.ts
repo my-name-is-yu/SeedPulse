@@ -3,6 +3,7 @@ import {
   ObservationTriggerEnum,
   ObservationLayerEnum,
   ObservationMethodSchema,
+  PaceStatusEnum,
 } from "./core.js";
 
 // --- Observation Log Entry ---
@@ -29,3 +30,22 @@ export const ObservationLogSchema = z.object({
   entries: z.array(ObservationLogEntrySchema),
 });
 export type ObservationLog = z.infer<typeof ObservationLogSchema>;
+
+// --- Reschedule Options (for behind milestones) ---
+
+export const RescheduleOptionItemSchema = z.object({
+  option_type: z.enum(["extend_deadline", "reduce_target", "renegotiate"]),
+  description: z.string(),
+  new_target_date: z.string().nullable().default(null),
+  new_target_value: z.number().nullable().default(null),
+});
+export type RescheduleOptionItem = z.infer<typeof RescheduleOptionItemSchema>;
+
+export const RescheduleOptionsSchema = z.object({
+  milestone_id: z.string(),
+  goal_id: z.string(),
+  current_pace: PaceStatusEnum,
+  options: z.array(RescheduleOptionItemSchema),
+  generated_at: z.string(),
+});
+export type RescheduleOptions = z.infer<typeof RescheduleOptionsSchema>;

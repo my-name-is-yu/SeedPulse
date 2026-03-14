@@ -7,6 +7,7 @@ import type { SatisficingJudge } from "./satisficing-judge.js";
 import type { StallDetector } from "./stall-detector.js";
 import type { ObservationEngine } from "./observation-engine.js";
 import type { DriveSystem } from "./drive-system.js";
+import type { VectorIndex } from "./vector-index.js";
 import type { Goal } from "./types/goal.js";
 import {
   CuriosityStateSchema,
@@ -37,6 +38,7 @@ export interface CuriosityEngineDeps {
   stallDetector: StallDetector;
   observationEngine: ObservationEngine;
   driveSystem: DriveSystem;
+  vectorIndex?: VectorIndex;  // Phase 2: embedding-based detection
   config?: Partial<CuriosityConfig>;
 }
 
@@ -62,6 +64,7 @@ const LLMProposalItemSchema = z.object({
       "cross_goal_transfer",
       "llm_heuristic",
       "periodic_review",
+      "embedding_similarity",
     ])
     .default("llm_heuristic"),
 });
@@ -92,6 +95,7 @@ export class CuriosityEngine {
   private readonly stallDetector: StallDetector;
   private readonly observationEngine: ObservationEngine;
   private readonly driveSystem: DriveSystem;
+  private readonly vectorIndex?: VectorIndex;
   private readonly config: CuriosityConfig;
   private state: CuriosityState;
 
@@ -103,6 +107,7 @@ export class CuriosityEngine {
     this.stallDetector = deps.stallDetector;
     this.observationEngine = deps.observationEngine;
     this.driveSystem = deps.driveSystem;
+    this.vectorIndex = deps.vectorIndex;
 
     // Merge user config with defaults
     this.config = CuriosityConfigSchema.parse(deps.config ?? {});
@@ -476,7 +481,7 @@ Return only valid JSON array, no markdown, no explanation outside the JSON.`;
         rationale: string;
         suggested_dimensions: Array<{ name: string; threshold_type: string; target: number }>;
         scope_domain: string;
-        detection_method: "observation_log" | "stall_pattern" | "cross_goal_transfer" | "llm_heuristic" | "periodic_review";
+        detection_method: "observation_log" | "stall_pattern" | "cross_goal_transfer" | "llm_heuristic" | "periodic_review" | "embedding_similarity";
       };
       let llmItems: LLMProposalItem[] = [];
 
@@ -537,6 +542,13 @@ Return only valid JSON array, no markdown, no explanation outside the JSON.`;
           continue;
         }
 
+        // Phase 2: use embedding_similarity detection method when vectorIndex
+        // is available and the trigger is undefined_problem
+        const detectionMethod =
+          this.vectorIndex && trigger.type === "undefined_problem"
+            ? "embedding_similarity"
+            : item.detection_method;
+
         const proposal = CuriosityProposalSchema.parse({
           id: proposalId,
           trigger,
@@ -545,7 +557,7 @@ Return only valid JSON array, no markdown, no explanation outside the JSON.`;
             rationale: item.rationale,
             suggested_dimensions: item.suggested_dimensions,
             scope_domain: item.scope_domain,
-            detection_method: item.detection_method,
+            detection_method: detectionMethod,
           },
           status: "pending",
           created_at: now.toISOString(),
@@ -778,6 +790,37 @@ Return only valid JSON array, no markdown, no explanation outside the JSON.`;
     }
 
     return false;
+  }
+
+  // ─── Phase 2: Embedding-based Detection ───
+
+  /**
+   * Detect semantically similar dimensions across goals using VectorIndex.
+   * Returns cross-goal transfers with similarity > 0.7.
+   */
+  async detectSemanticTransfer(
+    goalId: string,
+    dimensions: string[]
+  ): Promise<Array<{ source_goal_id: string; dimension: string; similarity: number }>> {
+    if (!this.vectorIndex) return [];
+
+    const transfers: Array<{ source_goal_id: string; dimension: string; similarity: number }> = [];
+
+    for (const dim of dimensions) {
+      const results = await this.vectorIndex.search(dim, 5, 0.7);
+      for (const result of results) {
+        const sourceGoalId = result.metadata.goal_id as string;
+        if (sourceGoalId && sourceGoalId !== goalId) {
+          transfers.push({
+            source_goal_id: sourceGoalId,
+            dimension: dim,
+            similarity: result.similarity,
+          });
+        }
+      }
+    }
+
+    return transfers;
   }
 
   /**

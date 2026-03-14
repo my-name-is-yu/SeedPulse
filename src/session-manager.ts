@@ -2,6 +2,7 @@ import { SessionSchema } from "./types/session.js";
 import type { Session, SessionType, ContextSlot } from "./types/session.js";
 import type { StateManager } from "./state-manager.js";
 import type { KnowledgeEntry } from "./types/knowledge.js";
+import type { VectorIndex } from "./vector-index.js";
 
 // ─── Constants ───
 
@@ -315,6 +316,75 @@ export class SessionManager {
     };
 
     return [...slots, knowledgeSlot];
+  }
+
+  /**
+   * Phase 2: Inject knowledge context using semantic search.
+   * Falls back to empty if no vectorIndex available.
+   */
+  async injectSemanticKnowledgeContext(
+    slots: ContextSlot[],
+    query: string,
+    vectorIndex: VectorIndex | undefined,
+    topK: number = 3
+  ): Promise<ContextSlot[]> {
+    if (!vectorIndex) return slots;
+
+    try {
+      const results = await vectorIndex.search(query, topK, 0.5);
+      if (results.length === 0) return slots;
+
+      const maxPriority = slots.reduce(
+        (max, s) => (s.priority > max ? s.priority : max),
+        0
+      );
+
+      const knowledgeSlots: ContextSlot[] = results.map((result, i) => ({
+        priority: maxPriority + 1 + i,
+        label: `semantic_knowledge_${i}`,
+        content: result.text,
+        token_estimate: Math.ceil(result.text.length / 4),
+      }));
+
+      return [...slots, ...knowledgeSlots];
+    } catch {
+      return slots;  // Non-critical failure
+    }
+  }
+
+  // ─── Dynamic Budget Filtering ───
+
+  /**
+   * Filters context slots to fit within a token budget.
+   *
+   * Slots are sorted by priority (ascending = higher priority first).
+   * Slots are accumulated until the budget is exceeded; any slot that
+   * would push the total over budget is dropped along with all subsequent slots.
+   *
+   * The returned array preserves the original slot order.
+   */
+  filterSlotsByBudget(slots: ContextSlot[], budget: number): ContextSlot[] {
+    // Sort by priority ascending (lower number = higher priority)
+    const sorted = [...slots].sort((a, b) => a.priority - b.priority);
+
+    let accumulated = 0;
+    const kept: ContextSlot[] = [];
+
+    for (const slot of sorted) {
+      const estimate = slot.token_estimate > 0
+        ? slot.token_estimate
+        : Math.ceil(slot.content.length / 4);
+
+      if (accumulated + estimate <= budget) {
+        accumulated += estimate;
+        kept.push(slot);
+      }
+      // Once budget exceeded, drop this slot and all lower-priority slots
+    }
+
+    // Restore original insertion order
+    const keptSet = new Set(kept);
+    return slots.filter((s) => keptSet.has(s));
   }
 
   // ─── Private Helpers ───

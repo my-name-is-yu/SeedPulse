@@ -35,6 +35,7 @@ export const ShortTermEntrySchema = z.object({
   dimensions: z.array(z.string()).default([]),
   tags: z.array(z.string()).default([]),
   data: z.record(z.string(), z.unknown()),
+  embedding_id: z.string().nullable().default(null),
 });
 export type ShortTermEntry = z.infer<typeof ShortTermEntrySchema>;
 
@@ -123,6 +124,7 @@ export const MemoryIndexEntrySchema = z.object({
   entry_id: z.string(),
   last_accessed: z.string().datetime(),
   access_count: z.number().int().nonnegative().default(0),
+  embedding_id: z.string().nullable().default(null),
 });
 export type MemoryIndexEntry = z.infer<typeof MemoryIndexEntrySchema>;
 
@@ -148,3 +150,25 @@ export const CompressionResultSchema = z.object({
   compressed_at: z.string().datetime(),
 });
 export type CompressionResult = z.infer<typeof CompressionResultSchema>;
+
+// Phase 2: Relevance scoring for semantic working memory selection
+export const RelevanceScoreSchema = z.object({
+  entry_id: z.string(),
+  goal_id: z.string(),
+  dimensions: z.array(z.string()),
+  semantic_score: z.number().min(0).max(1),
+  recency_score: z.number().min(0).max(1),
+  drive_bonus: z.number().min(0).max(0.3),
+  combined_score: z.number().min(0),
+});
+export type RelevanceScore = z.infer<typeof RelevanceScoreSchema>;
+
+// Phase 2: Compression policy driven by goal state
+export const CompressionPolicySchema = z.object({
+  goal_id: z.string(),
+  dimension: z.string(),
+  policy: z.enum(["normal", "delayed", "early_compression", "deadline_priority"]),
+  delay_factor: z.number().default(1.0),
+  updated_at: z.string(),
+});
+export type CompressionPolicy = z.infer<typeof CompressionPolicySchema>;

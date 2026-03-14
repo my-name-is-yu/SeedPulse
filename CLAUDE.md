@@ -8,7 +8,7 @@ Motiva — AI agent orchestrator that gives existing agents "motivation." Motiva
 
 ## Status
 
-Implementation Phase — Stage 1-11 complete (1749 tests, 35 test files).
+Implementation Phase — Stage 1-12 complete (1919 tests, 40 test files).
 See `docs/status.md` for stage-by-stage details.
 
 ## Core Concept
@@ -53,6 +53,7 @@ See `memory/archive/impl-roadmap-research.md` for module dependency graph and im
 - Layer 9: PortfolioManager (orchestrates parallel strategies between DriveScorer and TaskLifecycle)
 - Layer 10: DaemonRunner, PIDManager, Logger, EventServer, NotificationDispatcher, MemoryLifecycleManager
 - Layer 11: CuriosityEngine, CharacterConfigManager (好奇心・倫理強化・キャラクター, cross-cutting)
+- Layer 12: EmbeddingClient, VectorIndex, KnowledgeGraph, GoalDependencyGraph (semantic embedding infrastructure, cross-cutting)
 
 ## Design Documents
 

@@ -22,6 +22,18 @@ export type ContextSlot = z.infer<typeof ContextSlotSchema>;
 
 // --- Session ---
 
+// --- Context Budget Config ---
+
+export const ContextBudgetConfigSchema = z.object({
+  task_execution: z.number().default(50_000),
+  observation: z.number().default(50_000),
+  task_review: z.number().default(30_000),
+  goal_review: z.number().default(40_000),
+});
+export type ContextBudgetConfig = z.infer<typeof ContextBudgetConfigSchema>;
+
+// --- Session ---
+
 export const SessionSchema = z.object({
   id: z.string(),
   session_type: SessionTypeEnum,

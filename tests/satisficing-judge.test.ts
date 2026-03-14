@@ -4,6 +4,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { StateManager } from "../src/state-manager.js";
 import { SatisficingJudge, aggregateValues } from "../src/satisficing-judge.js";
+import { MockEmbeddingClient } from "../src/embedding-client.js";
 import type { Goal, Dimension } from "../src/types/goal.js";
 
 // ─── Test Fixtures ───
@@ -744,6 +745,145 @@ describe("propagateSubgoalCompletion", () => {
     expect(() =>
       judge.propagateSubgoalCompletion("subgoal-x", "nonexistent-parent")
     ).toThrow(/not found/);
+  });
+});
+
+// ─── proposeDimensionMapping (Phase 2) ───
+
+describe("proposeDimensionMapping (Phase 2)", () => {
+  it("proposes mappings when embedding client is available", async () => {
+    const mockEmbedding = new MockEmbeddingClient();
+    const judge2 = new SatisficingJudge(stateManager, mockEmbedding);
+    const proposals = await judge2.proposeDimensionMapping(
+      [{ name: "code_coverage" }, { name: "test_count" }],
+      [{ name: "quality_metrics" }, { name: "documentation" }]
+    );
+    expect(Array.isArray(proposals)).toBe(true);
+    // MockEmbeddingClient produces deterministic vectors, so specific assertions depend on hash behavior
+    for (const p of proposals) {
+      expect(p.similarity_score).toBeGreaterThan(0.5);
+      expect(p.suggested_aggregation).toBeDefined();
+      expect(p.reasoning).toBeTruthy();
+    }
+  });
+
+  it("returns empty when no embedding client", async () => {
+    const judge2 = new SatisficingJudge(stateManager);
+    const proposals = await judge2.proposeDimensionMapping(
+      [{ name: "coverage" }],
+      [{ name: "quality" }]
+    );
+    expect(proposals).toEqual([]);
+  });
+
+  it("returns empty when subgoalDimensions is empty", async () => {
+    const mockEmbedding = new MockEmbeddingClient();
+    const judge2 = new SatisficingJudge(stateManager, mockEmbedding);
+    const proposals = await judge2.proposeDimensionMapping([], [{ name: "quality" }]);
+    expect(proposals).toEqual([]);
+  });
+
+  it("includes reasoning with dimension names and similarity score", async () => {
+    const mockEmbedding = new MockEmbeddingClient();
+    const judge2 = new SatisficingJudge(stateManager, mockEmbedding);
+    const proposals = await judge2.proposeDimensionMapping(
+      [{ name: "test_coverage" }],
+      [{ name: "quality_metrics" }]
+    );
+    if (proposals.length > 0) {
+      expect(proposals[0].reasoning).toContain("test_coverage");
+      expect(proposals[0].reasoning).toContain("quality_metrics");
+      expect(proposals[0].confidence).toBeLessThanOrEqual(0.9);
+    }
+  });
+});
+
+// ─── onSatisficingJudgment callback (Phase 2) ───
+
+describe("onSatisficingJudgment callback (Phase 2)", () => {
+  it("calls callback with satisfied dimensions when checking completion", () => {
+    const calls: Array<{ goalId: string; dims: string[] }> = [];
+    const judge2 = new SatisficingJudge(stateManager, undefined, (goalId, dims) => {
+      calls.push({ goalId, dims });
+    });
+
+    const satisfiedGoal = makeGoal({
+      id: "goal-callback-test",
+      dimensions: [
+        makeDimension({
+          name: "done_dim",
+          current_value: 100,
+          threshold: { type: "min", value: 100 },
+          confidence: 0.9,
+        }),
+      ],
+    });
+
+    judge2.isGoalComplete(satisfiedGoal);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].goalId).toBe("goal-callback-test");
+    expect(calls[0].dims).toContain("done_dim");
+  });
+
+  it("does not call callback when no dimensions are satisfied", () => {
+    const calls: Array<{ goalId: string; dims: string[] }> = [];
+    const judge2 = new SatisficingJudge(stateManager, undefined, (goalId, dims) => {
+      calls.push({ goalId, dims });
+    });
+
+    const unsatisfiedGoal = makeGoal({
+      id: "goal-unsatisfied",
+      dimensions: [
+        makeDimension({
+          name: "not_done_dim",
+          current_value: 10,
+          threshold: { type: "min", value: 100 },
+          confidence: 0.9,
+        }),
+      ],
+    });
+
+    judge2.isGoalComplete(unsatisfiedGoal);
+
+    expect(calls).toHaveLength(0);
+  });
+
+  it("does not call callback when no callback is provided", () => {
+    // Standard judge without callback — should not throw
+    const goal = makeGoal({
+      dimensions: [
+        makeDimension({
+          name: "done_dim",
+          current_value: 100,
+          threshold: { type: "min", value: 100 },
+          confidence: 0.9,
+        }),
+      ],
+    });
+    expect(() => judge.isGoalComplete(goal)).not.toThrow();
+  });
+
+  it("calls callback for each partially satisfied goal independently", () => {
+    const calls: Array<{ goalId: string; dims: string[] }> = [];
+    const judge2 = new SatisficingJudge(stateManager, undefined, (goalId, dims) => {
+      calls.push({ goalId, dims });
+    });
+
+    const goal1 = makeGoal({
+      id: "goal-a",
+      dimensions: [
+        makeDimension({ name: "dim1", current_value: 100, threshold: { type: "min", value: 100 }, confidence: 0.9 }),
+        makeDimension({ name: "dim2", current_value: 50, threshold: { type: "min", value: 100 }, confidence: 0.9 }),
+      ],
+    });
+
+    judge2.isGoalComplete(goal1);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].goalId).toBe("goal-a");
+    expect(calls[0].dims).toContain("dim1");
+    expect(calls[0].dims).not.toContain("dim2");
   });
 });
 

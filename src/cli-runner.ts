@@ -940,10 +940,19 @@ async function main(): Promise<void> {
 
 // Only run main() when this file is the entry point
 // (not when imported as a module in tests)
-const isMain =
-  typeof process !== "undefined" &&
-  process.argv[1] !== undefined &&
-  (process.argv[1].endsWith("cli-runner.js") || process.argv[1].endsWith("cli-runner.ts"));
+import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
+
+const isMain = (() => {
+  if (typeof process === "undefined" || !process.argv[1]) return false;
+  try {
+    const thisFile = realpathSync(fileURLToPath(import.meta.url));
+    const entryFile = realpathSync(process.argv[1]);
+    return thisFile === entryFile;
+  } catch {
+    return false;
+  }
+})();
 
 if (isMain) {
   main();

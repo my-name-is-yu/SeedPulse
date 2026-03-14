@@ -18,3 +18,4 @@ export * from "./portfolio.js";
 export * from "./daemon.js";
 export * from "./notification.js";
 export * from "./memory-lifecycle.js";
+export * from "./dependency.js";

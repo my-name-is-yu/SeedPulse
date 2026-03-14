@@ -66,6 +66,8 @@ export type { CharacterConfig } from "./types/character.js";
 export { SatisficingAggregationEnum } from "./types/goal.js";
 export type { SatisficingAggregation } from "./types/goal.js";
 export { CuriosityEngine } from "./curiosity-engine.js";
+export { GoalDependencyGraph } from "./goal-dependency-graph.js";
+export { KnowledgeGraph } from "./knowledge-graph.js";
 export type { CuriosityEngineDeps } from "./curiosity-engine.js";
 export {
   CuriosityTriggerTypeEnum,
@@ -85,3 +87,8 @@ export type {
   LearningRecord,
   CuriosityState,
 } from "./types/curiosity.js";
+
+// --- Embedding ---
+export { type IEmbeddingClient, MockEmbeddingClient, OllamaEmbeddingClient, OpenAIEmbeddingClient, cosineSimilarity } from "./embedding-client.js";
+export { VectorIndex } from "./vector-index.js";
+export type { EmbeddingConfig, EmbeddingEntry, VectorSearchResult } from "./types/embedding.js";

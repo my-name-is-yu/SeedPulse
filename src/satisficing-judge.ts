@@ -6,7 +6,9 @@ import type {
   DimensionSatisfaction,
   IterationConstraints,
   ThresholdAdjustmentProposal,
+  MappingProposal,
 } from "./types/satisficing.js";
+import type { IEmbeddingClient } from "./embedding-client.js";
 
 /**
  * SatisficingJudge implements the completion judgment logic defined in satisficing.md.
@@ -22,9 +24,17 @@ import type {
  */
 export class SatisficingJudge {
   private readonly stateManager: StateManager;
+  private readonly embeddingClient?: IEmbeddingClient;
+  private readonly onSatisficingJudgment?: (goalId: string, satisfiedDimensions: string[]) => void;
 
-  constructor(stateManager: StateManager) {
+  constructor(
+    stateManager: StateManager,
+    embeddingClient?: IEmbeddingClient,  // Phase 2: for dimension mapping proposals
+    onSatisficingJudgment?: (goalId: string, satisfiedDimensions: string[]) => void
+  ) {
     this.stateManager = stateManager;
+    this.embeddingClient = embeddingClient;
+    this.onSatisficingJudgment = onSatisficingJudgment;
   }
 
   // ─── Confidence Tier Helpers ───
@@ -123,6 +133,49 @@ export class SatisficingJudge {
   }
 
   /**
+   * Propose dimension mappings between subgoal and parent goal dimensions
+   * using embedding similarity.
+   */
+  async proposeDimensionMapping(
+    subgoalDimensions: Array<{ name: string; description?: string }>,
+    parentGoalDimensions: Array<{ name: string; description?: string }>
+  ): Promise<MappingProposal[]> {
+    if (!this.embeddingClient) return [];
+
+    const proposals: MappingProposal[] = [];
+
+    for (const subDim of subgoalDimensions) {
+      const subText = subDim.description ? `${subDim.name}: ${subDim.description}` : subDim.name;
+      const subVector = await this.embeddingClient.embed(subText);
+
+      let bestMatch: { name: string; similarity: number } | null = null;
+
+      for (const parentDim of parentGoalDimensions) {
+        const parentText = parentDim.description ? `${parentDim.name}: ${parentDim.description}` : parentDim.name;
+        const parentVector = await this.embeddingClient.embed(parentText);
+        const similarity = this.embeddingClient.cosineSimilarity(subVector, parentVector);
+
+        if (!bestMatch || similarity > bestMatch.similarity) {
+          bestMatch = { name: parentDim.name, similarity };
+        }
+      }
+
+      if (bestMatch && bestMatch.similarity > 0.5) {
+        proposals.push({
+          subgoal_dimension: subDim.name,
+          parent_dimension: bestMatch.name,
+          similarity_score: bestMatch.similarity,
+          suggested_aggregation: "avg",  // default; could be smarter
+          confidence: Math.min(bestMatch.similarity, 0.9),
+          reasoning: `Dimension "${subDim.name}" is semantically similar to parent dimension "${bestMatch.name}" (similarity: ${bestMatch.similarity.toFixed(3)})`,
+        });
+      }
+    }
+
+    return proposals;
+  }
+
+  /**
    * Determine if a goal is fully complete.
    * Complete iff all dimensions are satisfied AND no dimension has low confidence.
    */
@@ -156,6 +209,15 @@ export class SatisficingJudge {
 
     const isComplete =
       blockingDimensions.length === 0 && lowConfidenceDimensions.length === 0;
+
+    if (this.onSatisficingJudgment) {
+      const satisfiedDims = dims
+        .filter(d => this.isDimensionSatisfied(d).is_satisfied)
+        .map(d => d.name);
+      if (satisfiedDims.length > 0) {
+        this.onSatisficingJudgment(goal.id, satisfiedDims);
+      }
+    }
 
     return {
       is_complete: isComplete,

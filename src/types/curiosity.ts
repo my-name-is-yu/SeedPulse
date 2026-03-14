@@ -55,6 +55,7 @@ export const CuriosityProposalSchema = z.object({
       "cross_goal_transfer",
       "llm_heuristic",
       "periodic_review",
+      "embedding_similarity",
     ]),
   }),
   status: CuriosityProposalStatusEnum,

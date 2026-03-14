@@ -20,6 +20,7 @@ import type {
 } from "./types/negotiation.js";
 import type { CharacterConfig } from "./types/character.js";
 import { DEFAULT_CHARACTER_CONFIG } from "./types/character.js";
+import type { SatisficingJudge } from "./satisficing-judge.js";
 
 // ─── Constants ───
 
@@ -248,19 +249,22 @@ export class GoalNegotiator {
   private readonly ethicsGate: EthicsGate;
   private readonly observationEngine: ObservationEngine;
   private readonly characterConfig: CharacterConfig;
+  private readonly satisficingJudge?: SatisficingJudge;
 
   constructor(
     stateManager: StateManager,
     llmClient: ILLMClient,
     ethicsGate: EthicsGate,
     observationEngine: ObservationEngine,
-    characterConfig?: CharacterConfig
+    characterConfig?: CharacterConfig,
+    satisficingJudge?: SatisficingJudge  // Phase 2: auto-mapping proposals
   ) {
     this.stateManager = stateManager;
     this.llmClient = llmClient;
     this.ethicsGate = ethicsGate;
     this.observationEngine = observationEngine;
     this.characterConfig = characterConfig ?? DEFAULT_CHARACTER_CONFIG;
+    this.satisficingJudge = satisficingJudge;
   }
 
   /**
@@ -539,6 +543,33 @@ export class GoalNegotiator {
 
       subgoals.push(subgoal);
       this.stateManager.saveGoal(subgoal);
+    }
+
+    // Phase 2: Auto-propose dimension mappings
+    if (this.satisficingJudge) {
+      for (const subgoal of subgoals) {
+        try {
+          const proposals = await this.satisficingJudge.proposeDimensionMapping(
+            subgoal.dimensions.map(d => ({ name: d.name })),
+            parentGoal.dimensions.map(d => ({ name: d.name }))
+          );
+          // Apply proposals to subgoal dimensions that don't already have mappings
+          for (const proposal of proposals) {
+            const dim = subgoal.dimensions.find(d => d.name === proposal.subgoal_dimension);
+            if (dim && !dim.dimension_mapping) {
+              dim.dimension_mapping = {
+                parent_dimension: proposal.parent_dimension,
+                aggregation: proposal.suggested_aggregation,
+              };
+            }
+          }
+          if (proposals.length > 0) {
+            await this.stateManager.saveGoal(subgoal);
+          }
+        } catch {
+          // Non-critical: auto-mapping failure should not block decomposition
+        }
+      }
     }
 
     // Step 4: If critical subgoal rejected, warn (but still return what we can)

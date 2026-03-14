@@ -335,6 +335,235 @@ describe("StateManager", () => {
     });
   });
 
+  describe("milestone tracking", () => {
+    function makeMilestone(overrides: Partial<Goal> = {}): Goal {
+      return makeGoal({
+        node_type: "milestone",
+        ...overrides,
+      });
+    }
+
+    describe("getMilestones", () => {
+      it("returns only goals with node_type === milestone", () => {
+        const g1 = makeGoal({ id: "g1", node_type: "goal" });
+        const g2 = makeMilestone({ id: "m1" });
+        const g3 = makeGoal({ id: "g3", node_type: "subgoal" });
+        const g4 = makeMilestone({ id: "m2" });
+
+        const milestones = manager.getMilestones([g1, g2, g3, g4]);
+        expect(milestones).toHaveLength(2);
+        expect(milestones.map((m) => m.id)).toEqual(["m1", "m2"]);
+      });
+
+      it("returns empty array when no milestones", () => {
+        const goals = [makeGoal({ id: "g1" }), makeGoal({ id: "g2", node_type: "subgoal" })];
+        expect(manager.getMilestones(goals)).toHaveLength(0);
+      });
+
+      it("returns empty array for empty input", () => {
+        expect(manager.getMilestones([])).toHaveLength(0);
+      });
+    });
+
+    describe("getOverdueMilestones", () => {
+      it("returns milestones past their target_date", () => {
+        const pastDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(); // yesterday
+        const futureDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // tomorrow
+
+        const overdue = makeMilestone({ id: "m-overdue", target_date: pastDate });
+        const upcoming = makeMilestone({ id: "m-upcoming", target_date: futureDate });
+        const noDate = makeMilestone({ id: "m-nodate", target_date: null });
+
+        const result = manager.getOverdueMilestones([overdue, upcoming, noDate]);
+        expect(result).toHaveLength(1);
+        expect(result[0].id).toBe("m-overdue");
+      });
+
+      it("excludes milestones without a target_date", () => {
+        const noDate = makeMilestone({ id: "m-nodate", target_date: null });
+        expect(manager.getOverdueMilestones([noDate])).toHaveLength(0);
+      });
+
+      it("returns empty array when no milestones are overdue", () => {
+        const futureDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        const m = makeMilestone({ id: "m-future", target_date: futureDate });
+        expect(manager.getOverdueMilestones([m])).toHaveLength(0);
+      });
+    });
+
+    describe("evaluatePace", () => {
+      it("returns on_track when pace_ratio >= 0.8", () => {
+        // 20% elapsed, 20% achievement → pace_ratio = 1.0 → on_track
+        const now = Date.now();
+        const createdAt = new Date(now - 20 * 24 * 60 * 60 * 1000).toISOString(); // 20 days ago
+        const targetDate = new Date(now + 80 * 24 * 60 * 60 * 1000).toISOString(); // 80 days from now
+        const milestone = makeMilestone({ id: "m-ontrack", created_at: createdAt, target_date: targetDate });
+
+        const snapshot = manager.evaluatePace(milestone, 0.2);
+        expect(snapshot.status).toBe("on_track");
+        expect(snapshot.achievement_ratio).toBe(0.2);
+        expect(snapshot.pace_ratio).toBeGreaterThanOrEqual(0.8);
+      });
+
+      it("returns at_risk when pace_ratio >= 0.5 and < 0.8", () => {
+        // 50% elapsed, 30% achievement → pace_ratio = 0.6 → at_risk
+        const now = Date.now();
+        const createdAt = new Date(now - 50 * 24 * 60 * 60 * 1000).toISOString(); // 50 days ago
+        const targetDate = new Date(now + 50 * 24 * 60 * 60 * 1000).toISOString(); // 50 days from now
+        const milestone = makeMilestone({ id: "m-atrisk", created_at: createdAt, target_date: targetDate });
+
+        const snapshot = manager.evaluatePace(milestone, 0.3);
+        expect(snapshot.status).toBe("at_risk");
+        expect(snapshot.pace_ratio).toBeGreaterThanOrEqual(0.5);
+        expect(snapshot.pace_ratio).toBeLessThan(0.8);
+      });
+
+      it("returns behind when pace_ratio < 0.5", () => {
+        // 80% elapsed, 20% achievement → pace_ratio = 0.25 → behind
+        const now = Date.now();
+        const createdAt = new Date(now - 80 * 24 * 60 * 60 * 1000).toISOString(); // 80 days ago
+        const targetDate = new Date(now + 20 * 24 * 60 * 60 * 1000).toISOString(); // 20 days from now
+        const milestone = makeMilestone({ id: "m-behind", created_at: createdAt, target_date: targetDate });
+
+        const snapshot = manager.evaluatePace(milestone, 0.2);
+        expect(snapshot.status).toBe("behind");
+        expect(snapshot.pace_ratio).toBeLessThan(0.5);
+      });
+
+      it("returns on_track when no target_date is set", () => {
+        const milestone = makeMilestone({ id: "m-nodate", target_date: null });
+        const snapshot = manager.evaluatePace(milestone, 0.5);
+        expect(snapshot.status).toBe("on_track");
+        expect(snapshot.pace_ratio).toBe(1);
+        expect(snapshot.elapsed_ratio).toBe(0);
+      });
+
+      it("handles 0 elapsed time without divide-by-zero", () => {
+        // created_at = now, target in the future → elapsed_ratio ≈ 0
+        const now = new Date();
+        const futureDate = new Date(now.getTime() + 100 * 24 * 60 * 60 * 1000).toISOString();
+        const milestone = makeMilestone({
+          id: "m-zero-elapsed",
+          created_at: now.toISOString(),
+          target_date: futureDate,
+        });
+
+        const snapshot = manager.evaluatePace(milestone, 0.0);
+        // Should not throw; pace_ratio = 1 when elapsed_ratio ≈ 0
+        expect(snapshot.status).toBe("on_track");
+        expect(snapshot.pace_ratio).toBe(1);
+      });
+
+      it("includes evaluated_at timestamp", () => {
+        const now = Date.now();
+        const createdAt = new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString();
+        const targetDate = new Date(now + 90 * 24 * 60 * 60 * 1000).toISOString();
+        const milestone = makeMilestone({ id: "m-ts", created_at: createdAt, target_date: targetDate });
+
+        const snapshot = manager.evaluatePace(milestone, 0.1);
+        expect(snapshot.evaluated_at).toBeTruthy();
+        expect(() => new Date(snapshot.evaluated_at)).not.toThrow();
+      });
+    });
+
+    describe("savePaceSnapshot", () => {
+      it("persists pace snapshot to goal file", async () => {
+        const milestone = makeMilestone({ id: "m-save" });
+        manager.saveGoal(milestone);
+
+        const snapshot = manager.evaluatePace(milestone, 0.5);
+        await manager.savePaceSnapshot("m-save", snapshot);
+
+        const loaded = manager.loadGoal("m-save");
+        expect(loaded).not.toBeNull();
+        expect(loaded!.pace_snapshot).not.toBeNull();
+        expect(loaded!.pace_snapshot!.achievement_ratio).toBe(0.5);
+      });
+
+      it("throws when goal does not exist", async () => {
+        const snapshot = {
+          elapsed_ratio: 0.5,
+          achievement_ratio: 0.5,
+          pace_ratio: 1,
+          status: "on_track" as const,
+          evaluated_at: new Date().toISOString(),
+        };
+        await expect(manager.savePaceSnapshot("nonexistent", snapshot)).rejects.toThrow();
+      });
+    });
+
+    describe("generateRescheduleOptions", () => {
+      it("generates 3 option types for a behind milestone", () => {
+        const now = Date.now();
+        const createdAt = new Date(now - 80 * 24 * 60 * 60 * 1000).toISOString();
+        const targetDate = new Date(now + 10 * 24 * 60 * 60 * 1000).toISOString();
+        const milestone = makeMilestone({
+          id: "m-behind-opts",
+          created_at: createdAt,
+          target_date: targetDate,
+        });
+
+        const opts = manager.generateRescheduleOptions(milestone, 0.1);
+
+        expect(opts.milestone_id).toBe("m-behind-opts");
+        expect(opts.options).toHaveLength(3);
+        expect(opts.options.map((o) => o.option_type).sort()).toEqual([
+          "extend_deadline",
+          "reduce_target",
+          "renegotiate",
+        ]);
+      });
+
+      it("sets new_target_date for extend_deadline option", () => {
+        const now = Date.now();
+        const createdAt = new Date(now - 50 * 24 * 60 * 60 * 1000).toISOString();
+        const targetDate = new Date(now + 50 * 24 * 60 * 60 * 1000).toISOString();
+        const milestone = makeMilestone({
+          id: "m-extend",
+          created_at: createdAt,
+          target_date: targetDate,
+        });
+
+        const opts = manager.generateRescheduleOptions(milestone, 0.2);
+        const extendOpt = opts.options.find((o) => o.option_type === "extend_deadline")!;
+
+        expect(extendOpt.new_target_date).not.toBeNull();
+        // Extended date should be after original target_date
+        expect(new Date(extendOpt.new_target_date!).getTime()).toBeGreaterThan(
+          new Date(targetDate).getTime()
+        );
+      });
+
+      it("sets renegotiate option with no new values", () => {
+        const milestone = makeMilestone({ id: "m-renegotiate" });
+        const opts = manager.generateRescheduleOptions(milestone, 0.1);
+        const renegotiateOpt = opts.options.find((o) => o.option_type === "renegotiate")!;
+
+        expect(renegotiateOpt.new_target_date).toBeNull();
+        expect(renegotiateOpt.new_target_value).toBeNull();
+      });
+
+      it("uses parent_id as goal_id when set", () => {
+        const milestone = makeMilestone({ id: "m-child", parent_id: "parent-goal" });
+        const opts = manager.generateRescheduleOptions(milestone, 0.5);
+        expect(opts.goal_id).toBe("parent-goal");
+      });
+
+      it("falls back to milestone id as goal_id when no parent_id", () => {
+        const milestone = makeMilestone({ id: "m-root", parent_id: null });
+        const opts = manager.generateRescheduleOptions(milestone, 0.5);
+        expect(opts.goal_id).toBe("m-root");
+      });
+
+      it("includes generated_at timestamp", () => {
+        const milestone = makeMilestone({ id: "m-ts-opts" });
+        const opts = manager.generateRescheduleOptions(milestone, 0.5);
+        expect(opts.generated_at).toBeTruthy();
+        expect(() => new Date(opts.generated_at)).not.toThrow();
+      });
+    });
+  });
+
   describe("raw read/write", () => {
     it("writes and reads arbitrary JSON", () => {
       manager.writeRaw("custom/data.json", { hello: "world" });

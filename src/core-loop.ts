@@ -10,6 +10,7 @@ import type { AdapterRegistry, IAdapter } from "./adapter-layer.js";
 import type { KnowledgeManager } from "./knowledge-manager.js";
 import type { CapabilityDetector } from "./capability-detector.js";
 import type { PortfolioManager } from "./portfolio-manager.js";
+import type { GoalDependencyGraph } from "./goal-dependency-graph.js";
 import type { Goal } from "./types/goal.js";
 import type { GapVector } from "./types/gap.js";
 import type { DriveContext, DriveScore } from "./types/drive.js";
@@ -90,6 +91,8 @@ export interface LoopIterationResult {
   completionJudgment: CompletionJudgment;
   elapsedMs: number;
   error: string | null;
+  /** Alerts for milestones that are at_risk or behind (optional) */
+  milestoneAlerts?: Array<{ goalId: string; status: string; pace_ratio: number }>;
 }
 
 export interface LoopResult {
@@ -119,6 +122,7 @@ export interface CoreLoopDeps {
   capabilityDetector?: CapabilityDetector;
   portfolioManager?: PortfolioManager;
   curiosityEngine?: CuriosityEngine;
+  goalDependencyGraph?: GoalDependencyGraph;
 }
 
 // ─── Helpers ───
@@ -526,6 +530,48 @@ export class CoreLoop {
       return result;
     }
 
+    // ─── 5b. Milestone Deadline Check ───
+    try {
+      // Load all sibling/related goals to find milestones (MVP: check the current goal itself)
+      const allGoals = [goal];
+      // Also load any child goals that may be milestones
+      for (const childId of goal.children_ids) {
+        const child = this.deps.stateManager.loadGoal(childId);
+        if (child) allGoals.push(child);
+      }
+
+      const milestones = this.deps.stateManager.getMilestones(allGoals);
+      if (milestones.length > 0) {
+        const milestoneAlerts: Array<{ goalId: string; status: string; pace_ratio: number }> = [];
+        for (const milestone of milestones) {
+          // Compute currentAchievement from pace_snapshot if available, else use 0
+          const currentAchievement =
+            milestone.pace_snapshot?.achievement_ratio ??
+            (typeof milestone.dimensions[0]?.current_value === "number"
+              ? Math.min((milestone.dimensions[0].current_value as number) / 100, 1)
+              : 0);
+
+          const snapshot = this.deps.stateManager.evaluatePace(milestone, currentAchievement);
+
+          // Save updated pace snapshot
+          await this.deps.stateManager.savePaceSnapshot(milestone.id, snapshot);
+
+          if (snapshot.status === "at_risk" || snapshot.status === "behind") {
+            milestoneAlerts.push({
+              goalId: milestone.id,
+              status: snapshot.status,
+              pace_ratio: snapshot.pace_ratio,
+            });
+          }
+        }
+        if (milestoneAlerts.length > 0) {
+          result.milestoneAlerts = milestoneAlerts;
+        }
+      }
+    } catch {
+      // Milestone check failure is non-fatal — continue with stall detection
+    }
+
     // ─── 6. Stall Check ───
     try {
       // Load gap history for stall detection
@@ -633,6 +679,22 @@ export class CoreLoop {
     } catch (err) {
       // Stall detection errors are non-fatal — log and continue
       // (we still want to run the task cycle)
+    }
+
+    // ─── 6b. Dependency Graph Scheduling Control ───
+    // If the current goal is blocked by unresolved prerequisites, skip task
+    // generation for this iteration and proceed directly to reporting.
+    if (this.deps.goalDependencyGraph) {
+      try {
+        if (this.deps.goalDependencyGraph.isBlocked(goalId)) {
+          const blockingGoals = this.deps.goalDependencyGraph.getBlockingGoals(goalId);
+          result.error = `Goal ${goalId} is blocked by prerequisites: ${blockingGoals.join(", ")}`;
+          // Skip task cycle — fall through to reporting
+          return result;
+        }
+      } catch {
+        // Dependency graph errors are non-fatal
+      }
     }
 
     // ─── 7. Task Cycle ───
