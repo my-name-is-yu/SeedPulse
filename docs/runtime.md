@@ -120,17 +120,33 @@ MVP では「スケジューリング」はユーザー（またはシステムc
 - ユーザーが画面上の承認オーバーレイ（`ApprovalOverlay`）でタスクを承認/拒否する。承認の可否は Promise を通じて `TaskLifecycle` の `approvalFn` に返される（CLI版の readline 読み取りと同じインターフェース）
 
 ```
+src/tui/
+├── entry.ts              — 依存DI配線 + Ink render（startTUI()エントリーポイント）
+├── app.tsx               — ルートコンポーネント、ビュー切り替え
+├── use-loop.ts           — LoopState管理、CoreLoop起動/停止（カスタムhook）
+├── dashboard.tsx         — ゴール・次元の進捗表示
+├── chat.tsx              — チャットインターフェース
+├── approval-overlay.tsx  — タスク承認UI（CoreLoop→TaskLifecycle→approvalFn経由）
+├── help-overlay.tsx      — ヘルプ表示
+├── report-view.tsx       — レポート表示
+├── actions.ts            — TUIアクション定義（コマンド解析・実行）
+├── intent-recognizer.ts  — ユーザー入力の意図判定
+├── markdown-renderer.ts  — Markdownレンダリング
+└── types/                — TUI専用型定義
+```
+
+```
 motiva tui
   ↓
 entry.ts（依存DI配線 + Ink render）
   ↓
 App（app.tsx）
   ├── useLoop（use-loop.ts）: LoopState管理、CoreLoop起動/停止
-  ├── Dashboard: ゴール・次元の進捗表示
-  ├── Chat: チャットインターフェース（IntentRecognizer経由）
-  ├── ApprovalOverlay: タスク承認UI（CoreLoop→TaskLifecycle→approvalFn経由）
-  ├── HelpOverlay: ヘルプ表示
-  └── ReportView: レポート表示
+  ├── Dashboard（dashboard.tsx）: ゴール・次元の進捗表示
+  ├── Chat（chat.tsx）: チャットインターフェース（IntentRecognizer経由）
+  ├── ApprovalOverlay（approval-overlay.tsx）: タスク承認UI
+  ├── HelpOverlay（help-overlay.tsx）: ヘルプ表示
+  └── ReportView（report-view.tsx）: レポート表示
 ```
 
 TUIはCLIモードの代替ではなく補完だ。ループの実行単位は同一で、「どう見て・どう操作するか」のみが異なる。

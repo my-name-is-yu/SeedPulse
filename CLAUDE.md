@@ -37,7 +37,7 @@ npx vitest run
 
 ## Architecture
 
-See `memory/archive/impl-roadmap-research.md` for module dependency graph and implementation order. For Stage 7-9 details, see `docs/status.md`.
+See `memory/archive/impl-roadmap-research.md` for module dependency graph and implementation order. For full stage-by-stage details, see `docs/status.md`.
 
 ### Implementation Layers (bottom-up)
 
@@ -49,12 +49,12 @@ See `memory/archive/impl-roadmap-research.md` for module dependency graph and im
 - Layer 5: CoreLoop, ReportingEngine
 - Layer 6: CLIRunner
 - Layer 7: TUI (src/tui/ — Ink/React dashboard, approval UI, chat)
-- Layer 8: KnowledgeManager, CapabilityDetector (cross-cutting, injected into Layer 3-4)
+- Layer 8: KnowledgeManager (cross-cutting, injected into Layer 3-4)
 - Layer 9: PortfolioManager (orchestrates parallel strategies between DriveScorer and TaskLifecycle)
 - Layer 10: DaemonRunner, PIDManager, Logger, EventServer, NotificationDispatcher, MemoryLifecycleManager
 - Layer 11: CuriosityEngine, CharacterConfigManager (好奇心・倫理強化・キャラクター, cross-cutting)
 - Layer 12: EmbeddingClient, VectorIndex, KnowledgeGraph, GoalDependencyGraph (semantic embedding infrastructure, cross-cutting)
-- Layer 13: CapabilityDetector, DataSourceAdapter (Stage 13 autonomous capability acquisition, cross-cutting)
+- Layer 13: CapabilityDetector (extended), DataSourceAdapter (Stage 13 autonomous capability acquisition, cross-cutting)
 - Layer 14: GoalTreeManager, StateAggregator, TreeLoopOrchestrator, CrossGoalPortfolio, StrategyTemplateRegistry, LearningPipeline, KnowledgeTransfer (cross-goal portfolio, learning, knowledge transfer)
 
 ## Design Documents
@@ -62,7 +62,7 @@ See `memory/archive/impl-roadmap-research.md` for module dependency graph and im
 - `docs/vision.md` — why Motiva exists
 - `docs/mechanism.md` — core loop and orchestration
 - `docs/runtime.md` — process model and execution
-- `docs/design/` — detailed design for each subsystem (19 files)
+- `docs/design/` — detailed design for each subsystem (23 files)
 
 Design docs are the source of truth for implementation. When in doubt, read the relevant design doc.
 

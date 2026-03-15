@@ -118,12 +118,35 @@ Implementation Phase — Stage 1-14 complete (2663 tests, 53 files).
 
 ## Stage 13 (complete)
 
-**Status**: 完了（CapabilityDetector拡張・DataSourceAdapter）
+**Status**: 完了（2 new test files: `tests/capability-detector.test.ts`, `tests/data-source-adapter.test.ts`）
 
-- `src/capability-detector.ts` — 能動的欠如検知、ユーザーエスカレーション自動発行
-- `src/types/data-source.ts` — DataSourceAdapter Zodスキーマ
-- 外部データソース（センサー/DB/API/IoT）との接続基盤
-- Layer 13: CapabilityDetector（能力自律調達）、DataSourceAdapter（外部世界接続）
+### 13A: CapabilityDetector 拡張（自律能力調達）
+- `src/capability-detector.ts` extensions — 能動的欠如検知・自律調達フロー
+  - `detectDeficiency(task)` — タスク実行に必要な能力欠如をLLMで検出し `CapabilityGap` を返す
+  - `planAcquisition(gap)` — 欠如ギャップから `CapabilityAcquisitionTask`（取得方法・成功基準）を生成
+  - `verifyAcquiredCapability(task)` — 取得後の能力をLLM+実行で検証（pass/fail/escalate）
+  - `registerCapability(cap, context?)` — 能力をレジストリに登録、取得コンテキスト付与
+  - `getAcquisitionHistory(goalId)` — ゴール単位の取得履歴を返す
+  - `removeCapability(id)`, `findCapabilityByName(name)`, `setCapabilityStatus(id, status)` — CRUD補完メソッド
+  - `escalateToUser(gap, goalId)` — 自動取得不可時にユーザーへエスカレーション通知
+- `src/types/capability.ts` 拡張 — `CapabilityAcquisitionTask`（取得タスク + 検証試行カウンタ）、`CapabilityDependency`（依存グラフ）、`CapabilityVerificationResult`（pass/fail/escalate）、`AcquisitionMethod`（tool_creation/permission_request/service_setup）型追加
+
+### 13B: DataSourceAdapter（外部世界接続）
+- `src/data-source-adapter.ts` — 外部データソース接続基盤
+  - `IDataSourceAdapter` interface — `connect()`, `query(params)`, `disconnect()`, `healthCheck()` 4メソッド規約
+  - `FileDataSourceAdapter` — JSONファイル読み込み、dimension_mappingによるフィールド抽出
+  - `HttpApiDataSourceAdapter` — GET/POSTリクエスト、Bearer/API Key/Basic認証、タイムアウト、レスポンスパス抽出
+  - `DataSourceRegistry` — 複数ソース管理、型別ファクトリ生成（file/http_api/database/custom）
+- `src/types/data-source.ts` — `DataSourceConfig`（4種: file/http_api/database/custom、認証・ポーリング設定）、`DataSourceQuery`（次元名・式・タイムアウト）、`DataSourceResult`（値・生データ・タイムスタンプ）、`DataSourceRegistry` Zodスキーマ
+
+### 13C: CLI サブコマンド（datasource）
+- `src/cli-runner.ts` 拡張 — 3サブコマンド追加
+  - `motiva datasource add <type>` — ファイル（`--path`）またはHTTP API（`--url`）データソース登録、`~/.motiva/datasources/<id>.json` に永続化
+  - `motiva datasource list` — 登録済みデータソース一覧表示
+  - `motiva datasource remove <id>` — データソース設定削除
+
+### 設計ドキュメント
+- `docs/design/data-source.md` — DataSourceAdapter設計（接続モデル、ポーリング、認証、次元マッピング）
 
 ## Stage 14 (complete)
 
