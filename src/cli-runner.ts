@@ -20,6 +20,8 @@ import { parseArgs } from "node:util";
 import { StateManager } from "./state-manager.js";
 import type { ILLMClient } from "./llm-client.js";
 import { buildLLMClient, buildAdapterRegistry } from "./provider-factory.js";
+import { loadProviderConfig, saveProviderConfig } from "./provider-config.js";
+import type { ProviderConfig } from "./provider-config.js";
 import { TrustManager } from "./trust-manager.js";
 import { DriveSystem } from "./drive-system.js";
 import { ObservationEngine } from "./observation-engine.js";
@@ -171,13 +173,15 @@ export class CLIRunner {
     loopConfig?: LoopConfig
   ): Promise<number> {
     const apiKey = this.getApiKey();
-    const provider = process.env.MOTIVA_LLM_PROVIDER;
-    if (!apiKey && provider !== "ollama" && provider !== "openai") {
+    const providerConfig = loadProviderConfig();
+    const provider = providerConfig.llm_provider;
+    if (!apiKey && provider !== "ollama" && provider !== "openai" && provider !== "codex") {
       console.error(
         "Error: ANTHROPIC_API_KEY environment variable is not set.\n" +
           "Set it with: export ANTHROPIC_API_KEY=<your-key>\n" +
           "Or use OpenAI: export MOTIVA_LLM_PROVIDER=openai\n" +
-          "Or use Ollama: export MOTIVA_LLM_PROVIDER=ollama"
+          "Or use Ollama: export MOTIVA_LLM_PROVIDER=ollama\n" +
+          "Or use Codex: export MOTIVA_LLM_PROVIDER=codex"
       );
       return 1;
     }
@@ -271,13 +275,15 @@ export class CLIRunner {
     opts: { deadline?: string; constraints?: string[] }
   ): Promise<number> {
     const apiKey = this.getApiKey();
-    const provider2 = process.env.MOTIVA_LLM_PROVIDER;
-    if (!apiKey && provider2 !== "ollama" && provider2 !== "openai") {
+    const providerConfig2 = loadProviderConfig();
+    const provider2 = providerConfig2.llm_provider;
+    if (!apiKey && provider2 !== "ollama" && provider2 !== "openai" && provider2 !== "codex") {
       console.error(
         "Error: ANTHROPIC_API_KEY environment variable is not set.\n" +
           "Set it with: export ANTHROPIC_API_KEY=<your-key>\n" +
           "Or use OpenAI: export MOTIVA_LLM_PROVIDER=openai\n" +
-          "Or use Ollama: export MOTIVA_LLM_PROVIDER=ollama"
+          "Or use Ollama: export MOTIVA_LLM_PROVIDER=ollama\n" +
+          "Or use Codex: export MOTIVA_LLM_PROVIDER=codex"
       );
       return 1;
     }
@@ -807,6 +813,68 @@ Options:
     }
   }
 
+  // ─── Provider Subcommands ───
+
+  private cmdProvider(argv: string[]): number {
+    const providerSubcommand = argv[0];
+
+    if (!providerSubcommand || providerSubcommand === "show") {
+      const config = loadProviderConfig();
+      console.log(JSON.stringify(config, null, 2));
+      return 0;
+    }
+
+    if (providerSubcommand === "set") {
+      let values: { llm?: string; adapter?: string };
+      try {
+        ({ values } = parseArgs({
+          args: argv.slice(1),
+          options: {
+            llm: { type: "string" },
+            adapter: { type: "string" },
+          },
+          strict: false,
+        }) as { values: { llm?: string; adapter?: string } });
+      } catch {
+        values = {};
+      }
+
+      const validLlmProviders = ["anthropic", "openai", "ollama", "codex"];
+      const validAdapters = ["claude_code_cli", "claude_api", "openai_codex_cli", "openai_api"];
+
+      if (values.llm && !validLlmProviders.includes(values.llm)) {
+        console.error(
+          `Error: invalid --llm provider "${values.llm}". Valid: ${validLlmProviders.join(", ")}`
+        );
+        return 1;
+      }
+
+      if (values.adapter && !validAdapters.includes(values.adapter)) {
+        console.error(
+          `Error: invalid --adapter "${values.adapter}". Valid: ${validAdapters.join(", ")}`
+        );
+        return 1;
+      }
+
+      // Load existing config as base, then update
+      const current = loadProviderConfig();
+      const updated: ProviderConfig = {
+        ...current,
+        ...(values.llm ? { llm_provider: values.llm as ProviderConfig["llm_provider"] } : {}),
+        ...(values.adapter ? { default_adapter: values.adapter as ProviderConfig["default_adapter"] } : {}),
+      };
+
+      saveProviderConfig(updated);
+      console.log("Provider config updated:");
+      console.log(JSON.stringify(updated, null, 2));
+      return 0;
+    }
+
+    console.error(`Unknown provider subcommand: "${providerSubcommand}"`);
+    console.error("Available: provider show, provider set");
+    return 1;
+  }
+
   // ─── Main dispatch ───
 
   /**
@@ -994,6 +1062,10 @@ Options:
       return 1;
     }
 
+    if (subcommand === "provider") {
+      return this.cmdProvider(argv.slice(1));
+    }
+
     if (subcommand === "config") {
       const configSubcommand = argv[1];
 
@@ -1049,6 +1121,8 @@ Usage:
   motiva datasource add <type>        Register a new data source (file | http_api)
   motiva datasource list              List all registered data sources
   motiva datasource remove <id>       Remove a data source by ID
+  motiva provider show                Show current provider config
+  motiva provider set                 Set LLM provider and/or default adapter
 
 Options (motiva run):
   --goal <id>                         Goal ID to run (required)
@@ -1073,8 +1147,13 @@ Options (motiva datasource add):
   --path <path>                       File path (required for type=file)
   --url <url>                         HTTP URL (required for type=http_api)
 
+Options (motiva provider set):
+  --llm <provider>                    LLM provider: anthropic | openai | ollama | codex
+  --adapter <type>                    Default adapter: claude_code_cli | claude_api | openai_codex_cli | openai_api
+
 Environment:
   ANTHROPIC_API_KEY                   Required for LLM-powered commands
+  MOTIVA_LLM_PROVIDER                 Override LLM provider (anthropic|openai|ollama|codex)
 
 Examples:
   motiva goal add "Increase test coverage to 90%"

@@ -6,43 +6,59 @@
 import { LLMClient, type ILLMClient } from "./llm-client.js";
 import { OllamaLLMClient } from "./ollama-client.js";
 import { OpenAILLMClient } from "./openai-client.js";
+import { CodexLLMClient } from "./codex-llm-client.js";
+import { loadProviderConfig } from "./provider-config.js";
 import { AdapterRegistry } from "./adapter-layer.js";
 import { ClaudeCodeCLIAdapter } from "./adapters/claude-code-cli.js";
 import { ClaudeAPIAdapter } from "./adapters/claude-api.js";
 import { OpenAICodexCLIAdapter } from "./adapters/openai-codex.js";
 
 /**
- * Build an LLM client based on MOTIVA_LLM_PROVIDER environment variable.
+ * Build an LLM client based on provider configuration.
  *
- * - MOTIVA_LLM_PROVIDER=ollama  → OllamaLLMClient (OLLAMA_BASE_URL, OLLAMA_MODEL)
- * - MOTIVA_LLM_PROVIDER=openai  → OpenAILLMClient (OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL)
- * - (default)                   → LLMClient / Anthropic (ANTHROPIC_API_KEY required)
+ * Configuration priority (highest to lowest):
+ *   1. MOTIVA_LLM_PROVIDER environment variable
+ *   2. ~/.motiva/provider.json llm_provider field
+ *   3. Default: Anthropic
+ *
+ * Providers:
+ *   - "anthropic" → LLMClient (ANTHROPIC_API_KEY required)
+ *   - "openai"    → OpenAILLMClient (OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL)
+ *   - "ollama"    → OllamaLLMClient (OLLAMA_BASE_URL, OLLAMA_MODEL)
+ *   - "codex"     → CodexLLMClient (codex CLI required, OPENAI_MODEL optional)
  */
 export function buildLLMClient(): ILLMClient {
-  const provider = process.env.MOTIVA_LLM_PROVIDER;
+  const config = loadProviderConfig();
 
-  if (provider === "ollama") {
-    const baseUrl = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
-    const model = process.env.OLLAMA_MODEL ?? "qwen3:4b";
-    return new OllamaLLMClient({ baseUrl, model });
-  }
+  switch (config.llm_provider) {
+    case "codex":
+      return new CodexLLMClient({
+        cliPath: config.codex?.cli_path,
+        model: config.codex?.model,
+      });
 
-  if (provider === "openai") {
-    return new OpenAILLMClient({
-      apiKey: process.env.OPENAI_API_KEY,
-      model: process.env.OPENAI_MODEL,
-      baseURL: process.env.OPENAI_BASE_URL,
-    });
-  }
+    case "openai":
+      return new OpenAILLMClient({
+        apiKey: config.openai?.api_key,
+        model: config.openai?.model,
+        baseURL: config.openai?.base_url,
+      });
 
-  // Default: Anthropic
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "ANTHROPIC_API_KEY is required (or set MOTIVA_LLM_PROVIDER=openai|ollama)"
-    );
+    case "ollama":
+      return new OllamaLLMClient({
+        baseUrl: config.ollama?.base_url ?? "http://localhost:11434",
+        model: config.ollama?.model ?? "qwen3:4b",
+      });
+
+    default:
+      // "anthropic" or any unknown value falls back to Anthropic
+      if (!config.anthropic?.api_key) {
+        throw new Error(
+          "ANTHROPIC_API_KEY is required (or set MOTIVA_LLM_PROVIDER=openai|ollama|codex)"
+        );
+      }
+      return new LLMClient(config.anthropic.api_key);
   }
-  return new LLMClient(apiKey);
 }
 
 /**
