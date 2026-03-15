@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { ObservationLogEntrySchema, ObservationLogSchema } from "./types/state.js";
 import type { ObservationLogEntry, ObservationLog } from "./types/state.js";
 import type { ObservationLayer, ObservationMethod, ObservationTrigger, ConfidenceTier } from "./types/core.js";
@@ -6,6 +7,7 @@ import { KnowledgeGapSignalSchema } from "./types/knowledge.js";
 import type { KnowledgeGapSignal } from "./types/knowledge.js";
 import type { IDataSourceAdapter } from "./data-source-adapter.js";
 import type { DataSourceQuery } from "./types/data-source.js";
+import type { ILLMClient } from "./llm-client.js";
 
 // ─── Layer Configuration ───
 
@@ -41,6 +43,12 @@ const LAYER_PRIORITY: Record<ObservationLayer, number> = {
   self_report: 1,
 };
 
+// Zod schema for LLM observation response
+const LLMObservationResponseSchema = z.object({
+  score: z.number().min(0).max(1),
+  reason: z.string(),
+});
+
 /**
  * ObservationEngine handles the 3-layer observation architecture.
  *
@@ -55,13 +63,16 @@ const LAYER_PRIORITY: Record<ObservationLayer, number> = {
 export class ObservationEngine {
   private readonly stateManager: StateManager;
   private readonly dataSources: IDataSourceAdapter[];
+  private readonly llmClient?: ILLMClient;
 
   constructor(
     stateManager: StateManager,
-    dataSources: IDataSourceAdapter[] = []
+    dataSources: IDataSourceAdapter[] = [],
+    llmClient?: ILLMClient
   ) {
     this.stateManager = stateManager;
     this.dataSources = dataSources;
+    this.llmClient = llmClient;
   }
 
   // ─── Progress Ceiling ───
@@ -275,11 +286,14 @@ export class ObservationEngine {
   // ─── Observe ───
 
   /**
-   * Perform a self-report observation pass for all dimensions of a goal.
+   * Perform an observation pass for all dimensions of a goal.
    *
-   * For each dimension the current_value and confidence are re-recorded as a
-   * self_report observation entry so that downstream gap-calculation always
-   * has up-to-date entries in the observation log.
+   * For each dimension, the following priority order is used:
+   *   1. DataSource — if a registered data source covers this dimension,
+   *      call observeFromDataSource() (mechanical, confidence 0.90).
+   *   2. LLM — if an LLM client is available, call observeWithLLM()
+   *      (independent_review, confidence 0.70).
+   *   3. self_report — fall back to re-recording the existing stored value.
    *
    * @param goalId   The goal to observe.
    * @param methods  Array of ObservationMethod descriptors (one per dimension,
@@ -287,15 +301,47 @@ export class ObservationEngine {
    *                 ignored; missing entries fall back to the dimension's own
    *                 observation_method.
    */
-  observe(goalId: string, methods: ObservationMethod[]): void {
+  async observe(goalId: string, methods: ObservationMethod[]): Promise<void> {
     const goal = this.stateManager.loadGoal(goalId);
     if (goal === null) {
       throw new Error(`observe: goal "${goalId}" not found`);
     }
 
-    goal.dimensions.forEach((dim, idx) => {
+    for (let idx = 0; idx < goal.dimensions.length; idx++) {
+      const dim = goal.dimensions[idx]!;
       const method: ObservationMethod = methods[idx] ?? dim.observation_method;
 
+      // 1. Try DataSource first
+      const dataSource = this.findDataSourceForDimension(dim.name);
+      if (dataSource) {
+        await this.observeFromDataSource(goalId, dim.name, dataSource.sourceId);
+        continue;
+      }
+
+      // 2. Try LLM if available
+      if (this.llmClient) {
+        try {
+          await this.observeWithLLM(
+            goalId,
+            dim.name,
+            goal.description,
+            dim.label ?? dim.name,
+            JSON.stringify(dim.threshold)
+          );
+          continue;
+        } catch (err) {
+          console.warn(
+            `[ObservationEngine] LLM observation failed for dimension "${dim.name}": ${err instanceof Error ? err.message : String(err)}. Falling back to self_report.`
+          );
+        }
+      } else if (this.dataSources.length > 0) {
+        // DataSources exist but none match this dimension and no LLM client
+        console.warn(
+          `[ObservationEngine] Warning: dimension "${dim.name}" has no matching DataSource and no LLM client available for observation`
+        );
+      }
+
+      // 3. Fall back to self_report
       const entry = this.createObservationEntry({
         goalId,
         dimensionName: dim.name,
@@ -314,7 +360,7 @@ export class ObservationEngine {
       });
 
       this.applyObservation(goalId, entry);
-    });
+    }
   }
 
   // ─── Data Source Observation ───
@@ -391,6 +437,90 @@ export class ObservationEngine {
       extracted_value: extractedValue,
       confidence: 0.90,
       notes: `Data source: ${sourceId}`,
+    });
+
+    this.applyObservation(goalId, entry);
+
+    return entry;
+  }
+
+  // ─── DataSource Dimension Lookup ───
+
+  /**
+   * Find the first DataSource adapter that can serve the given dimension name.
+   * Checks both getSupportedDimensions() and dimension_mapping config keys.
+   * Returns null if no adapter matches.
+   */
+  private findDataSourceForDimension(dimensionName: string): IDataSourceAdapter | null {
+    for (const ds of this.dataSources) {
+      const dims = ds.getSupportedDimensions?.() ?? [];
+      if (dims.includes(dimensionName)) return ds;
+      // Also check dimension_mapping keys
+      if (ds.config?.dimension_mapping && dimensionName in ds.config.dimension_mapping) {
+        return ds;
+      }
+    }
+    return null;
+  }
+
+  // ─── LLM Observation ───
+
+  /**
+   * Observe a goal dimension using the LLM client.
+   *
+   * The LLM is asked to score the dimension from 0.0 to 1.0.
+   * The score is used as extractedValue, and confidence is fixed at 0.70
+   * (middle of the independent_review range [0.50, 0.84]).
+   *
+   * @param goalId             The goal being observed.
+   * @param dimensionName      The dimension name (snake_case).
+   * @param goalDescription    Human-readable goal description.
+   * @param dimensionLabel     Human-readable dimension label.
+   * @param thresholdDescription  JSON-stringified threshold for context.
+   */
+  async observeWithLLM(
+    goalId: string,
+    dimensionName: string,
+    goalDescription: string,
+    dimensionLabel: string,
+    thresholdDescription: string
+  ): Promise<ObservationLogEntry> {
+    if (!this.llmClient) {
+      throw new Error("observeWithLLM: llmClient is not configured");
+    }
+
+    const prompt =
+      `以下のゴールの次元を0.0〜1.0で評価してください。\n\n` +
+      `ゴール: ${goalDescription}\n` +
+      `評価次元: ${dimensionLabel}\n` +
+      `目標値: ${thresholdDescription}\n\n` +
+      `現在の状態を考慮して、この次元の達成度を0.0（未達成）〜1.0（完全達成）で評価してください。\n\n` +
+      `回答はJSON形式で: {"score": 0.0〜1.0, "reason": "評価理由"}`;
+
+    const response = await this.llmClient.sendMessage([
+      { role: "user", content: prompt },
+    ]);
+
+    const parsed = this.llmClient.parseJSON(response.content, LLMObservationResponseSchema);
+
+    const entry = ObservationLogEntrySchema.parse({
+      observation_id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      trigger: "periodic",
+      goal_id: goalId,
+      dimension_name: dimensionName,
+      layer: "independent_review",
+      method: {
+        type: "llm_review",
+        source: "llm",
+        schedule: null,
+        endpoint: null,
+        confidence_tier: "independent_review",
+      },
+      raw_result: { score: parsed.score, reason: parsed.reason },
+      extracted_value: parsed.score,
+      confidence: 0.70,
+      notes: `LLM evaluation: ${parsed.reason}`,
     });
 
     this.applyObservation(goalId, entry);

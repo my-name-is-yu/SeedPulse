@@ -129,7 +129,7 @@ export class CLIRunner {
       }
     } catch { /* ignore errors */ }
 
-    const observationEngine = new ObservationEngine(stateManager, dataSources);
+    const observationEngine = new ObservationEngine(stateManager, dataSources, llmClient);
     const stallDetector = new StallDetector(stateManager, characterConfig);
     const satisficingJudge = new SatisficingJudge(stateManager);
     const ethicsGate = new EthicsGate(stateManager, llmClient);
