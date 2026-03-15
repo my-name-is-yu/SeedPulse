@@ -355,8 +355,14 @@ export class ObservationEngine {
       // 1. Try DataSource first
       const dataSource = this.findDataSourceForDimension(dim.name);
       if (dataSource) {
-        await this.observeFromDataSource(goalId, dim.name, dataSource.sourceId);
-        continue;
+        try {
+          await this.observeFromDataSource(goalId, dim.name, dataSource.sourceId);
+          continue;
+        } catch (err) {
+          console.warn(
+            `[ObservationEngine] DataSource observation failed for dimension "${dim.name}" (source: ${dataSource.sourceId}): ${err instanceof Error ? err.message : String(err)}. Falling through to LLM fallback.`
+          );
+        }
       }
 
       // 2. Try LLM if available
@@ -533,6 +539,10 @@ export class ObservationEngine {
       throw new Error("observeWithLLM: llmClient is not configured");
     }
 
+    console.log(
+      `[ObservationEngine] LLM observation for dimension "${dimensionLabel}" (goal: ${goalId})`
+    );
+
     const contextSection = workspaceContext
       ? `\n=== Current Workspace State ===\n${workspaceContext}\n=== End Workspace State ===\n`
       : "";
@@ -551,6 +561,10 @@ export class ObservationEngine {
     ]);
 
     const parsed = this.llmClient.parseJSON(response.content, LLMObservationResponseSchema);
+
+    console.log(
+      `[ObservationEngine] LLM observation result for "${dimensionLabel}": score=${parsed.score.toFixed(3)}`
+    );
 
     const entry = ObservationLogEntrySchema.parse({
       observation_id: crypto.randomUUID(),
