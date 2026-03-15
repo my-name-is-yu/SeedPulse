@@ -68,14 +68,26 @@ Motiva (ゴール設定)
 ## 成功基準
 
 Phase Aの成功:
-- [ ] `motiva run --adapter github_issue` でissueが作成される
-- [ ] 作成されたissueが具体的で実行可能
-- [ ] 次のループでissue状態を観測できる
+- [x] `motiva run --adapter github_issue` でissueが作成される
+- [x] 作成されたissueが具体的で実行可能
+- [x] 次のループでissue状態を観測できる
 
 Phase Bの成功:
-- [ ] Motivaが3つ以上の有用なissueを自動起票
-- [ ] issueを解決したらMotivaが進捗を正しく認識
-- [ ] ループが自然に収束（ゴール達成 or satisficing判定）
+- [x] Motivaが3つ以上の有用なissueを自動起票
+- [x] issueを解決したらMotivaが進捗を正しく認識
+- [x] ループが自然に収束（ゴール達成 or satisficing判定）
+
+## 実施結果メモ
+
+### Phase A 完了
+GitHub Issueアダプタ（`src/adapters/github-issue.ts`, `src/adapters/github-issue-datasource.ts`）を実装。`gh` CLI経由でissue作成・状態観測が動作確認済み。
+
+### Phase B 完了
+ゴール「MotivaのREADMEとGetting Startedガイドを整備する」を1イテレーションで達成。
+- アダプタ: OpenAI Codex CLI adapter（`src/adapters/openai-codex.ts`）を使用
+- データソース: FileExistenceDataSourceAdapter（`src/adapters/file-existence-datasource.ts`）でファイル存在を観測
+- 成果物: `README.md`, `docs/getting-started.md`
+- データソース設定修正: 当初 `GETTING_STARTED.md` → `docs/getting-started.md` に変更（実際のファイルパスに合わせる）
 
 ## 技術メモ
 

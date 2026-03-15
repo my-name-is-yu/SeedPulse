@@ -1,6 +1,6 @@
 # Implementation Status
 
-Implementation Phase — Stage 1-14 complete (2663 tests, 53 files).
+Implementation Phase — Stage 1-14 complete (2809 tests, 61 files).
 
 ## Stage 1 (complete)
 - Type definitions: 14 Zod schema files in `src/types/`
@@ -151,6 +151,36 @@ Implementation Phase — Stage 1-14 complete (2663 tests, 53 files).
 ## Stage 14 (complete)
 
 **Status**: 完了（2663テスト、53テストファイル、+744テスト、+13テストファイル）
+
+## Post-Stage-14 追加実装 (complete)
+
+**Status**: 完了（2809テスト、61テストファイル）
+
+### OpenAI/Codex対応
+- `src/openai-client.ts` — OpenAILLMClient（ILLMClient実装、openai SDK、gpt-4oデフォルト）
+- `src/adapters/openai-codex.ts` — OpenAICodexCLIAdapter（IAdapter実装、`codex exec --full-auto`）
+- `src/provider-factory.ts` — 共有ファクトリ（buildLLMClient + buildAdapterRegistry）
+- 環境変数: `MOTIVA_LLM_PROVIDER=openai|ollama|anthropic`、`OPENAI_API_KEY`、`OPENAI_MODEL`
+- デフォルトプロバイダーをOpenAIに変更
+
+### GitHub Issueアダプタ（dogfooding用）
+- `src/adapters/github-issue.ts` — GitHubIssueAdapter（IAdapter実装、`gh` CLI経由でissue作成）
+- `src/adapters/github-issue-datasource.ts` — GitHubIssueDataSourceAdapter（IDataSourceAdapter実装、issue状態観測）
+- プロンプト解析: ` ```github-issue JSON``` ` ブロック or フォールバック（1行目=タイトル）
+- 観測次元: open_issue_count, closed_issue_count, completion_ratio, total_issue_count
+- 設定: `MOTIVA_GITHUB_REPO` 環境変数 or コンフィグ、デフォルトラベル `motiva`
+
+### FileExistenceDataSourceAdapter
+- `src/adapters/file-existence-datasource.ts` — ファイル存在チェックによる進捗観測
+- ObservationEngine経由でのパススルー式サポート
+
+### CapabilityDetector: ゴール能力ギャップ検出
+- `src/capability-detector.ts` 拡張 — `detectGoalCapabilityGap(goal)` メソッド追加
+- ゴール実行に必要な能力の欠如をゴール単位で事前検出
+
+### Auto-archive
+- `src/state-manager.ts` 拡張 — `archiveGoal(goalId)` メソッド追加
+- `src/core-loop.ts` 統合 — satisficing完了時に自動アーカイブ
 
 Goal横断ポートフォリオと学習 — 再帰的ゴールツリー、ノード独立ループ、クロスゴールポートフォリオ、学習パイプライン Phase 2、ゴール間知識転移。
 
