@@ -130,7 +130,7 @@ describe("FileExistenceDataSourceAdapter", () => {
     expect(result.source_id).toBe("ds_file_existence_test");
   });
 
-  it("uses expression over dimension_name for dimension lookup when provided", async () => {
+  it("uses expression as filename directly when ObservationEngine passes mapped value", async () => {
     fs.writeFileSync(path.join(tmpDir, "TARGET.md"), "# Target");
     const adapter = new FileExistenceDataSourceAdapter(
       makeConfig({
@@ -139,9 +139,10 @@ describe("FileExistenceDataSourceAdapter", () => {
       })
     );
 
+    // ObservationEngine reads dimension_mapping and passes the value as expression
     const result = await adapter.query({
       dimension_name: "ignored_dim",
-      expression: "aliased_dim",
+      expression: "TARGET.md",
       timeout_ms: 5000,
     });
     expect(result.value).toBe(1);

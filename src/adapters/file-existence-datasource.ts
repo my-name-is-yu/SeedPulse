@@ -55,8 +55,10 @@ export class FileExistenceDataSourceAdapter implements IDataSourceAdapter {
   }
 
   async query(params: DataSourceQuery): Promise<DataSourceResult> {
-    const dimName = params.expression ?? params.dimension_name;
-    const filename = this.dimensionMap[dimName];
+    // ObservationEngine may pass `expression` = the mapped value (e.g. "README.md")
+    // from config.dimension_mapping. In that case, use it directly as the filename.
+    // Otherwise, look up the dimension_name in our local map.
+    const filename = params.expression ?? this.dimensionMap[params.dimension_name];
 
     if (filename === undefined) {
       // Unknown dimension — return null so caller can handle gracefully
