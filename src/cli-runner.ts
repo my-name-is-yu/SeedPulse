@@ -52,7 +52,7 @@ import { TreeLoopOrchestrator } from "./tree-loop-orchestrator.js";
 import { GoalTreeManager } from "./goal-tree-manager.js";
 import { StateAggregator } from "./state-aggregator.js";
 import { GoalDependencyGraph } from "./goal-dependency-graph.js";
-import { MemoryLifecycleManager } from "./memory-lifecycle.js";
+import { MemoryLifecycleManager, DriveScoreAdapter } from "./memory-lifecycle.js";
 import { DaemonRunner } from "./daemon-runner.js";
 import { PIDManager } from "./pid-manager.js";
 import { Logger } from "./logger.js";
@@ -195,19 +195,26 @@ export class CLIRunner {
 
     // A. MemoryLifecycleManager — wires 3-tier memory model into CoreLoop.
     // VectorIndex/EmbeddingClient are skipped for MVP (require external embedding service).
+    // DriveScoreAdapter bridges live DriveScorer output to MemoryLifecycleManager so
+    // compression delays and relevance scores reflect the current dissatisfaction state.
     const motivaBaseDir = path.join(os.homedir(), ".motiva");
     let memoryLifecycleManager: MemoryLifecycleManager | undefined;
+    let driveScoreAdapter: DriveScoreAdapter | undefined;
     try {
+      driveScoreAdapter = new DriveScoreAdapter();
       memoryLifecycleManager = new MemoryLifecycleManager(
         motivaBaseDir,
         llmClient,
-        undefined  // use default RetentionConfig
-        // embeddingClient and vectorIndex omitted — MVP uses LLM-only compression
+        undefined,  // use default RetentionConfig
+        undefined,  // embeddingClient omitted — MVP uses LLM-only compression
+        undefined,  // vectorIndex omitted
+        driveScoreAdapter
       );
       memoryLifecycleManager.initializeDirectories();
     } catch (err) {
       console.warn(`[motiva] MemoryLifecycleManager init failed — memory features disabled: ${err instanceof Error ? err.message : String(err)}`);
       memoryLifecycleManager = undefined;
+      driveScoreAdapter = undefined;
     }
 
     // Wrap pure-function modules to satisfy the CoreLoopDeps interface
@@ -222,7 +229,7 @@ export class CLIRunner {
       rankDimensions: DriveScorer.rankDimensions,
     };
 
-    // D. Pass memoryLifecycleManager and goalDependencyGraph to CoreLoop
+    // D. Pass memoryLifecycleManager, driveScoreAdapter, and goalDependencyGraph to CoreLoop
     const coreLoop = new CoreLoop({
       stateManager,
       observationEngine,
@@ -240,6 +247,7 @@ export class CLIRunner {
       treeLoopOrchestrator,
       goalDependencyGraph,
       memoryLifecycleManager,
+      driveScoreAdapter,
       logger,
       contextProvider,
       onProgress,

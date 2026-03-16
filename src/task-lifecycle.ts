@@ -100,6 +100,7 @@ export class TaskLifecycle {
   private readonly capabilityDetector?: CapabilityDetector;
   private readonly logger?: Logger;
   private readonly adapterRegistry?: AdapterRegistry;
+  private readonly healthCheckEnabled: boolean;
   private onTaskComplete?: (strategyId: string) => void;
 
   constructor(
@@ -116,6 +117,8 @@ export class TaskLifecycle {
       logger?: Logger;
       /** Optional adapter registry for L1 mechanical verification command execution */
       adapterRegistry?: AdapterRegistry;
+      /** Enable post-execution build/test health check (disabled by default) */
+      healthCheckEnabled?: boolean;
     }
   ) {
     this.stateManager = stateManager;
@@ -129,6 +132,7 @@ export class TaskLifecycle {
     this.capabilityDetector = options?.capabilityDetector;
     this.logger = options?.logger;
     this.adapterRegistry = options?.adapterRegistry;
+    this.healthCheckEnabled = options?.healthCheckEnabled ?? false;
   }
 
   // ─── setOnTaskComplete ───
@@ -886,6 +890,17 @@ export class TaskLifecycle {
     const executionResult = await this.executeTask(task, adapter);
     if (DEBUG) console.log(`[DEBUG-TL] Execution result: success=${executionResult.success}, stopped=${executionResult.stopped_reason}, error=${executionResult.error}, output=${executionResult.output?.substring(0, 200)}`);
 
+    // 4b. Post-execution health check (opt-in)
+    if (executionResult.success && this.healthCheckEnabled) {
+      const healthCheck = await this.runPostExecutionHealthCheck(adapter, task);
+      if (!healthCheck.healthy) {
+        console.warn(`[TaskLifecycle] Post-execution health check FAILED: ${healthCheck.output}`);
+        executionResult.success = false;
+        executionResult.output = (executionResult.output || "") +
+          `\n\n[Health Check Failed]\n${healthCheck.output}`;
+      }
+    }
+
     // Reload task from disk to get accurate status/started_at/completed_at set by executeTask
     let taskForVerification = task;
     try {
@@ -1311,12 +1326,24 @@ After completing the revert, respond with a JSON object:
     const historyPath = `tasks/${goalId}/task-history.json`;
     const existing = this.stateManager.readRaw(historyPath);
     const history = Array.isArray(existing) ? existing : [];
+
+    const actual_elapsed_ms =
+      task.started_at && task.completed_at
+        ? new Date(task.completed_at).getTime() - new Date(task.started_at).getTime()
+        : null;
+
+    const estimated_duration_ms = task.estimated_duration
+      ? this.durationToMs(task.estimated_duration)
+      : null;
+
     history.push({
       task_id: task.id,
       status: task.status,
       primary_dimension: task.primary_dimension,
       consecutive_failure_count: task.consecutive_failure_count,
       completed_at: task.completed_at ?? new Date().toISOString(),
+      actual_elapsed_ms,
+      estimated_duration_ms,
     });
     this.stateManager.writeRaw(historyPath, history);
   }
@@ -1329,5 +1356,76 @@ After completing the revert, respond with a JSON object:
       weeks: 7 * 24 * 60 * 60 * 1000,
     };
     return duration.value * (multipliers[duration.unit] ?? 60 * 60 * 1000);
+  }
+
+  // ─── Post-Execution Health Check ───
+
+  /**
+   * Run build and test checks after successful task execution to verify
+   * the codebase remains healthy. Opt-in via healthCheckEnabled constructor option.
+   */
+  async runPostExecutionHealthCheck(
+    _adapter: IAdapter,
+    _task: Task,
+  ): Promise<{ healthy: boolean; output: string }> {
+    // Run build check
+    try {
+      const buildResult = await this.runShellCommand(["npm", "run", "build"], {
+        timeout: 60000,
+        cwd: process.cwd(),
+      });
+      if (!buildResult.success) {
+        return {
+          healthy: false,
+          output: `Build failed: ${buildResult.stderr || buildResult.stdout}`,
+        };
+      }
+    } catch (err) {
+      return { healthy: false, output: `Build check error: ${err}` };
+    }
+
+    // Run quick test check (just verify tests still pass)
+    try {
+      const testResult = await this.runShellCommand(
+        ["npx", "vitest", "run", "--reporter=dot"],
+        { timeout: 120000, cwd: process.cwd() }
+      );
+      if (!testResult.success) {
+        return {
+          healthy: false,
+          output: `Tests failed: ${testResult.stderr || testResult.stdout}`,
+        };
+      }
+    } catch (err) {
+      return { healthy: false, output: `Test check error: ${err}` };
+    }
+
+    return { healthy: true, output: "Build and tests passed" };
+  }
+
+  /**
+   * Run a shell command safely using execFile (not exec) to avoid shell injection.
+   */
+  async runShellCommand(
+    argv: string[],
+    options: { timeout: number; cwd: string }
+  ): Promise<{ success: boolean; stdout: string; stderr: string }> {
+    const { execFile } = await import("child_process");
+    const { promisify } = await import("util");
+    const execFileAsync = promisify(execFile);
+
+    try {
+      const { stdout, stderr } = await execFileAsync(argv[0]!, argv.slice(1), {
+        timeout: options.timeout,
+        cwd: options.cwd,
+      });
+      return { success: true, stdout, stderr };
+    } catch (err: unknown) {
+      if (typeof err === "object" && err !== null && "stdout" in err) {
+        const e = err as { stdout: string; stderr: string };
+        return { success: false, stdout: e.stdout || "", stderr: e.stderr || "" };
+      }
+      return { success: false, stdout: "", stderr: String(err) };
+    }
   }
 }

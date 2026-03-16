@@ -314,7 +314,45 @@ export class SatisficingJudge {
         }
       }
 
-      // TODO: condition 3 (resource undershoot) deferred — requires task cost history
+      // Condition 3: Resource undershoot — tasks complete much faster than estimated
+      // but goal progress is stagnant, suggesting the threshold may be too ambitious.
+      // Requires task cost history (actual_elapsed_ms + estimated_duration_ms fields).
+      {
+        const rawHistory = this.stateManager.readRaw(`tasks/${goal.id}/task-history.json`);
+        const taskHistory = Array.isArray(rawHistory) ? rawHistory : [];
+
+        const dimHistory = taskHistory.filter(
+          (h: Record<string, unknown>) =>
+            h.primary_dimension === dim.name &&
+            typeof h.actual_elapsed_ms === "number" &&
+            typeof h.estimated_duration_ms === "number" &&
+            (h.estimated_duration_ms as number) > 0
+        ) as Array<{ actual_elapsed_ms: number; estimated_duration_ms: number }>;
+
+        if (dimHistory.length >= 3) {
+          const avgEstimated =
+            dimHistory.reduce((s, h) => s + h.estimated_duration_ms, 0) / dimHistory.length;
+          const avgActual =
+            dimHistory.reduce((s, h) => s + h.actual_elapsed_ms, 0) / dimHistory.length;
+
+          if (avgActual < 0.5 * avgEstimated && progress < 0.5) {
+            const currentThreshold = getNumericThresholdValueForProposal(dim);
+            if (
+              currentThreshold !== null &&
+              !proposals.some((p) => p.dimension_name === dim.name)
+            ) {
+              proposals.push({
+                goal_id: goal.id,
+                dimension_name: dim.name,
+                current_threshold: currentThreshold,
+                proposed_threshold: currentThreshold * 0.85,
+                reason: "resource_undershoot",
+                evidence: `${dimHistory.length} tasks averaged ${Math.round(avgActual)}ms vs ${Math.round(avgEstimated)}ms estimated; goal progress at ${Math.round(progress * 100)}%`,
+              });
+            }
+          }
+        }
+      }
 
       // Condition 2: bottleneck — all other dimensions satisfied, this one is far (< 30%)
       const othersAllSatisfied = dims

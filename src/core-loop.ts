@@ -20,6 +20,7 @@ import type { CapabilityAcquisitionTask } from "./types/capability.js";
 import type { PortfolioManager } from "./portfolio-manager.js";
 import type { GoalDependencyGraph } from "./goal-dependency-graph.js";
 import type { LearningPipeline } from "./learning-pipeline.js";
+import { DriveScoreAdapter } from "./memory-lifecycle.js";
 import type { MemoryLifecycleManager } from "./memory-lifecycle.js";
 import type { Goal } from "./types/goal.js";
 import type { GapVector } from "./types/gap.js";
@@ -162,6 +163,18 @@ export interface CoreLoopDeps {
   learningPipeline?: LearningPipeline;
   knowledgeTransfer?: KnowledgeTransfer;
   memoryLifecycleManager?: MemoryLifecycleManager;
+  /**
+   * Optional adapter that bridges DriveScorer output to MemoryLifecycleManager.
+   * When provided, CoreLoop calls adapter.update(driveScores) after each drive
+   * scoring step so MemoryLifecycleManager can use live dissatisfaction values
+   * for compression delay and relevance scoring.
+   *
+   * Typical setup (in CLIRunner):
+   *   const adapter = new DriveScoreAdapter();
+   *   const mlm = new MemoryLifecycleManager(baseDir, llm, config, emb, vec, adapter);
+   *   const loop = new CoreLoop({ ..., memoryLifecycleManager: mlm, driveScoreAdapter: adapter });
+   */
+  driveScoreAdapter?: DriveScoreAdapter;
   logger?: Logger;
   /** Optional context provider for workspace-aware task generation */
   contextProvider?: (goalId: string, dimensionName: string) => Promise<string>;
@@ -601,6 +614,13 @@ export class CoreLoop {
       const rankedScores = this.deps.driveScorer.rankDimensions(driveScores);
       result.driveScores = rankedScores;
       driveScores = rankedScores;
+
+      // ─── 4a. Update DriveScoreAdapter for MemoryLifecycleManager ───
+      // Propagate fresh dissatisfaction scores so compression delays and
+      // relevance scoring in MemoryLifecycleManager reflect the current loop state.
+      if (this.deps.driveScoreAdapter) {
+        this.deps.driveScoreAdapter.update(driveScores);
+      }
     } catch (err) {
       result.error = `Drive scoring failed: ${err instanceof Error ? err.message : String(err)}`;
       this.logger?.error(`CoreLoop: ${result.error}`, { goalId });
