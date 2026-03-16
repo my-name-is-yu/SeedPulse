@@ -358,7 +358,7 @@ export class ObservationEngine {
       const method: ObservationMethod = methods[idx] ?? dim.observation_method;
 
       // 1. Try DataSource first
-      const dataSource = this.findDataSourceForDimension(dim.name);
+      const dataSource = this.findDataSourceForDimension(dim.name, goalId);
       if (dataSource) {
         try {
           await this.observeFromDataSource(goalId, dim.name, dataSource.sourceId);
@@ -506,8 +506,14 @@ export class ObservationEngine {
    * Checks both getSupportedDimensions() and dimension_mapping config keys.
    * Returns null if no adapter matches.
    */
-  private findDataSourceForDimension(dimensionName: string): IDataSourceAdapter | null {
+  private findDataSourceForDimension(dimensionName: string, goalId?: string): IDataSourceAdapter | null {
     for (const ds of this.dataSources) {
+      // If the DataSource is scoped to a specific goal, only match when goalId matches
+      const scopeGoalId = ds.config?.scope_goal_id as string | undefined;
+      if (scopeGoalId !== undefined && scopeGoalId !== goalId) {
+        continue;
+      }
+
       const dims = ds.getSupportedDimensions?.() ?? [];
       if (dims.includes(dimensionName)) return ds;
       // Also check dimension_mapping keys
@@ -591,6 +597,19 @@ export class ObservationEngine {
       `[ObservationEngine] LLM observation result for "${dimensionLabel}": score=${parsed.score.toFixed(3)}`
     );
 
+    // Scale LLM 0-1 score to threshold's native scale for min/max types.
+    // LLM returns 0.0-1.0 (normalized), but gap-calculator expects the raw
+    // value in the threshold's scale (e.g., min:5 expects value >= 5).
+    let extractedValue: number = parsed.score;
+    try {
+      const threshold = JSON.parse(thresholdDescription);
+      if (threshold.type === "min" && typeof threshold.value === "number" && threshold.value > 1) {
+        extractedValue = parsed.score * threshold.value;
+      } else if (threshold.type === "max" && typeof threshold.value === "number" && threshold.value > 1) {
+        extractedValue = parsed.score * threshold.value;
+      }
+    } catch { /* keep original score if threshold parsing fails */ }
+
     const entry = ObservationLogEntrySchema.parse({
       observation_id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
@@ -606,7 +625,7 @@ export class ObservationEngine {
         confidence_tier: "independent_review",
       },
       raw_result: { score: parsed.score, reason: parsed.reason },
-      extracted_value: parsed.score,
+      extracted_value: extractedValue,
       confidence: 0.70,
       notes: `LLM evaluation: ${parsed.reason}`,
     });

@@ -36,6 +36,7 @@ export const DataSourceConfigSchema = z.object({
   enabled: z.boolean().default(true),
   created_at: z.string(),
   dimension_mapping: z.record(z.string(), z.string()).optional(),
+  scope_goal_id: z.string().optional(),
 });
 export type DataSourceConfig = z.infer<typeof DataSourceConfigSchema>;
 

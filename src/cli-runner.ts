@@ -458,7 +458,7 @@ export class CLIRunner {
       // No need to call saveGoal again.
 
       // Auto-register FileExistenceDataSource for file_existence dimensions (best-effort).
-      this.autoRegisterFileExistenceDataSources(goal.dimensions, goal.description);
+      this.autoRegisterFileExistenceDataSources(goal.dimensions, goal.description, goal.id);
 
       console.log(`Goal registered successfully!`);
       console.log(`Goal ID:    ${goal.id}`);
@@ -863,8 +863,9 @@ export class CLIRunner {
   // ─── Auto DataSource Registration ───
 
   private autoRegisterFileExistenceDataSources(
-    dimensions: Array<{ name: string }>,
-    goalDescription: string
+    dimensions: Array<{ name: string; label?: string }>,
+    goalDescription: string,
+    goalId: string
   ): void {
     try {
       const fileExistenceDims = dimensions.filter((d) =>
@@ -879,6 +880,19 @@ export class CLIRunner {
         candidateFiles.push(m[1]);
       }
 
+      // Also extract file name candidates from each dimension's label
+      for (const dim of fileExistenceDims) {
+        if (dim.label) {
+          const labelPattern = /\b([\w.\-/]+\.\w{1,10})\b/g;
+          let m2: RegExpExecArray | null;
+          while ((m2 = labelPattern.exec(dim.label)) !== null) {
+            if (!candidateFiles.includes(m2[1])) {
+              candidateFiles.push(m2[1]);
+            }
+          }
+        }
+      }
+
       const dimensionMapping: Record<string, string> = {};
       for (const dim of fileExistenceDims) {
         const dimBase = dim.name
@@ -886,10 +900,23 @@ export class CLIRunner {
           .replace(/_file$/, "")
           .replace(/_/g, "")
           .toLowerCase();
-        const matched = candidateFiles.find((f) => {
+        // Try matching dimension name against candidate files
+        let matched = candidateFiles.find((f) => {
           const fBase = path.basename(f).replace(/[._-]/g, "").toLowerCase();
           return fBase.includes(dimBase) || dimBase.includes(fBase);
         });
+        // If no match by dim name, try extracting a file name directly from the label
+        if (!matched && dim.label) {
+          const labelFilePattern = /\b([\w.\-/]+\.\w{1,10})\b/g;
+          let lm: RegExpExecArray | null;
+          while ((lm = labelFilePattern.exec(dim.label)) !== null) {
+            const labelFile = lm[1];
+            if (candidateFiles.includes(labelFile)) {
+              matched = labelFile;
+              break;
+            }
+          }
+        }
         if (matched) {
           dimensionMapping[dim.name] = matched;
         } else if (candidateFiles.length === 1) {
@@ -911,6 +938,7 @@ export class CLIRunner {
         type: "file_existence",
         connection: { path: process.cwd() },
         dimension_mapping: dimensionMapping,
+        scope_goal_id: goalId,
         enabled: true,
         created_at: new Date().toISOString(),
       };
