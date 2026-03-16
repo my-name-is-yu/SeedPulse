@@ -23,6 +23,21 @@ function extractAbsolutePaths(text: string): string[] {
 }
 
 /**
+ * Extract relative file paths from a text string.
+ * Matches paths like src/xxx.ts, docs/yyy.md, etc.
+ */
+function extractRelativePaths(text: string): string[] {
+  // Match relative paths: word/word... with common file extensions or multiple segments
+  const matches = text.match(/(?<![/\w])\w[\w.-]*(?:\/[\w.-]+)+/g) ?? [];
+  // Filter to plausible relative file paths (must contain a dot for extension or multiple segments)
+  return [...new Set(matches.filter((p) => {
+    const parts = p.split("/");
+    // Must have at least 2 parts and last part should look like a file (has extension or is recognizable)
+    return parts.length >= 2 && parts[parts.length - 1].includes(".");
+  }))];
+}
+
+/**
  * Returns true if the resolved path is under an allowed prefix.
  * Allowed: home directory or /tmp.
  */
@@ -151,19 +166,30 @@ export function createWorkspaceContextProvider(
         try { fs.accessSync(fp); return true; } catch { return false; }
       });
 
+    // Relative path exact-match: files explicitly mentioned in goal description
+    const relativePathsInGoal = extractRelativePaths(goalDescription);
+    const pathMatchedPaths = relativePathsInGoal
+      .map((rel) => path.join(workDir, rel))
+      .filter((fp) => {
+        try { fs.accessSync(fp); return true; } catch { return false; }
+      });
+
     // Collect all files (depth 3)
     const allFiles: string[] = [];
     collectFiles(workDir, workDir, 0, allFiles);
 
     // Separate already-included from candidates
     const alwaysSet = new Set(alwaysIncludePaths);
-    const candidates = allFiles.filter((fp) => !alwaysSet.has(fp));
+    const pathMatchSet = new Set(pathMatchedPaths);
+    const candidates = allFiles.filter((fp) => !alwaysSet.has(fp) && !pathMatchSet.has(fp));
 
     // Phase 1: filename match
     const nameMatched = candidates.filter((fp) => fileMatchesKeywords(fp, keywords));
 
     // Phase 2: content match (only if we still need more)
-    const neededFromCandidates = Math.max(0, maxFiles - alwaysIncludePaths.length);
+    // alwaysInclude and pathMatch are treated as priority (outside maxFiles cap),
+    // so keyword-match fills remaining slots up to maxFiles
+    const neededFromCandidates = Math.max(0, maxFiles - alwaysIncludePaths.length - pathMatchedPaths.length);
     let selected = nameMatched.slice(0, neededFromCandidates);
 
     if (selected.length < neededFromCandidates) {
@@ -177,6 +203,15 @@ export function createWorkspaceContextProvider(
 
     // Read always-include files first
     for (const fp of alwaysIncludePaths) {
+      const rel = path.relative(workDir, fp);
+      const content = readFileSection(fp, maxCharsPerFile);
+      if (content) {
+        parts.push(`## ${rel}\n\`\`\`\n${content}\n\`\`\``);
+      }
+    }
+
+    // Read explicit path-matched files (priority, same as alwaysInclude)
+    for (const fp of pathMatchedPaths) {
       const rel = path.relative(workDir, fp);
       const content = readFileSection(fp, maxCharsPerFile);
       if (content) {

@@ -103,6 +103,72 @@ describe("createWorkspaceContextProvider — external file reading", () => {
   });
 });
 
+describe("createWorkspaceContextProvider — relative path exact match", () => {
+  let tmpWorkDir: string;
+
+  beforeEach(() => {
+    tmpWorkDir = fs.mkdtempSync(path.join(os.tmpdir(), "motiva-ws-relpath-"));
+    fs.writeFileSync(path.join(tmpWorkDir, "README.md"), "# Test Project", "utf-8");
+    fs.writeFileSync(path.join(tmpWorkDir, "package.json"), '{"name":"test"}', "utf-8");
+    // Create src/ subdirectory with files
+    fs.mkdirSync(path.join(tmpWorkDir, "src"), { recursive: true });
+    fs.writeFileSync(path.join(tmpWorkDir, "src", "index.ts"), "export const hello = 'world';", "utf-8");
+    fs.writeFileSync(path.join(tmpWorkDir, "src", "core-loop.ts"), "export function coreLoop() {}", "utf-8");
+    fs.writeFileSync(path.join(tmpWorkDir, "src", "task-lifecycle.ts"), "export function taskLifecycle() {}", "utf-8");
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpWorkDir, { recursive: true, force: true });
+  });
+
+  it("includes src/index.ts when mentioned in goal description", async () => {
+    const provider = createWorkspaceContextProvider(
+      { workDir: tmpWorkDir },
+      () => "Improve src/index.ts API documentation"
+    );
+
+    const result = await provider("goal-relpath-1", "quality");
+    expect(result).toContain("src/index.ts");
+    expect(result).toContain("export const hello = 'world'");
+  });
+
+  it("includes multiple explicitly mentioned files", async () => {
+    const provider = createWorkspaceContextProvider(
+      { workDir: tmpWorkDir },
+      () => "Fix bugs in src/core-loop.ts and src/task-lifecycle.ts"
+    );
+
+    const result = await provider("goal-relpath-2", "quality");
+    expect(result).toContain("src/core-loop.ts");
+    expect(result).toContain("export function coreLoop()");
+    expect(result).toContain("src/task-lifecycle.ts");
+    expect(result).toContain("export function taskLifecycle()");
+  });
+
+  it("skips a relative path that does not exist in workDir", async () => {
+    const provider = createWorkspaceContextProvider(
+      { workDir: tmpWorkDir },
+      () => "Improve src/nonexistent.ts quality"
+    );
+
+    const result = await provider("goal-relpath-3", "quality");
+    expect(result).not.toContain("src/nonexistent.ts");
+  });
+
+  it("path-matched files are included even when maxFiles would be exhausted by keyword matches", async () => {
+    const provider = createWorkspaceContextProvider(
+      { workDir: tmpWorkDir, maxFiles: 2 },  // tight limit
+      () => "Improve src/index.ts API documentation"
+    );
+
+    const result = await provider("goal-relpath-4", "quality");
+    // README.md and package.json fill the 2 alwaysInclude slots,
+    // but src/index.ts (path match) should still appear
+    expect(result).toContain("src/index.ts");
+    expect(result).toContain("export const hello = 'world'");
+  });
+});
+
 describe("createWorkspaceContextProvider — existing workspace behavior unchanged", () => {
   let tmpWorkDir: string;
 
