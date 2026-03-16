@@ -83,3 +83,81 @@ export const LearningPipelineConfigSchema = z.object({
   cross_goal_sharing_enabled: z.boolean().default(true),
 });
 export type LearningPipelineConfig = z.infer<typeof LearningPipelineConfigSchema>;
+
+// --- Structural Feedback Type ---
+
+export const StructuralFeedbackTypeEnum = z.enum([
+  "observation_accuracy",
+  "strategy_selection",
+  "scope_sizing",
+  "task_generation",
+]);
+export type StructuralFeedbackType = z.infer<typeof StructuralFeedbackTypeEnum>;
+
+// --- Structural Feedback ---
+
+export const StructuralFeedbackSchema = z.object({
+  id: z.string(),
+  goalId: z.string(),
+  iterationId: z.string(),
+  feedbackType: StructuralFeedbackTypeEnum,
+  expected: z.unknown(),
+  actual: z.unknown(),
+  delta: z.number().min(-1).max(1),
+  timestamp: z.string().datetime(),
+  context: z.record(z.string(), z.unknown()),
+});
+export type StructuralFeedback = z.infer<typeof StructuralFeedbackSchema>;
+
+// --- Parameter Tuning ---
+
+export const ParameterTuningSchema = z.object({
+  parameterId: z.string(),
+  parameterName: z.string(),
+  currentValue: z.number(),
+  suggestedValue: z.number(),
+  confidence: z.number().min(0).max(1),
+  basedOnFeedbackCount: z.number().int().min(0),
+  feedbackType: StructuralFeedbackTypeEnum,
+});
+export type ParameterTuning = z.infer<typeof ParameterTuningSchema>;
+
+// --- Feedback Aggregation ---
+
+export const RecentTrendEnum = z.enum(["improving", "stable", "degrading"]);
+export type RecentTrend = z.infer<typeof RecentTrendEnum>;
+
+export const FeedbackAggregationSchema = z.object({
+  feedbackType: StructuralFeedbackTypeEnum,
+  totalCount: z.number().int().min(0),
+  averageDelta: z.number(),
+  recentTrend: RecentTrendEnum,
+  worstArea: z.string(),
+});
+export type FeedbackAggregation = z.infer<typeof FeedbackAggregationSchema>;
+
+// --- Cross-Goal Pattern ---
+
+export const CrossGoalPatternSchema = z.object({
+  id: z.string(),
+  patternType: z.enum(["success", "failure", "optimization"]),
+  description: z.string(),
+  sourceGoalIds: z.array(z.string()),
+  feedbackType: StructuralFeedbackTypeEnum,
+  confidence: z.number().min(0).max(1),
+  applicableConditions: z.array(z.string()),
+  suggestedAction: z.string(),
+  occurrenceCount: z.number().int().min(0),
+  lastObserved: z.string().datetime(),
+});
+export type CrossGoalPattern = z.infer<typeof CrossGoalPatternSchema>;
+
+// --- Pattern Sharing Result ---
+
+export const PatternSharingResultSchema = z.object({
+  patternsExtracted: z.number().int().min(0),
+  patternsShared: z.number().int().min(0),
+  targetGoalIds: z.array(z.string()),
+  newPatterns: z.array(CrossGoalPatternSchema),
+});
+export type PatternSharingResult = z.infer<typeof PatternSharingResultSchema>;

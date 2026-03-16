@@ -66,3 +66,38 @@ export const StateAggregationRuleSchema = z.object({
   propagation_direction: AggregationDirectionEnum,
 });
 export type StateAggregationRule = z.infer<typeof StateAggregationRuleSchema>;
+
+// --- Concreteness Score ---
+
+export const ConcretenessDimensionsSchema = z.object({
+  hasQuantitativeThreshold: z.boolean(),
+  hasObservableOutcome: z.boolean(),
+  hasTimebound: z.boolean(),
+  hasClearScope: z.boolean(),
+});
+
+export const ConcretenessScoreSchema = z.object({
+  score: z.number().min(0).max(1),
+  dimensions: ConcretenessDimensionsSchema,
+  reason: z.string(),
+});
+export type ConcretenessScore = z.infer<typeof ConcretenessScoreSchema>;
+
+// --- Decomposition Quality Metrics ---
+
+export const DecompositionQualityMetricsSchema = z.object({
+  coverage: z.number().min(0).max(1),
+  overlap: z.number().min(0).max(1),
+  actionability: z.number().min(0).max(1),
+  depthEfficiency: z.number().min(0).max(1),
+});
+export type DecompositionQualityMetrics = z.infer<typeof DecompositionQualityMetricsSchema>;
+
+// --- Prune Record ---
+
+export const PruneRecordSchema = z.object({
+  subgoalId: z.string(),
+  reason: z.string(),
+  timestamp: z.string(),
+});
+export type PruneRecord = z.infer<typeof PruneRecordSchema>;

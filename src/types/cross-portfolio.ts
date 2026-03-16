@@ -109,3 +109,84 @@ export const TransferEffectivenessSchema = z.object({
   evaluated_at: z.string().datetime(),
 });
 export type TransferEffectivenessRecord = z.infer<typeof TransferEffectivenessSchema>;
+
+// --- Momentum Info (M7.2a) ---
+
+export const MomentumTrendEnum = z.enum([
+  "accelerating",
+  "steady",
+  "decelerating",
+  "stalled",
+]);
+export type MomentumTrend = z.infer<typeof MomentumTrendEnum>;
+
+export const MomentumInfoSchema = z.object({
+  goalId: z.string(),
+  recentProgress: z.number(),
+  velocity: z.number(),
+  trend: MomentumTrendEnum,
+});
+export type MomentumInfo = z.infer<typeof MomentumInfoSchema>;
+
+// --- Dependency Phase (M7.2a) ---
+
+export const DependencyPhaseSchema = z.object({
+  phase: z.number().int().min(0),
+  goalIds: z.array(z.string()),
+  blockedBy: z.array(z.string()),
+});
+export type DependencyPhase = z.infer<typeof DependencyPhaseSchema>;
+
+// --- Dependency Schedule (M7.2a) ---
+
+export const DependencyScheduleSchema = z.object({
+  phases: z.array(DependencyPhaseSchema),
+  criticalPath: z.array(z.string()),
+});
+export type DependencySchedule = z.infer<typeof DependencyScheduleSchema>;
+
+// --- Allocation Strategy (M7.2a) ---
+
+export const AllocationStrategyTypeEnum = z.enum([
+  "equal",
+  "priority",
+  "momentum",
+  "dependency_aware",
+]);
+export type AllocationStrategyType = z.infer<typeof AllocationStrategyTypeEnum>;
+
+export const AllocationStrategySchema = z.object({
+  type: AllocationStrategyTypeEnum,
+  momentumWeight: z.number().min(0).max(1).optional(),
+});
+export type AllocationStrategy = z.infer<typeof AllocationStrategySchema>;
+
+// --- Rebalance Action (M7.2a) ---
+
+export const RebalanceActionSchema = z.object({
+  goalId: z.string(),
+  action: z.enum(["reduce", "increase", "suspend"]),
+  reason: z.string(),
+  previousShare: z.number().min(0).max(1),
+  newShare: z.number().min(0).max(1),
+});
+export type RebalanceAction = z.infer<typeof RebalanceActionSchema>;
+
+// --- Embedding Recommendation (M7.2b) ---
+
+export const EmbeddingRecommendationSchema = z.object({
+  templateId: z.string(),
+  similarity: z.number().min(0).max(1),
+  matchReason: z.string(),
+});
+export type EmbeddingRecommendation = z.infer<typeof EmbeddingRecommendationSchema>;
+
+// --- Hybrid Recommendation (M7.2b) ---
+
+export const HybridRecommendationSchema = z.object({
+  templateId: z.string(),
+  tagScore: z.number().min(0).max(1),
+  embeddingScore: z.number().min(0).max(1),
+  combinedScore: z.number().min(0).max(1),
+});
+export type HybridRecommendation = z.infer<typeof HybridRecommendationSchema>;

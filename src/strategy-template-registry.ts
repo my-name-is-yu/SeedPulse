@@ -5,7 +5,11 @@ import type { ILLMClient } from "./llm-client.js";
 import type { IEmbeddingClient } from "./embedding-client.js";
 import { VectorIndex } from "./vector-index.js";
 import { StrategyTemplateSchema } from "./types/cross-portfolio.js";
-import type { StrategyTemplate } from "./types/cross-portfolio.js";
+import type {
+  StrategyTemplate,
+  EmbeddingRecommendation,
+  HybridRecommendation,
+} from "./types/cross-portfolio.js";
 import { StrategySchema } from "./types/strategy.js";
 import type { Strategy } from "./types/strategy.js";
 
@@ -239,6 +243,129 @@ export class StrategyTemplateRegistry {
     });
 
     return strategy;
+  }
+
+  /**
+   * Index all registered templates into a VectorIndex using the provided embedding client.
+   * Each template's hypothesis_pattern is embedded and stored with its template_id as metadata.
+   * Call this once after loading templates to enable recommendByEmbedding() / recommendHybrid().
+   */
+  async indexTemplates(
+    embeddingClient: IEmbeddingClient,
+    vectorIndex: VectorIndex
+  ): Promise<void> {
+    for (const template of this.templates.values()) {
+      const indexId = `idx-${template.template_id}`;
+      await vectorIndex.add(indexId, template.hypothesis_pattern, {
+        template_id: template.template_id,
+        domain_tags: template.domain_tags,
+      });
+    }
+  }
+
+  /**
+   * Recommend templates for a goal description using semantic embedding similarity.
+   * Searches the provided VectorIndex for the top-K closest templates.
+   * Returns EmbeddingRecommendation[] sorted by similarity descending.
+   */
+  async recommendByEmbedding(
+    goalDescription: string,
+    embeddingClient: IEmbeddingClient,
+    vectorIndex: VectorIndex,
+    topK: number = 5
+  ): Promise<EmbeddingRecommendation[]> {
+    if (this.templates.size === 0) {
+      return [];
+    }
+
+    const queryVector = await embeddingClient.embed(goalDescription);
+    const searchResults = vectorIndex.searchByVector(queryVector, topK);
+
+    const recommendations: EmbeddingRecommendation[] = [];
+
+    for (const result of searchResults) {
+      // Each indexed entry stores template_id in metadata
+      const templateId = result.metadata?.["template_id"] as string | undefined;
+      if (!templateId) continue;
+
+      const template = this.templates.get(templateId);
+      if (!template) continue;
+
+      recommendations.push({
+        templateId,
+        similarity: result.similarity,
+        matchReason: `Semantic similarity to hypothesis pattern: "${template.hypothesis_pattern}"`,
+      });
+    }
+
+    return recommendations;
+  }
+
+  /**
+   * Hybrid recommendation combining tag-based matching with embedding similarity.
+   * tagScore: fraction of goal tags that overlap with template domain_tags (0 if no tags supplied).
+   * embeddingScore: cosine similarity from VectorIndex.
+   * combinedScore: tagWeight * tagScore + embeddingWeight * embeddingScore (default 0.4 / 0.6).
+   * Returns HybridRecommendation[] sorted by combinedScore descending.
+   */
+  async recommendHybrid(
+    goalDescription: string,
+    goalTags: string[],
+    embeddingClient: IEmbeddingClient,
+    vectorIndex: VectorIndex,
+    options: { tagWeight?: number; embeddingWeight?: number; topK?: number } = {}
+  ): Promise<HybridRecommendation[]> {
+    const {
+      tagWeight = 0.4,
+      embeddingWeight = 0.6,
+      topK = 5,
+    } = options;
+
+    if (this.templates.size === 0) {
+      return [];
+    }
+
+    // Get embedding scores for all templates (fetch all, we slice after combining)
+    const queryVector = await embeddingClient.embed(goalDescription);
+    const searchResults = vectorIndex.searchByVector(
+      queryVector,
+      this.templates.size
+    );
+
+    // Build a lookup from templateId → embedding similarity
+    const embeddingMap = new Map<string, number>();
+    for (const result of searchResults) {
+      const templateId = result.metadata?.["template_id"] as string | undefined;
+      if (templateId) {
+        embeddingMap.set(templateId, result.similarity);
+      }
+    }
+
+    const hybrid: HybridRecommendation[] = [];
+
+    for (const template of this.templates.values()) {
+      // Tag score: fraction of goal tags present in template domain_tags
+      let tagScore = 0;
+      if (goalTags.length > 0 && template.domain_tags.length > 0) {
+        const matchCount = goalTags.filter((t) =>
+          template.domain_tags.includes(t)
+        ).length;
+        tagScore = matchCount / goalTags.length;
+      }
+
+      const embeddingScore = embeddingMap.get(template.template_id) ?? 0;
+      const combinedScore = tagWeight * tagScore + embeddingWeight * embeddingScore;
+
+      hybrid.push({
+        templateId: template.template_id,
+        tagScore,
+        embeddingScore,
+        combinedScore,
+      });
+    }
+
+    hybrid.sort((a, b) => b.combinedScore - a.combinedScore);
+    return hybrid.slice(0, topK);
   }
 
   /**

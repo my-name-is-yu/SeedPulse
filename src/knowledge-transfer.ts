@@ -18,7 +18,8 @@ import type {
   TransferEffectivenessRecord,
   TransferEffectiveness,
 } from "./types/cross-portfolio.js";
-import type { LearnedPattern } from "./types/learning.js";
+import type { LearnedPattern, CrossGoalPattern, StructuralFeedbackType } from "./types/learning.js";
+import { CrossGoalPatternSchema } from "./types/learning.js";
 
 // ─── LLM Response Schemas ───
 
@@ -93,6 +94,9 @@ export class KnowledgeTransfer {
     string,
     PatternEffectivenessTracker
   > = new Map();
+
+  /** Cross-goal pattern store: pattern id → CrossGoalPattern */
+  private readonly crossGoalPatterns: Map<string, CrossGoalPattern> = new Map();
 
   constructor(deps: {
     llmClient: ILLMClient;
@@ -506,6 +510,51 @@ export class KnowledgeTransfer {
   /** Return all transfer results */
   getTransferResults(): TransferResult[] {
     return Array.from(this.results.values());
+  }
+
+  // ─── Cross-Goal Pattern Storage ───
+
+  /**
+   * Store a CrossGoalPattern for later retrieval.
+   * Uses KnowledgeGraph if available, otherwise stores in-memory.
+   */
+  storePattern(pattern: CrossGoalPattern): void {
+    const validated = CrossGoalPatternSchema.parse(pattern);
+    this.crossGoalPatterns.set(validated.id, validated);
+
+    // Optionally store in VectorIndex for semantic retrieval
+    if (this.deps.vectorIndex !== null) {
+      this.deps.vectorIndex
+        .add(validated.id, validated.description, {
+          type: "cross_goal_pattern",
+          patternType: validated.patternType,
+          feedbackType: validated.feedbackType,
+          confidence: validated.confidence,
+        })
+        .catch(() => {
+          // non-fatal: embedding failure should not block storage
+        });
+    }
+  }
+
+  /**
+   * Retrieve stored CrossGoalPatterns, optionally filtered by feedbackType or patternType.
+   */
+  retrievePatterns(filter?: {
+    feedbackType?: StructuralFeedbackType;
+    patternType?: CrossGoalPattern["patternType"];
+  }): CrossGoalPattern[] {
+    let results = Array.from(this.crossGoalPatterns.values());
+
+    if (filter?.feedbackType !== undefined) {
+      results = results.filter((p) => p.feedbackType === filter.feedbackType);
+    }
+
+    if (filter?.patternType !== undefined) {
+      results = results.filter((p) => p.patternType === filter.patternType);
+    }
+
+    return results;
   }
 
   // ─── Private Helpers ───

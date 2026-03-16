@@ -2,7 +2,7 @@
 
 ## 現在地
 
-Stage 1-14 完了。Milestone 1-6 完了（3105テスト、83テストファイル）。Dogfooding Phase A/B 完了。GitHub Issueアダプタ・FileExistenceDataSourceAdapter・能力自律調達フルサイクル・ホットプラグ実装済み。詳細は `docs/status.md` 参照。
+Stage 1-14 完了。Milestone 1-7 完了（3268テスト、89テストファイル）。Dogfooding Phase A/B 完了。GitHub Issueアダプタ・FileExistenceDataSourceAdapter・能力自律調達フルサイクル・ホットプラグ・Goal Tree Phase 2・横断ポートフォリオ Phase 2・学習パイプライン Phase 2 実装済み。詳細は `docs/status.md` 参照。
 
 ---
 
@@ -226,32 +226,56 @@ Stage 13でCapabilityDetector拡張・DataSourceAdapterは実装済み。Phase 2
 
 ## Milestone 7: 再帰的Goal Tree & 横断ポートフォリオ Phase 2
 
+**Status**: 完了 ✅
+
 **ビジョン対応**: 9. 再帰的Goal Tree + ポートフォリオ
 
-Stage 14でGoalTreeManager・StateAggregator・TreeLoopOrchestrator・CrossGoalPortfolio・LearningPipelineは実装済み。Phase 2では実運用レベルの安定化と高度化を行う。
+Stage 14でGoalTreeManager・StateAggregator・TreeLoopOrchestrator・CrossGoalPortfolio・LearningPipelineは実装済み。Phase 2では実運用レベルの安定化と高度化を完成させた。
 
-### 7.1 Goal Tree Phase 2（14.2 残り）
+### 7.1 Goal Tree Phase 2
 
-設計: `docs/vision.md` 5.2
+#### 7.1a: Concreteness Scoring & Auto-Stop
+- `scoreConcreteness()` — LLMベース4次元評価（具体性スコアリング）
+- `decompose()` auto-stop — 具体性閾値到達時に自動停止
+- maxDepth強制（デフォルト: 5）
+- 21テスト追加（goal-tree-concreteness.test.ts）
 
-- N層ゴール自動分解ロジックの品質向上（分解の深さ・粒度の自動制御）
-- サブゴールの動的追加・剪定・再構成の安定化
-- 分解深度の自動停止判定（具体性閾値）
+#### 7.1b: Quality Metrics & Pruning Stabilization
+- `evaluateDecompositionQuality()` — coverage, overlap, actionability, depthEfficiency評価
+- `pruneSubgoal()` — 理由トラッキング付き剪定 + `getPruneHistory()`
+- `restructure()` — 品質評価付き再構成 + 自動リバート
+- 23テスト追加（goal-tree-quality.test.ts）
 
-### 7.2 ゴール横断ポートフォリオ Phase 2（14.1 残り）
+### 7.2 ゴール横断ポートフォリオ Phase 2
 
-設計: `docs/design/portfolio-management.md` Phase 3
+#### 7.2a: Momentum Allocation & Dependency Scheduling
+- `calculateMomentum()` — velocity、トレンド検出
+- `buildDependencySchedule()` — トポロジカルソート、クリティカルパス
+- `allocateResources()` — momentum & dependency_aware戦略
+- `rebalanceOnStall()` — スタル検出とリソース再分配
+- 17テスト追加（cross-goal-portfolio-phase2.test.ts）
 
-- 複数ゴール間のリソース配分最適化の実用化
-- ゴール間優先度の動的調整（依存グラフ活用）
-- 過去のゴールからの戦略テンプレート推薦の精度向上
+#### 7.2b: Embedding-Based Template Recommendation
+- `indexTemplates()` — 全テンプレートをVectorIndexに埋め込み登録
+- `recommendByEmbedding()` — 類似度ベース推薦
+- `recommendHybrid()` — タグ + 埋め込みスコア統合推薦
+- 11テスト追加（strategy-template-embedding.test.ts）
 
-### 7.3 学習パイプライン Phase 2（14.3 残り）
+### 7.3 学習パイプライン Phase 2
 
-設計: `docs/mechanism.md` Phase 2
+#### 7.3a: 4-Step Structural Feedback
+- `recordStructuralFeedback()` — 全4タイプ対応（observation_accuracy, strategy_selection, scope_sizing, task_generation）
+- `aggregateFeedback()` — 平均値・トレンド・最悪領域算出
+- `autoTuneParameters()` — フィードバック駆動パラメータ提案
+- 16テスト追加（learning-pipeline-phase2.test.ts）
 
-- 全4ステップへの構造的フィードバック（観測精度・戦略選択・スコープサイジング・タスク生成）
-- クロスゴールパターン共有の実用化
+#### 7.3b: Cross-Goal Pattern Sharing
+- `extractCrossGoalPatterns()` — 複数ゴールにわたるパターン抽出
+- `sharePatternsAcrossGoals()` — パターンを新規ゴールに適用
+- `storePattern()` / `retrievePatterns()` — KnowledgeTransferでの永続化
+- 13テスト追加（learning-cross-goal.test.ts）
+
+**実装結果**: 163テスト追加（3268テスト合計、89テストファイル）。
 
 **Dogfooding検証**: Motivaに大規模・曖昧なゴール（「Motivaのコード品質を改善する」）を与え、ゴール木として自動分解し、並列ノードループが干渉なく動作することを確認する。
 
