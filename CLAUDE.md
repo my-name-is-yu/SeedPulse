@@ -8,7 +8,7 @@ Motiva — AI agent orchestrator that gives existing agents "motivation." Motiva
 
 ## Status
 
-Implementation Phase — Stage 1-14 + Milestone 1-7 complete (3268 tests, 89 test files).
+Implementation Phase — Stage 1-14 + Milestone 1-7 complete (3282 tests, 90 test files).
 See `docs/status.md` for stage-by-stage details.
 
 ## Core Concept
@@ -74,3 +74,5 @@ Design docs are the source of truth for implementation. When in doubt, read the 
 - Trust balance: asymmetric (failure penalty > success reward), [-100,+100], Δs=+3, Δf=-10
 - Satisficing: stop when "good enough," don't pursue perfection
 - Confidence adjustment applies ONLY in gap-calculation §3 (no triple-application)
+- **LLM応答はZodパース前にサニタイズ** — LLMがenum外の値を返すことがある（例: threshold_typeに"exact"）。catchブロックでエラーを握りつぶさず、必ずログ出力すること
+- **Dogfooding推奨モデル**: gpt-5.3-codex（gpt-4o-miniより観測精度・収束速度が大幅に優れる。`~/.motiva/provider.json`で設定）
