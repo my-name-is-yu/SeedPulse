@@ -47,6 +47,23 @@ import {
   distillLessons,
   validateCompressionQuality,
 } from "./memory-phases.js";
+import {
+  compressToLongTerm as _compressToLongTerm,
+  compressAllRemainingToLongTerm as _compressAllRemainingToLongTerm,
+  applyRetentionPolicy as _applyRetentionPolicy,
+  runGarbageCollection as _runGarbageCollection,
+  compressionDelay as _compressionDelay,
+  type MemoryCompressionDeps,
+} from "./memory-compression.js";
+import {
+  selectForWorkingMemory as _selectForWorkingMemory,
+  selectForWorkingMemorySemantic as _selectForWorkingMemorySemantic,
+  searchCrossGoalLessons as _searchCrossGoalLessons,
+  relevanceScore as _relevanceScore,
+  getCompressionDelay as _getCompressionDelay,
+  getDeadlineBonus as _getDeadlineBonus,
+  type MemorySelectionDeps,
+} from "./memory-selection.js";
 
 // ─── MemoryLifecycleManager ───
 
@@ -93,6 +110,27 @@ export class MemoryLifecycleManager {
     this.embeddingClient = embeddingClient;
     this.vectorIndex = vectorIndex;
     this.driveScorer = driveScorer;
+  }
+
+  // ─── Private: build deps objects ───
+
+  private get compressionDeps(): MemoryCompressionDeps {
+    return {
+      memoryDir: this.memoryDir,
+      llmClient: this.llmClient,
+      config: this.config,
+      vectorIndex: this.vectorIndex,
+      driveScorer: this.driveScorer,
+      earlyCompressionCandidates: this.earlyCompressionCandidates,
+    };
+  }
+
+  private get selectionDeps(): MemorySelectionDeps {
+    return {
+      memoryDir: this.memoryDir,
+      vectorIndex: this.vectorIndex,
+      driveScorer: this.driveScorer,
+    };
   }
 
   // ─── Directory Initialization ───
@@ -214,154 +252,7 @@ export class MemoryLifecycleManager {
     goalId: string,
     dataType: MemoryDataType
   ): Promise<CompressionResult> {
-    const now = new Date().toISOString();
-    const dataFile = getDataFile(this.memoryDir, goalId, dataType);
-    const allEntries =
-      readJsonFile<ShortTermEntry[]>(
-        dataFile,
-        z.array(ShortTermEntrySchema)
-      ) ?? [];
-
-    // Determine the retention limit for this goal
-    const retentionLimit = getRetentionLimit(this.config, goalId);
-
-    // Find entries eligible for compression (loop_number exceeds retention limit)
-    const maxLoopNumber = allEntries.reduce(
-      (max, e) => Math.max(max, e.loop_number),
-      0
-    );
-    const cutoffLoop = maxLoopNumber - retentionLimit;
-    const expiredEntries = allEntries.filter(
-      (e) => e.loop_number <= cutoffLoop
-    );
-
-    if (expiredEntries.length === 0) {
-      return {
-        goal_id: goalId,
-        data_type: dataType,
-        entries_compressed: 0,
-        lessons_generated: 0,
-        statistics_updated: false,
-        quality_check: {
-          passed: true,
-          failure_coverage_ratio: 1,
-          contradictions_found: 0,
-        },
-        compressed_at: now,
-      };
-    }
-
-    let lessons: LessonEntry[] = [];
-    let qualityCheck: {
-      passed: boolean;
-      failure_coverage_ratio: number;
-      contradictions_found: number;
-    } = {
-      passed: false,
-      failure_coverage_ratio: 0,
-      contradictions_found: 0,
-    };
-
-    try {
-      // Step 1: Extract patterns from entries
-      const patterns = await extractPatterns(this.llmClient, expiredEntries);
-
-      // Step 2: Distill lessons from patterns
-      const rawLessons = await distillLessons(this.llmClient, patterns, expiredEntries);
-
-      // Attach metadata to each lesson
-      const sourceLoops = expiredEntries.map((e) => `loop_${e.loop_number}`);
-      lessons = rawLessons.map((l) =>
-        LessonEntrySchema.parse({
-          ...l,
-          lesson_id: generateId("lesson"),
-          goal_id: goalId,
-          source_loops: sourceLoops,
-          extracted_at: now,
-          status: "active",
-          superseded_by: undefined,
-        })
-      );
-
-      // Step 3: Quality check
-      qualityCheck = validateCompressionQuality(lessons, expiredEntries);
-
-      if (!qualityCheck.passed) {
-        // Quality check failed — do NOT delete short-term data
-        return {
-          goal_id: goalId,
-          data_type: dataType,
-          entries_compressed: 0,
-          lessons_generated: 0,
-          statistics_updated: false,
-          quality_check: {
-            passed: false,
-            failure_coverage_ratio: qualityCheck.failure_coverage_ratio,
-            contradictions_found: qualityCheck.contradictions_found,
-          },
-          compressed_at: now,
-        };
-      }
-
-      // Step 4: Store lessons in long-term (by-goal, by-dimension, global)
-      storeLessonsLongTerm(this.memoryDir, goalId, lessons, expiredEntries);
-
-      // Phase 2 (5.2c): Auto-register lesson entries in VectorIndex
-      if (this.vectorIndex) {
-        for (const lesson of lessons) {
-          const lessonText = `${lesson.type}: ${lesson.context}. ${lesson.lesson}`;
-          this.vectorIndex
-            .add(lesson.lesson_id, lessonText, {
-              goal_id: goalId,
-              is_lesson: true,
-              lesson_type: lesson.type,
-            })
-            .catch(() => {
-              // Non-fatal: embedding failures are ignored
-            });
-        }
-      }
-
-      // Step 5: Update statistics
-      updateStatistics(this.memoryDir, goalId, expiredEntries);
-
-      // Step 6: Purge compressed short-term entries (only if compression succeeded)
-      const compressedIds = new Set(expiredEntries.map((e) => e.id));
-      const remaining = allEntries.filter((e) => !compressedIds.has(e.id));
-      atomicWrite(dataFile, remaining);
-
-      // Remove purged entries from the short-term index
-      removeFromIndex(this.memoryDir, "short-term", compressedIds);
-    } catch {
-      // LLM failure — never delete short-term data
-      return {
-        goal_id: goalId,
-        data_type: dataType,
-        entries_compressed: 0,
-        lessons_generated: 0,
-        statistics_updated: false,
-        quality_check: {
-          passed: false,
-          failure_coverage_ratio: 0,
-          contradictions_found: 0,
-        },
-        compressed_at: now,
-      };
-    }
-
-    return {
-      goal_id: goalId,
-      data_type: dataType,
-      entries_compressed: expiredEntries.length,
-      lessons_generated: lessons.length,
-      statistics_updated: true,
-      quality_check: {
-        passed: qualityCheck.passed,
-        failure_coverage_ratio: qualityCheck.failure_coverage_ratio,
-        contradictions_found: qualityCheck.contradictions_found,
-      },
-      compressed_at: now,
-    };
+    return _compressToLongTerm(this.compressionDeps, goalId, dataType);
   }
 
   // ─── Working Memory Selection ───
@@ -378,119 +269,7 @@ export class MemoryLifecycleManager {
     tags: string[],
     maxEntries: number = 10
   ): { shortTerm: ShortTermEntry[]; lessons: LessonEntry[] } {
-    // 1. Tag-based query: short-term entries for this goal matching dimensions/tags
-    const stIndex = loadIndex(this.memoryDir, "short-term");
-    const matchingIndexEntries = stIndex.entries.filter(
-      (ie) =>
-        ie.goal_id === goalId &&
-        (dimensions.some((d) => ie.dimensions.includes(d)) ||
-          tags.some((t) => ie.tags.includes(t)))
-    );
-
-    // Sort by last_accessed descending
-    matchingIndexEntries.sort(
-      (a, b) =>
-        new Date(b.last_accessed).getTime() -
-        new Date(a.last_accessed).getTime()
-    );
-
-    // Load the actual entries
-    const shortTermEntries: ShortTermEntry[] = [];
-    const seenEntryIds = new Set<string>();
-
-    for (const idxEntry of matchingIndexEntries) {
-      if (shortTermEntries.length >= maxEntries) break;
-      if (seenEntryIds.has(idxEntry.entry_id)) continue;
-
-      const dataFilePath = path.join(
-        this.memoryDir,
-        "short-term",
-        idxEntry.data_file
-      );
-      const allEntries =
-        readJsonFile<ShortTermEntry[]>(
-          dataFilePath,
-          z.array(ShortTermEntrySchema)
-        ) ?? [];
-      const found = allEntries.find((e) => e.id === idxEntry.entry_id);
-      if (found) {
-        shortTermEntries.push(found);
-        seenEntryIds.add(idxEntry.entry_id);
-
-        // Update access metadata in index
-        touchIndexEntry(this.memoryDir, "short-term", idxEntry.id);
-      }
-    }
-
-    // Phase 2 (5.2b): If results are fewer than needed and VectorIndex available, do sync lookup
-    // Note: selectForWorkingMemory is sync — semantic search via vectorIndex happens in
-    // selectForWorkingMemorySemantic (async). Here we merge from the index directly.
-    if (shortTermEntries.length < maxEntries && this.vectorIndex) {
-      // Pull all goal entries from the short-term index (not yet in result set) as semantic candidates
-      const remaining = stIndex.entries.filter(
-        (ie) => ie.goal_id === goalId && !seenEntryIds.has(ie.entry_id)
-      );
-
-      // Sort by access count + recency as a proxy
-      remaining.sort(
-        (a, b) =>
-          b.access_count - a.access_count ||
-          new Date(b.last_accessed).getTime() - new Date(a.last_accessed).getTime()
-      );
-
-      for (const idxEntry of remaining) {
-        if (shortTermEntries.length >= maxEntries) break;
-        if (seenEntryIds.has(idxEntry.entry_id)) continue;
-
-        const dataFilePath = path.join(
-          this.memoryDir,
-          "short-term",
-          idxEntry.data_file
-        );
-        const allEntries =
-          readJsonFile<ShortTermEntry[]>(
-            dataFilePath,
-            z.array(ShortTermEntrySchema)
-          ) ?? [];
-        const found = allEntries.find((e) => e.id === idxEntry.entry_id);
-        if (found) {
-          shortTermEntries.push(found);
-          seenEntryIds.add(idxEntry.entry_id);
-        }
-      }
-
-      // Re-sort by relevanceScore if driveScorer is available
-      if (this.driveScorer) {
-        shortTermEntries.sort(
-          (a, b) =>
-            this.relevanceScore(b, { goalId, dimensions, tags }) -
-            this.relevanceScore(a, { goalId, dimensions, tags })
-        );
-      }
-    }
-
-    // 2. Query long-term lessons matching tags (cross-goal OK for lessons)
-    const goalLessons = queryLessons(this.memoryDir, tags, dimensions, Math.ceil(maxEntries * 0.75));
-
-    // Phase 2 (5.2c): Include cross-goal lessons (up to 25% of budget)
-    const crossGoalBudget = Math.max(1, Math.floor(maxEntries * 0.25));
-    const crossGoalLessonList = queryCrossGoalLessons(
-      this.memoryDir,
-      tags,
-      dimensions,
-      goalId,
-      crossGoalBudget
-    );
-
-    // Deduplicate cross-goal lessons against goal lessons
-    const seenLessonIds = new Set(goalLessons.map((l) => l.lesson_id));
-    const dedupedCrossGoal = crossGoalLessonList.filter(
-      (l) => !seenLessonIds.has(l.lesson_id)
-    );
-
-    const lessons = [...goalLessons, ...dedupedCrossGoal];
-
-    return { shortTerm: shortTermEntries, lessons };
+    return _selectForWorkingMemory(this.selectionDeps, goalId, dimensions, tags, maxEntries);
   }
 
   // ─── Phase 2: Drive-based Memory Management ───
@@ -503,16 +282,7 @@ export class MemoryLifecycleManager {
   getCompressionDelay(
     driveScores: Array<{ dimension: string; dissatisfaction: number }>
   ): Map<string, number> {
-    const result = new Map<string, number>();
-    for (const { dimension, dissatisfaction } of driveScores) {
-      if (dissatisfaction > 0.7) {
-        const delayFactor = Math.min(2.0, 1 + dissatisfaction);
-        result.set(dimension, delayFactor);
-      } else {
-        result.set(dimension, 1.0);
-      }
-    }
-    return result;
+    return _getCompressionDelay(driveScores);
   }
 
   /**
@@ -523,11 +293,7 @@ export class MemoryLifecycleManager {
   getDeadlineBonus(
     driveScores: Array<{ dimension: string; deadline: number }>
   ): Map<string, number> {
-    const result = new Map<string, number>();
-    for (const { dimension, deadline } of driveScores) {
-      result.set(dimension, Math.min(deadline * 0.3, 0.3));
-    }
-    return result;
+    return _getDeadlineBonus(driveScores);
   }
 
   /**
@@ -566,32 +332,7 @@ export class MemoryLifecycleManager {
     entry: ShortTermEntry,
     context: { goalId: string; dimensions: string[]; tags: string[] }
   ): number {
-    // 1. Tag match ratio
-    const allTags = new Set([...entry.tags, ...context.tags]);
-    const matchingTags = entry.tags.filter((t) => context.tags.includes(t)).length;
-    const tagMatchRatio = allTags.size > 0 ? matchingTags / allTags.size : 0;
-
-    // 2. Drive weight
-    let driveWeight = 1.0;
-    if (this.driveScorer) {
-      // Use the first dimension that matches entry dimensions or context dimensions
-      const relevantDimensions = entry.dimensions.length > 0
-        ? entry.dimensions
-        : context.dimensions;
-      if (relevantDimensions.length > 0) {
-        const dim = relevantDimensions[0]!;
-        driveWeight = this.driveScorer.getDissatisfactionScore(dim);
-        // Clamp to [0.1, 2]: floor at 0.1 so satisfied dimensions don't zero out tag-perfect matches
-        driveWeight = Math.max(0.1, driveWeight);
-      }
-    }
-
-    // 3. Freshness factor (exponential decay over 30 days)
-    const createdAt = new Date(entry.timestamp).getTime();
-    const daysSinceCreation = (Date.now() - createdAt) / (1000 * 60 * 60 * 24);
-    const freshnessFactor = Math.exp(-daysSinceCreation / 30);
-
-    return tagMatchRatio * driveWeight * freshnessFactor;
+    return _relevanceScore(this.selectionDeps, entry, context);
   }
 
   /**
@@ -604,20 +345,7 @@ export class MemoryLifecycleManager {
    * If no DriveScorer → retention_period (unchanged).
    */
   compressionDelay(goalId: string, dimension: string): number {
-    const retentionPeriod = getRetentionLimit(this.config, goalId);
-
-    if (!this.driveScorer) {
-      return retentionPeriod;
-    }
-
-    const dissatisfaction = this.driveScorer.getDissatisfactionScore(dimension);
-
-    if (dissatisfaction > 0.7) {
-      return retentionPeriod * 2.0;
-    } else if (dissatisfaction > 0.4) {
-      return retentionPeriod * 1.5;
-    }
-    return retentionPeriod;
+    return _compressionDelay(this.compressionDeps, goalId, dimension);
   }
 
   /**
@@ -654,72 +382,7 @@ export class MemoryLifecycleManager {
    * @param topK   - maximum number of lessons to return (default 5)
    */
   async searchCrossGoalLessons(query: string, topK = 5): Promise<LessonEntry[]> {
-    if (this.vectorIndex) {
-      // Semantic search in vector index
-      const results = await this.vectorIndex.search(query, topK * 2, 0.0);
-
-      // Filter to lesson entries (metadata.is_lesson === true)
-      const lessonResults = results.filter((r) => r.metadata.is_lesson === true);
-
-      // Load actual lessons from global file
-      const globalPath = path.join(
-        this.memoryDir,
-        "long-term",
-        "lessons",
-        "global.json"
-      );
-      const globalLessons =
-        readJsonFile<LessonEntry[]>(
-          globalPath,
-          z.array(LessonEntrySchema)
-        ) ?? [];
-
-      const lessonMap = new Map(globalLessons.map((l) => [l.lesson_id, l]));
-      const matched: LessonEntry[] = [];
-      for (const r of lessonResults) {
-        const lesson = lessonMap.get(r.id);
-        if (lesson && lesson.status === "active") {
-          matched.push(lesson);
-          if (matched.length >= topK) break;
-        }
-      }
-
-      // If we got enough results from semantic search, return them
-      if (matched.length > 0) {
-        return matched;
-      }
-    }
-
-    // Fallback: tag-based global search
-    const globalPath = path.join(
-      this.memoryDir,
-      "long-term",
-      "lessons",
-      "global.json"
-    );
-    const globalLessons =
-      readJsonFile<LessonEntry[]>(
-        globalPath,
-        z.array(LessonEntrySchema)
-      ) ?? [];
-
-    // Simple text match on lesson content
-    const queryLower = query.toLowerCase();
-    const matching = globalLessons.filter(
-      (l) =>
-        l.status === "active" &&
-        (l.lesson.toLowerCase().includes(queryLower) ||
-          l.context.toLowerCase().includes(queryLower) ||
-          l.relevance_tags.some((t) => t.toLowerCase().includes(queryLower)))
-    );
-
-    // Sort by recency
-    matching.sort(
-      (a, b) =>
-        new Date(b.extracted_at).getTime() - new Date(a.extracted_at).getTime()
-    );
-
-    return matching.slice(0, topK);
+    return _searchCrossGoalLessons(this.selectionDeps, query, topK);
   }
 
   // ─── Phase 2: Semantic Working Memory Selection ───
@@ -738,81 +401,15 @@ export class MemoryLifecycleManager {
     maxEntries: number = 10,
     driveScores?: Array<{ dimension: string; dissatisfaction: number; deadline: number }>
   ): Promise<{ shortTerm: ShortTermEntry[]; lessons: LessonEntry[] }> {
-    // Fall back to sync method if no vectorIndex
-    if (!this.vectorIndex) {
-      return this.selectForWorkingMemory(goalId, dimensions, tags, maxEntries);
-    }
-
-    // Compute deadline bonuses per dimension
-    const deadlineBonus = driveScores
-      ? this.getDeadlineBonus(driveScores.map((d) => ({ dimension: d.dimension, deadline: d.deadline })))
-      : new Map<string, number>();
-
-    const maxBonus = deadlineBonus.size > 0
-      ? Math.max(...Array.from(deadlineBonus.values()))
-      : 0;
-
-    // Search vector index for semantically similar entries
-    const searchResults = await this.vectorIndex.search(query, maxEntries * 2, 0.0);
-
-    // Filter to this goal's entries
-    const goalResults = searchResults.filter(
-      (r) => r.metadata.goal_id === goalId
+    return _selectForWorkingMemorySemantic(
+      this.selectionDeps,
+      goalId,
+      query,
+      dimensions,
+      tags,
+      maxEntries,
+      driveScores
     );
-
-    // Load short-term index for recency data
-    const stIndex = loadIndex(this.memoryDir, "short-term");
-    const indexEntryMap = new Map(
-      stIndex.entries.map((ie) => [ie.entry_id, ie])
-    );
-
-    // Score entries by combining semantic score + recency + deadline bonus
-    const now = Date.now();
-    const scoredEntries: Array<{ entry: ShortTermEntry; combinedScore: number }> = [];
-    const seenEntryIds = new Set<string>();
-
-    for (const result of goalResults) {
-      if (seenEntryIds.has(result.id)) continue;
-
-      const idxEntry = indexEntryMap.get(result.id);
-      if (!idxEntry) continue;
-
-      // Compute recency score: normalize last_accessed relative to now
-      const ageMs = now - new Date(idxEntry.last_accessed).getTime();
-      const ageHours = ageMs / (1000 * 60 * 60);
-      const recencyScore = Math.max(0, 1 - ageHours / (24 * 7)); // decay over 1 week
-
-      const combinedScore = result.similarity + recencyScore * 0.3 + maxBonus;
-
-      // Load the actual entry from disk
-      const dataFilePath = path.join(
-        this.memoryDir,
-        "short-term",
-        idxEntry.data_file
-      );
-      const allEntries =
-        readJsonFile<ShortTermEntry[]>(
-          dataFilePath,
-          z.array(ShortTermEntrySchema)
-        ) ?? [];
-      const found = allEntries.find((e) => e.id === idxEntry.entry_id);
-      if (found) {
-        scoredEntries.push({ entry: found, combinedScore });
-        seenEntryIds.add(result.id);
-        touchIndexEntry(this.memoryDir, "short-term", idxEntry.id);
-      }
-    }
-
-    // Sort by combined score descending and take top maxEntries
-    scoredEntries.sort((a, b) => b.combinedScore - a.combinedScore);
-    const shortTermEntries = scoredEntries
-      .slice(0, maxEntries)
-      .map((s) => s.entry);
-
-    // Still use tag/dimension-based lesson query for long-term
-    const lessons = queryLessons(this.memoryDir, tags, dimensions, maxEntries);
-
-    return { shortTerm: shortTermEntries, lessons };
   }
 
   // ─── Retention Policy ───
@@ -822,64 +419,7 @@ export class MemoryLifecycleManager {
    * Phase 2 (5.2a): uses compressionDelay() per dimension for drive-based retention.
    */
   async applyRetentionPolicy(goalId: string): Promise<CompressionResult[]> {
-    const dataTypes: MemoryDataType[] = [
-      "experience_log",
-      "observation",
-      "strategy",
-      "task",
-      "knowledge",
-    ];
-
-    const results: CompressionResult[] = [];
-
-    for (const dataType of dataTypes) {
-      const dataFile = getDataFile(this.memoryDir, goalId, dataType);
-      if (!fs.existsSync(dataFile)) continue;
-
-      const entries =
-        readJsonFile<ShortTermEntry[]>(
-          dataFile,
-          z.array(ShortTermEntrySchema)
-        ) ?? [];
-
-      if (entries.length === 0) continue;
-
-      const maxLoopNumber = entries.reduce(
-        (max, e) => Math.max(max, e.loop_number),
-        0
-      );
-      const minLoopNumber = entries.reduce(
-        (min, e) => Math.min(min, e.loop_number),
-        Infinity
-      );
-
-      // Phase 2 (5.2a): compute effective retention limit using drive-based delay.
-      // Use the dimensions present in the entries to find the most conservative (highest) delay.
-      const allDimensions = [...new Set(entries.flatMap((e) => e.dimensions))];
-      let effectiveRetentionLimit: number;
-      if (allDimensions.length > 0 && this.driveScorer) {
-        // Take the maximum delay across all dimensions (most conservative = longest retention)
-        effectiveRetentionLimit = Math.max(
-          ...allDimensions.map((dim) => this.compressionDelay(goalId, dim))
-        );
-      } else {
-        effectiveRetentionLimit = getRetentionLimit(this.config, goalId);
-      }
-
-      // Check for early compression candidates — reduce retention limit if any dimension is satisfied
-      const earlyDims = this.earlyCompressionCandidates.get(goalId);
-      if (earlyDims && allDimensions.some(d => earlyDims.has(d))) {
-        effectiveRetentionLimit = Math.min(effectiveRetentionLimit, Math.floor(getRetentionLimit(this.config, goalId) * 0.5));
-      }
-
-      // Trigger compression if span of loops exceeds effective retention limit
-      if (maxLoopNumber - minLoopNumber >= effectiveRetentionLimit) {
-        const result = await this.compressToLongTerm(goalId, dataType);
-        results.push(result);
-      }
-    }
-
-    return results;
+    return _applyRetentionPolicy(this.compressionDeps, goalId);
   }
 
   // ─── Goal Close ───
@@ -914,7 +454,7 @@ export class MemoryLifecycleManager {
 
       try {
         // Force-compress all remaining entries regardless of loop count
-        await this.compressAllRemainingToLongTerm(goalId, dataType, entries);
+        await _compressAllRemainingToLongTerm(this.compressionDeps, goalId, dataType, entries);
       } catch {
         // Failure is acceptable on close — proceed to archive anyway
       }
@@ -1034,90 +574,7 @@ export class MemoryLifecycleManager {
    * Short-term: 10MB per goal (default). Long-term: 100MB total (default).
    */
   async runGarbageCollection(): Promise<void> {
-    const shortTermGoalsDir = path.join(
-      this.memoryDir,
-      "short-term",
-      "goals"
-    );
-
-    if (!fs.existsSync(shortTermGoalsDir)) return;
-
-    const goalDirs = fs
-      .readdirSync(shortTermGoalsDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name);
-
-    const shortTermLimitBytes =
-      this.config.size_limits.short_term_per_goal_mb * 1024 * 1024;
-
-    // Check short-term size per goal
-    for (const goalId of goalDirs) {
-      const goalDir = path.join(shortTermGoalsDir, goalId);
-      const size = getDirectorySize(goalDir);
-
-      if (size > shortTermLimitBytes) {
-        // Trigger early compression for all data types
-        const dataTypes: MemoryDataType[] = [
-          "experience_log",
-          "observation",
-          "strategy",
-          "task",
-          "knowledge",
-        ];
-        for (const dataType of dataTypes) {
-          try {
-            await this.compressToLongTerm(goalId, dataType);
-          } catch {
-            // Compression failure is non-fatal for GC
-          }
-        }
-      }
-    }
-
-    // Check long-term total size
-    const longTermDir = path.join(this.memoryDir, "long-term");
-    if (fs.existsSync(longTermDir)) {
-      const longTermSize = getDirectorySize(longTermDir);
-      const longTermLimitBytes =
-        this.config.size_limits.long_term_total_mb * 1024 * 1024;
-
-      if (longTermSize > longTermLimitBytes) {
-        // Archive oldest (by last_accessed) lessons from long-term index
-        archiveOldestLongTermEntries(this.memoryDir);
-      }
-    }
-  }
-
-  // ─── Private: Force-compress remaining entries on goal close ───
-
-  private async compressAllRemainingToLongTerm(
-    goalId: string,
-    dataType: MemoryDataType,
-    entries: ShortTermEntry[]
-  ): Promise<void> {
-    if (entries.length === 0) return;
-
-    const now = new Date().toISOString();
-    const patterns = await extractPatterns(this.llmClient, entries);
-    const rawLessons = await distillLessons(this.llmClient, patterns, entries);
-    const sourceLoops = entries.map((e) => `loop_${e.loop_number}`);
-
-    const lessons: LessonEntry[] = rawLessons.map((l) =>
-      LessonEntrySchema.parse({
-        ...l,
-        lesson_id: generateId("lesson"),
-        goal_id: goalId,
-        source_loops: sourceLoops,
-        extracted_at: now,
-        status: "active",
-        superseded_by: undefined,
-      })
-    );
-
-    storeLessonsLongTerm(this.memoryDir, goalId, lessons, entries);
-    updateStatistics(this.memoryDir, goalId, entries);
-
-    void dataType; // type info available for future audit logging
+    return _runGarbageCollection(this.compressionDeps);
   }
 }
 

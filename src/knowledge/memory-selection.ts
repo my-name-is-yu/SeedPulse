@@ -1,0 +1,418 @@
+import * as path from "node:path";
+import { z } from "zod";
+import type { VectorIndex } from "./vector-index.js";
+import {
+  ShortTermEntrySchema,
+} from "../types/memory-lifecycle.js";
+import type {
+  ShortTermEntry,
+  LessonEntry,
+} from "../types/memory-lifecycle.js";
+import type { IDriveScorer } from "./drive-score-adapter.js";
+import {
+  readJsonFile,
+} from "./memory-persistence.js";
+import {
+  loadIndex,
+  queryLessons,
+  queryCrossGoalLessons,
+  touchIndexEntry,
+} from "./memory-phases.js";
+
+// ─── Deps interface ───
+
+export interface MemorySelectionDeps {
+  memoryDir: string;
+  vectorIndex?: VectorIndex;
+  driveScorer?: IDriveScorer;
+}
+
+// ─── relevanceScore ───
+
+/**
+ * Compute a relevance score for a short-term entry given a context.
+ *
+ * Score = tag_match_ratio * drive_weight * freshness_factor
+ *   - tag_match_ratio  = matching tags / total unique tags (0 if no tags)
+ *   - drive_weight     = DriveScorer dissatisfaction score for first matching
+ *                        dimension (1.0 if no DriveScorer or no dimensions)
+ *   - freshness_factor = Math.exp(-daysSinceCreation / 30)
+ */
+export function relevanceScore(
+  deps: Pick<MemorySelectionDeps, "driveScorer">,
+  entry: ShortTermEntry,
+  context: { goalId: string; dimensions: string[]; tags: string[] }
+): number {
+  // 1. Tag match ratio
+  const allTags = new Set([...entry.tags, ...context.tags]);
+  const matchingTags = entry.tags.filter((t) => context.tags.includes(t)).length;
+  const tagMatchRatio = allTags.size > 0 ? matchingTags / allTags.size : 0;
+
+  // 2. Drive weight
+  let driveWeight = 1.0;
+  if (deps.driveScorer) {
+    // Use the first dimension that matches entry dimensions or context dimensions
+    const relevantDimensions = entry.dimensions.length > 0
+      ? entry.dimensions
+      : context.dimensions;
+    if (relevantDimensions.length > 0) {
+      const dim = relevantDimensions[0]!;
+      driveWeight = deps.driveScorer.getDissatisfactionScore(dim);
+      // Clamp to [0.1, 2]: floor at 0.1 so satisfied dimensions don't zero out tag-perfect matches
+      driveWeight = Math.max(0.1, driveWeight);
+    }
+  }
+
+  // 3. Freshness factor (exponential decay over 30 days)
+  const createdAt = new Date(entry.timestamp).getTime();
+  const daysSinceCreation = (Date.now() - createdAt) / (1000 * 60 * 60 * 24);
+  const freshnessFactor = Math.exp(-daysSinceCreation / 30);
+
+  return tagMatchRatio * driveWeight * freshnessFactor;
+}
+
+// ─── selectForWorkingMemory ───
+
+/**
+ * Select relevant entries for working memory.
+ * Phase 1: tag exact-match + recency sort.
+ * Phase 2 (5.2b): semantic search fallback via VectorIndex if tag results are insufficient.
+ * Phase 2 (5.2c): includes cross-goal lessons (up to 25% of budget).
+ */
+export function selectForWorkingMemory(
+  deps: MemorySelectionDeps,
+  goalId: string,
+  dimensions: string[],
+  tags: string[],
+  maxEntries: number = 10
+): { shortTerm: ShortTermEntry[]; lessons: LessonEntry[] } {
+  // 1. Tag-based query: short-term entries for this goal matching dimensions/tags
+  const stIndex = loadIndex(deps.memoryDir, "short-term");
+  const matchingIndexEntries = stIndex.entries.filter(
+    (ie) =>
+      ie.goal_id === goalId &&
+      (dimensions.some((d) => ie.dimensions.includes(d)) ||
+        tags.some((t) => ie.tags.includes(t)))
+  );
+
+  // Sort by last_accessed descending
+  matchingIndexEntries.sort(
+    (a, b) =>
+      new Date(b.last_accessed).getTime() -
+      new Date(a.last_accessed).getTime()
+  );
+
+  // Load the actual entries
+  const shortTermEntries: ShortTermEntry[] = [];
+  const seenEntryIds = new Set<string>();
+
+  for (const idxEntry of matchingIndexEntries) {
+    if (shortTermEntries.length >= maxEntries) break;
+    if (seenEntryIds.has(idxEntry.entry_id)) continue;
+
+    const dataFilePath = path.join(
+      deps.memoryDir,
+      "short-term",
+      idxEntry.data_file
+    );
+    const allEntries =
+      readJsonFile<ShortTermEntry[]>(
+        dataFilePath,
+        z.array(ShortTermEntrySchema)
+      ) ?? [];
+    const found = allEntries.find((e) => e.id === idxEntry.entry_id);
+    if (found) {
+      shortTermEntries.push(found);
+      seenEntryIds.add(idxEntry.entry_id);
+
+      // Update access metadata in index
+      touchIndexEntry(deps.memoryDir, "short-term", idxEntry.id);
+    }
+  }
+
+  // Phase 2 (5.2b): If results are fewer than needed and VectorIndex available, do sync lookup
+  // Note: selectForWorkingMemory is sync — semantic search via vectorIndex happens in
+  // selectForWorkingMemorySemantic (async). Here we merge from the index directly.
+  if (shortTermEntries.length < maxEntries && deps.vectorIndex) {
+    // Pull all goal entries from the short-term index (not yet in result set) as semantic candidates
+    const remaining = stIndex.entries.filter(
+      (ie) => ie.goal_id === goalId && !seenEntryIds.has(ie.entry_id)
+    );
+
+    // Sort by access count + recency as a proxy
+    remaining.sort(
+      (a, b) =>
+        b.access_count - a.access_count ||
+        new Date(b.last_accessed).getTime() - new Date(a.last_accessed).getTime()
+    );
+
+    for (const idxEntry of remaining) {
+      if (shortTermEntries.length >= maxEntries) break;
+      if (seenEntryIds.has(idxEntry.entry_id)) continue;
+
+      const dataFilePath = path.join(
+        deps.memoryDir,
+        "short-term",
+        idxEntry.data_file
+      );
+      const allEntries =
+        readJsonFile<ShortTermEntry[]>(
+          dataFilePath,
+          z.array(ShortTermEntrySchema)
+        ) ?? [];
+      const found = allEntries.find((e) => e.id === idxEntry.entry_id);
+      if (found) {
+        shortTermEntries.push(found);
+        seenEntryIds.add(idxEntry.entry_id);
+      }
+    }
+
+    // Re-sort by relevanceScore if driveScorer is available
+    if (deps.driveScorer) {
+      shortTermEntries.sort(
+        (a, b) =>
+          relevanceScore(deps, b, { goalId, dimensions, tags }) -
+          relevanceScore(deps, a, { goalId, dimensions, tags })
+      );
+    }
+  }
+
+  // 2. Query long-term lessons matching tags (cross-goal OK for lessons)
+  const goalLessons = queryLessons(deps.memoryDir, tags, dimensions, Math.ceil(maxEntries * 0.75));
+
+  // Phase 2 (5.2c): Include cross-goal lessons (up to 25% of budget)
+  const crossGoalBudget = Math.max(1, Math.floor(maxEntries * 0.25));
+  const crossGoalLessonList = queryCrossGoalLessons(
+    deps.memoryDir,
+    tags,
+    dimensions,
+    goalId,
+    crossGoalBudget
+  );
+
+  // Deduplicate cross-goal lessons against goal lessons
+  const seenLessonIds = new Set(goalLessons.map((l) => l.lesson_id));
+  const dedupedCrossGoal = crossGoalLessonList.filter(
+    (l) => !seenLessonIds.has(l.lesson_id)
+  );
+
+  const lessons = [...goalLessons, ...dedupedCrossGoal];
+
+  return { shortTerm: shortTermEntries, lessons };
+}
+
+// ─── searchCrossGoalLessons ───
+
+/**
+ * Search long-term lessons across ALL goals using semantic search.
+ * Falls back to tag-based global search if VectorIndex is unavailable.
+ *
+ * @param query  - natural language search query
+ * @param topK   - maximum number of lessons to return (default 5)
+ */
+export async function searchCrossGoalLessons(
+  deps: Pick<MemorySelectionDeps, "memoryDir" | "vectorIndex">,
+  query: string,
+  topK = 5
+): Promise<LessonEntry[]> {
+  const { LessonEntrySchema } = await import("../types/memory-lifecycle.js");
+
+  if (deps.vectorIndex) {
+    // Semantic search in vector index
+    const results = await deps.vectorIndex.search(query, topK * 2, 0.0);
+
+    // Filter to lesson entries (metadata.is_lesson === true)
+    const lessonResults = results.filter((r) => r.metadata.is_lesson === true);
+
+    // Load actual lessons from global file
+    const globalPath = path.join(
+      deps.memoryDir,
+      "long-term",
+      "lessons",
+      "global.json"
+    );
+    const globalLessons =
+      readJsonFile<LessonEntry[]>(
+        globalPath,
+        z.array(LessonEntrySchema)
+      ) ?? [];
+
+    const lessonMap = new Map(globalLessons.map((l) => [l.lesson_id, l]));
+    const matched: LessonEntry[] = [];
+    for (const r of lessonResults) {
+      const lesson = lessonMap.get(r.id);
+      if (lesson && lesson.status === "active") {
+        matched.push(lesson);
+        if (matched.length >= topK) break;
+      }
+    }
+
+    // If we got enough results from semantic search, return them
+    if (matched.length > 0) {
+      return matched;
+    }
+  }
+
+  // Fallback: tag-based global search
+  const { LessonEntrySchema: LessonSchema } = await import("../types/memory-lifecycle.js");
+  const globalPath = path.join(
+    deps.memoryDir,
+    "long-term",
+    "lessons",
+    "global.json"
+  );
+  const globalLessons =
+    readJsonFile<LessonEntry[]>(
+      globalPath,
+      z.array(LessonSchema)
+    ) ?? [];
+
+  // Simple text match on lesson content
+  const queryLower = query.toLowerCase();
+  const matching = globalLessons.filter(
+    (l) =>
+      l.status === "active" &&
+      (l.lesson.toLowerCase().includes(queryLower) ||
+        l.context.toLowerCase().includes(queryLower) ||
+        l.relevance_tags.some((t) => t.toLowerCase().includes(queryLower)))
+  );
+
+  // Sort by recency
+  matching.sort(
+    (a, b) =>
+      new Date(b.extracted_at).getTime() - new Date(a.extracted_at).getTime()
+  );
+
+  return matching.slice(0, topK);
+}
+
+// ─── selectForWorkingMemorySemantic ───
+
+/**
+ * Semantic variant of selectForWorkingMemory.
+ * Uses VectorIndex.search() to find semantically relevant entries.
+ * Applies deadline bonus to relevance scores.
+ * Falls back to existing sync method if no vectorIndex available.
+ */
+export async function selectForWorkingMemorySemantic(
+  deps: MemorySelectionDeps,
+  goalId: string,
+  query: string,
+  dimensions: string[],
+  tags: string[],
+  maxEntries: number = 10,
+  driveScores?: Array<{ dimension: string; dissatisfaction: number; deadline: number }>
+): Promise<{ shortTerm: ShortTermEntry[]; lessons: LessonEntry[] }> {
+  // Fall back to sync method if no vectorIndex
+  if (!deps.vectorIndex) {
+    return selectForWorkingMemory(deps, goalId, dimensions, tags, maxEntries);
+  }
+
+  // Compute deadline bonuses per dimension
+  const deadlineBonus = driveScores
+    ? getDeadlineBonus(driveScores.map((d) => ({ dimension: d.dimension, deadline: d.deadline })))
+    : new Map<string, number>();
+
+  const maxBonus = deadlineBonus.size > 0
+    ? Math.max(...Array.from(deadlineBonus.values()))
+    : 0;
+
+  // Search vector index for semantically similar entries
+  const searchResults = await deps.vectorIndex.search(query, maxEntries * 2, 0.0);
+
+  // Filter to this goal's entries
+  const goalResults = searchResults.filter(
+    (r) => r.metadata.goal_id === goalId
+  );
+
+  // Load short-term index for recency data
+  const stIndex = loadIndex(deps.memoryDir, "short-term");
+  const indexEntryMap = new Map(
+    stIndex.entries.map((ie) => [ie.entry_id, ie])
+  );
+
+  // Score entries by combining semantic score + recency + deadline bonus
+  const now = Date.now();
+  const scoredEntries: Array<{ entry: ShortTermEntry; combinedScore: number }> = [];
+  const seenEntryIds = new Set<string>();
+
+  for (const result of goalResults) {
+    if (seenEntryIds.has(result.id)) continue;
+
+    const idxEntry = indexEntryMap.get(result.id);
+    if (!idxEntry) continue;
+
+    // Compute recency score: normalize last_accessed relative to now
+    const ageMs = now - new Date(idxEntry.last_accessed).getTime();
+    const ageHours = ageMs / (1000 * 60 * 60);
+    const recencyScore = Math.max(0, 1 - ageHours / (24 * 7)); // decay over 1 week
+
+    const combinedScore = result.similarity + recencyScore * 0.3 + maxBonus;
+
+    // Load the actual entry from disk
+    const dataFilePath = path.join(
+      deps.memoryDir,
+      "short-term",
+      idxEntry.data_file
+    );
+    const allEntries =
+      readJsonFile<ShortTermEntry[]>(
+        dataFilePath,
+        z.array(ShortTermEntrySchema)
+      ) ?? [];
+    const found = allEntries.find((e) => e.id === idxEntry.entry_id);
+    if (found) {
+      scoredEntries.push({ entry: found, combinedScore });
+      seenEntryIds.add(result.id);
+      touchIndexEntry(deps.memoryDir, "short-term", idxEntry.id);
+    }
+  }
+
+  // Sort by combined score descending and take top maxEntries
+  scoredEntries.sort((a, b) => b.combinedScore - a.combinedScore);
+  const shortTermEntries = scoredEntries
+    .slice(0, maxEntries)
+    .map((s) => s.entry);
+
+  // Still use tag/dimension-based lesson query for long-term
+  const lessons = queryLessons(deps.memoryDir, tags, dimensions, maxEntries);
+
+  return { shortTerm: shortTermEntries, lessons };
+}
+
+// ─── Drive helpers (used by selection + compression) ───
+
+/**
+ * Dissatisfaction drive: delay compression up to 2x for high-dissatisfaction dimensions.
+ * For each dimension, if dissatisfaction > 0.7, delay_factor = 1 + dissatisfaction (max 2.0).
+ * Returns map of dimension -> delay_factor.
+ */
+export function getCompressionDelay(
+  driveScores: Array<{ dimension: string; dissatisfaction: number }>
+): Map<string, number> {
+  const result = new Map<string, number>();
+  for (const { dimension, dissatisfaction } of driveScores) {
+    if (dissatisfaction > 0.7) {
+      const delayFactor = Math.min(2.0, 1 + dissatisfaction);
+      result.set(dimension, delayFactor);
+    } else {
+      result.set(dimension, 1.0);
+    }
+  }
+  return result;
+}
+
+/**
+ * Deadline drive: boost Working Memory priority up to 30%.
+ * For each dimension, bonus = min(deadline * 0.3, 0.3).
+ * Returns map of dimension -> bonus_factor.
+ */
+export function getDeadlineBonus(
+  driveScores: Array<{ dimension: string; deadline: number }>
+): Map<string, number> {
+  const result = new Map<string, number>();
+  for (const { dimension, deadline } of driveScores) {
+    result.set(dimension, Math.min(deadline * 0.3, 0.3));
+  }
+  return result;
+}
