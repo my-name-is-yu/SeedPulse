@@ -230,7 +230,10 @@ function createDeps(tmpDir: string): {
     } as unknown as CoreLoopDeps["observationEngine"],
     gapCalculator: {
       calculateGapVector: vi.fn().mockReturnValue(makeGapVector()),
-      aggregateGaps: vi.fn().mockReturnValue(0),
+      // Use a non-zero gap so the gap=0 early-exit path (Step 3b, commit a927850) is NOT
+      // triggered. R1-1/R1-2 tests target the Step 5 pre-task completion check, which
+      // only runs when gap > 0.
+      aggregateGaps: vi.fn().mockReturnValue(0.1),
     } as unknown as CoreLoopDeps["gapCalculator"],
     driveScorer: {
       scoreAllDimensions: vi.fn().mockReturnValue(makeDriveScores()),
