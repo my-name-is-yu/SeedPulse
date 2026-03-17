@@ -1,100 +1,43 @@
-import { CuriosityEngine } from "./traits/curiosity-engine.js";
 import type { Logger } from "./runtime/logger.js";
-import type { KnowledgeTransfer } from "./knowledge/knowledge-transfer.js";
-import type { TransferCandidate } from "./types/cross-portfolio.js";
-import type { CrossGoalPortfolio } from "./strategy/cross-goal-portfolio.js";
-import type { GoalTreeManager } from "./goal/goal-tree-manager.js";
-import type { StateAggregator } from "./goal/state-aggregator.js";
-import type { TreeLoopOrchestrator } from "./goal/tree-loop-orchestrator.js";
-import type { StateManager } from "./state-manager.js";
-import type { ObservationEngine } from "./observation/observation-engine.js";
-import type { TaskLifecycle, TaskCycleResult } from "./execution/task-lifecycle.js";
-import type { SatisficingJudge } from "./drive/satisficing-judge.js";
-import type { StallDetector } from "./drive/stall-detector.js";
-import type { StrategyManager } from "./strategy/strategy-manager.js";
-import type { DriveSystem } from "./drive/drive-system.js";
-import type { AdapterRegistry, IAdapter } from "./execution/adapter-layer.js";
-import type { KnowledgeManager } from "./knowledge/knowledge-manager.js";
+import type { TaskCycleResult } from "./execution/task-lifecycle.js";
+import type { IAdapter } from "./execution/adapter-layer.js";
 import type { CapabilityDetector } from "./observation/capability-detector.js";
 import type { CapabilityAcquisitionTask } from "./types/capability.js";
-import type { PortfolioManager } from "./portfolio-manager.js";
-import type { GoalDependencyGraph } from "./goal/goal-dependency-graph.js";
-import type { LearningPipeline } from "./knowledge/learning-pipeline.js";
 import { DriveScoreAdapter } from "./knowledge/memory-lifecycle.js";
-import type { MemoryLifecycleManager } from "./knowledge/memory-lifecycle.js";
 import type { Goal } from "./types/goal.js";
 import type { GapVector } from "./types/gap.js";
-import type { DriveContext, DriveScore } from "./types/drive.js";
-import type { CompletionJudgment } from "./types/satisficing.js";
-import type { StallReport } from "./types/stall.js";
+import type { DriveScore } from "./types/drive.js";
 
-// ─── GapCalculator module interface (pure functions) ───
+import type {
+  GapCalculatorModule,
+  DriveScorerModule,
+  ExecutionSummaryParams,
+  ReportingEngine,
+  LoopConfig,
+  LoopIterationResult,
+  LoopResult,
+  CoreLoopDeps,
+  ProgressEvent,
+} from "./loop/core-loop-types.js";
+import { buildDriveContext } from "./loop/core-loop-types.js";
+import {
+  runTreeIteration as runTreeIterationImpl,
+  runMultiGoalIteration as runMultiGoalIterationImpl,
+} from "./loop/tree-loop-runner.js";
 
-export interface GapCalculatorModule {
-  calculateGapVector: (
-    goalId: string,
-    dimensions: Goal["dimensions"],
-    globalUncertaintyWeight?: number
-  ) => GapVector;
-  aggregateGaps: (
-    childGaps: number[],
-    method?: "max" | "weighted_avg" | "sum",
-    weights?: number[]
-  ) => number;
-}
-
-// ─── DriveScorerModule interface (pure functions) ───
-
-export interface DriveScorerModule {
-  scoreAllDimensions: (
-    gapVector: GapVector,
-    context: DriveContext,
-    config?: unknown
-  ) => DriveScore[];
-  rankDimensions: (scores: DriveScore[]) => DriveScore[];
-}
-
-// ─── ReportingEngine interface (minimal — being implemented in parallel) ───
-
-export interface ExecutionSummaryParams {
-  goalId: string;
-  loopIndex: number;
-  observation: { dimensionName: string; progress: number; confidence: number }[];
-  gapAggregate: number;
-  taskResult: { taskId: string; action: string; dimension: string } | null;
-  stallDetected: boolean;
-  pivotOccurred: boolean;
-  elapsedMs: number;
-}
-
-export interface ReportingEngine {
-  generateExecutionSummary(params: ExecutionSummaryParams): unknown;
-  saveReport(report: unknown): void;
-}
-
-// ─── Config ───
-
-export interface LoopConfig {
-  maxIterations?: number;
-  maxConsecutiveErrors?: number;
-  delayBetweenLoopsMs?: number;
-  adapterType?: string;
-  treeMode?: boolean;  // Enable tree mode (iterate across all tree nodes)
-  multiGoalMode?: boolean;  // Enable multi-goal mode (iterate across multiple goals)
-  goalIds?: string[];       // List of goal IDs to manage in multi-goal mode
-  /**
-   * Minimum number of iterations to run before the loop can exit on completion.
-   * Default: 1 (at least one full task cycle always runs before declaring complete).
-   * Setting to 2 forces two full iterations even if the goal is already satisfied after iteration 1.
-   */
-  minIterations?: number;
-  /**
-   * Whether to automatically archive a completed goal at the end of run().
-   * Default: false — archiving is an irreversible action and should be triggered explicitly
-   * (e.g. via `motiva goal archive <id>` CLI command or by setting this flag intentionally).
-   */
-  autoArchive?: boolean;
-}
+// Re-export types for backward compatibility
+export type {
+  GapCalculatorModule,
+  DriveScorerModule,
+  ExecutionSummaryParams,
+  ReportingEngine,
+  LoopConfig,
+  LoopIterationResult,
+  LoopResult,
+  CoreLoopDeps,
+  ProgressEvent,
+} from "./loop/core-loop-types.js";
+export { buildDriveContext } from "./loop/core-loop-types.js";
 
 const DEFAULT_CONFIG: Required<LoopConfig> = {
   maxIterations: 100,
@@ -107,137 +50,6 @@ const DEFAULT_CONFIG: Required<LoopConfig> = {
   minIterations: 1,
   autoArchive: false,
 };
-
-// ─── Result types ───
-
-export interface LoopIterationResult {
-  loopIndex: number;
-  goalId: string;
-  gapAggregate: number;
-  driveScores: DriveScore[];
-  taskResult: TaskCycleResult | null;
-  stallDetected: boolean;
-  stallReport: StallReport | null;
-  pivotOccurred: boolean;
-  completionJudgment: CompletionJudgment;
-  elapsedMs: number;
-  error: string | null;
-  /** Alerts for milestones that are at_risk or behind (optional) */
-  milestoneAlerts?: Array<{ goalId: string; status: string; pace_ratio: number }>;
-  /** Transfer candidates detected from cross-goal knowledge (suggestion-only, Phase 1) */
-  transfer_candidates?: TransferCandidate[];
-}
-
-export interface LoopResult {
-  goalId: string;
-  totalIterations: number;
-  finalStatus: "completed" | "stalled" | "max_iterations" | "error" | "stopped";
-  iterations: LoopIterationResult[];
-  startedAt: string;
-  completedAt: string;
-}
-
-// ─── Dependencies ───
-
-export interface CoreLoopDeps {
-  stateManager: StateManager;
-  observationEngine: ObservationEngine;
-  gapCalculator: GapCalculatorModule;
-  driveScorer: DriveScorerModule;
-  taskLifecycle: TaskLifecycle;
-  satisficingJudge: SatisficingJudge;
-  stallDetector: StallDetector;
-  strategyManager: StrategyManager;
-  reportingEngine: ReportingEngine;
-  driveSystem: DriveSystem;
-  adapterRegistry: AdapterRegistry;
-  knowledgeManager?: KnowledgeManager;
-  capabilityDetector?: CapabilityDetector;
-  portfolioManager?: PortfolioManager;
-  curiosityEngine?: CuriosityEngine;
-  goalDependencyGraph?: GoalDependencyGraph;
-  goalTreeManager?: GoalTreeManager;
-  stateAggregator?: StateAggregator;
-  treeLoopOrchestrator?: TreeLoopOrchestrator;
-  crossGoalPortfolio?: CrossGoalPortfolio;
-  learningPipeline?: LearningPipeline;
-  knowledgeTransfer?: KnowledgeTransfer;
-  memoryLifecycleManager?: MemoryLifecycleManager;
-  /**
-   * Optional adapter that bridges DriveScorer output to MemoryLifecycleManager.
-   * When provided, CoreLoop calls adapter.update(driveScores) after each drive
-   * scoring step so MemoryLifecycleManager can use live dissatisfaction values
-   * for compression delay and relevance scoring.
-   *
-   * Typical setup (in CLIRunner):
-   *   const adapter = new DriveScoreAdapter();
-   *   const mlm = new MemoryLifecycleManager(baseDir, llm, config, emb, vec, adapter);
-   *   const loop = new CoreLoop({ ..., memoryLifecycleManager: mlm, driveScoreAdapter: adapter });
-   */
-  driveScoreAdapter?: DriveScoreAdapter;
-  logger?: Logger;
-  /** Optional context provider for workspace-aware task generation */
-  contextProvider?: (goalId: string, dimensionName: string) => Promise<string>;
-  /**
-   * Optional progress callback. Called at key phases during each iteration so
-   * callers (e.g. CLIRunner) can print user-friendly progress lines.
-   */
-  onProgress?: (event: ProgressEvent) => void;
-}
-
-export interface ProgressEvent {
-  /** 1-based iteration number */
-  iteration: number;
-  /** Maximum iterations configured */
-  maxIterations: number;
-  /** Current phase label */
-  phase: string;
-  /** Gap aggregate from latest gap calculation (undefined before first gap calc) */
-  gap?: number;
-  /** Short description of the task being executed (undefined outside execute phase) */
-  taskDescription?: string;
-}
-
-// ─── Helpers ───
-
-/**
- * Build DriveContext from goal state.
- * For each dimension, compute hours since last update.
- * Deadline comes from goal.deadline if set.
- */
-export function buildDriveContext(goal: Goal): DriveContext {
-  const timeSinceLastAttempt: Record<string, number> = {};
-  const deadlines: Record<string, number | null> = {};
-  const opportunities: Record<string, { value: number; detected_at: string }> = {};
-
-  const now = Date.now();
-
-  for (const dim of goal.dimensions) {
-    // Calculate hours since last update
-    if (dim.last_updated) {
-      const lastUpdated = new Date(dim.last_updated).getTime();
-      timeSinceLastAttempt[dim.name] = (now - lastUpdated) / (1000 * 60 * 60);
-    } else {
-      // No previous attempt — use a large number to indicate high staleness
-      timeSinceLastAttempt[dim.name] = 168; // 1 week default
-    }
-
-    // Deadline: compute hours remaining from goal.deadline
-    if (goal.deadline) {
-      const deadlineTime = new Date(goal.deadline).getTime();
-      const hoursRemaining = (deadlineTime - now) / (1000 * 60 * 60);
-      deadlines[dim.name] = hoursRemaining;
-    } else {
-      deadlines[dim.name] = null;
-    }
-  }
-
-  return {
-    time_since_last_attempt: timeSinceLastAttempt,
-    deadlines,
-    opportunities,
-  };
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -1063,71 +875,8 @@ export class CoreLoop {
    * Called by run() when treeMode=true.
    */
   async runTreeIteration(rootId: string, loopIndex: number): Promise<LoopIterationResult> {
-    const orchestrator = this.deps.treeLoopOrchestrator!;
-
-    // 0. Auto-decompose if root has no children yet
-    const rootGoalForDecomp = this.deps.stateManager.loadGoal(rootId);
-    if (rootGoalForDecomp && rootGoalForDecomp.children_ids.length === 0 && this.deps.goalTreeManager) {
-      const defaultConfig = { min_specificity: 0.7, max_depth: 3, parallel_loop_limit: 3, auto_prune_threshold: 0.3 };
-      try {
-        this.logger?.info("CoreLoop: auto-decomposing goal tree", { rootId });
-        const decompResult = await this.deps.goalTreeManager.decomposeGoal(rootId, defaultConfig);
-        this.logger?.info("CoreLoop: decomposition complete", { rootId, childCount: decompResult.children.length });
-        await this.deps.treeLoopOrchestrator!.startTreeExecution(rootId, defaultConfig);
-      } catch (err) {
-        this.logger?.warn("CoreLoop: decomposition failed, falling back to flat iteration", { rootId, err });
-      }
-    }
-
-    // 1. Select next node to iterate
-    const selectedNodeId = orchestrator.selectNextNode(rootId);
-
-    // 2. If null, all nodes are completed/paused — check root completion
-    if (selectedNodeId === null) {
-      const rootGoal = this.deps.stateManager.loadGoal(rootId);
-      const isComplete = rootGoal
-        ? (rootGoal.children_ids.length > 0
-            ? this.deps.satisficingJudge.judgeTreeCompletion(rootId)
-            : this.deps.satisficingJudge.isGoalComplete(rootGoal))
-        : { is_complete: false, blocking_dimensions: [], low_confidence_dimensions: [], needs_verification_task: false, checked_at: new Date().toISOString() };
-
-      return {
-        loopIndex,
-        goalId: rootId,
-        gapAggregate: 0,
-        driveScores: [],
-        taskResult: null,
-        stallDetected: false,
-        stallReport: null,
-        pivotOccurred: false,
-        completionJudgment: isComplete,
-        elapsedMs: 0,
-        error: null,
-      };
-    }
-
-    // 3. Run normal iteration on selected node
-    const result = await this.runOneIteration(selectedNodeId, loopIndex);
-
-    // 3b. After each iteration, propagate state upward through parent chain
-    if (this.deps.stateAggregator) {
-      const selectedGoal = this.deps.stateManager.loadGoal(selectedNodeId);
-      let parentId = selectedGoal?.parent_id ?? null;
-      while (parentId !== null) {
-        try {
-          this.deps.stateAggregator.aggregateChildStates(parentId);
-        } catch { break; }
-        const parent = this.deps.stateManager.loadGoal(parentId);
-        parentId = parent?.parent_id ?? null;
-      }
-    }
-
-    // 4. If the node's goal is now completed, call onNodeCompleted
-    if (result.completionJudgment.is_complete) {
-      orchestrator.onNodeCompleted(selectedNodeId);
-    }
-
-    return result;
+    return runTreeIterationImpl(rootId, loopIndex, this.deps, this.config, this.logger,
+      (id, idx) => this.runOneIteration(id, idx));
   }
 
   /**
@@ -1142,50 +891,8 @@ export class CoreLoop {
    * Throws if CrossGoalPortfolio is not injected and multiGoalMode is enabled.
    */
   async runMultiGoalIteration(loopIndex: number): Promise<LoopIterationResult> {
-    if (!this.config.multiGoalMode || !this.config.goalIds || this.config.goalIds.length === 0) {
-      throw new Error(
-        "runMultiGoalIteration requires config.multiGoalMode=true and config.goalIds to be non-empty"
-      );
-    }
-
-    const goalIds = this.config.goalIds;
-
-    // Build allocation map
-    let allocationMap: Map<string, number>;
-
-    if (this.deps.crossGoalPortfolio) {
-      allocationMap = this.deps.crossGoalPortfolio.getAllocationMap(goalIds);
-    } else {
-      // Fall back to equal allocation when CrossGoalPortfolio is not provided
-      const equalShare = 1.0 / goalIds.length;
-      allocationMap = new Map(goalIds.map((id) => [id, equalShare]));
-    }
-
-    // Select next goal + strategy using PortfolioManager
-    if (!this.deps.portfolioManager) {
-      // Without a portfolio manager, round-robin by loopIndex
-      const selectedGoalId = goalIds[loopIndex % goalIds.length]!;
-      return this.runOneIteration(selectedGoalId, loopIndex);
-    }
-
-    const selection = await this.deps.portfolioManager.selectNextStrategyAcrossGoals(
-      goalIds,
-      allocationMap
-    );
-
-    if (selection === null) {
-      // No strategies available — return a no-op result for the first goal
-      const fallbackGoalId = goalIds[0]!;
-      return this.runOneIteration(fallbackGoalId, loopIndex);
-    }
-
-    // Record that a task was dispatched for this goal
-    this.deps.portfolioManager.recordGoalTaskDispatched(selection.goal_id);
-
-    // Run normal iteration for the selected goal
-    const result = await this.runOneIteration(selection.goal_id, loopIndex);
-
-    return result;
+    return runMultiGoalIterationImpl(loopIndex, this.deps, this.config,
+      (id, idx) => this.runOneIteration(id, idx));
   }
 
   /**
