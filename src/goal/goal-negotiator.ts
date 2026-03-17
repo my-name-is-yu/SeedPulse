@@ -34,6 +34,10 @@ import {
   findBestDimensionMatch,
 } from "./goal-validation.js";
 import {
+  decompose as decomposeImpl,
+  decomposeIntoSubgoals as decomposeIntoSubgoalsImpl,
+} from "./goal-decomposer.js";
+import {
   suggestGoals as suggestGoalsImpl,
   filterSuggestions as filterSuggestionsImpl,
   buildCapabilityCheckPrompt,
@@ -187,53 +191,6 @@ ${instruction}
 
 Return a brief, user-facing message (1-3 sentences). Return ONLY the message text, no JSON.`;
 }
-
-function buildSubgoalDecompositionPrompt(parentGoal: Goal): string {
-  const dimensionsList = parentGoal.dimensions
-    .map((d) => `- ${d.label} (${d.name}): target=${JSON.stringify(d.threshold)}`)
-    .join("\n");
-
-  return `Break down this goal into actionable subgoals.
-
-Goal: ${parentGoal.title}
-Description: ${parentGoal.description}
-Dimensions:
-${dimensionsList}
-
-For each subgoal, provide:
-- title: a clear subgoal title
-- description: what needs to be achieved
-- dimensions: array of dimension decompositions (same format as goal dimensions)
-
-Return a JSON array of subgoal objects:
-[
-  {
-    "title": "Subgoal Title",
-    "description": "What to achieve",
-    "dimensions": [
-      {
-        "name": "dimension_name",
-        "label": "Dimension Label",
-        "threshold_type": "min",
-        "threshold_value": 50,
-        "observation_method_hint": "How to measure"
-      }
-    ]
-  }
-]
-
-Return ONLY a JSON array, no other text.`;
-}
-
-// ─── Subgoal schema for LLM parsing ───
-
-const SubgoalLLMSchema = z.object({
-  title: z.string(),
-  description: z.string(),
-  dimensions: z.array(DimensionDecompositionSchema),
-});
-
-const SubgoalListSchema = z.array(SubgoalLLMSchema);
 
 // ─── Qualitative feasibility schema for LLM parsing ───
 
@@ -566,102 +523,13 @@ export class GoalNegotiator {
     subgoals: Goal[];
     rejectedSubgoals: Array<{ description: string; reason: string }>;
   }> {
-    // Step 1: LLM generates subgoals
-    const prompt = buildSubgoalDecompositionPrompt(parentGoal);
-    const response = await this.llmClient.sendMessage(
-      [{ role: "user", content: prompt }],
-      { temperature: 0 }
-    );
-
-    const subgoalSpecs = this.llmClient.parseJSON(response.content, SubgoalListSchema);
-
-    const subgoals: Goal[] = [];
-    const rejectedSubgoals: Array<{ description: string; reason: string }> = [];
-    let hasCriticalRejection = false;
-
-    // Step 2: Ethics check each subgoal
-    for (const spec of subgoalSpecs) {
-      const subgoalId = randomUUID();
-      const verdict = await this.ethicsGate.check(
-        "subgoal",
-        subgoalId,
-        spec.description,
-        `Parent goal: ${parentGoal.title}`
-      );
-
-      if (verdict.verdict === "reject") {
-        rejectedSubgoals.push({
-          description: spec.title,
-          reason: verdict.reasoning,
-        });
-        hasCriticalRejection = true;
-        continue;
-      }
-
-      const now = new Date().toISOString();
-      const dimensions = spec.dimensions.map(decompositionToDimension);
-
-      const subgoal = GoalSchema.parse({
-        id: subgoalId,
-        parent_id: goalId,
-        node_type: "subgoal",
-        title: spec.title,
-        description: spec.description,
-        status: "active",
-        dimensions,
-        gap_aggregation: "max",
-        dimension_mapping: null,
-        constraints: [],
-        children_ids: [],
-        target_date: null,
-        origin: "decomposition",
-        pace_snapshot: null,
-        deadline: null,
-        confidence_flag: verdict.verdict === "flag" ? "medium" : "high",
-        user_override: false,
-        feasibility_note: null,
-        uncertainty_weight: 1.0,
-        created_at: now,
-        updated_at: now,
-      });
-
-      subgoals.push(subgoal);
-      this.stateManager.saveGoal(subgoal);
-    }
-
-    // Phase 2: Auto-propose dimension mappings
-    if (this.satisficingJudge) {
-      for (const subgoal of subgoals) {
-        try {
-          const proposals = await this.satisficingJudge.proposeDimensionMapping(
-            subgoal.dimensions.map(d => ({ name: d.name })),
-            parentGoal.dimensions.map(d => ({ name: d.name }))
-          );
-          // Apply proposals to subgoal dimensions that don't already have mappings
-          for (const proposal of proposals) {
-            const dim = subgoal.dimensions.find(d => d.name === proposal.subgoal_dimension);
-            if (dim && !dim.dimension_mapping) {
-              dim.dimension_mapping = {
-                parent_dimension: proposal.parent_dimension,
-                aggregation: proposal.suggested_aggregation,
-              };
-            }
-          }
-          if (proposals.length > 0) {
-            await this.stateManager.saveGoal(subgoal);
-          }
-        } catch {
-          // Non-critical: auto-mapping failure should not block decomposition
-        }
-      }
-    }
-
-    // Step 4: If critical subgoal rejected, warn (but still return what we can)
-    if (hasCriticalRejection && subgoals.length === 0) {
-      // All subgoals rejected — caller should consider rejecting parent goal
-    }
-
-    return { subgoals, rejectedSubgoals };
+    return decomposeImpl(goalId, parentGoal, {
+      stateManager: this.stateManager,
+      llmClient: this.llmClient,
+      ethicsGate: this.ethicsGate,
+      satisficingJudge: this.satisficingJudge,
+      goalTreeManager: this.goalTreeManager,
+    });
   }
 
   // ─── renegotiate() ───
@@ -930,23 +798,17 @@ export class GoalNegotiator {
     goalId: string,
     config?: GoalDecompositionConfig
   ): Promise<DecompositionResult | null> {
-    if (this.goalTreeManager === undefined) {
-      return null;
-    }
-
-    const goal = this.stateManager.loadGoal(goalId);
-    if (!goal) {
-      return null;
-    }
-
-    const resolvedConfig: GoalDecompositionConfig = config ?? {
-      max_depth: 5,
-      min_specificity: 0.7,
-      auto_prune_threshold: 0.3,
-      parallel_loop_limit: 3,
-    };
-
-    return this.goalTreeManager.decomposeGoal(goalId, resolvedConfig);
+    return decomposeIntoSubgoalsImpl(
+      goalId,
+      {
+        stateManager: this.stateManager,
+        llmClient: this.llmClient,
+        ethicsGate: this.ethicsGate,
+        satisficingJudge: this.satisficingJudge,
+        goalTreeManager: this.goalTreeManager,
+      },
+      config
+    );
   }
 
   // ─── suggestGoals() ───
