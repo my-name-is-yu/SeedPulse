@@ -3,10 +3,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { StateManager } from "../src/state-manager.js";
-import { GoalDependencyGraph } from "../src/goal-dependency-graph.js";
-import { VectorIndex } from "../src/vector-index.js";
-import { MockEmbeddingClient } from "../src/embedding-client.js";
-import { CrossGoalPortfolio } from "../src/cross-goal-portfolio.js";
+import { GoalDependencyGraph } from "../src/goal/goal-dependency-graph.js";
+import { VectorIndex } from "../src/knowledge/vector-index.js";
+import { MockEmbeddingClient } from "../src/knowledge/embedding-client.js";
+import { CrossGoalPortfolio } from "../src/strategy/cross-goal-portfolio.js";
 import { GoalSchema } from "../src/types/goal.js";
 import type { Goal } from "../src/types/goal.js";
 import type {

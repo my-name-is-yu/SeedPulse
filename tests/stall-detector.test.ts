@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { StateManager } from "../src/state-manager.js";
-import { StallDetector } from "../src/stall-detector.js";
+import { StallDetector } from "../src/drive/stall-detector.js";
 import type { StallState } from "../src/types/stall.js";
 
 // ─── Test helpers ───
@@ -70,16 +70,23 @@ describe("checkDimensionStall", () => {
     expect(result).toBeNull();
   });
 
-  it("uses N=3 for 'immediate' feedback category", () => {
-    // N=3 means need 4 entries; flat over 4 entries → stall
-    const history = makeGapHistory([0.5, 0.5, 0.5, 0.5]);
+  it("uses N=6 for 'immediate' feedback category", () => {
+    // N=6 means need 7 entries; flat over 7 entries → stall
+    const history = makeGapHistory([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]);
     const result = detector.checkDimensionStall("goal-1", "dim-a", history, "immediate");
     expect(result).not.toBeNull();
     expect(result!.stall_type).toBe("dimension_stall");
   });
 
-  it("uses N=3 for 'immediate': improving over 4 entries → no stall", () => {
-    const history = makeGapHistory([0.5, 0.4, 0.3, 0.2]);
+  it("uses N=6 for 'immediate': 4 entries is insufficient history → no stall", () => {
+    // N=6 → need 7 entries; 4 entries is not enough data
+    const history = makeGapHistory([0.5, 0.5, 0.5, 0.5]);
+    const result = detector.checkDimensionStall("goal-1", "dim-a", history, "immediate");
+    expect(result).toBeNull();
+  });
+
+  it("uses N=6 for 'immediate': improving over 7 entries → no stall", () => {
+    const history = makeGapHistory([0.5, 0.45, 0.40, 0.35, 0.30, 0.25, 0.20]);
     const result = detector.checkDimensionStall("goal-1", "dim-a", history, "immediate");
     expect(result).toBeNull();
   });
@@ -110,6 +117,37 @@ describe("checkDimensionStall", () => {
     const history = makeGapHistory([0.5, 0.5, 0.5, 0.5, 0.5, 0.5]);
     const result = detector.checkDimensionStall("goal-1", "dim-a", history, "unknown_category");
     expect(result).not.toBeNull();
+  });
+
+  it("should not stall within 5 iterations if no progress (new 6-iteration threshold)", () => {
+    // Default category N=5 → need 6 entries to detect stall.
+    // 5 flat entries (indices 0-4) = only 5 entries → insufficient history → no stall.
+    const history = makeGapHistory([0.5, 0.5, 0.5, 0.5, 0.5]);
+    const result = detector.checkDimensionStall("goal-1", "dim-a", history);
+    expect(result).toBeNull();
+  });
+
+  it("should stall after 6 iterations of no progress", () => {
+    // Default category N=5 → need 6 entries (N+1=6) → 6 flat entries → stall.
+    const history = makeGapHistory([0.5, 0.5, 0.5, 0.5, 0.5, 0.5]);
+    const result = detector.checkDimensionStall("goal-1", "dim-a", history);
+    expect(result).not.toBeNull();
+    expect(result!.stall_type).toBe("dimension_stall");
+  });
+
+  it("does not reset stall detection for trivial improvement below 0.05 delta", () => {
+    // Improvement of only 0.001 (from 0.5 to 0.499) — below MIN_IMPROVEMENT_DELTA → still stall
+    const history = makeGapHistory([0.5, 0.5, 0.5, 0.5, 0.5, 0.499]);
+    const result = detector.checkDimensionStall("goal-1", "dim-a", history);
+    expect(result).not.toBeNull();
+    expect(result!.stall_type).toBe("dimension_stall");
+  });
+
+  it("resets stall detection for meaningful improvement of >= 0.05 delta", () => {
+    // Improvement of 0.10 (from 0.5 to 0.40) — at or above MIN_IMPROVEMENT_DELTA → no stall
+    const history = makeGapHistory([0.5, 0.5, 0.5, 0.5, 0.5, 0.40]);
+    const result = detector.checkDimensionStall("goal-1", "dim-a", history);
+    expect(result).toBeNull();
   });
 });
 
@@ -587,11 +625,11 @@ describe("StallDetector CharacterConfig integration", () => {
     expect(() => new StallDetector(stateManager2)).not.toThrow();
   });
 
-  it("default config (stall_flexibility=1) uses original N values — immediate=3", () => {
-    // stall_flexibility=1 → multiplier=1.0 → immediate N=3 (same as before)
+  it("default config (stall_flexibility=1) uses N=6 for immediate category", () => {
+    // stall_flexibility=1 → multiplier=1.0 → immediate N=6 (need 7 entries)
     const detectorDefault = new StallDetector(stateManager2);
-    // 4 flat entries → stall with immediate (N=3, need 4 entries)
-    const history = makeGapHistory([0.5, 0.5, 0.5, 0.5]);
+    // 7 flat entries → stall with immediate (N=6, need 7 entries)
+    const history = makeGapHistory([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]);
     const result = detectorDefault.checkDimensionStall("goal-1", "dim-a", history, "immediate");
     expect(result).not.toBeNull();
     expect(result!.stall_type).toBe("dimension_stall");
@@ -611,24 +649,24 @@ describe("StallDetector CharacterConfig integration", () => {
       communication_directness: 3,
       proactivity_level: 2,
     });
-    // immediate N=3 → need 4 entries
-    const history = makeGapHistory([0.5, 0.5, 0.5, 0.5]);
+    // immediate N=6 → need 7 entries
+    const history = makeGapHistory([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]);
     expect(detectorFlex1.checkDimensionStall("g", "d", history, "immediate")).not.toBeNull();
   });
 
-  it("stall_flexibility=5 → multiplier=2.0 → immediate N=6 (need 7 entries)", () => {
+  it("stall_flexibility=5 → multiplier=2.0 → immediate N=12 (need 13 entries)", () => {
     const detectorFlex5 = new StallDetector(stateManager2, {
       caution_level: 2,
       stall_flexibility: 5,
       communication_directness: 3,
       proactivity_level: 2,
     });
-    // immediate base N=3 → adjusted N=round(3*2.0)=6 → need 7 entries
-    // 4 flat entries: not enough data → null
-    const shortHistory = makeGapHistory([0.5, 0.5, 0.5, 0.5]);
+    // immediate base N=6 → adjusted N=round(6*2.0)=12 → need 13 entries
+    // 7 flat entries: not enough data → null
+    const shortHistory = makeGapHistory(new Array(7).fill(0.5));
     expect(detectorFlex5.checkDimensionStall("g", "d", shortHistory, "immediate")).toBeNull();
-    // 7 flat entries: stall detected
-    const longHistory = makeGapHistory([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]);
+    // 13 flat entries: stall detected
+    const longHistory = makeGapHistory(new Array(13).fill(0.5));
     expect(detectorFlex5.checkDimensionStall("g", "d", longHistory, "immediate")).not.toBeNull();
   });
 
@@ -708,8 +746,8 @@ describe("StallDetector CharacterConfig integration", () => {
       communication_directness: 3,
       proactivity_level: 2,
     });
-    // Both should behave identically for immediate stall (N=3, need 4 entries)
-    const history = makeGapHistory([0.5, 0.5, 0.5, 0.5]);
+    // Both should behave identically for immediate stall (N=6, need 7 entries)
+    const history = makeGapHistory([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]);
     const r1 = detectorDefault.checkDimensionStall("g", "d", history, "immediate");
     const r2 = detectorExplicit.checkDimensionStall("g", "d", history, "immediate");
     expect(r1).not.toBeNull();

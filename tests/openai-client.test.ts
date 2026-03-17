@@ -21,7 +21,7 @@ vi.mock("openai", () => {
   };
 });
 
-import { OpenAILLMClient } from "../src/openai-client.js";
+import { OpenAILLMClient } from "../src/llm/openai-client.js";
 
 // ─── Helpers ───
 

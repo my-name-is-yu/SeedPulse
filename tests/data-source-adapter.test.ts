@@ -7,7 +7,7 @@ import {
   FileDataSourceAdapter,
   HttpApiDataSourceAdapter,
   DataSourceRegistry,
-} from "../src/data-source-adapter.js";
+} from "../src/observation/data-source-adapter.js";
 import type { DataSourceConfig } from "../src/types/data-source.js";
 
 // ─── Helpers ───

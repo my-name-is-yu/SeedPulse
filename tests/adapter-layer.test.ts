@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { AdapterRegistry } from "../src/adapter-layer.js";
-import type { IAdapter, AgentTask, AgentResult } from "../src/adapter-layer.js";
+import { AdapterRegistry } from "../src/execution/adapter-layer.js";
+import type { IAdapter, AgentTask, AgentResult } from "../src/execution/adapter-layer.js";
 import { ClaudeAPIAdapter } from "../src/adapters/claude-api.js";
 import { ClaudeCodeCLIAdapter } from "../src/adapters/claude-code-cli.js";
-import { MockLLMClient } from "../src/llm-client.js";
+import { MockLLMClient } from "../src/llm/llm-client.js";
 
 // ─── Helpers ───
 

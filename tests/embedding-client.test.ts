@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   MockEmbeddingClient,
   cosineSimilarity,
-} from "../src/embedding-client.js";
+} from "../src/knowledge/embedding-client.js";
 
 describe("MockEmbeddingClient", () => {
   it("embed returns vector with correct dimensions (default 768)", async () => {

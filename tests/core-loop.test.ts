@@ -13,13 +13,13 @@ import {
   type LoopIterationResult,
 } from "../src/core-loop.js";
 import { StateManager } from "../src/state-manager.js";
-import type { ObservationEngine } from "../src/observation-engine.js";
-import type { TaskLifecycle, TaskCycleResult } from "../src/task-lifecycle.js";
-import type { SatisficingJudge } from "../src/satisficing-judge.js";
-import type { StallDetector } from "../src/stall-detector.js";
-import type { StrategyManager } from "../src/strategy-manager.js";
-import type { DriveSystem } from "../src/drive-system.js";
-import type { AdapterRegistry, IAdapter } from "../src/adapter-layer.js";
+import type { ObservationEngine } from "../src/observation/observation-engine.js";
+import type { TaskLifecycle, TaskCycleResult } from "../src/execution/task-lifecycle.js";
+import type { SatisficingJudge } from "../src/drive/satisficing-judge.js";
+import type { StallDetector } from "../src/drive/stall-detector.js";
+import type { StrategyManager } from "../src/strategy/strategy-manager.js";
+import type { DriveSystem } from "../src/drive/drive-system.js";
+import type { AdapterRegistry, IAdapter } from "../src/execution/adapter-layer.js";
 import type { Goal } from "../src/types/goal.js";
 import type { GapVector } from "../src/types/gap.js";
 import type { CompletionJudgment } from "../src/types/satisficing.js";
@@ -2342,7 +2342,7 @@ describe("CoreLoop tree mode (14B)", () => {
 });
 
 // ─── Tree Mode Tests (14C) ───
-import type { TreeLoopOrchestrator } from "../src/tree-loop-orchestrator.js";
+import type { TreeLoopOrchestrator } from "../src/goal/tree-loop-orchestrator.js";
 
 describe("CoreLoop tree mode (14C)", () => {
   let tmpDir: string;
@@ -2573,7 +2573,7 @@ describe("CoreLoop tree mode (14C)", () => {
       const memoryLifecycleManager = {
         onGoalClose: vi.fn().mockResolvedValue(undefined),
       };
-      deps.memoryLifecycleManager = memoryLifecycleManager as unknown as import("../src/memory-lifecycle.js").MemoryLifecycleManager;
+      deps.memoryLifecycleManager = memoryLifecycleManager as unknown as import("../src/knowledge/memory-lifecycle.js").MemoryLifecycleManager;
 
       const loop = new CoreLoop(deps, { maxIterations: 10, delayBetweenLoopsMs: 0 });
       const result = await loop.run("goal-1");

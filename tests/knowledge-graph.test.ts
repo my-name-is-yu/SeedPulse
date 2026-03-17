@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as os from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { KnowledgeGraph } from "../src/knowledge-graph.js";
+import { KnowledgeGraph } from "../src/knowledge/knowledge-graph.js";
 
 // ─── Helpers ───
 

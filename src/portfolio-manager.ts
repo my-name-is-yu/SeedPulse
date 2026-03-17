@@ -1,4 +1,4 @@
-import { StrategyManager } from "./strategy-manager.js";
+import { StrategyManager } from "./strategy/strategy-manager.js";
 import { StateManager } from "./state-manager.js";
 import { StrategySchema, PortfolioSchema } from "./types/strategy.js";
 import type { Strategy, Portfolio, WaitStrategy } from "./types/strategy.js";

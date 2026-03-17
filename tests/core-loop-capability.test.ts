@@ -11,14 +11,14 @@ import {
   type ReportingEngine,
 } from "../src/core-loop.js";
 import { StateManager } from "../src/state-manager.js";
-import type { ObservationEngine } from "../src/observation-engine.js";
-import type { TaskLifecycle, TaskCycleResult } from "../src/task-lifecycle.js";
-import type { SatisficingJudge } from "../src/satisficing-judge.js";
-import type { StallDetector } from "../src/stall-detector.js";
-import type { StrategyManager } from "../src/strategy-manager.js";
-import type { DriveSystem } from "../src/drive-system.js";
-import type { AdapterRegistry, IAdapter } from "../src/adapter-layer.js";
-import type { CapabilityDetector } from "../src/capability-detector.js";
+import type { ObservationEngine } from "../src/observation/observation-engine.js";
+import type { TaskLifecycle, TaskCycleResult } from "../src/execution/task-lifecycle.js";
+import type { SatisficingJudge } from "../src/drive/satisficing-judge.js";
+import type { StallDetector } from "../src/drive/stall-detector.js";
+import type { StrategyManager } from "../src/strategy/strategy-manager.js";
+import type { DriveSystem } from "../src/drive/drive-system.js";
+import type { AdapterRegistry, IAdapter } from "../src/execution/adapter-layer.js";
+import type { CapabilityDetector } from "../src/observation/capability-detector.js";
 import type { Goal } from "../src/types/goal.js";
 import type { GapVector } from "../src/types/gap.js";
 import type { CompletionJudgment } from "../src/types/satisficing.js";

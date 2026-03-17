@@ -1,5 +1,5 @@
 import type { ZodSchema } from "zod";
-import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../../src/llm-client.js";
+import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../../src/llm/llm-client.js";
 
 // ─── JSON Extraction (mirrors extractJSON in src/llm-client.ts exactly) ───
 

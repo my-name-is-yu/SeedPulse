@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { DriveScoreAdapter, MemoryLifecycleManager } from "../src/memory-lifecycle.js";
+import { DriveScoreAdapter, MemoryLifecycleManager } from "../src/knowledge/memory-lifecycle.js";
 import { createMockLLMClient } from "./helpers/mock-llm.js";
 
 // ─── Helpers ───

@@ -3,7 +3,7 @@ import * as http from "node:http";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { EventServer } from "../src/event-server.js";
+import { EventServer } from "../src/runtime/event-server.js";
 import type { MotivaEvent } from "../src/types/drive.js";
 
 // ─── Helpers ───

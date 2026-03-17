@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as http from "node:http";
-import { NotificationDispatcher } from "../src/notification-dispatcher.js";
+import { NotificationDispatcher } from "../src/runtime/notification-dispatcher.js";
 import type { Report } from "../src/types/report.js";
 import type { NotificationConfig } from "../src/types/notification.js";
 

@@ -19,7 +19,7 @@ import { createMockLLMClient } from "./helpers/mock-llm.js";
 // ─── Module mocks ─────────────────────────────────────────────────────────────
 // Only mock modules that would make real network/process calls.
 
-vi.mock("../src/llm-client.js", () => ({
+vi.mock("../src/llm/llm-client.js", () => ({
   LLMClient: vi.fn().mockImplementation(() => ({})),
   MockLLMClient: vi.fn(),
 }));
@@ -183,7 +183,7 @@ describe("goal add with real GoalNegotiator", () => {
     // CLIRunner creates a real LLMClient via the mocked constructor — we need
     // to inject our mock before construction. We do this by overriding the
     // LLMClient mock implementation for this test.
-    const { LLMClient } = await import("../src/llm-client.js");
+    const { LLMClient } = await import("../src/llm/llm-client.js");
     const capabilityCheck = JSON.stringify({ gaps: [] });
     const mockLLM = createMockLLMClient([
       ethicsPass,
@@ -217,7 +217,7 @@ describe("goal add with real GoalNegotiator", () => {
       reasoning: "Goal is harmful",
     });
 
-    const { LLMClient } = await import("../src/llm-client.js");
+    const { LLMClient } = await import("../src/llm/llm-client.js");
     const mockLLM = createMockLLMClient([ethicsReject]);
     vi.mocked(LLMClient).mockImplementation(() => mockLLM as unknown as InstanceType<typeof LLMClient>);
 
@@ -252,7 +252,7 @@ describe("goal add with real GoalNegotiator", () => {
     });
 
     const capabilityCheck = JSON.stringify({ gaps: [] });
-    const { LLMClient } = await import("../src/llm-client.js");
+    const { LLMClient } = await import("../src/llm/llm-client.js");
     const mockLLM = createMockLLMClient([
       ethicsPass,
       decomposition,
@@ -327,7 +327,7 @@ describe("run subcommand with real CoreLoop (max_iterations=1)", () => {
       criteria_total: 1,
     });
 
-    const { LLMClient } = await import("../src/llm-client.js");
+    const { LLMClient } = await import("../src/llm/llm-client.js");
     // Provide many responses since CoreLoop may make multiple LLM calls
     const mockLLM = createMockLLMClient([
       observationResponse,
@@ -358,7 +358,7 @@ describe("run subcommand with real CoreLoop (max_iterations=1)", () => {
   });
 
   it("exits with code 1 when the goal ID does not exist in state", async () => {
-    const { LLMClient } = await import("../src/llm-client.js");
+    const { LLMClient } = await import("../src/llm/llm-client.js");
     const mockLLM = createMockLLMClient([]);
     vi.mocked(LLMClient).mockImplementation(() => mockLLM as unknown as InstanceType<typeof LLMClient>);
 

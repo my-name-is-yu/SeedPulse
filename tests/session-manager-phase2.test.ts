@@ -3,8 +3,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { StateManager } from "../src/state-manager.js";
-import { SessionManager } from "../src/session-manager.js";
-import { GoalDependencyGraph } from "../src/goal-dependency-graph.js";
+import { SessionManager } from "../src/execution/session-manager.js";
+import { GoalDependencyGraph } from "../src/goal/goal-dependency-graph.js";
 import type { ContextSlot } from "../src/types/session.js";
 
 // ─── Helpers ───

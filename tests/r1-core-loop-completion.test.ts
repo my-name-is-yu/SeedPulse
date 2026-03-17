@@ -17,12 +17,12 @@ import {
   type CoreLoopDeps,
 } from "../src/core-loop.js";
 import { StateManager } from "../src/state-manager.js";
-import type { IAdapter } from "../src/adapter-layer.js";
+import type { IAdapter } from "../src/execution/adapter-layer.js";
 import type { Goal } from "../src/types/goal.js";
 import type { CompletionJudgment } from "../src/types/satisficing.js";
 import type { GapVector } from "../src/types/gap.js";
 import type { DriveScore } from "../src/types/drive.js";
-import type { TaskCycleResult } from "../src/task-lifecycle.js";
+import type { TaskCycleResult } from "../src/execution/task-lifecycle.js";
 
 // ─── Helpers ───
 

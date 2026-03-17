@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { LoopController, calcDimensionProgress } from "../../src/tui/use-loop.js";
 import { StateManager } from "../../src/state-manager.js";
 import type { CoreLoop, LoopResult } from "../../src/core-loop.js";
-import type { TrustManager } from "../../src/trust-manager.js";
+import type { TrustManager } from "../../src/traits/trust-manager.js";
 import type { Goal } from "../../src/types/goal.js";
 import type { Threshold } from "../../src/types/core.js";
 

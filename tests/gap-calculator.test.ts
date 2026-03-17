@@ -6,7 +6,7 @@ import {
   calculateDimensionGap,
   calculateGapVector,
   aggregateGaps,
-} from "../src/gap-calculator.js";
+} from "../src/drive/gap-calculator.js";
 import type { Threshold } from "../src/types/core.js";
 import type { Dimension } from "../src/types/goal.js";
 

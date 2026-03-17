@@ -2,13 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { ObservationEngine } from "../src/observation-engine.js";
+import { ObservationEngine } from "../src/observation/observation-engine.js";
 import { StateManager } from "../src/state-manager.js";
 import type { Goal } from "../src/types/goal.js";
 import type { ObservationLogEntry } from "../src/types/state.js";
 import type { ObservationLayer, ObservationMethod, ObservationTrigger } from "../src/types/core.js";
 import type { KnowledgeGapSignal } from "../src/types/knowledge.js";
-import type { IDataSourceAdapter } from "../src/data-source-adapter.js";
+import type { IDataSourceAdapter } from "../src/observation/data-source-adapter.js";
 import type { DataSourceConfig } from "../src/types/data-source.js";
 
 // ─── Helpers ───

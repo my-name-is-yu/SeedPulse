@@ -1,0 +1,1032 @@
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import type { ILLMClient } from "../llm/llm-client.js";
+import { extractJSON } from "../llm/llm-client.js";
+import type { VectorIndex } from "./vector-index.js";
+import type { StateManager } from "../state-manager.js";
+import {
+  LearningTriggerSchema,
+  LearnedPatternSchema,
+  LearnedPatternTypeEnum,
+  FeedbackEntrySchema,
+  FeedbackTargetStepEnum,
+  LearningPipelineConfigSchema,
+  StructuralFeedbackSchema,
+  StructuralFeedbackTypeEnum,
+  CrossGoalPatternSchema,
+} from "../types/learning.js";
+import type {
+  LearningTrigger,
+  LearnedPattern,
+  FeedbackEntry,
+  FeedbackTargetStep,
+  LearningPipelineConfig,
+  StructuralFeedback,
+  StructuralFeedbackType,
+  ParameterTuning,
+  FeedbackAggregation,
+  CrossGoalPattern,
+  PatternSharingResult,
+} from "../types/learning.js";
+import type { StallReport } from "../types/stall.js";
+
+// ─── LLM Response Schemas ───
+
+const TripletSchema = z.object({
+  state_context: z.string(),
+  action_taken: z.string(),
+  outcome: z.string(),
+  gap_delta: z.number(),
+});
+type Triplet = z.infer<typeof TripletSchema>;
+
+const TripletsResponseSchema = z.object({
+  triplets: z.array(TripletSchema),
+});
+
+const PatternItemSchema = z.object({
+  description: z.string(),
+  pattern_type: LearnedPatternTypeEnum,
+  action_group: z.string(),
+  applicable_domains: z.array(z.string()).default([]),
+  occurrence_count: z.number().int().min(0),
+  consistent_count: z.number().int().min(0),
+  total_count: z.number().int().min(1),
+  is_specific: z.boolean(),
+});
+
+const PatternsResponseSchema = z.object({
+  patterns: z.array(PatternItemSchema),
+});
+
+// ─── Prompt Builders ───
+
+function buildExtractionPrompt(
+  trigger: LearningTrigger,
+  logs: unknown
+): string {
+  return `Analyze the experience logs for goal "${trigger.goal_id}" and extract state→action→outcome triplets.
+
+Trigger type: ${trigger.type}
+Context: ${trigger.context}
+Timestamp: ${trigger.timestamp}
+
+Experience logs:
+${JSON.stringify(logs, null, 2)}
+
+Extract concrete triplets describing what happened. Each triplet must include:
+- state_context: the observable state when the action was taken
+- action_taken: a specific, concrete action that was executed
+- outcome: what actually happened as a result
+- gap_delta: change in goal gap (-1.0 to 1.0, negative means gap reduced/improved)
+
+IMPORTANT: Only include triplets where action_taken describes a specific, concrete action.
+Examples of ACCEPTED actions: "reduced task scope to 3 steps", "added prerequisite check at start", "estimated effort at 1.5x"
+Examples of REJECTED actions: "did something better", "made improvements", "tried harder"
+
+Output JSON:
+{
+  "triplets": [
+    {
+      "state_context": "<specific state description>",
+      "action_taken": "<concrete specific action>",
+      "outcome": "<measurable outcome>",
+      "gap_delta": <number -1.0 to 1.0>
+    }
+  ]
+}
+
+Return ONLY the JSON object, no other text.`;
+}
+
+function buildPatternizationPrompt(triplets: Triplet[]): string {
+  return `Analyze the following state→action→outcome triplets and identify repeating patterns.
+
+Triplets:
+${JSON.stringify(triplets, null, 2)}
+
+For each group of similar actions, create a pattern entry. Each pattern must have:
+- description: a concrete, actionable description (must specify what to do exactly)
+- pattern_type: one of "observation_accuracy", "strategy_selection", "scope_sizing", "task_generation"
+- action_group: the common action theme across the grouped triplets
+- applicable_domains: list of domains where this pattern applies (infer from context)
+- occurrence_count: how many triplets have this action group
+- consistent_count: how many of those triplets showed consistent outcome direction (all improving or all worsening)
+- total_count: total number of triplets analyzed
+- is_specific: true if description is concrete enough to act on directly (false for vague descriptions like "do better")
+
+Pattern type mapping:
+- "observation_accuracy": patterns about how well observations matched reality
+- "strategy_selection": patterns about which strategies worked/failed in which contexts
+- "scope_sizing": patterns about task scope, size, or granularity
+- "task_generation": patterns about task structure, format, or prerequisites
+
+Only include patterns where is_specific = true AND occurrence_count >= 2.
+
+Output JSON:
+{
+  "patterns": [
+    {
+      "description": "<concrete actionable description>",
+      "pattern_type": "<type>",
+      "action_group": "<common action theme>",
+      "applicable_domains": ["<domain1>"],
+      "occurrence_count": <int>,
+      "consistent_count": <int>,
+      "total_count": <int>,
+      "is_specific": <boolean>
+    }
+  ]
+}
+
+Return ONLY the JSON object, no other text.`;
+}
+
+// ─── LearningPipeline ───
+
+/**
+ * LearningPipeline extracts patterns from goal execution logs and
+ * applies feedback to future iterations via SessionManager context injection.
+ *
+ * File layout:
+ *   <base>/learning/<goal_id>_logs.json
+ *   <base>/learning/<goal_id>_patterns.json
+ *   <base>/learning/<goal_id>_feedback.json
+ */
+export class LearningPipeline {
+  private readonly config: LearningPipelineConfig;
+
+  constructor(
+    private readonly llmClient: ILLMClient,
+    private readonly vectorIndex: VectorIndex | null,
+    private readonly stateManager: StateManager,
+    config?: LearningPipelineConfig
+  ) {
+    this.config = config ?? LearningPipelineConfigSchema.parse({});
+  }
+
+  // ─── Trigger Handlers ───
+
+  /**
+   * Called when a goal dimension reaches a milestone threshold.
+   */
+  async onMilestoneReached(
+    goalId: string,
+    milestoneContext: string
+  ): Promise<LearnedPattern[]> {
+    const trigger = LearningTriggerSchema.parse({
+      type: "milestone_reached",
+      goal_id: goalId,
+      context: milestoneContext,
+      timestamp: new Date().toISOString(),
+    });
+    const patterns = await this.analyzeLogs(trigger);
+    if (patterns.length > 0) {
+      this.generateFeedback(patterns);
+    }
+    return patterns;
+  }
+
+  /**
+   * Called when a stall is detected for a goal.
+   */
+  async onStallDetected(
+    goalId: string,
+    stallInfo: StallReport
+  ): Promise<LearnedPattern[]> {
+    const trigger = LearningTriggerSchema.parse({
+      type: "stall_detected",
+      goal_id: goalId,
+      context: JSON.stringify(stallInfo),
+      timestamp: new Date().toISOString(),
+    });
+    const patterns = await this.analyzeLogs(trigger);
+    if (patterns.length > 0) {
+      this.generateFeedback(patterns);
+    }
+    return patterns;
+  }
+
+  /**
+   * Called during periodic review of a goal.
+   */
+  async onPeriodicReview(goalId: string): Promise<LearnedPattern[]> {
+    const trigger = LearningTriggerSchema.parse({
+      type: "periodic_review",
+      goal_id: goalId,
+      context: `Periodic review at ${new Date().toISOString()}`,
+      timestamp: new Date().toISOString(),
+    });
+    const patterns = await this.analyzeLogs(trigger);
+    if (patterns.length > 0) {
+      this.generateFeedback(patterns);
+    }
+    return patterns;
+  }
+
+  /**
+   * Called when a goal is marked as completed.
+   * Also triggers cross-goal pattern sharing if enabled.
+   */
+  async onGoalCompleted(goalId: string): Promise<LearnedPattern[]> {
+    const trigger = LearningTriggerSchema.parse({
+      type: "goal_completed",
+      goal_id: goalId,
+      context: `Goal ${goalId} completed at ${new Date().toISOString()}`,
+      timestamp: new Date().toISOString(),
+    });
+    const patterns = await this.analyzeLogs(trigger);
+    if (patterns.length > 0) {
+      this.generateFeedback(patterns);
+      // Share patterns across goals if enabled
+      if (this.config.cross_goal_sharing_enabled) {
+        for (const pattern of patterns) {
+          try {
+            await this.sharePatternAcrossGoals(pattern.pattern_id);
+          } catch {
+            // non-fatal: sharing failure should not block completion handling
+          }
+        }
+      }
+    }
+    return patterns;
+  }
+
+  // ─── Analysis Pipeline ───
+
+  /**
+   * Core analysis pipeline: reads logs, extracts triplets via LLM,
+   * detects patterns, filters by confidence, and persists results.
+   */
+  async analyzeLogs(trigger: LearningTrigger): Promise<LearnedPattern[]> {
+    // 1. Load experience logs
+    const logsKey = `learning/${trigger.goal_id}_logs.json`;
+    const rawLogs = this.stateManager.readRaw(logsKey);
+    if (!rawLogs) {
+      return [];
+    }
+
+    // 2. Stage 1: Extract triplets via LLM
+    let triplets: Triplet[];
+    try {
+      const extractionPrompt = buildExtractionPrompt(trigger, rawLogs);
+      const extractionResponse = await this.llmClient.sendMessage(
+        [{ role: "user", content: extractionPrompt }],
+        { max_tokens: 2048 }
+      );
+      const extractionJson = extractJSON(extractionResponse.content);
+      const extractionRaw = JSON.parse(extractionJson) as unknown;
+      const extractionParsed = TripletsResponseSchema.parse(extractionRaw);
+      triplets = extractionParsed.triplets;
+    } catch {
+      // LLM failure or parse failure — return empty (non-fatal)
+      return [];
+    }
+
+    if (triplets.length === 0) {
+      return [];
+    }
+
+    // 3. Stage 2: Patternize triplets via LLM
+    let patternItems: z.infer<typeof PatternItemSchema>[];
+    try {
+      const patternizationPrompt = buildPatternizationPrompt(triplets);
+      const patternizationResponse = await this.llmClient.sendMessage(
+        [{ role: "user", content: patternizationPrompt }],
+        { max_tokens: 2048 }
+      );
+      const patternizationJson = extractJSON(patternizationResponse.content);
+      const patternizationRaw = JSON.parse(patternizationJson) as unknown;
+      const patternizationParsed = PatternsResponseSchema.parse(patternizationRaw);
+      patternItems = patternizationParsed.patterns.filter((p) => p.is_specific);
+    } catch {
+      // LLM failure or parse failure — return empty (non-fatal)
+      return [];
+    }
+
+    // 4. Compute confidence (TypeScript-side) and filter
+    const now = new Date().toISOString();
+    const newPatterns: LearnedPattern[] = [];
+
+    for (const item of patternItems) {
+      const occurrenceFrequency = item.occurrence_count / item.total_count;
+      const resultConsistency =
+        item.occurrence_count > 0
+          ? item.consistent_count / item.occurrence_count
+          : 0;
+      const confidence = occurrenceFrequency * resultConsistency;
+
+      if (confidence < this.config.min_confidence_threshold) {
+        continue;
+      }
+
+      const pattern = LearnedPatternSchema.parse({
+        pattern_id: `pat_${randomUUID()}`,
+        type: item.pattern_type,
+        description: item.description,
+        confidence,
+        evidence_count: item.occurrence_count,
+        source_goal_ids: [trigger.goal_id],
+        applicable_domains: item.applicable_domains,
+        embedding_id: null,
+        created_at: now,
+        last_applied_at: null,
+      });
+
+      newPatterns.push(pattern);
+    }
+
+    if (newPatterns.length === 0) {
+      return [];
+    }
+
+    // 5. Merge with existing patterns (respecting max_patterns_per_goal)
+    const existing = this.getPatterns(trigger.goal_id);
+    const merged = [...existing, ...newPatterns];
+
+    // If over limit, remove lowest-confidence patterns
+    if (merged.length > this.config.max_patterns_per_goal) {
+      merged.sort((a, b) => b.confidence - a.confidence);
+      merged.splice(this.config.max_patterns_per_goal);
+    }
+
+    this.savePatterns(trigger.goal_id, merged);
+
+    // 6. Register embeddings in VectorIndex if available
+    if (this.vectorIndex !== null) {
+      for (const pattern of newPatterns) {
+        try {
+          const entry = await this.vectorIndex.add(
+            pattern.pattern_id,
+            pattern.description,
+            {
+              pattern_id: pattern.pattern_id,
+              type: pattern.type,
+              goal_id: trigger.goal_id,
+              confidence: pattern.confidence,
+            }
+          );
+
+          // Update pattern with embedding_id
+          const updatedPatterns = this.getPatterns(trigger.goal_id).map((p) =>
+            p.pattern_id === pattern.pattern_id
+              ? { ...p, embedding_id: entry.id }
+              : p
+          );
+          this.savePatterns(trigger.goal_id, updatedPatterns);
+        } catch {
+          // non-fatal: embedding failure should not block pattern registration
+        }
+      }
+    }
+
+    return newPatterns;
+  }
+
+  /**
+   * Generate FeedbackEntry objects from learned patterns.
+   * Maps each pattern type to a target step and persists the feedback.
+   */
+  generateFeedback(patterns: LearnedPattern[]): FeedbackEntry[] {
+    const targetStepMap: Record<
+      z.infer<typeof LearnedPatternTypeEnum>,
+      FeedbackTargetStep
+    > = {
+      observation_accuracy: "observation",
+      strategy_selection: "strategy",
+      scope_sizing: "task",
+      task_generation: "task",
+    };
+
+    const now = new Date().toISOString();
+    const entries: FeedbackEntry[] = patterns.map((pattern, index) => {
+      const targetStep = targetStepMap[pattern.type];
+      return FeedbackEntrySchema.parse({
+        feedback_id: `fb_${Date.now()}_${index}`,
+        pattern_id: pattern.pattern_id,
+        target_step: targetStep,
+        adjustment: pattern.description,
+        applied_at: now,
+        effect_observed: null,
+      });
+    });
+
+    // Group by goal: patterns share source_goal_ids[0] as the owner
+    const byGoal = new Map<string, FeedbackEntry[]>();
+    for (let i = 0; i < patterns.length; i++) {
+      const pattern = patterns[i]!;
+      const entry = entries[i]!;
+      const goalId = pattern.source_goal_ids[0];
+      if (!goalId) continue;
+      const existing = byGoal.get(goalId) ?? [];
+      existing.push(entry);
+      byGoal.set(goalId, existing);
+    }
+
+    for (const [goalId, newEntries] of byGoal) {
+      const existing = this.getFeedbackEntries(goalId);
+      this.saveFeedbackEntries(goalId, [...existing, ...newEntries]);
+    }
+
+    return entries;
+  }
+
+  /**
+   * Return adjustment strings for a given goal and target step.
+   * Returns at most 3 entries sorted by confidence descending.
+   */
+  applyFeedback(goalId: string, step: FeedbackTargetStep): string[] {
+    const allEntries = this.getFeedbackEntries(goalId);
+    const stepEntries = allEntries.filter((e) => e.target_step === step);
+
+    // Enrich with pattern confidence for sorting
+    const patterns = this.getPatterns(goalId);
+    const patternConfidenceMap = new Map<string, number>(
+      patterns.map((p) => [p.pattern_id, p.confidence])
+    );
+
+    const enriched = stepEntries.map((e) => ({
+      entry: e,
+      confidence: patternConfidenceMap.get(e.pattern_id) ?? 0,
+    }));
+
+    // Sort by confidence descending, take top 3
+    enriched.sort((a, b) => b.confidence - a.confidence);
+    const top3 = enriched.slice(0, 3);
+
+    return top3.map((e) => e.entry.adjustment);
+  }
+
+  /**
+   * Share a pattern from its source goal to similar goals in the VectorIndex.
+   * Only runs if vectorIndex is available and cross_goal_sharing_enabled.
+   */
+  async sharePatternAcrossGoals(patternId: string): Promise<void> {
+    if (!this.vectorIndex || !this.config.cross_goal_sharing_enabled) {
+      return;
+    }
+
+    // Find the pattern across all goals
+    const allGoalIds = this.stateManager.listGoalIds();
+    let sourcePattern: LearnedPattern | null = null;
+    let sourceGoalId: string | null = null;
+
+    for (const goalId of allGoalIds) {
+      const patterns = this.getPatterns(goalId);
+      const found = patterns.find((p) => p.pattern_id === patternId);
+      if (found) {
+        sourcePattern = found;
+        sourceGoalId = goalId;
+        break;
+      }
+    }
+
+    if (!sourcePattern || !sourceGoalId) {
+      return;
+    }
+
+    // Search for similar goals using the pattern description
+    let similarResults: Array<{ id: string; similarity: number }>;
+    try {
+      similarResults = await this.vectorIndex.search(
+        sourcePattern.description,
+        10,
+        0.7
+      );
+    } catch {
+      // non-fatal
+      return;
+    }
+
+    // Filter to goal-level entries only (metadata.goal_id present but different from source)
+    const targetGoalIds = new Set<string>();
+    for (const result of similarResults) {
+      const entry = this.vectorIndex.getEntry(result.id);
+      if (!entry) continue;
+      const metaGoalId = entry.metadata?.["goal_id"] as string | undefined;
+      if (metaGoalId && metaGoalId !== sourceGoalId) {
+        targetGoalIds.add(metaGoalId);
+      }
+    }
+
+    // Share to each target goal with confidence discount
+    for (const targetGoalId of targetGoalIds) {
+      const targetPatterns = this.getPatterns(targetGoalId);
+
+      // Duplicate check: skip if same pattern_id already in target
+      const alreadyShared = targetPatterns.some(
+        (p) => p.pattern_id === patternId
+      );
+      if (alreadyShared) continue;
+
+      // Apply confidence discount
+      const transferredConfidence = sourcePattern.confidence * 0.7;
+
+      // Skip if transferred confidence is below threshold
+      if (transferredConfidence < this.config.min_confidence_threshold) {
+        continue;
+      }
+
+      const sharedPattern = LearnedPatternSchema.parse({
+        ...sourcePattern,
+        pattern_id: `pat_${randomUUID()}`, // New ID for the shared copy
+        confidence: transferredConfidence,
+        source_goal_ids: [...sourcePattern.source_goal_ids, sourceGoalId],
+        created_at: new Date().toISOString(),
+        last_applied_at: null,
+        embedding_id: null,
+      });
+
+      const updatedTargetPatterns = [...targetPatterns, sharedPattern];
+
+      // Respect max_patterns_per_goal limit
+      if (updatedTargetPatterns.length > this.config.max_patterns_per_goal) {
+        updatedTargetPatterns.sort((a, b) => b.confidence - a.confidence);
+        updatedTargetPatterns.splice(this.config.max_patterns_per_goal);
+      }
+
+      this.savePatterns(targetGoalId, updatedTargetPatterns);
+    }
+  }
+
+  // ─── Persistence ───
+
+  /**
+   * Load learned patterns for a goal. Returns empty array if not found.
+   */
+  getPatterns(goalId: string): LearnedPattern[] {
+    const raw = this.stateManager.readRaw(`learning/${goalId}_patterns.json`);
+    if (!raw || !Array.isArray(raw)) return [];
+    try {
+      return (raw as unknown[]).map((item) => LearnedPatternSchema.parse(item));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Persist learned patterns for a goal.
+   */
+  savePatterns(goalId: string, patterns: LearnedPattern[]): void {
+    this.stateManager.writeRaw(`learning/${goalId}_patterns.json`, patterns);
+  }
+
+  /**
+   * Load feedback entries for a goal. Returns empty array if not found.
+   */
+  getFeedbackEntries(goalId: string): FeedbackEntry[] {
+    const raw = this.stateManager.readRaw(`learning/${goalId}_feedback.json`);
+    if (!raw || !Array.isArray(raw)) return [];
+    try {
+      return (raw as unknown[]).map((item) => FeedbackEntrySchema.parse(item));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Persist feedback entries for a goal.
+   */
+  saveFeedbackEntries(goalId: string, entries: FeedbackEntry[]): void {
+    this.stateManager.writeRaw(`learning/${goalId}_feedback.json`, entries);
+  }
+
+  // ─── Structural Feedback (Phase 2) ───
+
+  /**
+   * Record a structural feedback entry for a goal/iteration.
+   * Validates with Zod and persists via StateManager.
+   */
+  recordStructuralFeedback(feedback: StructuralFeedback): void {
+    const validated = StructuralFeedbackSchema.parse(feedback);
+    const existing = this.getStructuralFeedback(validated.goalId);
+    existing.push(validated);
+    this.stateManager.writeRaw(
+      `learning/${validated.goalId}_structural_feedback.json`,
+      existing
+    );
+  }
+
+  /**
+   * Load structural feedback for a goal.
+   */
+  getStructuralFeedback(goalId: string): StructuralFeedback[] {
+    const raw = this.stateManager.readRaw(
+      `learning/${goalId}_structural_feedback.json`
+    );
+    if (!raw || !Array.isArray(raw)) return [];
+    try {
+      return (raw as unknown[]).map((item) =>
+        StructuralFeedbackSchema.parse(item)
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Aggregate structural feedback for a goal, optionally filtered by type.
+   * Calculates averageDelta, recent trend (last 10 vs previous 10), and worst area.
+   */
+  aggregateFeedback(
+    goalId: string,
+    feedbackType?: StructuralFeedbackType
+  ): FeedbackAggregation[] {
+    const all = this.getStructuralFeedback(goalId);
+    const types: StructuralFeedbackType[] = feedbackType
+      ? [feedbackType]
+      : (StructuralFeedbackTypeEnum.options as StructuralFeedbackType[]);
+
+    const results: FeedbackAggregation[] = [];
+
+    for (const type of types) {
+      const entries = all.filter((f) => f.feedbackType === type);
+      if (entries.length === 0) continue;
+
+      const totalCount = entries.length;
+      const averageDelta =
+        entries.reduce((sum, e) => sum + e.delta, 0) / totalCount;
+
+      // Sort by timestamp for trend calculation
+      const sorted = [...entries].sort(
+        (a, b) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
+
+      // Compare last 10 vs previous 10
+      const recent = sorted.slice(-10);
+      const previous = sorted.slice(-20, -10);
+
+      let recentTrend: FeedbackAggregation["recentTrend"] = "stable";
+      if (previous.length > 0 && recent.length > 0) {
+        const recentAvg =
+          recent.reduce((sum, e) => sum + e.delta, 0) / recent.length;
+        const prevAvg =
+          previous.reduce((sum, e) => sum + e.delta, 0) / previous.length;
+        const diff = recentAvg - prevAvg;
+        if (diff > 0.05) {
+          recentTrend = "improving";
+        } else if (diff < -0.05) {
+          recentTrend = "degrading";
+        }
+      }
+
+      // Worst area: find the context key or dimension with lowest average delta
+      const areaDeltas = new Map<string, number[]>();
+      for (const entry of entries) {
+        // Use context keys as area identifiers; fall back to iterationId
+        const areaKeys = Object.keys(entry.context);
+        if (areaKeys.length > 0) {
+          for (const key of areaKeys) {
+            const existing = areaDeltas.get(key) ?? [];
+            existing.push(entry.delta);
+            areaDeltas.set(key, existing);
+          }
+        } else {
+          const existing = areaDeltas.get(entry.iterationId) ?? [];
+          existing.push(entry.delta);
+          areaDeltas.set(entry.iterationId, existing);
+        }
+      }
+
+      let worstArea = "unknown";
+      let worstAvg = Infinity;
+      for (const [area, deltas] of areaDeltas) {
+        const avg = deltas.reduce((s, d) => s + d, 0) / deltas.length;
+        if (avg < worstAvg) {
+          worstAvg = avg;
+          worstArea = area;
+        }
+      }
+
+      results.push({
+        feedbackType: type,
+        totalCount,
+        averageDelta,
+        recentTrend,
+        worstArea,
+      });
+    }
+
+    return results;
+  }
+
+  /**
+   * Analyze feedback history and suggest parameter adjustments.
+   * Only suggests when basedOnFeedbackCount >= 5 and confidence >= 0.6.
+   */
+  autoTuneParameters(goalId: string): ParameterTuning[] {
+    const all = this.getStructuralFeedback(goalId);
+    const suggestions: ParameterTuning[] = [];
+
+    const typeGroups = new Map<StructuralFeedbackType, StructuralFeedback[]>();
+    for (const entry of all) {
+      const existing = typeGroups.get(entry.feedbackType) ?? [];
+      existing.push(entry);
+      typeGroups.set(entry.feedbackType, existing);
+    }
+
+    for (const [type, entries] of typeGroups) {
+      if (entries.length < 5) continue;
+
+      const avgDelta =
+        entries.reduce((sum, e) => sum + e.delta, 0) / entries.length;
+
+      // Confidence based on consistency: proportion with same sign as average
+      const sameSign = entries.filter((e) =>
+        avgDelta >= 0 ? e.delta >= 0 : e.delta < 0
+      ).length;
+      const confidence = sameSign / entries.length;
+
+      if (confidence < 0.6) continue;
+
+      switch (type) {
+        case "observation_accuracy": {
+          // Suggest confidence threshold adjustment
+          // Negative avgDelta = observations were overconfident → raise threshold
+          // Positive avgDelta = observations were too conservative → lower threshold
+          const currentValue = this.config.min_confidence_threshold;
+          const adjustment = avgDelta < 0 ? 0.05 : -0.05;
+          const suggestedValue = Math.min(
+            1,
+            Math.max(0, currentValue + adjustment)
+          );
+          suggestions.push({
+            parameterId: `param_confidence_threshold_${goalId}`,
+            parameterName: "min_confidence_threshold",
+            currentValue,
+            suggestedValue,
+            confidence,
+            basedOnFeedbackCount: entries.length,
+            feedbackType: type,
+          });
+          break;
+        }
+        case "strategy_selection": {
+          // Suggest strategy weight change
+          // Negative avgDelta = strategies underperformed → increase exploration weight
+          // Positive avgDelta = strategies performed well → increase exploitation weight
+          const currentValue = 0.5; // default strategy weight
+          const suggestedValue = avgDelta < 0 ? 0.3 : 0.7;
+          suggestions.push({
+            parameterId: `param_strategy_weight_${goalId}`,
+            parameterName: "strategy_exploitation_weight",
+            currentValue,
+            suggestedValue,
+            confidence,
+            basedOnFeedbackCount: entries.length,
+            feedbackType: type,
+          });
+          break;
+        }
+        case "scope_sizing": {
+          // Suggest task granularity change
+          // Negative avgDelta = tasks were too large → reduce granularity
+          // Positive avgDelta = tasks were appropriately sized → maintain or increase
+          const currentValue = 1.0; // default granularity multiplier
+          const suggestedValue = avgDelta < 0 ? 0.7 : 1.2;
+          suggestions.push({
+            parameterId: `param_task_granularity_${goalId}`,
+            parameterName: "task_granularity_multiplier",
+            currentValue,
+            suggestedValue,
+            confidence,
+            basedOnFeedbackCount: entries.length,
+            feedbackType: type,
+          });
+          break;
+        }
+        case "task_generation": {
+          // Suggest prompt/template change weight
+          // Negative avgDelta = templates were ineffective → suggest template refresh
+          // Positive avgDelta = templates were effective → reinforce current template
+          const currentValue = 0.5; // default template reuse weight
+          const suggestedValue = avgDelta < 0 ? 0.2 : 0.8;
+          suggestions.push({
+            parameterId: `param_template_reuse_${goalId}`,
+            parameterName: "task_template_reuse_weight",
+            currentValue,
+            suggestedValue,
+            confidence,
+            basedOnFeedbackCount: entries.length,
+            feedbackType: type,
+          });
+          break;
+        }
+      }
+    }
+
+    return suggestions;
+  }
+
+  // ─── Cross-Goal Pattern Extraction ───
+
+  /**
+   * Extract cross-goal patterns by analyzing structural feedback across multiple goals.
+   * A pattern is identified when the same feedbackType appears with similar delta values
+   * (within ±0.2) across 2 or more goals.
+   */
+  extractCrossGoalPatterns(goalIds: string[]): CrossGoalPattern[] {
+    if (goalIds.length < 2) {
+      return [];
+    }
+
+    // Collect all structural feedback grouped by feedbackType
+    const byType = new Map<
+      StructuralFeedbackType,
+      Array<{ goalId: string; feedback: StructuralFeedback }>
+    >();
+
+    for (const goalId of goalIds) {
+      const feedbacks = this.getStructuralFeedback(goalId);
+      for (const fb of feedbacks) {
+        const existing = byType.get(fb.feedbackType) ?? [];
+        existing.push({ goalId, feedback: fb });
+        byType.set(fb.feedbackType, existing);
+      }
+    }
+
+    const patterns: CrossGoalPattern[] = [];
+    const now = new Date().toISOString();
+
+    for (const [feedbackType, entries] of byType) {
+      if (entries.length < 2) continue;
+
+      // Group entries by similar delta values (within ±0.2)
+      const clustered: Array<{
+        representative: number;
+        members: Array<{ goalId: string; feedback: StructuralFeedback }>;
+      }> = [];
+
+      for (const entry of entries) {
+        const delta = entry.feedback.delta;
+        let placed = false;
+        for (const cluster of clustered) {
+          if (Math.abs(cluster.representative - delta) <= 0.2) {
+            cluster.members.push(entry);
+            // Update representative as mean
+            cluster.representative =
+              cluster.members.reduce(
+                (sum, m) => sum + m.feedback.delta,
+                0
+              ) / cluster.members.length;
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) {
+          clustered.push({ representative: delta, members: [entry] });
+        }
+      }
+
+      // Only keep clusters where 2+ distinct goals are represented
+      for (const cluster of clustered) {
+        const goalSet = new Set(cluster.members.map((m) => m.goalId));
+        if (goalSet.size < 2) continue;
+
+        const avgDelta = cluster.representative;
+        const patternType: CrossGoalPattern["patternType"] =
+          avgDelta < -0.05
+            ? "success"
+            : avgDelta > 0.05
+              ? "failure"
+              : "optimization";
+
+        const sourceGoalIds = Array.from(goalSet);
+        const occurrenceCount = cluster.members.length;
+        const confidence = goalSet.size / goalIds.length;
+
+        // Build suggested action from feedbackType
+        const suggestedAction = this._buildSuggestedAction(
+          feedbackType,
+          avgDelta
+        );
+
+        // Build applicable conditions from context keys
+        const conditionSet = new Set<string>();
+        for (const m of cluster.members) {
+          for (const key of Object.keys(m.feedback.context)) {
+            conditionSet.add(key);
+          }
+        }
+        const applicableConditions = Array.from(conditionSet);
+
+        const description = `${feedbackType} pattern: avg delta=${avgDelta.toFixed(2)} observed across ${sourceGoalIds.length} goals`;
+
+        const pattern = CrossGoalPatternSchema.parse({
+          id: `cgp_${randomUUID()}`,
+          patternType,
+          description,
+          sourceGoalIds,
+          feedbackType,
+          confidence,
+          applicableConditions,
+          suggestedAction,
+          occurrenceCount,
+          lastObserved: now,
+        });
+
+        patterns.push(pattern);
+      }
+    }
+
+    return patterns;
+  }
+
+  /**
+   * Apply cross-goal patterns to target goals as feedback insights.
+   * For each target goal, patterns whose applicableConditions match the goal's
+   * feedback context keys are applied.
+   */
+  sharePatternsAcrossGoals(
+    patterns: CrossGoalPattern[],
+    targetGoalIds: string[]
+  ): PatternSharingResult {
+    let patternsShared = 0;
+    const newPatterns: CrossGoalPattern[] = [];
+    const affectedGoals = new Set<string>();
+
+    for (const targetGoalId of targetGoalIds) {
+      // Gather context keys from existing structural feedback
+      const existingFeedback = this.getStructuralFeedback(targetGoalId);
+      const existingContextKeys = new Set<string>();
+      for (const fb of existingFeedback) {
+        for (const key of Object.keys(fb.context)) {
+          existingContextKeys.add(key);
+        }
+      }
+
+      for (const pattern of patterns) {
+        // Skip if target goal is already a source
+        if (pattern.sourceGoalIds.includes(targetGoalId)) {
+          continue;
+        }
+
+        // Check if applicableConditions match: either no conditions (universal)
+        // or at least one condition key exists in the target's context
+        const conditionsMatch =
+          pattern.applicableConditions.length === 0 ||
+          pattern.applicableConditions.some((c) => existingContextKeys.has(c));
+
+        if (!conditionsMatch) {
+          continue;
+        }
+
+        // Generate a synthetic StructuralFeedback entry to represent this shared pattern
+        const syntheticFeedback: StructuralFeedback = StructuralFeedbackSchema.parse({
+          id: `sf_shared_${randomUUID()}`,
+          goalId: targetGoalId,
+          iterationId: `shared_from_cross_goal_pattern_${pattern.id}`,
+          feedbackType: pattern.feedbackType,
+          expected: pattern.suggestedAction,
+          actual: pattern.description,
+          delta: pattern.patternType === "success" ? -0.1 : pattern.patternType === "failure" ? 0.1 : 0,
+          timestamp: new Date().toISOString(),
+          context: {
+            cross_goal_pattern_id: pattern.id,
+            source_goal_count: pattern.sourceGoalIds.length,
+          },
+        });
+
+        this.recordStructuralFeedback(syntheticFeedback);
+
+        patternsShared++;
+        affectedGoals.add(targetGoalId);
+        newPatterns.push(pattern);
+      }
+    }
+
+    return {
+      patternsExtracted: patterns.length,
+      patternsShared,
+      targetGoalIds: Array.from(affectedGoals),
+      newPatterns,
+    };
+  }
+
+  // ─── Private helpers ───
+
+  private _buildSuggestedAction(
+    feedbackType: StructuralFeedbackType,
+    avgDelta: number
+  ): string {
+    switch (feedbackType) {
+      case "observation_accuracy":
+        return avgDelta < 0
+          ? "Improve observation accuracy by cross-checking with data sources"
+          : "Maintain current observation approach";
+      case "strategy_selection":
+        return avgDelta < 0
+          ? "Switch to incremental strategy to reduce risk"
+          : "Continue current strategy selection";
+      case "scope_sizing":
+        return avgDelta < 0
+          ? "Reduce task scope to smaller units"
+          : "Increase task scope for efficiency";
+      case "task_generation":
+        return avgDelta < 0
+          ? "Refine task generation templates"
+          : "Reinforce current task generation approach";
+    }
+  }
+}

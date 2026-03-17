@@ -11,9 +11,9 @@
 
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
-import { OpenAILLMClient } from "../../src/openai-client.js";
-import { buildLLMClient } from "../../src/provider-factory.js";
-import type { LLMResponse } from "../../src/llm-client.js";
+import { OpenAILLMClient } from "../../src/llm/openai-client.js";
+import { buildLLMClient } from "../../src/llm/provider-factory.js";
+import type { LLMResponse } from "../../src/llm/llm-client.js";
 
 const API_KEY_SET = Boolean(process.env["OPENAI_API_KEY"]);
 

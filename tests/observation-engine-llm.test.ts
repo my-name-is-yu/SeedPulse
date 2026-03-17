@@ -2,13 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { ObservationEngine } from "../src/observation-engine.js";
+import { ObservationEngine } from "../src/observation/observation-engine.js";
 import { StateManager } from "../src/state-manager.js";
-import { GapCalculator } from "../src/gap-calculator.js";
+import { GapCalculator } from "../src/drive/gap-calculator.js";
 import type { Goal } from "../src/types/goal.js";
 import type { ObservationMethod } from "../src/types/core.js";
-import type { ILLMClient } from "../src/llm-client.js";
-import type { IDataSourceAdapter } from "../src/data-source-adapter.js";
+import type { ILLMClient } from "../src/llm/llm-client.js";
+import type { IDataSourceAdapter } from "../src/observation/data-source-adapter.js";
 import type { DataSourceConfig } from "../src/types/data-source.js";
 
 // ─── Helpers ───
@@ -384,7 +384,7 @@ describe("ObservationEngine LLM observation", () => {
 
       // Compute gap: current_value should now be 0.72 (from LLM), threshold.min = 0.8
       // raw gap = max(0, 0.8 - 0.72) = 0.08
-      const { computeRawGap } = await import("../src/gap-calculator.js");
+      const { computeRawGap } = await import("../src/drive/gap-calculator.js");
       const rawGap = computeRawGap(dim!.current_value, dim!.threshold);
 
       // Gap should reflect the LLM score (0.72), not the initial value (0.5)
@@ -430,11 +430,146 @@ describe("ObservationEngine LLM observation", () => {
       const dim = updatedGoal!.dimensions.find((d) => d.name === "code_quality");
       expect(dim).not.toBeNull();
 
-      const { computeRawGap } = await import("../src/gap-calculator.js");
+      const { computeRawGap } = await import("../src/drive/gap-calculator.js");
       const rawGap = computeRawGap(dim!.current_value, dim!.threshold);
 
       expect(dim!.current_value).toBe(0.9);
       expect(rawGap).toBe(0); // 0.9 >= 0.8, so no gap
+    });
+  });
+
+  // ─── Test 6: contextProvider output is included in the LLM prompt ───
+
+  describe("observeWithLLM: workspace context injection", () => {
+    it("includes contextProvider output in the LLM prompt", async () => {
+      const contextOutput = "File: src/foo.ts\nconst quality = 0.92; // measured";
+      const contextProvider = vi.fn().mockResolvedValue(contextOutput);
+      const mockLLMClient = createMockLLMClient(0.85, "context provided");
+      const engine = new ObservationEngine(stateManager, [], mockLLMClient, contextProvider);
+
+      const goal = makeGoal({ id: "goal-ctx-provider" });
+      stateManager.saveGoal(goal);
+
+      // Call observeWithLLM with the context already provided (simulates observe() flow)
+      await engine.observeWithLLM(
+        "goal-ctx-provider",
+        "code_quality",
+        "Improve code quality",
+        "Code Quality",
+        JSON.stringify({ type: "min", value: 0.8 }),
+        contextOutput // pass context directly, as observe() would
+      );
+
+      // The LLM prompt should contain the context output
+      const sendMessageCalls = (mockLLMClient.sendMessage as ReturnType<typeof vi.fn>).mock.calls;
+      expect(sendMessageCalls.length).toBeGreaterThan(0);
+      const promptArg: string = sendMessageCalls[0][0][0].content;
+      expect(promptArg).toContain("src/foo.ts");
+      expect(promptArg).toContain("const quality = 0.92");
+    });
+
+    it("falls back to git diff when no workspaceContext is provided", async () => {
+      // Inject a fake gitContextFetcher that returns simulated git diff output
+      const fakeGitContext =
+        "[git diff --stat]\n src/foo.ts | 2 +-\n 1 file changed\n\n" +
+        "[git diff]\ndiff --git a/src/foo.ts b/src/foo.ts\n+const x = 1;";
+      const gitContextFetcher = vi.fn().mockReturnValue(fakeGitContext);
+
+      const mockLLMClient = createMockLLMClient(0.7, "git diff fallback");
+      const engine = new ObservationEngine(
+        stateManager,
+        [],
+        mockLLMClient,
+        undefined,
+        { gitContextFetcher }
+      );
+
+      const goal = makeGoal({ id: "goal-git-fallback" });
+      stateManager.saveGoal(goal);
+
+      // Call with no workspaceContext — should trigger git diff fallback
+      await engine.observeWithLLM(
+        "goal-git-fallback",
+        "code_quality",
+        "Improve code quality",
+        "Code Quality",
+        JSON.stringify({ type: "min", value: 0.8 })
+        // no workspaceContext passed
+      );
+
+      // gitContextFetcher should have been called
+      expect(gitContextFetcher).toHaveBeenCalled();
+
+      // The LLM prompt should contain the fake git diff output
+      const sendMessageCalls = (mockLLMClient.sendMessage as ReturnType<typeof vi.fn>).mock.calls;
+      expect(sendMessageCalls.length).toBeGreaterThan(0);
+      const promptArg: string = sendMessageCalls[0][0][0].content;
+      expect(promptArg).toContain("git diff --stat");
+      expect(promptArg).toContain("src/foo.ts");
+    });
+
+    it("truncates context to 4000 chars max", async () => {
+      // Create context that exceeds 4000 chars
+      const longContext = "x".repeat(5000);
+      const mockLLMClient = createMockLLMClient(0.6, "truncated");
+      const engine = new ObservationEngine(stateManager, [], mockLLMClient);
+
+      const goal = makeGoal({ id: "goal-truncate" });
+      stateManager.saveGoal(goal);
+
+      await engine.observeWithLLM(
+        "goal-truncate",
+        "code_quality",
+        "Improve code quality",
+        "Code Quality",
+        JSON.stringify({ type: "min", value: 0.8 }),
+        longContext
+      );
+
+      // Verify the prompt was passed to sendMessage and the context is truncated
+      const sendMessageCalls = (mockLLMClient.sendMessage as ReturnType<typeof vi.fn>).mock.calls;
+      expect(sendMessageCalls.length).toBeGreaterThan(0);
+      const promptArg: string = sendMessageCalls[0][0][0].content;
+      // Prompt should contain truncation marker
+      expect(promptArg).toContain("(truncated)");
+      // The full 5000-char context should NOT appear verbatim
+      expect(promptArg).not.toContain("x".repeat(4001));
+    });
+
+    it("observation still works when both contextProvider and git diff fail", async () => {
+      // Inject a gitContextFetcher that returns empty string (simulates non-git directory)
+      const gitContextFetcher = vi.fn().mockReturnValue("");
+
+      const mockLLMClient = createMockLLMClient(0.0, "no evidence available");
+      const engine = new ObservationEngine(
+        stateManager,
+        [],
+        mockLLMClient,
+        undefined,
+        { gitContextFetcher }
+      );
+
+      const goal = makeGoal({ id: "goal-no-context" });
+      stateManager.saveGoal(goal);
+
+      // Should NOT throw — falls back gracefully and calls LLM with warning in prompt
+      const entry = await engine.observeWithLLM(
+        "goal-no-context",
+        "code_quality",
+        "Improve code quality",
+        "Code Quality",
+        JSON.stringify({ type: "min", value: 0.8 })
+        // no workspaceContext, git context is empty
+      );
+
+      expect(entry.layer).toBe("independent_review");
+      expect(typeof entry.extracted_value).toBe("number");
+
+      // The prompt should include the "no workspace content" warning
+      const sendMessageCalls = (mockLLMClient.sendMessage as ReturnType<typeof vi.fn>).mock.calls;
+      expect(sendMessageCalls.length).toBeGreaterThan(0);
+      const promptArg: string = sendMessageCalls[0][0][0].content;
+      expect(promptArg).toContain("WARNING: No workspace content was provided");
     });
   });
 });

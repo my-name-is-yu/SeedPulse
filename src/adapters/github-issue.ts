@@ -8,7 +8,7 @@
 //   MOTIVA_GITHUB_REPO — "owner/name", overrides auto-detection
 
 import { spawn } from "node:child_process";
-import type { IAdapter, AgentTask, AgentResult } from "../adapter-layer.js";
+import type { IAdapter, AgentTask, AgentResult } from "../execution/adapter-layer.js";
 
 // ─── Config ───
 

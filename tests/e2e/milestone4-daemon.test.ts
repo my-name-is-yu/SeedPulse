@@ -15,12 +15,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { StateManager } from "../../src/state-manager.js";
-import { DriveSystem } from "../../src/drive-system.js";
-import { DaemonRunner } from "../../src/daemon-runner.js";
-import { PIDManager } from "../../src/pid-manager.js";
-import { Logger } from "../../src/logger.js";
-import { EventServer } from "../../src/event-server.js";
-import type { DaemonDeps } from "../../src/daemon-runner.js";
+import { DriveSystem } from "../../src/drive/drive-system.js";
+import { DaemonRunner } from "../../src/runtime/daemon-runner.js";
+import { PIDManager } from "../../src/runtime/pid-manager.js";
+import { Logger } from "../../src/runtime/logger.js";
+import { EventServer } from "../../src/runtime/event-server.js";
+import type { DaemonDeps } from "../../src/runtime/daemon-runner.js";
 import type { DaemonState } from "../../src/types/daemon.js";
 import { DaemonStateSchema } from "../../src/types/daemon.js";
 import type { LoopResult } from "../../src/core-loop.js";

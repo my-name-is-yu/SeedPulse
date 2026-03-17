@@ -2,10 +2,10 @@ import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { ObservationEngine } from "../src/observation-engine.js";
+import { ObservationEngine } from "../src/observation/observation-engine.js";
 import { StateManager } from "../src/state-manager.js";
 import type { Goal } from "../src/types/goal.js";
-import type { ILLMClient } from "../src/llm-client.js";
+import type { ILLMClient } from "../src/llm/llm-client.js";
 import { z } from "zod";
 
 // ─── Prompt Capture Mock ───
@@ -132,7 +132,10 @@ describe("observeWithLLM prompt quality", () => {
     const tmpDir = makeTempDir();
     const stateManager = new StateManager(tmpDir);
     const mockLLM = new PromptCaptureMockLLM();
-    const engine = new ObservationEngine(stateManager, [], mockLLM);
+    // Inject a no-op gitContextFetcher so git diff fallback does not supply context
+    const engine = new ObservationEngine(stateManager, [], mockLLM, undefined, {
+      gitContextFetcher: () => "",
+    });
 
     const goal = makeGoal();
     stateManager.saveGoal(goal);

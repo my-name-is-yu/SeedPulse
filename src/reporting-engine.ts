@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { StateManager } from "./state-manager.js";
 import { ReportSchema } from "./types/report.js";
 import type { Report } from "./types/report.js";
-import type { INotificationDispatcher } from "./notification-dispatcher.js";
+import type { INotificationDispatcher } from "./runtime/notification-dispatcher.js";
 import type { CharacterConfig } from "./types/character.js";
 import { DEFAULT_CHARACTER_CONFIG } from "./types/character.js";
 

@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { StateManager } from "../src/state-manager.js";
-import { CharacterConfigManager } from "../src/character-config.js";
+import { CharacterConfigManager } from "../src/traits/character-config.js";
 import {
   CharacterConfigSchema,
   DEFAULT_CHARACTER_CONFIG,

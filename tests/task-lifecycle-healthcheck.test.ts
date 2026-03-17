@@ -4,18 +4,18 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
 import { StateManager } from "../src/state-manager.js";
-import { SessionManager } from "../src/session-manager.js";
-import { TrustManager } from "../src/trust-manager.js";
-import { StrategyManager } from "../src/strategy-manager.js";
-import { StallDetector } from "../src/stall-detector.js";
-import { TaskLifecycle } from "../src/task-lifecycle.js";
+import { SessionManager } from "../src/execution/session-manager.js";
+import { TrustManager } from "../src/traits/trust-manager.js";
+import { StrategyManager } from "../src/strategy/strategy-manager.js";
+import { StallDetector } from "../src/drive/stall-detector.js";
+import { TaskLifecycle } from "../src/execution/task-lifecycle.js";
 import type { Task } from "../src/types/task.js";
 import type {
   ILLMClient,
   LLMMessage,
   LLMRequestOptions,
   LLMResponse,
-} from "../src/llm-client.js";
+} from "../src/llm/llm-client.js";
 
 // ─── Minimal mock LLM ───
 
@@ -78,10 +78,10 @@ function makeMinimalTask(goalId: string, overrides: Partial<Task> = {}): Task {
   };
 }
 
-function makeMockAdapter(): import("../src/task-lifecycle.js").IAdapter {
+function makeMockAdapter(): import("../src/execution/task-lifecycle.js").IAdapter {
   return {
     adapterType: "mock",
-    async execute(): Promise<import("../src/task-lifecycle.js").AgentResult> {
+    async execute(): Promise<import("../src/execution/task-lifecycle.js").AgentResult> {
       return {
         success: true,
         output: "Task completed successfully",
@@ -334,9 +334,9 @@ describe("TaskLifecycle — post-execution health check", () => {
   it("health check does NOT run when adapter execution fails", async () => {
     const lifecycle = createLifecycle({ healthCheckEnabled: true });
 
-    const failingAdapter: import("../src/task-lifecycle.js").IAdapter = {
+    const failingAdapter: import("../src/execution/task-lifecycle.js").IAdapter = {
       adapterType: "mock",
-      async execute(): Promise<import("../src/task-lifecycle.js").AgentResult> {
+      async execute(): Promise<import("../src/execution/task-lifecycle.js").AgentResult> {
         return {
           success: false,
           output: "",

@@ -13,7 +13,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { IDataSourceAdapter } from "../data-source-adapter.js";
+import type { IDataSourceAdapter } from "../observation/data-source-adapter.js";
 import type {
   DataSourceType,
   DataSourceConfig,

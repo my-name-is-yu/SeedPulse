@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { DaemonRunner } from "../src/daemon-runner.js";
-import { PIDManager } from "../src/pid-manager.js";
-import { Logger } from "../src/logger.js";
+import { DaemonRunner } from "../src/runtime/daemon-runner.js";
+import { PIDManager } from "../src/runtime/pid-manager.js";
+import { Logger } from "../src/runtime/logger.js";
 import type { LoopResult } from "../src/core-loop.js";
-import type { DaemonDeps } from "../src/daemon-runner.js";
+import type { DaemonDeps } from "../src/runtime/daemon-runner.js";
 
 // ─── Helpers ───
 

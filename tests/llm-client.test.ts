@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { z } from "zod";
-import { MockLLMClient, LLMClient } from "../src/llm-client.js";
-import type { ILLMClient } from "../src/llm-client.js";
+import { MockLLMClient, LLMClient } from "../src/llm/llm-client.js";
+import type { ILLMClient } from "../src/llm/llm-client.js";
 
 // ─── MockLLMClient ───
 

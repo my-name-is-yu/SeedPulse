@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ILLMClient } from "../llm-client.js";
+import type { ILLMClient } from "../llm/llm-client.js";
 
 // ─── Types ───
 

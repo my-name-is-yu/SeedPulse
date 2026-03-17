@@ -16,7 +16,7 @@ vi.mock("node:child_process", () => ({
 }));
 
 import { OpenAICodexCLIAdapter } from "../src/adapters/openai-codex.js";
-import type { AgentTask } from "../src/adapter-layer.js";
+import type { AgentTask } from "../src/execution/adapter-layer.js";
 
 // ─── Helpers ───
 
@@ -66,7 +66,7 @@ describe("OpenAICodexCLIAdapter", () => {
   // ─── spawn args ───
 
   describe("spawn arguments", () => {
-    it("spawns codex with 'exec -s danger-full-access PROMPT' by default", async () => {
+    it("spawns codex with 'exec -s danger-full-access --path . PROMPT' by default", async () => {
       const adapter = new OpenAICodexCLIAdapter();
       const child = makeFakeChild();
 
@@ -77,7 +77,7 @@ describe("OpenAICodexCLIAdapter", () => {
       expect(mockSpawn).toHaveBeenCalledTimes(1);
       const [cliPath, spawnArgs] = mockSpawn.mock.calls[0] as [string, string[]];
       expect(cliPath).toBe("codex");
-      expect(spawnArgs).toEqual(["exec", "-s", "danger-full-access", "run tests"]);
+      expect(spawnArgs).toEqual(["exec", "-s", "danger-full-access", "--path", ".", "run tests"]);
     });
 
     it("uses custom cliPath when configured", async () => {
@@ -103,6 +103,8 @@ describe("OpenAICodexCLIAdapter", () => {
       const [, spawnArgs] = mockSpawn.mock.calls[0] as [string, string[]];
       expect(spawnArgs).toContain("-m");
       expect(spawnArgs).toContain("o4-mini");
+      expect(spawnArgs).toContain("--path");
+      expect(spawnArgs[spawnArgs.indexOf("--path") + 1]).toBe(".");
       // Verify order: -m comes before the prompt
       const modelIdx = spawnArgs.indexOf("-m");
       const promptIdx = spawnArgs.indexOf("do task");
@@ -131,7 +133,7 @@ describe("OpenAICodexCLIAdapter", () => {
 
       const [, spawnArgs] = mockSpawn.mock.calls[0] as [string, string[]];
       expect(spawnArgs).not.toContain("-s");
-      expect(spawnArgs).toEqual(["exec", "hi"]);
+      expect(spawnArgs).toEqual(["exec", "--path", ".", "hi"]);
     });
   });
 

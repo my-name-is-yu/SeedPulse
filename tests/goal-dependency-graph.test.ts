@@ -3,8 +3,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { StateManager } from "../src/state-manager.js";
-import { MockLLMClient } from "../src/llm-client.js";
-import { GoalDependencyGraph } from "../src/goal-dependency-graph.js";
+import { MockLLMClient } from "../src/llm/llm-client.js";
+import { GoalDependencyGraph } from "../src/goal/goal-dependency-graph.js";
 import type { DependencyEdge } from "../src/types/dependency.js";
 
 // ─── Helpers ───

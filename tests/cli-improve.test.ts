@@ -23,15 +23,15 @@ vi.mock("../src/core-loop.js", async (importOriginal) => {
   };
 });
 
-vi.mock("../src/goal-negotiator.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/goal-negotiator.js")>();
+vi.mock("../src/goal/goal-negotiator.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/goal/goal-negotiator.js")>();
   return {
     ...actual,
     GoalNegotiator: vi.fn(),
   };
 });
 
-vi.mock("../src/llm-client.js", () => ({
+vi.mock("../src/llm/llm-client.js", () => ({
   LLMClient: vi.fn().mockImplementation(() => ({})),
   MockLLMClient: vi.fn(),
 }));
@@ -44,7 +44,7 @@ vi.mock("../src/drive-system.js", () => ({
   DriveSystem: vi.fn().mockImplementation(() => ({})),
 }));
 
-vi.mock("../src/observation-engine.js", () => ({
+vi.mock("../src/observation/observation-engine.js", () => ({
   ObservationEngine: vi.fn().mockImplementation(() => ({})),
 }));
 
@@ -60,15 +60,15 @@ vi.mock("../src/ethics-gate.js", () => ({
   EthicsGate: vi.fn().mockImplementation(() => ({})),
 }));
 
-vi.mock("../src/session-manager.js", () => ({
+vi.mock("../src/execution/session-manager.js", () => ({
   SessionManager: vi.fn().mockImplementation(() => ({})),
 }));
 
-vi.mock("../src/strategy-manager.js", () => ({
+vi.mock("../src/strategy/strategy-manager.js", () => ({
   StrategyManager: vi.fn().mockImplementation(() => ({})),
 }));
 
-vi.mock("../src/adapter-layer.js", () => ({
+vi.mock("../src/execution/adapter-layer.js", () => ({
   AdapterRegistry: vi.fn().mockImplementation(() => ({
     register: vi.fn(),
     getAdapterCapabilities: vi.fn().mockReturnValue([]),
@@ -83,7 +83,7 @@ vi.mock("../src/adapters/claude-api.js", () => ({
   ClaudeAPIAdapter: vi.fn().mockImplementation(() => ({})),
 }));
 
-vi.mock("../src/task-lifecycle.js", () => ({
+vi.mock("../src/execution/task-lifecycle.js", () => ({
   TaskLifecycle: vi.fn().mockImplementation(() => ({})),
 }));
 
@@ -100,7 +100,7 @@ vi.mock("../src/reporting-engine.js", async (importOriginal) => {
 import { CLIRunner } from "../src/cli-runner.js";
 import { StateManager } from "../src/state-manager.js";
 import { CoreLoop } from "../src/core-loop.js";
-import { GoalNegotiator } from "../src/goal-negotiator.js";
+import { GoalNegotiator } from "../src/goal/goal-negotiator.js";
 import type { Goal } from "../src/types/goal.js";
 import type { LoopResult } from "../src/core-loop.js";
 

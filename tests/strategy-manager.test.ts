@@ -4,8 +4,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
 import { StateManager } from "../src/state-manager.js";
-import { StrategyManager } from "../src/strategy-manager.js";
-import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../src/llm-client.js";
+import { StrategyManager } from "../src/strategy/strategy-manager.js";
+import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../src/llm/llm-client.js";
 import type { Strategy } from "../src/types/strategy.js";
 import { createMockLLMClient } from "./helpers/mock-llm.js";
 

@@ -14,7 +14,7 @@
 //   - NOTE: --full-auto does NOT exist in this version; use sandbox policy instead
 
 import { spawn } from "node:child_process";
-import type { IAdapter, AgentTask, AgentResult } from "../adapter-layer.js";
+import type { IAdapter, AgentTask, AgentResult } from "../execution/adapter-layer.js";
 
 export interface OpenAICodexCLIAdapterConfig {
   /** The executable name / path for the codex CLI. Default: "codex" */
@@ -27,6 +27,8 @@ export interface OpenAICodexCLIAdapterConfig {
   sandboxPolicy?: string | null;
   /** If set, pass -m <model> to the CLI. */
   model?: string;
+  /** Repository path passed to Codex for workspace-aware execution. Default: "." */
+  repoPath?: string;
 }
 
 export class OpenAICodexCLIAdapter implements IAdapter {
@@ -36,12 +38,14 @@ export class OpenAICodexCLIAdapter implements IAdapter {
   private readonly cliPath: string;
   private readonly sandboxPolicy: string | null;
   private readonly model: string | undefined;
+  private readonly repoPath: string;
 
   constructor(config: OpenAICodexCLIAdapterConfig = {}) {
     this.cliPath = config.cliPath ?? "codex";
     this.sandboxPolicy =
       config.sandboxPolicy !== undefined ? config.sandboxPolicy : "danger-full-access";
     this.model = config.model;
+    this.repoPath = config.repoPath?.trim() || ".";
   }
 
   async execute(task: AgentTask): Promise<AgentResult> {
@@ -58,6 +62,8 @@ export class OpenAICodexCLIAdapter implements IAdapter {
       if (this.model) {
         spawnArgs.push("-m", this.model);
       }
+
+      spawnArgs.push("--path", this.repoPath);
 
       // Prompt is passed as a positional argument to the exec subcommand.
       // codex exec [-s <policy>] [-m <model>] "<prompt>"

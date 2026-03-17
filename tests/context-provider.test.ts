@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildWorkspaceContext,
   dimensionNameToSearchTerms,
-} from "../src/context-provider.js";
+} from "../src/observation/context-provider.js";
 import * as path from "path";
 
 describe("dimensionNameToSearchTerms", () => {

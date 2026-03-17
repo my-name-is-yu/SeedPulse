@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { StateManager } from "../src/state-manager.js";
-import { DriveSystem } from "../src/drive-system.js";
+import { DriveSystem } from "../src/drive/drive-system.js";
 import type { MotivaEvent, GoalSchedule } from "../src/types/drive.js";
 import type { Goal } from "../src/types/goal.js";
 

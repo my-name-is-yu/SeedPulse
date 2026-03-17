@@ -2,23 +2,23 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ─── Mock heavy dependencies so no real clients are constructed ───
 
-vi.mock("../src/llm-client.js", () => ({
+vi.mock("../src/llm/llm-client.js", () => ({
   LLMClient: vi.fn().mockImplementation(() => ({ _tag: "LLMClient" })),
 }));
 
-vi.mock("../src/ollama-client.js", () => ({
+vi.mock("../src/llm/ollama-client.js", () => ({
   OllamaLLMClient: vi.fn().mockImplementation(() => ({ _tag: "OllamaLLMClient" })),
 }));
 
-vi.mock("../src/openai-client.js", () => ({
+vi.mock("../src/llm/openai-client.js", () => ({
   OpenAILLMClient: vi.fn().mockImplementation(() => ({ _tag: "OpenAILLMClient" })),
 }));
 
-vi.mock("../src/codex-llm-client.js", () => ({
+vi.mock("../src/llm/codex-llm-client.js", () => ({
   CodexLLMClient: vi.fn().mockImplementation(() => ({ _tag: "CodexLLMClient" })),
 }));
 
-vi.mock("../src/adapter-layer.js", () => ({
+vi.mock("../src/execution/adapter-layer.js", () => ({
   AdapterRegistry: vi.fn().mockImplementation(() => ({ register: vi.fn() })),
 }));
 
@@ -42,11 +42,11 @@ vi.mock("../src/adapters/github-issue.js", () => ({
 
 const mockLoadProviderConfig = vi.fn();
 
-vi.mock("../src/provider-config.js", () => ({
+vi.mock("../src/llm/provider-config.js", () => ({
   loadProviderConfig: () => mockLoadProviderConfig(),
 }));
 
-import { buildLLMClient } from "../src/provider-factory.js";
+import { buildLLMClient } from "../src/llm/provider-factory.js";
 
 // ─── Tests ───
 

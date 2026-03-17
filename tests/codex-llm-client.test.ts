@@ -32,7 +32,7 @@ vi.mock("node:fs", async (importOriginal) => {
   };
 });
 
-import { CodexLLMClient } from "../src/codex-llm-client.js";
+import { CodexLLMClient } from "../src/llm/codex-llm-client.js";
 
 // ─── Helpers ───
 
@@ -98,7 +98,7 @@ describe("CodexLLMClient", () => {
   // ─── spawn arguments ───
 
   describe("sendMessage: spawn args", () => {
-    it("spawns with exec --ephemeral --full-auto -o <path> - (stdin mode)", async () => {
+    it("spawns with exec --ephemeral --full-auto --path . -o <path> - (stdin mode)", async () => {
       const client = new CodexLLMClient();
       const child = makeFakeChild();
 
@@ -110,6 +110,8 @@ describe("CodexLLMClient", () => {
       expect(spawnArgs[0]).toBe("exec");
       expect(spawnArgs).toContain("--ephemeral");
       expect(spawnArgs).toContain("--full-auto");
+      expect(spawnArgs).toContain("--path");
+      expect(spawnArgs[spawnArgs.indexOf("--path") + 1]).toBe(".");
       expect(spawnArgs).toContain("-o");
       // -o must be followed by a path
       const dashOIdx = spawnArgs.indexOf("-o");

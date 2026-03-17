@@ -4,11 +4,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
 import { StateManager } from "../src/state-manager.js";
-import { SessionManager } from "../src/session-manager.js";
-import { TrustManager } from "../src/trust-manager.js";
-import { StrategyManager } from "../src/strategy-manager.js";
-import { StallDetector } from "../src/stall-detector.js";
-import { TaskLifecycle } from "../src/task-lifecycle.js";
+import { SessionManager } from "../src/execution/session-manager.js";
+import { TrustManager } from "../src/traits/trust-manager.js";
+import { StrategyManager } from "../src/strategy/strategy-manager.js";
+import { StallDetector } from "../src/drive/stall-detector.js";
+import { TaskLifecycle } from "../src/execution/task-lifecycle.js";
 import type { Task } from "../src/types/task.js";
 import type { GapVector } from "../src/types/gap.js";
 import type { DriveContext } from "../src/types/drive.js";
@@ -17,7 +17,7 @@ import type {
   LLMMessage,
   LLMRequestOptions,
   LLMResponse,
-} from "../src/llm-client.js";
+} from "../src/llm/llm-client.js";
 import { createMockLLMClient } from "./helpers/mock-llm.js";
 
 // ─── Spy LLM Client (tracks messages sent) ───
@@ -182,8 +182,9 @@ describe("TaskLifecycle", () => {
     llmClient: ILLMClient,
     options?: {
       approvalFn?: (task: Task) => Promise<boolean>;
-      logger?: import("../src/logger.js").Logger;
-      adapterRegistry?: import("../src/task-lifecycle.js").AdapterRegistry;
+      logger?: import("../src/runtime/logger.js").Logger;
+      adapterRegistry?: import("../src/execution/task-lifecycle.js").AdapterRegistry;
+      execFileSyncFn?: (cmd: string, args: string[], opts: { cwd: string; encoding: "utf-8" }) => string;
     }
   ): TaskLifecycle {
     strategyManager = new StrategyManager(stateManager, llmClient);
@@ -538,7 +539,7 @@ describe("TaskLifecycle", () => {
       const rawResponse = "This is not JSON at all";
       const llm = createMockLLMClient([rawResponse]);
       const mockLogger = { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() };
-      const lifecycle = createLifecycle(llm, { logger: mockLogger as unknown as import("../src/logger.js").Logger });
+      const lifecycle = createLifecycle(llm, { logger: mockLogger as unknown as import("../src/runtime/logger.js").Logger });
 
       await lifecycle.generateTask("goal-1", "dim").catch(() => {});
 
@@ -843,14 +844,14 @@ describe("TaskLifecycle", () => {
   }
 
   function createMockAdapter(
-    results: Array<Partial<import("../src/task-lifecycle.js").AgentResult>>
-  ): import("../src/task-lifecycle.js").IAdapter {
+    results: Array<Partial<import("../src/execution/task-lifecycle.js").AgentResult>>
+  ): import("../src/execution/task-lifecycle.js").IAdapter {
     let callIndex = 0;
     return {
       adapterType: "mock",
       async execute(
-        _task: import("../src/task-lifecycle.js").AgentTask
-      ): Promise<import("../src/task-lifecycle.js").AgentResult> {
+        _task: import("../src/execution/task-lifecycle.js").AgentTask
+      ): Promise<import("../src/execution/task-lifecycle.js").AgentResult> {
         const r = results[callIndex++] ?? {};
         return {
           success: true,
@@ -897,7 +898,7 @@ describe("TaskLifecycle", () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
       let executeCalled = false;
-      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute() {
           executeCalled = true;
@@ -1009,7 +1010,7 @@ describe("TaskLifecycle", () => {
     it("handles adapter throwing an error", async () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
-      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute() {
           throw new Error("Adapter crashed");
@@ -1027,7 +1028,7 @@ describe("TaskLifecycle", () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
       let receivedPrompt = "";
-      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute(agentTask) {
           receivedPrompt = agentTask.prompt;
@@ -1048,7 +1049,7 @@ describe("TaskLifecycle", () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
       let receivedPrompt = "";
-      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
         adapterType: "github_issue",
         async execute(agentTask) {
           receivedPrompt = agentTask.prompt;
@@ -1074,7 +1075,7 @@ describe("TaskLifecycle", () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
       let receivedPrompt = "";
-      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
         adapterType: "github_issue",
         async execute(agentTask) {
           receivedPrompt = agentTask.prompt;
@@ -1099,7 +1100,7 @@ describe("TaskLifecycle", () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
       let receivedTimeout = 0;
-      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute(agentTask) {
           receivedTimeout = agentTask.timeout_ms;
@@ -1119,7 +1120,7 @@ describe("TaskLifecycle", () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
       let receivedTimeout = 0;
-      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute(agentTask) {
           receivedTimeout = agentTask.timeout_ms;
@@ -1139,7 +1140,7 @@ describe("TaskLifecycle", () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
       let receivedType = "";
-      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
         adapterType: "claude_api",
         async execute(agentTask) {
           receivedType = agentTask.adapter_type;
@@ -1168,6 +1169,84 @@ describe("TaskLifecycle", () => {
       expect(persisted.started_at).toBeDefined();
       expect(typeof persisted.started_at).toBe("string");
     });
+
+    // ─── filesChanged annotation (git diff check) ───
+
+    it("sets filesChanged=true when git diff --stat reports changed files", async () => {
+      // Inject mock via execFileSyncFn option to avoid ES module spy issues
+      const mockExecFileSync = vi.fn().mockReturnValue("src/foo.ts | 5 +++++\n 1 file changed, 5 insertions(+)");
+
+      const llm = createMockLLMClient([]);
+      const lifecycle = createLifecycle(llm, { execFileSyncFn: mockExecFileSync });
+      const adapter = createMockAdapter([{ success: true }]);
+      const task = makeTask();
+
+      const result = await lifecycle.executeTask(task, adapter);
+
+      expect(result.filesChanged).toBe(true);
+    });
+
+    it("sets filesChanged=false and logs warning when git diff --stat is empty", async () => {
+      // Inject mock that returns empty string (no files changed)
+      const mockExecFileSync = vi.fn().mockReturnValue("");
+
+      const warnCalls: Array<[string, Record<string, unknown>?]> = [];
+      const mockLogger = {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn((...args: unknown[]) => {
+          warnCalls.push(args as [string, Record<string, unknown>?]);
+        }),
+        error: vi.fn(),
+      };
+
+      const llm = createMockLLMClient([]);
+      const lifecycle = createLifecycle(llm, {
+        logger: mockLogger as unknown as import("../src/runtime/logger.js").Logger,
+        execFileSyncFn: mockExecFileSync,
+      });
+      const adapter = createMockAdapter([{ success: true }]);
+      const task = makeTask();
+
+      const result = await lifecycle.executeTask(task, adapter);
+
+      expect(result.filesChanged).toBe(false);
+      // Logger.warn should have been called with the no-files-modified message
+      expect(warnCalls.some(([msg]) => msg.includes("no files were modified"))).toBe(true);
+    });
+
+    it("does not annotate filesChanged when git is unavailable", async () => {
+      // Inject mock that throws (simulates git not available / not a git repo)
+      const mockExecFileSync = vi.fn().mockImplementation(() => {
+        throw new Error("git: command not found");
+      });
+
+      const llm = createMockLLMClient([]);
+      const lifecycle = createLifecycle(llm, { execFileSyncFn: mockExecFileSync });
+      const adapter = createMockAdapter([{ success: true }]);
+      const task = makeTask();
+
+      // Should not throw, and filesChanged should be undefined (check skipped)
+      const result = await lifecycle.executeTask(task, adapter);
+
+      expect(result.success).toBe(true);
+      expect(result.filesChanged).toBeUndefined();
+    });
+
+    it("does not run git diff check when adapter reports failure", async () => {
+      const mockExecFileSync = vi.fn().mockReturnValue("some output");
+
+      const llm = createMockLLMClient([]);
+      const lifecycle = createLifecycle(llm, { execFileSyncFn: mockExecFileSync });
+      const adapter = createMockAdapter([{ success: false, stopped_reason: "error" }]);
+      const task = makeTask();
+
+      const result = await lifecycle.executeTask(task, adapter);
+
+      // Git diff check is skipped for failed tasks
+      expect(result.filesChanged).toBeUndefined();
+      expect(mockExecFileSync).not.toHaveBeenCalled();
+    });
   });
 
   // ─────────────────────────────────────────────
@@ -1176,8 +1255,8 @@ describe("TaskLifecycle", () => {
 
   describe("verifyTask", () => {
     function makeExecutionResult(
-      overrides: Partial<import("../src/task-lifecycle.js").AgentResult> = {}
-    ): import("../src/task-lifecycle.js").AgentResult {
+      overrides: Partial<import("../src/execution/task-lifecycle.js").AgentResult> = {}
+    ): import("../src/execution/task-lifecycle.js").AgentResult {
       return {
         success: true,
         output: "Task completed: all tests pass",
@@ -2521,7 +2600,7 @@ describe("TaskLifecycle", () => {
       const llm = createMockLLMClient([LLM_REVIEW_PASS]);
       const lifecycle = createLifecycle(llm);
       const task = makeTask({ id: "task-persist-test" });
-      const result: import("../src/task-lifecycle.js").AgentResult = {
+      const result: import("../src/execution/task-lifecycle.js").AgentResult = {
         success: true,
         output: "done",
         error: null,
@@ -2614,7 +2693,7 @@ describe("TaskLifecycle", () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
       let statusDuringExecution = "";
-      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute() {
           // Check status during execution
@@ -2865,7 +2944,7 @@ describe("TaskLifecycle", () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
 
-      const timeoutAdapter: import("../src/task-lifecycle.js").IAdapter = {
+      const timeoutAdapter: import("../src/execution/task-lifecycle.js").IAdapter = {
         adapterType: "mock-timeout",
         async execute() {
           throw new Error("Adapter execution timed out after 30000ms");
@@ -2891,7 +2970,7 @@ describe("TaskLifecycle", () => {
       ]);
       const lifecycle = createLifecycle(llm);
 
-      const timeoutAdapter: import("../src/task-lifecycle.js").IAdapter = {
+      const timeoutAdapter: import("../src/execution/task-lifecycle.js").IAdapter = {
         adapterType: "mock-timeout",
         async execute() {
           throw new Error("Connection timeout");
@@ -2921,7 +3000,7 @@ describe("TaskLifecycle", () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
 
-      const badAdapter: import("../src/task-lifecycle.js").IAdapter = {
+      const badAdapter: import("../src/execution/task-lifecycle.js").IAdapter = {
         adapterType: "mock-bad",
         async execute() {
           // eslint-disable-next-line @typescript-eslint/no-throw-literal
@@ -2993,7 +3072,7 @@ describe("TaskLifecycle", () => {
       const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
       const context = makeDriveContext(["coverage"]);
       let adapterExecuteCalled = false;
-      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute() {
           adapterExecuteCalled = true;
@@ -3024,7 +3103,7 @@ describe("TaskLifecycle", () => {
       const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
       const context = makeDriveContext(["coverage"]);
       let adapterExecuteCalled = false;
-      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute() {
           adapterExecuteCalled = true;
@@ -3056,7 +3135,7 @@ describe("TaskLifecycle", () => {
       const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
       const context = makeDriveContext(["coverage"]);
       const adapterExecute = vi.fn();
-      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute() {
           adapterExecute();
@@ -3108,7 +3187,7 @@ describe("TaskLifecycle", () => {
       const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
       const context = makeDriveContext(["coverage"]);
       let adapterExecuteCalled = false;
-      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute() {
           adapterExecuteCalled = true;
@@ -3140,7 +3219,7 @@ describe("TaskLifecycle", () => {
       const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
       const context = makeDriveContext(["coverage"]);
       const adapterExecute = vi.fn();
-      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute() {
           adapterExecute();
@@ -3310,7 +3389,7 @@ describe("TaskLifecycle", () => {
       });
       const gapVector = makeGapVector("goal-1", [{ name: "dim", gap: 0.5 }]);
       const context = makeDriveContext(["dim"]);
-      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute() {
           callOrder.push("adapterExecute");
@@ -3542,7 +3621,7 @@ describe("TaskLifecycle", () => {
       const llm = createMockLLMClient([VALID_TASK_RESPONSE, LLM_REVIEW_PASS]);
       const lifecycle = createLifecycle(llm, {
         approvalFn: async () => true,
-        capabilityDetector: capabilityDetector as unknown as import("../src/capability-detector.js").CapabilityDetector,
+        capabilityDetector: capabilityDetector as unknown as import("../src/observation/capability-detector.js").CapabilityDetector,
       });
 
       // Spy on generateTask to return a task with task_category = "capability_acquisition"
@@ -3585,7 +3664,7 @@ describe("TaskLifecycle", () => {
       const llm = createMockLLMClient([VALID_TASK_RESPONSE]);
       const lifecycle = createLifecycle(llm, {
         approvalFn: async () => true,
-        capabilityDetector: capabilityDetector as unknown as import("../src/capability-detector.js").CapabilityDetector,
+        capabilityDetector: capabilityDetector as unknown as import("../src/observation/capability-detector.js").CapabilityDetector,
       });
 
       const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
@@ -3627,7 +3706,7 @@ describe("TaskLifecycle", () => {
       const llm = createMockLLMClient([VALID_TASK_RESPONSE]);
       const lifecycle = createLifecycle(llm, {
         approvalFn: async () => true,
-        capabilityDetector: capabilityDetector as unknown as import("../src/capability-detector.js").CapabilityDetector,
+        capabilityDetector: capabilityDetector as unknown as import("../src/observation/capability-detector.js").CapabilityDetector,
       });
 
       const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
@@ -3663,7 +3742,7 @@ describe("TaskLifecycle", () => {
       const llm = createMockLLMClient([VALID_TASK_RESPONSE]);
       const lifecycle = createLifecycle(llm, {
         approvalFn: async () => true,
-        capabilityDetector: capabilityDetector as unknown as import("../src/capability-detector.js").CapabilityDetector,
+        capabilityDetector: capabilityDetector as unknown as import("../src/observation/capability-detector.js").CapabilityDetector,
       });
 
       const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);

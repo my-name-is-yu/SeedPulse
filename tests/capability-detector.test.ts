@@ -5,7 +5,7 @@ import * as os from "node:os";
 import { z } from "zod";
 import { StateManager } from "../src/state-manager.js";
 import { ReportingEngine } from "../src/reporting-engine.js";
-import { CapabilityDetector } from "../src/capability-detector.js";
+import { CapabilityDetector } from "../src/observation/capability-detector.js";
 import { CapabilityRegistrySchema } from "../src/types/capability.js";
 import type {
   Capability,
@@ -15,8 +15,8 @@ import type {
   AcquisitionContext,
 } from "../src/types/capability.js";
 import type { Task } from "../src/types/task.js";
-import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../src/llm-client.js";
-import type { AgentResult } from "../src/adapter-layer.js";
+import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../src/llm/llm-client.js";
+import type { AgentResult } from "../src/execution/adapter-layer.js";
 import { createMockLLMClient } from "./helpers/mock-llm.js";
 
 // ─── Fixtures ───
@@ -1257,5 +1257,61 @@ describe("detectGoalCapabilityGap", () => {
     );
 
     expect(result).toBeNull();
+  });
+});
+
+// ─── dependency helpers ───
+
+describe("dependency helpers", () => {
+  it("addDependency persists dependencies that getDependencies can read back", () => {
+    const detector = new CapabilityDetector(stateManager, createMockLLMClient([]), reportingEngine);
+
+    detector.addDependency("deploy", ["build", "test"]);
+
+    expect(detector.getDependencies("deploy")).toEqual(["build", "test"]);
+  });
+
+  it("getDependencies returns an empty array when a capability has no dependency entry", () => {
+    const detector = new CapabilityDetector(stateManager, createMockLLMClient([]), reportingEngine);
+
+    expect(detector.getDependencies("nonexistent")).toEqual([]);
+  });
+
+  it("resolveDependencies orders prerequisites before dependents", () => {
+    const detector = new CapabilityDetector(stateManager, createMockLLMClient([]), reportingEngine);
+
+    const ordered = detector.resolveDependencies([
+      { capability_id: "deploy", depends_on: ["build", "test"] },
+      { capability_id: "build", depends_on: ["lint"] },
+    ]);
+
+    expect(ordered.indexOf("lint")).toBeLessThan(ordered.indexOf("build"));
+    expect(ordered.indexOf("build")).toBeLessThan(ordered.indexOf("deploy"));
+    expect(ordered.indexOf("test")).toBeLessThan(ordered.indexOf("deploy"));
+  });
+
+  it("detectCircularDependency returns the cycle path when dependencies loop", () => {
+    const detector = new CapabilityDetector(stateManager, createMockLLMClient([]), reportingEngine);
+
+    const cycle = detector.detectCircularDependency([
+      { capability_id: "tool-a", depends_on: ["tool-b"] },
+      { capability_id: "tool-b", depends_on: ["tool-c"] },
+      { capability_id: "tool-c", depends_on: ["tool-a"] },
+    ]);
+
+    expect(cycle).not.toBeNull();
+    expect(cycle![0]).toBe("tool-a");
+    expect(cycle![cycle!.length - 1]).toBe("tool-a");
+  });
+
+  it("detectCircularDependency returns null when dependencies are acyclic", () => {
+    const detector = new CapabilityDetector(stateManager, createMockLLMClient([]), reportingEngine);
+
+    const cycle = detector.detectCircularDependency([
+      { capability_id: "build", depends_on: ["lint"] },
+      { capability_id: "deploy", depends_on: ["build"] },
+    ]);
+
+    expect(cycle).toBeNull();
   });
 });

@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { StateManager } from "../src/state-manager.js";
-import { TrustManager } from "../src/trust-manager.js";
+import { TrustManager } from "../src/traits/trust-manager.js";
 import {
   HIGH_TRUST_THRESHOLD,
   HIGH_CONFIDENCE_THRESHOLD,

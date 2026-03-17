@@ -16,7 +16,7 @@ vi.mock("node:child_process", () => ({
 }));
 
 import { ClaudeCodeCLIAdapter } from "../src/adapters/claude-code-cli.js";
-import type { AgentTask } from "../src/adapter-layer.js";
+import type { AgentTask } from "../src/execution/adapter-layer.js";
 
 // ─── Helpers ───
 

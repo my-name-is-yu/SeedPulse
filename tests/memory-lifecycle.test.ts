@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { MemoryLifecycleManager } from "../src/memory-lifecycle.js";
-import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../src/llm-client.js";
+import { MemoryLifecycleManager } from "../src/knowledge/memory-lifecycle.js";
+import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../src/llm/llm-client.js";
 import type { ZodSchema } from "zod";
 import { createMockLLMClient } from "./helpers/mock-llm.js";
 

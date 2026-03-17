@@ -4,8 +4,8 @@
 // Intended for tasks where a single LLM call is sufficient.
 // Timeout is handled via Promise.race().
 
-import type { IAdapter, AgentTask, AgentResult } from "../adapter-layer.js";
-import type { ILLMClient } from "../llm-client.js";
+import type { IAdapter, AgentTask, AgentResult } from "../execution/adapter-layer.js";
+import type { ILLMClient } from "../llm/llm-client.js";
 
 export class ClaudeAPIAdapter implements IAdapter {
   readonly adapterType = "claude_api";

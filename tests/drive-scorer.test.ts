@@ -7,7 +7,7 @@ import {
   combineDriveScores,
   scoreAllDimensions,
   rankDimensions,
-} from "../src/drive-scorer.js";
+} from "../src/drive/drive-scorer.js";
 import type { DriveConfig, DriveContext } from "../src/types/drive.js";
 import type { GapVector } from "../src/types/gap.js";
 

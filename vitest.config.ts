@@ -4,6 +4,6 @@ export default defineConfig({
   test: {
     globals: true,
     root: '.',
-    include: ['tests/**/*.test.ts'],
+    include: ['tests/**/*.test.ts', 'tests/test_*.ts'],
   },
 });

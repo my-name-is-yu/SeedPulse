@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import { IntentRecognizer } from "../../src/tui/intent-recognizer.js";
-import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../../src/llm-client.js";
+import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../../src/llm/llm-client.js";
 import { createSingleMockLLMClient as makeMockLLMClient } from "../helpers/mock-llm.js";
 
 // ─── Keyword matching ───

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { CuriosityEngine } from "../src/curiosity-engine.js";
-import type { CuriosityEngineDeps } from "../src/curiosity-engine.js";
+import { CuriosityEngine } from "../src/traits/curiosity-engine.js";
+import type { CuriosityEngineDeps } from "../src/traits/curiosity-engine.js";
 import type { Goal, Dimension } from "../src/types/goal.js";
 import type { CuriosityProposal, CuriosityTrigger } from "../src/types/curiosity.js";
 import type { StallState } from "../src/types/stall.js";

@@ -4,12 +4,12 @@ import * as path from "node:path";
 import * as os from "node:os";
 import {
   createWorkspaceContextProvider,
-} from "../src/context-providers/workspace-context.js";
-import { ObservationEngine } from "../src/observation-engine.js";
+} from "../src/observation/workspace-context.js";
+import { ObservationEngine } from "../src/observation/observation-engine.js";
 import { StateManager } from "../src/state-manager.js";
 import type { Goal } from "../src/types/goal.js";
 import type { ObservationMethod } from "../src/types/core.js";
-import type { ILLMClient } from "../src/llm-client.js";
+import type { ILLMClient } from "../src/llm/llm-client.js";
 
 // ─── Helpers ───
 

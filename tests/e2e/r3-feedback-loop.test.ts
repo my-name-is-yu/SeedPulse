@@ -15,20 +15,20 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { StateManager } from "../../src/state-manager.js";
-import { TaskLifecycle } from "../../src/task-lifecycle.js";
-import { TrustManager } from "../../src/trust-manager.js";
-import { SessionManager } from "../../src/session-manager.js";
-import { StrategyManager } from "../../src/strategy-manager.js";
-import { StallDetector } from "../../src/stall-detector.js";
+import { TaskLifecycle } from "../../src/execution/task-lifecycle.js";
+import { TrustManager } from "../../src/traits/trust-manager.js";
+import { SessionManager } from "../../src/execution/session-manager.js";
+import { StrategyManager } from "../../src/strategy/strategy-manager.js";
+import { StallDetector } from "../../src/drive/stall-detector.js";
 import { CoreLoop, type CoreLoopDeps } from "../../src/core-loop.js";
 import type { Goal } from "../../src/types/goal.js";
 import type { Task, VerificationResult } from "../../src/types/task.js";
-import type { IAdapter, AgentTask, AgentResult } from "../../src/adapter-layer.js";
+import type { IAdapter, AgentTask, AgentResult } from "../../src/execution/adapter-layer.js";
 import type { GapVector } from "../../src/types/gap.js";
 import type { DriveScore } from "../../src/types/drive.js";
 import type { CompletionJudgment } from "../../src/types/satisficing.js";
-import type { TaskCycleResult } from "../../src/task-lifecycle.js";
-import type { ILLMClient } from "../../src/llm-client.js";
+import type { TaskCycleResult } from "../../src/execution/task-lifecycle.js";
+import type { ILLMClient } from "../../src/llm/llm-client.js";
 
 // ─── Helpers ───
 

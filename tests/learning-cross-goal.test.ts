@@ -2,11 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { LearningPipeline } from "../src/learning-pipeline.js";
-import { KnowledgeTransfer } from "../src/knowledge-transfer.js";
+import { LearningPipeline } from "../src/knowledge/learning-pipeline.js";
+import { KnowledgeTransfer } from "../src/knowledge/knowledge-transfer.js";
 import { StateManager } from "../src/state-manager.js";
-import { VectorIndex } from "../src/vector-index.js";
-import { MockEmbeddingClient } from "../src/embedding-client.js";
+import { VectorIndex } from "../src/knowledge/vector-index.js";
+import { MockEmbeddingClient } from "../src/knowledge/embedding-client.js";
 import { createMockLLMClient } from "./helpers/mock-llm.js";
 import type { StructuralFeedback, CrossGoalPattern } from "../src/types/learning.js";
 import { CrossGoalPatternSchema } from "../src/types/learning.js";
@@ -395,7 +395,7 @@ describe("KnowledgeTransfer — storePattern / retrievePatterns", () => {
     const mockKnowledgeManager = {
       searchRelated: async () => [],
       addEntry: async () => ({ id: "mock" }),
-    } as unknown as import("../src/knowledge-manager.js").KnowledgeManager;
+    } as unknown as import("../src/knowledge/knowledge-manager.js").KnowledgeManager;
 
     const mockEthicsGate = {
       check: async () => ({ verdict: "allow" as const, reasoning: "" }),

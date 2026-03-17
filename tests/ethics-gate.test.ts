@@ -4,8 +4,8 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { z } from "zod";
 import { StateManager } from "../src/state-manager.js";
-import { EthicsGate } from "../src/ethics-gate.js";
-import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../src/llm-client.js";
+import { EthicsGate } from "../src/traits/ethics-gate.js";
+import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../src/llm/llm-client.js";
 import { createMockLLMClient } from "./helpers/mock-llm.js";
 
 // ─── Fixtures ───
