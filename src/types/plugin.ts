@@ -72,6 +72,18 @@ export const PluginStateSchema = z.object({
 
 export type PluginState = z.infer<typeof PluginStateSchema>;
 
+// ─── Plugin match result ───
+
+export const PluginMatchResultSchema = z.object({
+  pluginName: z.string(),
+  matchScore: z.number().min(0).max(1),
+  matchedDimensions: z.array(z.string()),
+  trustScore: z.number().int(),
+  autoSelectable: z.boolean(), // trust_score >= 20
+});
+
+export type PluginMatchResult = z.infer<typeof PluginMatchResultSchema>;
+
 // ─── Notification types ───
 
 export type NotificationEventType =

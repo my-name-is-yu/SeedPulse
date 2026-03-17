@@ -3,6 +3,8 @@ import { StateManager } from "../state-manager.js";
 import { ReportingEngine } from "../reporting-engine.js";
 import type { ILLMClient } from "../llm/llm-client.js";
 import type { Task } from "../types/task.js";
+import type { PluginMatchResult } from "../types/plugin.js";
+import type { PluginLoader } from "../runtime/plugin-loader.js";
 import {
   CapabilityAcquisitionTaskSchema,
   CapabilityGapSchema,
@@ -85,15 +87,18 @@ export class CapabilityDetector {
   private readonly stateManager: StateManager;
   private readonly llmClient: ILLMClient;
   private readonly reportingEngine: ReportingEngine;
+  private readonly pluginLoader?: PluginLoader;
 
   constructor(
     stateManager: StateManager,
     llmClient: ILLMClient,
-    reportingEngine: ReportingEngine
+    reportingEngine: ReportingEngine,
+    pluginLoader?: PluginLoader
   ) {
     this.stateManager = stateManager;
     this.llmClient = llmClient;
     this.reportingEngine = reportingEngine;
+    this.pluginLoader = pluginLoader;
   }
 
   // ─── detectDeficiency ───
@@ -169,8 +174,9 @@ export class CapabilityDetector {
    */
   async detectGoalCapabilityGap(
     goalDescription: string,
-    adapterCapabilities: string[]
-  ): Promise<{ gap: CapabilityGap; acquirable: boolean } | null> {
+    adapterCapabilities: string[],
+    goalDimensions?: string[]
+  ): Promise<{ gap: CapabilityGap; acquirable: boolean; suggestedPlugins?: PluginMatchResult[] } | null> {
     try {
       const registry = await this.loadRegistry();
 
@@ -232,10 +238,66 @@ export class CapabilityDetector {
         // related_task_id intentionally omitted — this is goal-level, not task-level
       });
 
-      return { gap, acquirable: parsed.acquirable ?? false };
+      const result: { gap: CapabilityGap; acquirable: boolean; suggestedPlugins?: PluginMatchResult[] } = {
+        gap,
+        acquirable: parsed.acquirable ?? false,
+      };
+
+      if (this.pluginLoader && goalDimensions && goalDimensions.length > 0) {
+        result.suggestedPlugins = await this.matchPluginsForGoal(goalDescription, goalDimensions);
+      }
+
+      return result;
     } catch {
       return null;
     }
+  }
+
+  // ─── matchPluginsForGoal ───
+
+  /**
+   * Finds installed plugins that match the goal's dimensions.
+   * Returns plugins with matchScore >= 0.5, sorted by score then trust.
+   */
+  async matchPluginsForGoal(
+    _goalDescription: string,
+    goalDimensions: string[]
+  ): Promise<PluginMatchResult[]> {
+    if (!this.pluginLoader || goalDimensions.length === 0) {
+      return [];
+    }
+
+    const pluginStates = await this.pluginLoader.loadAll();
+
+    const results: PluginMatchResult[] = [];
+
+    for (const state of pluginStates) {
+      if (state.status !== "loaded") continue;
+
+      const pluginDimensions = state.manifest.dimensions ?? [];
+      if (pluginDimensions.length === 0) continue;
+
+      const matchedDimensions = goalDimensions.filter((d) => pluginDimensions.includes(d));
+      const matchScore = matchedDimensions.length / goalDimensions.length;
+
+      if (matchScore < 0.5) continue;
+
+      results.push({
+        pluginName: state.name,
+        matchScore,
+        matchedDimensions,
+        trustScore: state.trust_score,
+        autoSelectable: state.trust_score >= 20,
+      });
+    }
+
+    // Sort by matchScore descending, then trustScore descending
+    results.sort((a, b) => {
+      if (b.matchScore !== a.matchScore) return b.matchScore - a.matchScore;
+      return b.trustScore - a.trustScore;
+    });
+
+    return results;
   }
 
   // ─── Registry wrappers ───

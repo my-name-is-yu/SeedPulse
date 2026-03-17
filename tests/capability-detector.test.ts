@@ -1315,3 +1315,111 @@ describe("dependency helpers", () => {
     expect(cycle).toBeNull();
   });
 });
+
+// ─── matchPluginsForGoal ───
+
+describe("matchPluginsForGoal", () => {
+  let stateManager: StateManager;
+  let reportingEngine: ReportingEngine;
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "motiva-match-test-"));
+    stateManager = new StateManager(tmpDir);
+    reportingEngine = new ReportingEngine(stateManager);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function makePluginLoader(pluginStates: Array<{
+    name: string;
+    dimensions?: string[];
+    trustScore?: number;
+    status?: "loaded" | "error" | "disabled";
+  }>): import("../src/runtime/plugin-loader.js").PluginLoader {
+    // Mock PluginLoader that returns pre-configured states
+    const mockLoader = {
+      loadAll: async () => {
+        return pluginStates.map((p) => ({
+          name: p.name,
+          manifest: {
+            name: p.name,
+            version: "1.0.0",
+            type: "data_source" as const,
+            capabilities: ["query"],
+            dimensions: p.dimensions ?? [],
+            description: "test plugin",
+            config_schema: {},
+            dependencies: [],
+            entry_point: "dist/index.js",
+            permissions: { network: false, file_read: false, file_write: false, shell: false },
+          },
+          status: (p.status ?? "loaded") as "loaded" | "error" | "disabled",
+          loaded_at: new Date().toISOString(),
+          trust_score: p.trustScore ?? 0,
+          usage_count: 0,
+          success_count: 0,
+          failure_count: 0,
+        }));
+      },
+    } as unknown as import("../src/runtime/plugin-loader.js").PluginLoader;
+    return mockLoader;
+  }
+
+  it("returns empty array when no pluginLoader provided", async () => {
+    const detector = new CapabilityDetector(stateManager, createMockLLMClient([]), reportingEngine);
+    const results = await detector.matchPluginsForGoal("improve code coverage", ["test_coverage"]);
+    expect(results).toEqual([]);
+  });
+
+  it("returns empty array when no plugins match dimensions", async () => {
+    const loader = makePluginLoader([
+      { name: "slack-notifier", dimensions: ["notification_sent"] },
+    ]);
+    const detector = new CapabilityDetector(stateManager, createMockLLMClient([]), reportingEngine, loader);
+    const results = await detector.matchPluginsForGoal("improve code quality", ["test_coverage", "lint_errors"]);
+    expect(results).toEqual([]);
+  });
+
+  it("returns matching plugins sorted by score then trust", async () => {
+    const loader = makePluginLoader([
+      { name: "coverage-plugin", dimensions: ["test_coverage", "branch_coverage"], trustScore: 10 },
+      { name: "quality-plugin", dimensions: ["test_coverage", "lint_errors", "branch_coverage"], trustScore: 5 },
+      { name: "lint-plugin", dimensions: ["lint_errors"], trustScore: 30 },
+    ]);
+    const detector = new CapabilityDetector(stateManager, createMockLLMClient([]), reportingEngine, loader);
+    const results = await detector.matchPluginsForGoal("improve code quality", ["test_coverage", "lint_errors"]);
+
+    // quality-plugin: 2/2 = 1.0; coverage-plugin: 1/2 = 0.5; lint-plugin: 1/2 = 0.5
+    expect(results[0].pluginName).toBe("quality-plugin");
+    expect(results[0].matchScore).toBe(1.0);
+    // lint-plugin has higher trust than coverage-plugin at equal score
+    expect(results[1].pluginName).toBe("lint-plugin");
+    expect(results[2].pluginName).toBe("coverage-plugin");
+  });
+
+  it("filters out plugins below 0.5 threshold", async () => {
+    const loader = makePluginLoader([
+      { name: "partial-plugin", dimensions: ["test_coverage", "x", "y"] }, // 1/3 ≈ 0.33
+    ]);
+    const detector = new CapabilityDetector(stateManager, createMockLLMClient([]), reportingEngine, loader);
+    const results = await detector.matchPluginsForGoal("improve code quality", ["test_coverage", "lint_errors", "complexity"]);
+    expect(results).toEqual([]);
+  });
+
+  it("sets autoSelectable=true when trust_score >= 20", async () => {
+    const loader = makePluginLoader([
+      { name: "trusted-plugin", dimensions: ["test_coverage"], trustScore: 20 },
+      { name: "low-trust-plugin", dimensions: ["test_coverage"], trustScore: 19 },
+    ]);
+    const detector = new CapabilityDetector(stateManager, createMockLLMClient([]), reportingEngine, loader);
+    const results = await detector.matchPluginsForGoal("improve coverage", ["test_coverage"]);
+
+    const trusted = results.find((r) => r.pluginName === "trusted-plugin");
+    const lowTrust = results.find((r) => r.pluginName === "low-trust-plugin");
+    expect(trusted?.autoSelectable).toBe(true);
+    expect(lowTrust?.autoSelectable).toBe(false);
+  });
+});
