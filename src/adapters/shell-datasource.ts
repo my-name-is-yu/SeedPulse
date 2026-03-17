@@ -100,6 +100,9 @@ export class ShellDataSourceAdapter implements IDataSourceAdapter {
           results[dimName] = 0;
         } else if (this.isExecError(err) && err.code === 1 && spec.output_type === "boolean") {
           results[dimName] = 0;  // false
+        } else if (this.isExecError(err) && err.code === 1 && err.stdout) {
+          // Test runners (vitest, jest) exit 1 when tests fail but still output valid results
+          results[dimName] = this.parseOutput(err.stdout, spec.output_type);
         } else {
           console.warn(`[ShellDataSource] command failed for "${dimName}": ${String(err)}`);
           // Don't include in results — let ObservationEngine fallback handle it

@@ -454,6 +454,7 @@ export function cmdCleanup(stateManager: StateManager): number {
 export interface ShellCommandConfig {
   argv: string[];
   output_type: "number" | "boolean" | "raw";
+  timeout_ms?: number;
 }
 
 export const SHELL_DIMENSION_PATTERNS: Record<string, ShellCommandConfig> = {
@@ -462,7 +463,7 @@ export const SHELL_DIMENSION_PATTERNS: Record<string, ShellCommandConfig> = {
   test_count:        { argv: ["grep", "-rEc", "it\\(|test\\(|describe\\(", "tests/"], output_type: "number" },
   lint_errors:       { argv: ["npx", "eslint", "src/", "--format", "compact", "--max-warnings", "9999"], output_type: "number" },
   tsc_error_count:   { argv: ["npx", "tsc", "--noEmit", "--pretty", "false"], output_type: "number" },
-  test_coverage:     { argv: ["npx", "vitest", "run", "--coverage", "--reporter=json"], output_type: "number" },
+  test_coverage:     { argv: ["npx", "vitest", "run", "--coverage", "--reporter=json"], output_type: "number", timeout_ms: 180000 },
 };
 
 // ─── Raw Goal Add (no LLM) ───
@@ -754,9 +755,9 @@ export function autoRegisterShellDataSources(
 
     // Serialize commands in the format ShellDataSourceAdapter expects:
     // Record<dimensionName, ShellCommandSpec>
-    const commandsConfig: Record<string, { argv: string[]; output_type: string }> = {};
+    const commandsConfig: Record<string, { argv: string[]; output_type: string; timeout_ms?: number }> = {};
     for (const [dimName, spec] of Object.entries(matchedCommands)) {
-      commandsConfig[dimName] = { argv: spec.argv, output_type: spec.output_type };
+      commandsConfig[dimName] = { argv: spec.argv, output_type: spec.output_type, ...(spec.timeout_ms ? { timeout_ms: spec.timeout_ms } : {}) };
     }
 
     const config = {
