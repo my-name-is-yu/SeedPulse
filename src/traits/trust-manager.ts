@@ -11,6 +11,8 @@ import {
   TRUST_FAILURE_DELTA,
 } from "../types/trust.js";
 import type { TrustBalance, TrustStore, ActionQuadrant } from "../types/trust.js";
+import type { PluginMatchResult } from "../types/plugin.js";
+import type { PluginLoader } from "../runtime/plugin-loader.js";
 
 /** Path relative to StateManager base dir for the trust store */
 const TRUST_STORE_PATH = "trust/trust-store.json";
@@ -236,5 +238,58 @@ export class TrustManager {
     const gates = store.permanent_gates[domain];
     if (!gates) return false;
     return gates.includes(category);
+  }
+
+  // ─── Plugin trust ───
+
+  /**
+   * Record a successful plugin execution.
+   * Updates trust_score (+3), success_count, and usage_count in PluginState.
+   */
+  recordPluginSuccess(pluginName: string, pluginLoader: PluginLoader): void {
+    const state = pluginLoader.getPluginState(pluginName);
+    if (state === null) return;
+    void pluginLoader.updatePluginState(pluginName, {
+      trust_score: clamp(state.trust_score + TRUST_SUCCESS_DELTA),
+      success_count: state.success_count + 1,
+      usage_count: state.usage_count + 1,
+    });
+  }
+
+  /**
+   * Record a failed plugin execution.
+   * Updates trust_score (-10), failure_count, and usage_count in PluginState.
+   */
+  recordPluginFailure(pluginName: string, pluginLoader: PluginLoader): void {
+    const state = pluginLoader.getPluginState(pluginName);
+    if (state === null) return;
+    void pluginLoader.updatePluginState(pluginName, {
+      trust_score: clamp(state.trust_score + TRUST_FAILURE_DELTA),
+      failure_count: state.failure_count + 1,
+      usage_count: state.usage_count + 1,
+    });
+  }
+
+  /**
+   * Select the best plugin from candidates.
+   * Prefers auto-selectable (trust >= 20) candidates, picking highest matchScore then trustScore.
+   * Returns null if no candidate is auto-selectable.
+   */
+  selectPlugin(candidates: PluginMatchResult[], pluginLoader: PluginLoader): PluginMatchResult | null {
+    // Enrich candidates with current trust scores from pluginLoader
+    const enriched = candidates.map((c) => {
+      const state = pluginLoader.getPluginState(c.pluginName);
+      const trustScore = state !== null ? state.trust_score : c.trustScore;
+      return { ...c, trustScore, autoSelectable: trustScore >= HIGH_TRUST_THRESHOLD };
+    });
+
+    const autoSelectable = enriched.filter((c) => c.autoSelectable);
+    if (autoSelectable.length === 0) return null;
+
+    // Sort by matchScore desc, then trustScore desc
+    autoSelectable.sort((a, b) =>
+      b.matchScore !== a.matchScore ? b.matchScore - a.matchScore : b.trustScore - a.trustScore
+    );
+    return autoSelectable[0];
   }
 }

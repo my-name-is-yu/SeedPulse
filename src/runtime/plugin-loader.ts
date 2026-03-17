@@ -30,6 +30,7 @@ export class PluginLoader {
   private dataSourceRegistry: DataSourceRegistry;
   private notifierRegistry: NotifierRegistry;
   private pluginsDir: string;
+  private pluginStates: Map<string, PluginState> = new Map();
 
   constructor(
     adapterRegistry: AdapterRegistry,
@@ -223,7 +224,7 @@ export class PluginLoader {
   // ─── State builders ───
 
   buildSuccessState(manifest: PluginManifest): PluginState {
-    return PluginStateSchema.parse({
+    const state = PluginStateSchema.parse({
       name: manifest.name,
       manifest,
       status: "loaded",
@@ -233,6 +234,8 @@ export class PluginLoader {
       success_count: 0,
       failure_count: 0,
     });
+    this.pluginStates.set(manifest.name, state);
+    return state;
   }
 
   buildErrorState(pluginDir: string, reason: unknown): PluginState {
@@ -262,6 +265,33 @@ export class PluginLoader {
       success_count: 0,
       failure_count: 0,
     });
+  }
+
+  /**
+   * Return the PluginState for a given plugin name, or null if not found.
+   */
+  getPluginState(pluginName: string): PluginState | null {
+    return this.pluginStates.get(pluginName) ?? null;
+  }
+
+  /**
+   * Update the in-memory plugin state and persist to disk.
+   */
+  async updatePluginState(
+    pluginName: string,
+    updates: Partial<Pick<PluginState, "trust_score" | "usage_count" | "success_count" | "failure_count">>
+  ): Promise<void> {
+    const existing = this.pluginStates.get(pluginName);
+    if (existing === undefined) {
+      return;
+    }
+    const updated = PluginStateSchema.parse({ ...existing, ...updates });
+    this.pluginStates.set(pluginName, updated);
+
+    // Persist to disk: ~/.motiva/plugins/<name>/state.json
+    const statePath = path.join(this.pluginsDir, pluginName, "state.json");
+    await fs.mkdir(path.dirname(statePath), { recursive: true });
+    await fs.writeFile(statePath, JSON.stringify(updated, null, 2), "utf-8");
   }
 
   // ─── Private helpers ───

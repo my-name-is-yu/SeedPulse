@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -10,6 +10,9 @@ import {
   TRUST_SUCCESS_DELTA,
   TRUST_FAILURE_DELTA,
 } from "../src/types/trust.js";
+import { PluginManifestSchema, PluginStateSchema } from "../src/types/plugin.js";
+import type { PluginState, PluginMatchResult } from "../src/types/plugin.js";
+import type { PluginLoader } from "../src/runtime/plugin-loader.js";
 
 function makeTempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "motiva-trust-test-"));
@@ -414,5 +417,130 @@ describe("TrustManager", () => {
       const files = fs.readdirSync(trustDir);
       expect(files.filter((f) => f.endsWith(".tmp"))).toHaveLength(0);
     });
+  });
+});
+
+// ─── Helpers for plugin trust tests ───
+
+function makePluginState(overrides: Partial<PluginState> = {}): PluginState {
+  const manifest = PluginManifestSchema.parse({
+    name: "test-plugin",
+    version: "1.0.0",
+    type: "notifier",
+    capabilities: ["notify"],
+    description: "test",
+  });
+  return PluginStateSchema.parse({
+    name: "test-plugin",
+    manifest,
+    status: "loaded",
+    loaded_at: new Date().toISOString(),
+    trust_score: 0,
+    usage_count: 0,
+    success_count: 0,
+    failure_count: 0,
+    ...overrides,
+  });
+}
+
+function makePluginLoader(states: Record<string, PluginState>): PluginLoader {
+  const captured: Record<string, PluginState> = { ...states };
+  return {
+    getPluginState: vi.fn((name: string) => captured[name] ?? null),
+    updatePluginState: vi.fn(
+      async (name: string, updates: Partial<PluginState>) => {
+        if (captured[name]) {
+          captured[name] = { ...captured[name], ...updates };
+        }
+      }
+    ),
+    _captured: captured,
+  } as unknown as PluginLoader;
+}
+
+// ─── Plugin trust ───
+
+describe("plugin trust", () => {
+  let tmpDir: string;
+  let stateManager: StateManager;
+  let manager: TrustManager;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "motiva-trust-plugin-test-"));
+    stateManager = new StateManager(tmpDir);
+    manager = new TrustManager(stateManager);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("recordPluginSuccess increases trust_score by 3 and increments counts", async () => {
+    const state = makePluginState({ name: "my-plugin", trust_score: 0, usage_count: 0, success_count: 0 });
+    const manifest = state.manifest;
+    const loader = makePluginLoader({ "my-plugin": state });
+    manager.recordPluginSuccess("my-plugin", loader);
+    // Allow async updatePluginState to complete
+    await Promise.resolve();
+    const captured = (loader as unknown as { _captured: Record<string, PluginState> })._captured;
+    expect(captured["my-plugin"].trust_score).toBe(3);
+    expect(captured["my-plugin"].success_count).toBe(1);
+    expect(captured["my-plugin"].usage_count).toBe(1);
+  });
+
+  it("recordPluginFailure decreases trust_score by 10 and increments counts", async () => {
+    const state = makePluginState({ name: "my-plugin", trust_score: 0, usage_count: 0, failure_count: 0 });
+    const loader = makePluginLoader({ "my-plugin": state });
+    manager.recordPluginFailure("my-plugin", loader);
+    await Promise.resolve();
+    const captured = (loader as unknown as { _captured: Record<string, PluginState> })._captured;
+    expect(captured["my-plugin"].trust_score).toBe(-10);
+    expect(captured["my-plugin"].failure_count).toBe(1);
+    expect(captured["my-plugin"].usage_count).toBe(1);
+  });
+
+  it("trust score clamps at +100 on success", async () => {
+    const state = makePluginState({ name: "my-plugin", trust_score: 99 });
+    const loader = makePluginLoader({ "my-plugin": state });
+    manager.recordPluginSuccess("my-plugin", loader);
+    await Promise.resolve();
+    const captured = (loader as unknown as { _captured: Record<string, PluginState> })._captured;
+    expect(captured["my-plugin"].trust_score).toBe(100);
+  });
+
+  it("trust score clamps at -100 on failure", async () => {
+    const state = makePluginState({ name: "my-plugin", trust_score: -95 });
+    const loader = makePluginLoader({ "my-plugin": state });
+    manager.recordPluginFailure("my-plugin", loader);
+    await Promise.resolve();
+    const captured = (loader as unknown as { _captured: Record<string, PluginState> })._captured;
+    expect(captured["my-plugin"].trust_score).toBe(-100);
+  });
+
+  it("selectPlugin returns highest-scoring auto-selectable candidate", () => {
+    const stateA = makePluginState({ name: "plugin-a", trust_score: 25 });
+    const stateB = makePluginState({ name: "plugin-b", trust_score: 30 });
+    const loader = makePluginLoader({ "plugin-a": stateA, "plugin-b": stateB });
+
+    const candidates: PluginMatchResult[] = [
+      { pluginName: "plugin-a", matchScore: 0.9, matchedDimensions: [], trustScore: 25, autoSelectable: true },
+      { pluginName: "plugin-b", matchScore: 0.9, matchedDimensions: [], trustScore: 30, autoSelectable: true },
+    ];
+
+    const result = manager.selectPlugin(candidates, loader);
+    expect(result).not.toBeNull();
+    expect(result!.pluginName).toBe("plugin-b");
+  });
+
+  it("selectPlugin returns null when no candidates are auto-selectable", () => {
+    const stateA = makePluginState({ name: "plugin-a", trust_score: 10 });
+    const loader = makePluginLoader({ "plugin-a": stateA });
+
+    const candidates: PluginMatchResult[] = [
+      { pluginName: "plugin-a", matchScore: 0.9, matchedDimensions: [], trustScore: 10, autoSelectable: false },
+    ];
+
+    const result = manager.selectPlugin(candidates, loader);
+    expect(result).toBeNull();
   });
 });

@@ -367,3 +367,65 @@ describe("PluginLoader.discoverPluginDirs", () => {
     expect(dirs).toEqual([]);
   });
 });
+
+// ─── PluginLoader.getPluginState / updatePluginState ───
+
+import * as os from "node:os";
+import * as fsSync from "node:fs";
+
+describe("PluginLoader.getPluginState and updatePluginState", () => {
+  let tmpDir: string;
+  let loader: PluginLoader;
+
+  beforeEach(() => {
+    tmpDir = fsSync.mkdtempSync(path.join(os.tmpdir(), "motiva-plugin-state-test-"));
+    loader = new PluginLoader(
+      makeAdapterRegistry(),
+      makeDataSourceRegistry(),
+      makeNotifierRegistry(),
+      tmpDir
+    );
+  });
+
+  afterEach(() => {
+    fsSync.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("getPluginState returns null for unknown plugin", () => {
+    expect(loader.getPluginState("unknown-plugin")).toBeNull();
+  });
+
+  it("getPluginState returns state after buildSuccessState is called", () => {
+    const manifest = makeValidManifest({ name: "my-plugin" });
+    loader.buildSuccessState(manifest);
+    const state = loader.getPluginState("my-plugin");
+    expect(state).not.toBeNull();
+    expect(state!.name).toBe("my-plugin");
+    expect(state!.trust_score).toBe(0);
+  });
+
+  it("updatePluginState updates in-memory state", async () => {
+    const manifest = makeValidManifest({ name: "my-plugin" });
+    loader.buildSuccessState(manifest);
+    await loader.updatePluginState("my-plugin", { trust_score: 15, usage_count: 2 });
+    const state = loader.getPluginState("my-plugin");
+    expect(state!.trust_score).toBe(15);
+    expect(state!.usage_count).toBe(2);
+  });
+
+  it("updatePluginState persists state to disk", async () => {
+    const manifest = makeValidManifest({ name: "my-plugin" });
+    loader.buildSuccessState(manifest);
+    await loader.updatePluginState("my-plugin", { trust_score: 25, success_count: 3 });
+    const statePath = path.join(tmpDir, "my-plugin", "state.json");
+    expect(fsSync.existsSync(statePath)).toBe(true);
+    const content = JSON.parse(fsSync.readFileSync(statePath, "utf-8"));
+    expect(content.trust_score).toBe(25);
+    expect(content.success_count).toBe(3);
+  });
+
+  it("updatePluginState does nothing for unknown plugin", async () => {
+    // Should not throw
+    await expect(loader.updatePluginState("ghost-plugin", { trust_score: 10 })).resolves.toBeUndefined();
+  });
+});
