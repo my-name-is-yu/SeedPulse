@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import * as path from "node:path";
 import { z } from "zod";
 import { StateManager } from "../state-manager.js";
 import type { ILLMClient } from "../llm/llm-client.js";
@@ -11,7 +10,6 @@ import {
   KnowledgeGapSignalSchema,
   ContradictionResultSchema,
   SharedKnowledgeEntrySchema,
-  DomainStabilitySchema,
   REVALIDATION_SCHEDULE,
 } from "../types/knowledge.js";
 import type {
@@ -24,13 +22,34 @@ import type {
 } from "../types/knowledge.js";
 import type { VectorIndex } from "./vector-index.js";
 import type { IEmbeddingClient } from "./embedding-client.js";
+import {
+  searchKnowledge,
+  searchAcrossGoals,
+  searchByEmbedding,
+  querySharedKnowledge,
+  loadSharedEntries,
+  loadDomainKnowledge,
+} from "./knowledge-search.js";
+import {
+  classifyDomainStability,
+  getStaleEntries,
+  generateRevalidationTasks,
+  computeRevalidationDue,
+} from "./knowledge-revalidation.js";
+
+// Re-export for backward compatibility
+export {
+  searchKnowledge,
+  searchAcrossGoals,
+  searchByEmbedding,
+  querySharedKnowledge,
+  classifyDomainStability,
+  getStaleEntries,
+  generateRevalidationTasks,
+  computeRevalidationDue,
+};
 
 // ─── LLM response schemas ───
-
-const DomainStabilityResponseSchema = z.object({
-  stability: DomainStabilitySchema,
-  rationale: z.string().optional(),
-});
 
 const GapDetectionResponseSchema = z.object({
   has_gap: z.boolean(),
@@ -286,7 +305,7 @@ Respond with JSON:
    */
   async saveKnowledge(goalId: string, entry: KnowledgeEntry): Promise<void> {
     const parsed = KnowledgeEntrySchema.parse(entry);
-    const domainKnowledge = await this.loadDomainKnowledge(goalId);
+    const domainKnowledge = await this._loadDomainKnowledge(goalId);
 
     domainKnowledge.entries.push(parsed);
     domainKnowledge.last_updated = new Date().toISOString();
@@ -318,7 +337,7 @@ Respond with JSON:
     goalId: string,
     tags?: string[]
   ): Promise<KnowledgeEntry[]> {
-    const domainKnowledge = await this.loadDomainKnowledge(goalId);
+    const domainKnowledge = await this._loadDomainKnowledge(goalId);
     const entries = domainKnowledge.entries;
 
     if (!tags || tags.length === 0) {
@@ -341,7 +360,7 @@ Respond with JSON:
     newEntry: KnowledgeEntry
   ): Promise<ContradictionResult> {
     // Load entries that share at least one tag with the new entry
-    const domainKnowledge = await this.loadDomainKnowledge(goalId);
+    const domainKnowledge = await this._loadDomainKnowledge(goalId);
     const candidateEntries = domainKnowledge.entries.filter(
       (existing) =>
         existing.entry_id !== newEntry.entry_id &&
@@ -427,28 +446,11 @@ Determine if there is a factual contradiction. Respond with JSON:
     query: string,
     topK: number = 5
   ): Promise<KnowledgeEntry[]> {
-    if (!this.vectorIndex) {
-      return [];
-    }
-
-    const results = await this.vectorIndex.search(query, topK);
-    const entries: KnowledgeEntry[] = [];
-
-    for (const result of results) {
-      // Load the full entry from the goal stored in metadata
-      const goalId = result.metadata["goal_id"] as string | undefined;
-      if (!goalId) continue;
-
-      const domainKnowledge = await this.loadDomainKnowledge(goalId);
-      const entry = domainKnowledge.entries.find(
-        (e) => e.entry_id === result.id
-      );
-      if (entry) {
-        entries.push(entry);
-      }
-    }
-
-    return entries;
+    return searchKnowledge(
+      { stateManager: this.stateManager, vectorIndex: this.vectorIndex },
+      query,
+      topK
+    );
   }
 
   // ─── searchAcrossGoals (Phase 2) ───
@@ -462,10 +464,11 @@ Determine if there is a factual contradiction. Respond with JSON:
     query: string,
     topK: number = 5
   ): Promise<KnowledgeEntry[]> {
-    // The VectorIndex is goal-agnostic — entries from all goals are indexed
-    // together, so this is semantically equivalent to searchKnowledge but
-    // explicitly documents cross-goal intent.
-    return this.searchKnowledge(query, topK);
+    return searchAcrossGoals(
+      { stateManager: this.stateManager, vectorIndex: this.vectorIndex },
+      query,
+      topK
+    );
   }
 
   // ─── 5.1a: Shared Knowledge Base ───
@@ -486,12 +489,12 @@ Determine if there is a factual contradiction. Respond with JSON:
       ...entry,
       source_goal_ids: [goalId],
       domain_stability: "moderate" as DomainStability,
-      revalidation_due_at: this._computeRevalidationDue(now, "moderate"),
+      revalidation_due_at: computeRevalidationDue(now, "moderate"),
       embedding_id: null,
     });
 
     // Load existing entries and merge / append
-    const all = this._loadSharedEntries();
+    const all = loadSharedEntries(this.stateManager);
     const existingIdx = all.findIndex((e) => e.entry_id === entry.entry_id);
 
     let merged: SharedKnowledgeEntry;
@@ -540,15 +543,7 @@ Determine if there is a factual contradiction. Respond with JSON:
     tags: string[],
     goalId?: string
   ): SharedKnowledgeEntry[] {
-    const all = this._loadSharedEntries();
-
-    return all.filter((entry) => {
-      const tagsMatch =
-        tags.length === 0 || tags.every((t) => entry.tags.includes(t));
-      const goalMatch =
-        goalId === undefined || entry.source_goal_ids.includes(goalId);
-      return tagsMatch && goalMatch;
-    });
+    return querySharedKnowledge(this.stateManager, tags, goalId);
   }
 
   // ─── 5.1b: Vector Search for Knowledge Sharing ───
@@ -561,22 +556,11 @@ Determine if there is a factual contradiction. Respond with JSON:
     query: string,
     topK: number = 5
   ): Promise<{ entry: SharedKnowledgeEntry; similarity: number }[]> {
-    if (!this.vectorIndex) {
-      return [];
-    }
-
-    const results = await this.vectorIndex.search(query, topK);
-    const all = this._loadSharedEntries();
-    const output: { entry: SharedKnowledgeEntry; similarity: number }[] = [];
-
-    for (const result of results) {
-      const entry = all.find((e) => e.entry_id === result.id);
-      if (entry) {
-        output.push({ entry, similarity: result.similarity });
-      }
-    }
-
-    return output;
+    return searchByEmbedding(
+      { stateManager: this.stateManager, vectorIndex: this.vectorIndex },
+      query,
+      topK
+    );
   }
 
   // ─── 5.1c: Domain Stability Auto-Revalidation ───
@@ -589,65 +573,18 @@ Determine if there is a factual contradiction. Respond with JSON:
     domain: string,
     entries: KnowledgeEntry[]
   ): Promise<DomainStability> {
-    const sampleAnswers = entries
-      .slice(0, 5)
-      .map((e) => `Q: ${e.question}\nA: ${e.answer}`)
-      .join("\n\n");
-
-    const prompt = `You are classifying how quickly knowledge in a domain becomes outdated.
-
-Domain: ${domain}
-Sample knowledge entries:
-${sampleAnswers || "(no entries yet)"}
-
-Classify the domain stability:
-- "stable"   — knowledge rarely changes (math, history, established science)
-- "moderate" — knowledge changes every few months to a year (best practices, frameworks)
-- "volatile" — knowledge changes frequently (current events, fast-moving tech, prices)
-
-Respond with JSON:
-{ "stability": "stable" | "moderate" | "volatile", "rationale": "brief explanation" }`;
-
-    const response = await this.llmClient.sendMessage(
-      [{ role: "user", content: prompt }],
-      {
-        system:
-          "You classify knowledge domain stability. Respond with JSON only.",
-        max_tokens: 256,
-      }
+    return classifyDomainStability(
+      { stateManager: this.stateManager, llmClient: this.llmClient },
+      domain,
+      entries
     );
-
-    try {
-      const parsed = this.llmClient.parseJSON(
-        response.content,
-        DomainStabilityResponseSchema
-      );
-      return parsed.stability;
-    } catch {
-      return "moderate";
-    }
   }
 
   /**
    * Return shared knowledge entries whose revalidation_due_at is in the past.
    */
   getStaleEntries(): SharedKnowledgeEntry[] {
-    const all = this._loadSharedEntries();
-    const now = new Date();
-
-    return all.filter((entry) => {
-      if (!entry.revalidation_due_at) {
-        // No due date — consider stale based on stability interval from acquired_at
-        const acquiredAt = new Date(entry.acquired_at);
-        const intervalDays =
-          REVALIDATION_SCHEDULE[entry.domain_stability];
-        const dueAt = new Date(
-          acquiredAt.getTime() + intervalDays * 24 * 60 * 60 * 1000
-        );
-        return now > dueAt;
-      }
-      return now > new Date(entry.revalidation_due_at);
-    });
+    return getStaleEntries(this.stateManager);
   }
 
   /**
@@ -655,89 +592,12 @@ Respond with JSON:
    * re-asking the original question.
    */
   async generateRevalidationTasks(staleEntries: SharedKnowledgeEntry[]): Promise<Task[]> {
-    const tasks: Task[] = [];
-
-    for (const entry of staleEntries) {
-      const goalId = entry.source_goal_ids[0] ?? "shared";
-      const taskId = randomUUID();
-      const now = new Date().toISOString();
-
-      const task = TaskSchema.parse({
-        id: taskId,
-        goal_id: goalId,
-        strategy_id: null,
-        target_dimensions: entry.tags,
-        primary_dimension: entry.tags[0] ?? "knowledge",
-        work_description: `Revalidate knowledge: ${entry.question}`,
-        rationale: `Entry ${entry.entry_id} is stale (domain_stability: ${entry.domain_stability}, due: ${entry.revalidation_due_at ?? "overdue"})`,
-        approach: `Re-research the following question and verify whether the answer has changed:\n${entry.question}\n\nPrevious answer: ${entry.answer}`,
-        success_criteria: [
-          {
-            description: `Confirm or update answer to: "${entry.question}"`,
-            verification_method: "Compare new answer to existing answer with cited sources",
-            is_blocking: true,
-          },
-        ],
-        scope_boundary: {
-          in_scope: ["Information collection", "Web search", "Document reading"],
-          out_of_scope: ["System modifications", "Code changes", "Data mutations"],
-          blast_radius: "None — read-only revalidation task",
-        },
-        constraints: [
-          "No system modifications allowed",
-          `Original entry_id: ${entry.entry_id}`,
-        ],
-        reversibility: "reversible",
-        estimated_duration: { value: 2, unit: "hours" },
-        task_category: "knowledge_acquisition",
-        status: "pending",
-        created_at: now,
-      });
-
-      tasks.push(task);
-    }
-
-    return tasks;
+    return generateRevalidationTasks(staleEntries);
   }
 
   // ─── Private Helpers ───
 
-  /** Load all SharedKnowledgeEntries from the shared KB file. */
-  private _loadSharedEntries(): SharedKnowledgeEntry[] {
-    const raw = this.stateManager.readRaw(SHARED_KB_PATH);
-    if (!raw || !Array.isArray(raw)) {
-      return [];
-    }
-    try {
-      return (raw as unknown[]).map((item) =>
-        SharedKnowledgeEntrySchema.parse(item)
-      );
-    } catch {
-      return [];
-    }
-  }
-
-  /** Compute revalidation due date based on stability and a base date. */
-  private _computeRevalidationDue(base: Date, stability: DomainStability): string {
-    const days = REVALIDATION_SCHEDULE[stability];
-    const due = new Date(base.getTime() + days * 24 * 60 * 60 * 1000);
-    return due.toISOString();
-  }
-
-  private async loadDomainKnowledge(goalId: string): Promise<DomainKnowledge> {
-    const raw = this.stateManager.readRaw(
-      `goals/${goalId}/domain_knowledge.json`
-    );
-
-    if (raw === null) {
-      return DomainKnowledgeSchema.parse({
-        goal_id: goalId,
-        domain: goalId,
-        entries: [],
-        last_updated: new Date().toISOString(),
-      });
-    }
-
-    return DomainKnowledgeSchema.parse(raw);
+  private async _loadDomainKnowledge(goalId: string): Promise<DomainKnowledge> {
+    return loadDomainKnowledge(this.stateManager, goalId);
   }
 }
