@@ -8,7 +8,7 @@ import { StateManager } from "../../state-manager.js";
 import { CharacterConfigManager } from "../../traits/character-config.js";
 import { loadProviderConfig } from "../../llm/provider-config.js";
 import { ReportingEngine } from "../../reporting-engine.js";
-import { EthicsRejectedError } from "../../goal/goal-negotiator.js";
+import { EthicsRejectedError, gatherNegotiationContext } from "../../goal/goal-negotiator.js";
 import { buildDeps } from "../setup.js";
 import { formatOperationError } from "../utils.js";
 
@@ -52,9 +52,11 @@ export async function cmdGoalAdd(
   console.log("This may take a moment...\n");
 
   try {
+    const workspaceContext = await gatherNegotiationContext(description, process.cwd());
     const { goal, response } = await goalNegotiator.negotiate(description, {
       deadline: opts.deadline,
       constraints: opts.constraints,
+      workspaceContext: workspaceContext || undefined,
     });
 
     if (response.type === "counter_propose") {
