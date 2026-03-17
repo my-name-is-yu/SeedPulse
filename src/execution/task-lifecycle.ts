@@ -339,10 +339,9 @@ export class TaskLifecycle {
       // Build prompt with task description as primary content
       const scopeConstraints =
         `\n\nSCOPE CONSTRAINTS (CRITICAL — violations will cause task failure):\n` +
-        `- ONLY modify source files directly related to the task\n` +
-        `- Do NOT modify: test files (*test*, *spec*), config files (*.config.*, package.json, tsconfig.json), CI/CD files\n` +
-        `- Do NOT change function visibility (private→export), file structure, or imports in unrelated files\n` +
-        `- Do NOT modify build configuration or dependency files\n` +
+        `- ONLY modify files directly related to the task\n` +
+        `- Do NOT modify: config files (*.config.*, package.json, tsconfig.json), CI/CD files, build configuration, dependency files\n` +
+        `- Do NOT change function visibility (private→export) or imports in unrelated files\n` +
         `- If a file contains the target pattern inside a string literal or template, leave it as-is`;
       const contextSection = workspaceContext
         ? `\n\nWORKSPACE CONTEXT (use these specific locations):\n${workspaceContext}`
@@ -424,8 +423,6 @@ export class TaskLifecycle {
         if (diffOutput) {
           const changedFiles = diffOutput.split("\n");
           const protectedPatterns = [
-            /\.test\./,
-            /\.spec\./,
             /vitest\.config/,
             /jest\.config/,
             /tsconfig/,
