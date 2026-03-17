@@ -311,15 +311,15 @@ export class ObservationEngine {
 
     const dim = goal.dimensions[dimIndex]!;
 
-    // Monotonic progress: for min thresholds, never decrease; for max, never increase.
-    // This prevents temperature-induced noise from regressing observed progress.
+    // Monotonic floor for min thresholds: never decrease an observed value below the
+    // current floor. This prevents noise from hiding real progress on "higher is better"
+    // dimensions. Max thresholds are NOT clamped — regressions (e.g. bug count going up)
+    // must remain visible.
     let effectiveValue = entry.extracted_value;
     if (typeof effectiveValue === 'number' && typeof dim.current_value === 'number') {
       // NOTE: range thresholds intentionally not clamped — progress direction is ambiguous.
       // Assumes earlier observations are reliable; no mechanism to override a false-high floor.
       if (dim.threshold.type === 'min' && effectiveValue < dim.current_value) {
-        effectiveValue = dim.current_value;
-      } else if (dim.threshold.type === 'max' && effectiveValue > dim.current_value) {
         effectiveValue = dim.current_value;
       }
     }

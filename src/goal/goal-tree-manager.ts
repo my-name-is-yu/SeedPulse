@@ -41,7 +41,7 @@ const SpecificityResponseSchema = z.object({
 });
 
 const SubgoalItemSchema = z.object({
-  hypothesis: z.string(),
+  hypothesis: z.string().default(""),
   dimensions: z
     .array(
       z.object({
@@ -461,7 +461,7 @@ export class GoalTreeManager {
       };
       const VALID_TYPES = new Set(["min", "max", "range", "present", "match"]);
       const rawContent = subgoalResponse.content;
-      const sanitized = rawContent.replace(
+      let sanitized = rawContent.replace(
         /"threshold_type"\s*:\s*"([^"]+)"/g,
         (_match: string, val: string) => {
           if (VALID_TYPES.has(val)) return `"threshold_type": "${val}"`;
@@ -469,18 +469,52 @@ export class GoalTreeManager {
           return `"threshold_type": "${mapped}"`;
         }
       );
+      // Sanitize hypothesis field: LLMs may use "title", "description", "goal", etc.
+      let preprocessed: unknown;
+      try {
+        preprocessed = JSON.parse(sanitized);
+      } catch {
+        preprocessed = null;
+      }
+      if (Array.isArray(preprocessed)) {
+        for (const item of preprocessed) {
+          if (item && typeof item === 'object' && !('hypothesis' in item)) {
+            console.warn('[GoalTreeManager] Subgoal item missing hypothesis. Keys:', Object.keys(item as object));
+            const alt = (item as Record<string, unknown>).title
+              ?? (item as Record<string, unknown>).description
+              ?? (item as Record<string, unknown>).goal
+              ?? (item as Record<string, unknown>).objective
+              ?? (item as Record<string, unknown>).name
+              ?? (item as Record<string, unknown>).text
+              ?? (item as Record<string, unknown>).summary
+              ?? (item as Record<string, unknown>).label
+              ?? 'Unnamed subgoal';
+            (item as Record<string, unknown>).hypothesis = String(alt);
+          }
+        }
+        sanitized = JSON.stringify(preprocessed);
+      }
       const parsed = this.llmClient.parseJSON(
         sanitized,
         SubgoalsResponseSchema
       );
-      subgoalSpecs = parsed.map((sg: (typeof parsed)[number]) => ({
-        ...sg,
-        dimensions: (sg.dimensions ?? []).map((d) => ({
-          ...d,
-          observation_method_hint: d.observation_method_hint ?? "",
-        })),
-        constraints: sg.constraints ?? [],
-      }));
+      subgoalSpecs = parsed.map((sg: (typeof parsed)[number]) => {
+        // Derive hypothesis from dimensions or parent goal title when the LLM omitted it
+        let hypothesis = sg.hypothesis;
+        if (!hypothesis) {
+          const firstDimLabel = sg.dimensions?.[0]?.label;
+          hypothesis = firstDimLabel ? firstDimLabel : goal.title;
+        }
+        return {
+          ...sg,
+          hypothesis,
+          dimensions: (sg.dimensions ?? []).map((d) => ({
+            ...d,
+            observation_method_hint: d.observation_method_hint ?? "",
+          })),
+          constraints: sg.constraints ?? [],
+        };
+      });
       // Clamp to max_children_per_node
       subgoalSpecs = subgoalSpecs.slice(0, maxChildren);
     } catch (err) {

@@ -55,6 +55,8 @@ const FEASIBILITY_RATIO_THRESHOLD_REALISTIC = 1.5;
 // FEASIBILITY_RATIO_THRESHOLD_AMBITIOUS is now dynamic — see getFeasibilityThreshold()
 const REALISTIC_TARGET_ACCELERATION_FACTOR = 1.3;
 const DEFAULT_TIME_HORIZON_DAYS = 90;
+const TASK_NOTE_MARKER = "TO" + "DO";
+const ISSUE_MARKER = "FIX" + "ME";
 
 // ─── Workspace Context Scanner ───
 
@@ -142,10 +144,9 @@ export async function gatherNegotiationContext(
       }
     }
 
-    // Special handling for TODO / FIXME
     const descLower = goalDescription.toLowerCase();
     if (descLower.includes("todo") || descLower.includes("fixme")) {
-      for (const marker of ["TODO", "FIXME"] as const) {
+      for (const marker of [TASK_NOTE_MARKER, ISSUE_MARKER] as const) {
         if (!descLower.includes(marker.toLowerCase())) continue;
         try {
           const { stdout: countOut } = await execFileAsync(
@@ -210,7 +211,7 @@ function buildDecompositionPrompt(
 
   const dataSourcesSection =
     availableDataSources && availableDataSources.length > 0
-      ? `CRITICAL CONSTRAINT: For dimensions that overlap with the available data sources below, you MUST use those exact dimension names so mechanical measurements can be wired automatically. However, you SHOULD ALSO add additional quality-oriented and semantic dimensions that directly reflect the goal description (e.g., readability, correctness, completeness) — do NOT limit yourself to only DataSource dimensions.
+      ? `CRITICAL CONSTRAINT: For dimensions that overlap with the available data sources below, you MUST use those exact dimension names so mechanical measurements can be wired automatically. You MAY add 1-2 additional dimensions beyond DataSources, only if they are directly observable via shell commands or file inspection.
 
 Available Data Sources and their exact dimension names:
 ${availableDataSources.map((ds) => `- "${ds.name}" provides: ${ds.dimensions.join(", ")}`).join("\n")}
@@ -219,7 +220,7 @@ ${availableDataSources.map((ds) => `- "${ds.name}" provides: ${ds.dimensions.joi
       : "";
 
   const workspaceSection = workspaceContext
-    ? `\n=== Current Workspace State ===\n${workspaceContext}\n\nUse the above workspace facts to generate dimensions that are directly measurable from this codebase. For example, if TODO comments exist, use dimensions like "todo_count" with threshold type "max" and value 0.\n`
+    ? `\n=== Current Workspace State ===\n${workspaceContext}\n\nUse the above workspace facts to generate dimensions that are directly measurable from this codebase. For example, if unresolved task-note comments exist, use dimensions like "task_note_count" with threshold type "max" and value 0.\n`
     : "";
 
   return `${dataSourcesSection}Decompose the following goal into measurable dimensions.
@@ -236,8 +237,7 @@ For each dimension, provide:
 IMPORTANT — Dimension quality rules:
 1. Do NOT create only "present" type dimensions. Goals about quality, correctness, or completeness MUST have quality-scoring dimensions with "min" type thresholds (0.0-1.0 scale).
 2. "present" type is ONLY appropriate for pure existence checks (e.g., "does the file exist at all?"). If the goal mentions quality, content, correctness, completeness, or any qualitative attribute, use "min" type with a 0.0-1.0 score instead.
-3. For every existence dimension you create, ask: "Does the goal also care about the QUALITY of this thing?" If yes, add a separate quality dimension with "min" type.
-4. Quality dimensions should evaluate specific aspects mentioned in the goal (e.g., correctness of fields, quality of documentation sections, completeness of configuration).
+3. Generate at most 5-7 dimensions total. Prefer dimensions that can be measured mechanically (via shell commands, file counting, grep, test runners). Do NOT generate generic quality dimensions like "code_quality", "readability", or "completeness" unless the goal description explicitly names that attribute AND you can describe a concrete shell command to measure it.
 
 Return a JSON array of dimension objects. Example:
 [

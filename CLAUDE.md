@@ -86,3 +86,5 @@ Design docs are the source of truth for implementation. When in doubt, read the 
 - Confidence adjustment applies ONLY in gap-calculation §3 (no triple-application)
 - **LLM応答はZodパース前にサニタイズ** — LLMがenum外の値を返すことがある（例: threshold_typeに"exact"）。catchブロックでエラーを握りつぶさず、必ずログ出力すること
 - **Dogfooding推奨モデル**: gpt-5.3-codex（gpt-4o-miniより観測精度・収束速度が大幅に優れる。`~/.motiva/provider.json`で設定）
+- **KEEP THE FILES SHORT**: If the code exceeds 500 lines, consider splitting it into multiple files.
+- **KEEP THE CORD SIMPLE**: Do not overcomplicate it. Keep it as simple as possible.

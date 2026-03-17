@@ -76,7 +76,7 @@ describe("autoRegisterShellDataSources", () => {
     expect(configs).toHaveLength(1);
     const commands = configs[0].commands as Record<string, { argv: string[]; output_type: string }>;
     expect(commands).toHaveProperty("fixme_count");
-    expect(commands.fixme_count.argv).toContain("FIXME");
+    expect(commands.fixme_count.argv.some((a: string) => a.includes("FIXME"))).toBe(true);
     expect(commands.fixme_count.output_type).toBe("number");
   });
 
@@ -174,17 +174,17 @@ describe("SHELL_DIMENSION_PATTERNS", () => {
     }
   });
 
-  it("todo_count uses grep with -rc flag", () => {
+  it("todo_count uses grep with comment-aware pattern", () => {
     const spec = SHELL_DIMENSION_PATTERNS.todo_count;
     expect(spec.argv[0]).toBe("grep");
-    expect(spec.argv).toContain("-rc");
-    expect(spec.argv).toContain("TODO");
+    expect(spec.argv).toContain("-rEc");
+    expect(spec.argv.some(a => a.includes("TODO"))).toBe(true);
   });
 
-  it("fixme_count uses grep with -rc flag", () => {
+  it("fixme_count uses grep with comment-aware pattern", () => {
     const spec = SHELL_DIMENSION_PATTERNS.fixme_count;
     expect(spec.argv[0]).toBe("grep");
-    expect(spec.argv).toContain("-rc");
-    expect(spec.argv).toContain("FIXME");
+    expect(spec.argv).toContain("-rEc");
+    expect(spec.argv.some(a => a.includes("FIXME"))).toBe(true);
   });
 });

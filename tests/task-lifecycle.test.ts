@@ -19,6 +19,7 @@ import type {
   LLMResponse,
 } from "../src/llm/llm-client.js";
 import { createMockLLMClient } from "./helpers/mock-llm.js";
+import type { Dimension } from "../src/types/goal.js";
 
 // ─── Spy LLM Client (tracks messages sent) ───
 
@@ -85,6 +86,32 @@ function makeDriveContext(
   }
 
   return { time_since_last_attempt, deadlines, opportunities };
+}
+
+function makeDimension(
+  name: string,
+  confidenceTier: "mechanical" | "independent_review" | "self_report"
+): Dimension {
+  return {
+    name,
+    label: name,
+    current_value: 0,
+    threshold: { type: "min", value: 1 },
+    confidence: 0.8,
+    observation_method: {
+      type: "mechanical",
+      source: "test",
+      schedule: null,
+      endpoint: null,
+      confidence_tier: confidenceTier,
+    },
+    last_updated: null,
+    history: [],
+    weight: 1.0,
+    uncertainty_weight: null,
+    state_integrity: "ok",
+    dimension_mapping: null,
+  };
 }
 
 const VALID_TASK_RESPONSE = `\`\`\`json
@@ -356,6 +383,99 @@ describe("TaskLifecycle", () => {
       const result = lifecycle.selectTargetDimension(gapVector, context);
       expect(typeof result).toBe("string");
       expect(result.length).toBeGreaterThan(0);
+    });
+
+    // ─── confidence-tier weighting ───
+
+    it("prefers mechanical dimension over self_report even with smaller gap", () => {
+      const llm = createMockLLMClient([]);
+      const lifecycle = createLifecycle(llm);
+
+      // todo_count: gap=0.5, mechanical (weight 1.0) → weighted score = 0.5 * 1.0 = 0.5
+      // todo_quality: gap=0.8, self_report (weight 0.3) → weighted score = 0.8 * 0.3 = 0.24
+      const gapVector = makeGapVector("goal-1", [
+        { name: "todo_count", gap: 0.5 },
+        { name: "todo_quality", gap: 0.8 },
+      ]);
+      const context = makeDriveContext(["todo_count", "todo_quality"]);
+      const dimensions = [
+        makeDimension("todo_count", "mechanical"),
+        makeDimension("todo_quality", "self_report"),
+      ];
+
+      const result = lifecycle.selectTargetDimension(gapVector, context, dimensions);
+      expect(result).toBe("todo_count");
+    });
+
+    it("falls back to largest-gap when all dimensions have the same confidence_tier", () => {
+      const llm = createMockLLMClient([]);
+      const lifecycle = createLifecycle(llm);
+
+      const gapVector = makeGapVector("goal-1", [
+        { name: "dim_a", gap: 0.3 },
+        { name: "dim_b", gap: 0.7 },
+        { name: "dim_c", gap: 0.5 },
+      ]);
+      const context = makeDriveContext(["dim_a", "dim_b", "dim_c"]);
+      const dimensions = [
+        makeDimension("dim_a", "independent_review"),
+        makeDimension("dim_b", "independent_review"),
+        makeDimension("dim_c", "independent_review"),
+      ];
+
+      const result = lifecycle.selectTargetDimension(gapVector, context, dimensions);
+      expect(result).toBe("dim_b");
+    });
+
+    it("defaults unmapped dimension to self_report weight (0.3)", () => {
+      const llm = createMockLLMClient([]);
+      const lifecycle = createLifecycle(llm);
+
+      // known_dim: gap=0.4, mechanical → weighted = 0.4 * 1.0 = 0.4
+      // unknown_dim: gap=0.9, no dimension entry → defaults to self_report (0.3) → weighted = 0.9 * 0.3 = 0.27
+      const gapVector = makeGapVector("goal-1", [
+        { name: "known_dim", gap: 0.4 },
+        { name: "unknown_dim", gap: 0.9 },
+      ]);
+      const context = makeDriveContext(["known_dim", "unknown_dim"]);
+      // Only provide metadata for known_dim; unknown_dim has no entry
+      const dimensions = [makeDimension("known_dim", "mechanical")];
+
+      const result = lifecycle.selectTargetDimension(gapVector, context, dimensions);
+      expect(result).toBe("known_dim");
+    });
+
+    it("uses drive-score ranking when no dimensions provided", () => {
+      const llm = createMockLLMClient([]);
+      const lifecycle = createLifecycle(llm);
+
+      const gapVector = makeGapVector("goal-1", [
+        { name: "small_gap", gap: 0.2 },
+        { name: "large_gap", gap: 0.9 },
+      ]);
+      const context = makeDriveContext(["small_gap", "large_gap"]);
+
+      // Without dimensions, falls back to unweighted ranking (largest gap wins)
+      const result = lifecycle.selectTargetDimension(gapVector, context);
+      expect(result).toBe("large_gap");
+    });
+
+    it("independent_review beats self_report at equal gap", () => {
+      const llm = createMockLLMClient([]);
+      const lifecycle = createLifecycle(llm);
+
+      const gapVector = makeGapVector("goal-1", [
+        { name: "reviewed", gap: 0.5 },
+        { name: "unreliable", gap: 0.5 },
+      ]);
+      const context = makeDriveContext(["reviewed", "unreliable"]);
+      const dimensions = [
+        makeDimension("reviewed", "independent_review"),
+        makeDimension("unreliable", "self_report"),
+      ];
+
+      const result = lifecycle.selectTargetDimension(gapVector, context, dimensions);
+      expect(result).toBe("reviewed");
     });
   });
 

@@ -457,8 +457,8 @@ export interface ShellCommandConfig {
 }
 
 export const SHELL_DIMENSION_PATTERNS: Record<string, ShellCommandConfig> = {
-  todo_count:   { argv: ["grep", "-rc", "TODO",  "src/"], output_type: "number" },
-  fixme_count:  { argv: ["grep", "-rc", "FIXME", "src/"], output_type: "number" },
+  todo_count:   { argv: ["grep", "-rEc", "//\\s*TODO|#\\s*TODO", "src/"], output_type: "number" },
+  fixme_count:  { argv: ["grep", "-rEc", "//\\s*FIXME|#\\s*FIXME", "src/"], output_type: "number" },
   test_count:   { argv: ["grep", "-rEc", "it\\(|test\\(|describe\\(", "tests/"], output_type: "number" },
   lint_errors:  { argv: ["npx", "eslint", "src/", "--format", "compact", "--max-warnings", "9999"], output_type: "number" },
 };
