@@ -323,16 +323,22 @@ export class DriveSystem {
       if (filename.endsWith(".tmp")) return;
 
       const filePath = path.join(eventsDir, filename);
+      let content: string;
       try {
-        if (!fs.existsSync(filePath)) return;
-        const content = fs.readFileSync(filePath, "utf-8");
+        content = fs.readFileSync(filePath, "utf-8");
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") return; // file deleted — expected
+        console.warn(`[DriveSystem] watcher read error: ${String(err)}`);
+        return;
+      }
+      try {
         const event = MotivaEventSchema.parse(JSON.parse(content) as unknown);
         this.inMemoryQueue.push(event);
         if (this.onEventCallback) {
           this.onEventCallback(event);
         }
-      } catch {
-        // Ignore invalid event files
+      } catch (err) {
+        console.warn(`[DriveSystem] watcher parse error in ${filename}: ${String(err)}`);
       }
     });
   }

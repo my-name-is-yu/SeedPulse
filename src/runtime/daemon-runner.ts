@@ -216,6 +216,7 @@ export class DaemonRunner {
    */
   stop(): void {
     this.running = false;
+    this.sleepAbortController?.abort();
     this.state.status = "stopping";
     // Save current active_goals as interrupted_goals for state restoration
     this.state.interrupted_goals = [...this.state.active_goals];

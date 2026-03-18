@@ -569,7 +569,8 @@ export class SessionManager {
   private loadSessionIndex(): string[] {
     const raw = this.stateManager.readRaw("sessions/index.json");
     if (raw === null) return [];
-    return raw as string[];
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((item): item is string => typeof item === "string");
   }
 
   /** Adds a session ID to the index if not already present. */

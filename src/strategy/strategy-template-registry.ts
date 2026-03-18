@@ -400,8 +400,8 @@ export class StrategyTemplateRegistry {
         const template = StrategyTemplateSchema.parse(item);
         this.templates.set(template.template_id, template);
       }
-    } catch {
-      // Corrupt or empty file — start fresh
+    } catch (err) {
+      console.warn(`[StrategyTemplateRegistry] Failed to load templates from ${this.persistPath}, starting fresh: ${err}`);
     }
   }
 

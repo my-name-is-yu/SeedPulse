@@ -84,6 +84,11 @@ function truncate(str: string, maxLen: number): string {
   return str.slice(0, maxLen - 3) + "...";
 }
 
+/** Escape user-controlled strings before embedding in HTML to prevent XSS. */
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 // ─── Slack formatting ───
 
 type SlackBlock =
@@ -200,10 +205,10 @@ async function sendSlack(
 /** Build a simple HTML body for a report. */
 function buildEmailHtml(report: Report): string {
   const rows = [
-    ["ID", report.id],
-    ["Type", report.report_type],
-    ["Goal", report.goal_id ?? "(none)"],
-    ["Generated", report.generated_at],
+    ["ID", escapeHtml(report.id)],
+    ["Type", escapeHtml(report.report_type)],
+    ["Goal", escapeHtml(report.goal_id ?? "(none)")],
+    ["Generated", escapeHtml(report.generated_at)],
   ]
     .map(
       ([k, v]) =>
@@ -216,12 +221,12 @@ function buildEmailHtml(report: Report): string {
 <html>
 <head><meta charset="utf-8"></head>
 <body style="font-family:sans-serif;color:#333">
-<h2>${report.title}</h2>
+<h2>${escapeHtml(report.title)}</h2>
 <table border="0" cellpadding="0" cellspacing="4" style="border-collapse:collapse">
 ${rows}
 </table>
 <hr>
-<pre style="white-space:pre-wrap;background:#fafafa;padding:12px;border-radius:4px">${report.content}</pre>
+<pre style="white-space:pre-wrap;background:#fafafa;padding:12px;border-radius:4px">${escapeHtml(report.content)}</pre>
 </body>
 </html>`;
 }

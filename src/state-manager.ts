@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { GoalSchema, GoalTreeSchema } from "./types/goal.js";
 import { ObservationLogSchema, ObservationLogEntrySchema } from "./types/state.js";
@@ -28,7 +29,7 @@ export class StateManager {
   private readonly baseDir: string;
 
   constructor(baseDir?: string) {
-    this.baseDir = baseDir ?? path.join(process.env.HOME ?? "~", ".motiva");
+    this.baseDir = baseDir ?? path.join(os.homedir(), ".motiva");
     this.ensureDirectories();
   }
 
@@ -71,11 +72,21 @@ export class StateManager {
   }
 
   private readJsonFile<T>(filePath: string): T | null {
-    if (!fs.existsSync(filePath)) {
-      return null;
+    let content: string;
+    try {
+      content = fs.readFileSync(filePath, "utf-8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        return null;
+      }
+      throw err;
     }
-    const content = fs.readFileSync(filePath, "utf-8");
-    return JSON.parse(content) as T;
+    try {
+      return JSON.parse(content) as T;
+    } catch (err) {
+      console.warn(`[StateManager] Corrupt JSON at ${filePath}:`, err);
+      throw err;
+    }
   }
 
   // ─── Goal CRUD ───

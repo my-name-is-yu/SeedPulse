@@ -45,7 +45,12 @@ const LLMProposalItemSchema = z.object({
     .default("llm_heuristic"),
 });
 
-const LLMProposalsResponseSchema = z.array(LLMProposalItemSchema);
+const LLMProposalsResponseSchema = z.union([
+  z.array(LLMProposalItemSchema),
+  z
+    .object({ proposals: z.array(LLMProposalItemSchema) })
+    .transform((o) => o.proposals),
+]);
 
 type LLMProposalItem = z.infer<typeof LLMProposalItemSchema>;
 
