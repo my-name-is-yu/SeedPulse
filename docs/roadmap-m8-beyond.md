@@ -27,6 +27,7 @@ Stage 1-14 + Milestone 1-12 完了（3461テスト、109ファイル）。Phase 
 | **11** | 戦略自律選択 + 実行品質 | Medium | TODO/FIXME解消が1イテレーション完了 |
 | **12** | プラグインアーキテクチャ | Large | サンプルプラグインロード + デーモン24時間動作 |
 | **13** | プラグイン自律選択 + セマンティック知識共有 | Large | プラグイン自動選択 + 知識転移 |
+| **14** | 仮説検証メカニズム（PIVOT/REFINE + 学習） | Medium-Large | stall時の自律回復 + 判断履歴学習 |
 
 ---
 
@@ -234,7 +235,40 @@ Stage 1-14 + Milestone 1-12 完了（3461テスト、109ファイル）。Phase 
 
 ---
 
-## 将来（M14以降）
+## Milestone 14: 仮説検証メカニズム（PIVOT/REFINE + 学習ループ）
+
+**テーマ**: AutoResearchClawの仮説検証パターンをMotivaに導入し、戦略停滞時の自律判断力を強化する。設計: `docs/design/hypothesis-verification.md`
+
+### 14.1: 構造化PIVOT/REFINE判断（StallDetector + StrategyManager統合）
+- StallDetectorに `analyzeStallCause()` 追加 — gap推移パターンから原因を推定
+  - oscillating（振動）→ REFINE（パラメータ調整して再実行）
+  - flat（横ばい）→ PIVOT（戦略変更、ゴールは維持）
+  - diverging（悪化）→ ESCALATE（ゴール再交渉）
+- StrategyManagerに各戦略のrollback target定義
+- CoreLoopのstall分岐を3方向に拡張
+- 最大pivot回数: 2
+- 影響: stall-detector.ts, strategy-manager.ts, core-loop.ts, types/
+- 規模: Medium（2-3日）
+
+### 14.2: 判断履歴の学習ループ（KnowledgeManager拡張）
+- DecisionRecordスキーマ — PIVOT/REFINE判断時のコンテキスト（gap値、戦略種別、stall回数、trust）を記録
+- KnowledgeManagerにdecision記録・検索API追加
+- StrategyManager.selectStrategy()で過去の判断履歴を参照（失敗戦略回避、成功戦略優先）
+- 30日time-decay
+- M13のセマンティック知識共有と統合
+- 影響: knowledge-manager.ts, strategy-manager.ts, types/
+- 規模: Medium-Large（3-5日）
+
+**成功基準**:
+- [ ] stall検出時にPIVOT/REFINE/ESCALATEが原因に応じて自動選択される
+- [ ] 過去にPIVOTされた戦略が同種ゴールで自動的に低優先になる
+- [ ] dogfooding: 2回以上のstallが発生するゴールで自律回復を確認
+
+**Status**: planned
+
+---
+
+## 将来（M15以降）
 
 - DatabaseDataSourceAdapter（PostgreSQL/MySQL/SQLite）
 - WebSocket/SSEリアルタイムDataSource
