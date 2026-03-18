@@ -60,6 +60,26 @@ describe("ShellDataSourceAdapter", () => {
     expect(result).toEqual({ flag: 0 });
   });
 
+  // 3b. observe() with output_type "raw" — stdout "73.98" → 73.98 (covers test_coverage use case)
+  it('observe(["coverage"]) with argv echo "73.98" and output_type "raw" returns {coverage: 73.98}', async () => {
+    const adapter = new ShellDataSourceAdapter("ds_shell_test", {
+      coverage: { argv: ["echo", "73.98"], output_type: "raw" },
+    });
+
+    const result = await adapter.observe(["coverage"]);
+    expect(result).toEqual({ coverage: 73.98 });
+  });
+
+  // 3c. observe() with output_type "raw" — stdout "0" → 0 (parseFloat("0") must NOT fallback to NaN)
+  it('observe(["coverage"]) with argv echo "0" and output_type "raw" returns {coverage: 0}', async () => {
+    const adapter = new ShellDataSourceAdapter("ds_shell_test", {
+      coverage: { argv: ["echo", "0"], output_type: "raw" },
+    });
+
+    const result = await adapter.observe(["coverage"]);
+    expect(result).toEqual({ coverage: 0 });
+  });
+
   // 4. observe() with unknown dimension (no command defined) returns {}
   it('observe(["unknown"]) when no command defined for "unknown" returns {}', async () => {
     const adapter = new ShellDataSourceAdapter("ds_shell_test", {

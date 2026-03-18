@@ -54,7 +54,8 @@ describe("autoRegisterShellDataSources", () => {
     expect(cfg.type).toBe("shell");
     expect(cfg.scope_goal_id).toBe("goal_abc");
     expect(cfg.enabled).toBe(true);
-    const commands = cfg.commands as Record<string, { argv: string[]; output_type: string }>;
+    const conn = cfg.connection as { path: string; commands: Record<string, { argv: string[]; output_type: string }> };
+    const commands = conn.commands;
     expect(commands).toHaveProperty("todo_count");
     expect(commands.todo_count.argv).toContain("grep");
     expect(commands.todo_count.output_type).toBe("number");
@@ -70,7 +71,8 @@ describe("autoRegisterShellDataSources", () => {
 
     const configs = readDsConfigs(datasourcesDir);
     expect(configs).toHaveLength(1);
-    const commands = configs[0].commands as Record<string, { argv: string[]; output_type: string }>;
+    const conn74 = configs[0].connection as { path: string; commands: Record<string, { argv: string[]; output_type: string }> };
+    const commands = conn74.commands;
     expect(commands).toHaveProperty("fixme_count");
     expect(commands.fixme_count.argv.some((a: string) => a.includes("FIXME"))).toBe(true);
     expect(commands.fixme_count.output_type).toBe("number");
@@ -111,9 +113,9 @@ describe("autoRegisterShellDataSources", () => {
     const conn = cfg.connection as { path: string };
     expect(typeof conn.path).toBe("string");
 
-    // commands must be an object with at least one key
-    const commands = cfg.commands as Record<string, unknown>;
-    expect(Object.keys(commands).length).toBeGreaterThan(0);
+    // commands must be an object with at least one key (stored under connection.commands)
+    const connCmds = (cfg.connection as { path: string; commands: Record<string, unknown> }).commands;
+    expect(Object.keys(connCmds).length).toBeGreaterThan(0);
   });
 
   it("creates a single datasource with multiple commands for multiple matching dimensions", async () => {
@@ -127,7 +129,8 @@ describe("autoRegisterShellDataSources", () => {
     const configs = readDsConfigs(datasourcesDir);
     // Both dimensions should be packed into ONE datasource file
     expect(configs).toHaveLength(1);
-    const commands = configs[0].commands as Record<string, unknown>;
+    const connMulti = configs[0].connection as { path: string; commands: Record<string, unknown> };
+    const commands = connMulti.commands;
     expect(commands).toHaveProperty("todo_count");
     expect(commands).toHaveProperty("fixme_count");
   });
