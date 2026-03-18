@@ -9,6 +9,18 @@ import type {
   MappingProposal,
 } from "../types/satisficing.js";
 import type { IEmbeddingClient } from "../knowledge/embedding-client.js";
+import {
+  toNumber,
+  isTruthy,
+  toNumberOrNull,
+  getNumericThresholdValue,
+  getNumericThresholdValueForProposal,
+} from "./satisficing-helpers.js";
+import {
+  judgeTreeCompletion as judgeTreeCompletionFn,
+  propagateSubgoalCompletion as propagateSubgoalCompletionFn,
+} from "./satisficing-propagation.js";
+export { aggregateValues } from "./satisficing-helpers.js";
 
 /**
  * SatisficingJudge implements the completion judgment logic defined in satisficing.md.
@@ -386,72 +398,7 @@ export class SatisficingJudge {
    * @returns CompletionJudgment for the root node.
    */
   judgeTreeCompletion(rootId: string): CompletionJudgment {
-    const goal = this.stateManager.loadGoal(rootId);
-    if (goal === null) {
-      return {
-        is_complete: false,
-        blocking_dimensions: [],
-        low_confidence_dimensions: [],
-        needs_verification_task: false,
-        checked_at: new Date().toISOString(),
-      };
-    }
-
-    // Leaf node (no children): delegate to existing isGoalComplete
-    if (!goal.children_ids || goal.children_ids.length === 0) {
-      return this.isGoalComplete(goal);
-    }
-
-    // Non-leaf node: check all children recursively
-    const blockingDimensions: string[] = [];
-    const lowConfidenceDimensions: string[] = [];
-    let needsVerification = false;
-
-    for (const childId of goal.children_ids) {
-      const child = this.stateManager.loadGoal(childId);
-
-      // Missing child is treated as blocking
-      if (child === null) {
-        blockingDimensions.push(childId);
-        continue;
-      }
-
-      // Cancelled children count as complete (covers "merged" prune reason)
-      if (child.status === "cancelled") {
-        continue;
-      }
-
-      // Recurse into child
-      const childJudgment = this.judgeTreeCompletion(childId);
-
-      if (!childJudgment.is_complete) {
-        // Aggregate child's blocking and low-confidence dimensions
-        for (const dim of childJudgment.blocking_dimensions) {
-          if (!blockingDimensions.includes(dim)) {
-            blockingDimensions.push(dim);
-          }
-        }
-        for (const dim of childJudgment.low_confidence_dimensions) {
-          if (!lowConfidenceDimensions.includes(dim)) {
-            lowConfidenceDimensions.push(dim);
-          }
-        }
-      }
-
-      if (childJudgment.needs_verification_task) {
-        needsVerification = true;
-      }
-    }
-
-    const isComplete = blockingDimensions.length === 0 && lowConfidenceDimensions.length === 0;
-
-    return {
-      is_complete: isComplete,
-      blocking_dimensions: blockingDimensions,
-      low_confidence_dimensions: lowConfidenceDimensions,
-      needs_verification_task: needsVerification,
-      checked_at: new Date().toISOString(),
-    };
+    return judgeTreeCompletionFn(rootId, this.stateManager, (goal) => this.isGoalComplete(goal));
   }
 
   /**
@@ -472,254 +419,12 @@ export class SatisficingJudge {
     parentGoalId: string,
     subgoalDimensions?: import("../types/goal.js").Dimension[]
   ): void {
-    const parentGoal = this.stateManager.loadGoal(parentGoalId);
-    if (parentGoal === null) {
-      throw new Error(
-        `propagateSubgoalCompletion: parent goal "${parentGoalId}" not found`
-      );
-    }
-
-    const now = new Date().toISOString();
-
-    // Phase 2: if subgoalDimensions are provided and any has dimension_mapping, use aggregation path
-    if (subgoalDimensions && subgoalDimensions.length > 0) {
-      const mappedDims = subgoalDimensions.filter((d) => d.dimension_mapping !== null);
-      const unmappedDims = subgoalDimensions.filter((d) => d.dimension_mapping === null);
-
-      // Process mapped dimensions: group by parent_dimension
-      const parentDimUpdates = new Map<string, number>();
-
-      if (mappedDims.length > 0) {
-        // Group subgoal dimensions by target parent_dimension
-        const grouped = new Map<string, import("../types/goal.js").Dimension[]>();
-        for (const dim of mappedDims) {
-          const mapping = dim.dimension_mapping!;
-          const existing = grouped.get(mapping.parent_dimension) ?? [];
-          existing.push(dim);
-          grouped.set(mapping.parent_dimension, existing);
-        }
-
-        // Compute aggregated value for each parent dimension
-        for (const [parentDimName, dims] of grouped) {
-          const aggregation = dims[0]!.dimension_mapping!.aggregation;
-
-          const numericValues: number[] = [];
-          const fulfillmentRatios: number[] = [];
-
-          for (const dim of dims) {
-            const cv = dim.current_value;
-            if (typeof cv === "number") {
-              numericValues.push(cv);
-            } else if (typeof cv === "boolean") {
-              numericValues.push(cv ? 1 : 0);
-            } else if (typeof cv === "string") {
-              const parsed = Number(cv);
-              if (!isNaN(parsed)) {
-                numericValues.push(parsed);
-              } else {
-                // Non-numeric in avg mode: skip with warning
-                if (aggregation === "avg") {
-                  console.warn(
-                    `propagateSubgoalCompletion: skipping non-numeric current_value "${cv}" for dimension "${dim.name}" in avg aggregation`
-                  );
-                }
-              }
-            }
-            // For all_required: also compute fulfillment ratio
-            if (aggregation === "all_required") {
-              const progress = this.computeActualProgress(dim);
-              fulfillmentRatios.push(progress);
-            }
-          }
-
-          const thresholds = dims.map((d) => {
-            const th = d.threshold;
-            if (th.type === "min") return th.value;
-            if (th.type === "max") return th.value;
-            if (th.type === "range") return th.high;
-            return 1;
-          });
-
-          const aggregated =
-            aggregation === "all_required"
-              ? aggregateValues(fulfillmentRatios, aggregation, thresholds)
-              : aggregateValues(numericValues, aggregation, thresholds);
-
-          parentDimUpdates.set(parentDimName, aggregated);
-        }
-      }
-
-      // Build updated dimensions array for the parent goal
-      let updatedDimensions = parentGoal.dimensions.map((d) => {
-        if (parentDimUpdates.has(d.name)) {
-          return { ...d, current_value: parentDimUpdates.get(d.name)!, last_updated: now };
-        }
-        return d;
-      });
-
-      // Process unmapped dimensions: fall back to name-based matching (MVP path)
-      for (const unmappedDim of unmappedDims) {
-        const matchedIndex = updatedDimensions.findIndex(
-          (d) => d.name === unmappedDim.name || d.name.includes(unmappedDim.name)
-        );
-        if (matchedIndex !== -1) {
-          const matchedDim = updatedDimensions[matchedIndex]!;
-          const satisfiedValue = getSatisfiedValue(matchedDim);
-          updatedDimensions = updatedDimensions.map((d, i) =>
-            i === matchedIndex ? { ...d, current_value: satisfiedValue, last_updated: now } : d
-          );
-        }
-      }
-
-      this.stateManager.saveGoal({
-        ...parentGoal,
-        dimensions: updatedDimensions,
-        updated_at: now,
-      });
-      return;
-    }
-
-    // MVP path: name-based matching (backwards compatible)
-    const matchedDimIndex = parentGoal.dimensions.findIndex(
-      (d) => d.name === subgoalId || d.name.includes(subgoalId)
+    propagateSubgoalCompletionFn(
+      subgoalId,
+      parentGoalId,
+      this.stateManager,
+      (dim) => this.computeActualProgress(dim),
+      subgoalDimensions
     );
-
-    if (matchedDimIndex === -1) {
-      // No matching dimension — nothing to propagate
-      return;
-    }
-
-    const matchedDim = parentGoal.dimensions[matchedDimIndex]!;
-
-    // Set current_value to threshold value so isDimensionSatisfied returns true
-    const satisfiedValue = getSatisfiedValue(matchedDim);
-
-    const updatedDimensions = parentGoal.dimensions.map((d, i) =>
-      i === matchedDimIndex
-        ? { ...d, current_value: satisfiedValue, last_updated: now }
-        : d
-    );
-
-    this.stateManager.saveGoal({
-      ...parentGoal,
-      dimensions: updatedDimensions,
-      updated_at: now,
-    });
-  }
-}
-
-// ─── Pure Helper: aggregateValues ───
-
-/**
- * Aggregate an array of numeric values using the specified strategy.
- *
- * @param values - Numeric values to aggregate.
- * @param aggregation - Strategy: "min" | "avg" | "max" | "all_required".
- * @param thresholds - For "all_required": fulfillment ratios are already computed (values = ratios).
- * @returns Aggregated value, or 0 if values array is empty.
- */
-export function aggregateValues(
-  values: number[],
-  aggregation: "min" | "avg" | "max" | "all_required",
-  thresholds?: number[]
-): number {
-  if (values.length === 0) return 0;
-
-  switch (aggregation) {
-    case "min":
-      return Math.min(...values);
-    case "max":
-      return Math.max(...values);
-    case "avg": {
-      const sum = values.reduce((acc, v) => acc + v, 0);
-      return sum / values.length;
-    }
-    case "all_required":
-      // values are fulfillment ratios (0..1); return the minimum ratio
-      // (parent is "complete" only if all ratios = 1.0, expressed as min)
-      return Math.min(...values);
-  }
-}
-
-// ─── Helpers (non-exported) ───
-
-function toNumber(value: number | string | boolean | null): number {
-  if (typeof value === "number") return value;
-  if (typeof value === "boolean") return value ? 1 : 0;
-  if (typeof value === "string") {
-    const n = Number(value);
-    return isNaN(n) ? 0 : n;
-  }
-  return 0;
-}
-
-function isTruthy(value: number | string | boolean | null): boolean {
-  if (value === null || value === undefined) return false;
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number") return value !== 0;
-  if (typeof value === "string") return value.length > 0;
-  return false;
-}
-
-function toNumberOrNull(value: number | string | boolean | null): number | null {
-  if (value === null) return null;
-  return toNumber(value);
-}
-
-/**
- * Extract a representative numeric threshold value for the DimensionSatisfaction schema.
- * Returns null for "present" (no numeric threshold).
- */
-function getNumericThresholdValue(dim: Dimension): number | null {
-  const { threshold } = dim;
-  switch (threshold.type) {
-    case "min":
-      return threshold.value;
-    case "max":
-      return threshold.value;
-    case "range":
-      return threshold.high; // use upper bound as representative
-    case "present":
-      return null;
-    case "match":
-      return typeof threshold.value === "number" ? threshold.value : null;
-  }
-}
-
-/**
- * Returns the numeric threshold for adjustment proposals.
- * Only applicable to numeric thresholds (min/max/range).
- */
-function getNumericThresholdValueForProposal(dim: Dimension): number | null {
-  const { threshold } = dim;
-  switch (threshold.type) {
-    case "min":
-      return threshold.value;
-    case "max":
-      return threshold.value;
-    case "range":
-      return threshold.high;
-    case "present":
-    case "match":
-      return null; // adjustment not meaningful for binary thresholds
-  }
-}
-
-/**
- * Compute the value that fully satisfies the threshold (for propagation).
- */
-function getSatisfiedValue(dim: Dimension): number | string | boolean | null {
-  const { threshold } = dim;
-  switch (threshold.type) {
-    case "min":
-      return threshold.value;
-    case "max":
-      return threshold.value;
-    case "range":
-      return (threshold.low + threshold.high) / 2;
-    case "present":
-      return true;
-    case "match":
-      return threshold.value;
   }
 }

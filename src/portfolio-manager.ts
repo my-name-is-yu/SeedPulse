@@ -1,7 +1,7 @@
 import { StrategyManager } from "./strategy/strategy-manager.js";
 import { StateManager } from "./state-manager.js";
 import { StrategySchema, PortfolioSchema } from "./types/strategy.js";
-import type { Strategy, Portfolio, WaitStrategy } from "./types/strategy.js";
+import type { Strategy, Portfolio } from "./types/strategy.js";
 import { PortfolioConfigSchema } from "./types/portfolio.js";
 import type {
   PortfolioConfig,
@@ -9,8 +9,17 @@ import type {
   TaskSelectionResult,
   RebalanceTrigger,
   RebalanceResult,
-  AllocationAdjustment,
 } from "./types/portfolio.js";
+import {
+  calculateInitialAllocations,
+  countConsecutiveLowestRebalances,
+  redistributeAllocation,
+  adjustAllocations,
+  handleWaitStrategyExpiry as _handleWaitStrategyExpiry,
+  selectNextStrategyAcrossGoals as _selectNextStrategyAcrossGoals,
+  getCurrentGapForDimension as _getCurrentGapForDimension,
+  calculateGapDeltaForStrategy as _calculateGapDeltaForStrategy,
+} from "./portfolio-rebalance.js";
 
 /**
  * PortfolioManager provides portfolio-level orchestration on top of StrategyManager.
@@ -69,7 +78,6 @@ export class PortfolioManager {
       (s) => s.state === "active" || s.state === "evaluating"
     );
 
-    // Filter out WaitStrategy instances
     const eligible = activeStrategies.filter((s) => !this.isWaitStrategy(s));
     if (eligible.length === 0) return null;
 
@@ -163,7 +171,6 @@ export class PortfolioManager {
   shouldRebalance(goalId: string): RebalanceTrigger | null {
     const now = Date.now();
 
-    // Check periodic trigger
     const lastRebalance = this.lastRebalanceTime.get(goalId) ?? 0;
     const intervalMs = this.config.rebalance_interval_hours * 60 * 60 * 1000;
     if (lastRebalance > 0 && now - lastRebalance >= intervalMs) {
@@ -174,18 +181,13 @@ export class PortfolioManager {
       };
     }
 
-    // Check score change trigger
     const currentRecords = this.calculateEffectiveness(goalId);
     const history = this.rebalanceHistory.get(goalId) ?? [];
     if (history.length === 0) return null;
 
-    const lastResult = history[history.length - 1];
-
-    // Find strategies that existed at last rebalance and compare scores
     for (const record of currentRecords) {
       if (record.effectiveness_score === null) continue;
 
-      // Look up previous score from portfolio at last rebalance time
       const portfolio = this.strategyManager.getPortfolio(goalId);
       if (!portfolio) continue;
 
@@ -246,7 +248,6 @@ export class PortfolioManager {
       (s) => s.state === "active" || s.state === "evaluating"
     );
 
-    // Check termination conditions first
     for (const strategy of activeStrategies) {
       if (this.checkTermination(strategy, records)) {
         this.strategyManager.updateState(strategy.id, "terminated");
@@ -254,12 +255,10 @@ export class PortfolioManager {
       }
     }
 
-    // Get remaining active strategies after terminations
     const remainingStrategies = activeStrategies.filter(
       (s) => !result.terminated_strategies.includes(s.id)
     );
 
-    // If all strategies terminated, signal new generation needed
     if (
       remainingStrategies.length === 0 &&
       result.terminated_strategies.length > 0
@@ -269,7 +268,6 @@ export class PortfolioManager {
       return result;
     }
 
-    // Redistribute terminated strategies' allocation if any were terminated
     if (result.terminated_strategies.length > 0 && remainingStrategies.length > 0) {
       const freedAllocation = result.terminated_strategies.reduce(
         (sum, sid) => {
@@ -278,16 +276,17 @@ export class PortfolioManager {
         },
         0
       );
-      this.redistributeAllocation(
+      redistributeAllocation(
         goalId,
         remainingStrategies,
         records,
         freedAllocation,
-        result
+        this.config,
+        result,
+        (gId, sId, alloc) => this.updateStrategyAllocation(gId, sId, alloc)
       );
     }
 
-    // Score-based rebalancing for remaining strategies
     const scoredRecords = records.filter(
       (r) =>
         r.effectiveness_score !== null &&
@@ -300,7 +299,14 @@ export class PortfolioManager {
       const minScore = Math.min(...scores);
 
       if (minScore > 0 && maxScore / minScore >= this.config.score_ratio_threshold) {
-        this.adjustAllocations(goalId, remainingStrategies, scoredRecords, result);
+        adjustAllocations(
+          goalId,
+          remainingStrategies,
+          scoredRecords,
+          this.config,
+          result,
+          (gId, sId, alloc) => this.updateStrategyAllocation(gId, sId, alloc)
+        );
       }
     }
 
@@ -320,12 +326,10 @@ export class PortfolioManager {
     strategy: Strategy,
     records: EffectivenessRecord[]
   ): boolean {
-    // Condition 2: consecutive stall count
     if (strategy.consecutive_stall_count >= this.config.termination_stall_count) {
       return true;
     }
 
-    // Condition 3: resource overconsumption
     const sessionsConsumed = strategy.tasks_generated.length;
     const estimatedSessions = strategy.resource_estimate.sessions;
     if (
@@ -336,7 +340,6 @@ export class PortfolioManager {
       return true;
     }
 
-    // Condition 1: lowest score for N consecutive rebalances at min allocation
     if (strategy.allocation <= this.config.min_allocation) {
       const record = records.find((r) => r.strategy_id === strategy.id);
       if (record?.effectiveness_score !== null && record !== undefined) {
@@ -354,9 +357,10 @@ export class PortfolioManager {
           );
           if (isLowest) {
             const history = this.rebalanceHistory.get(strategy.goal_id) ?? [];
-            const recentCount = this.countConsecutiveLowestRebalances(
+            const recentCount = countConsecutiveLowestRebalances(
               strategy.id,
-              history
+              history,
+              this.config.min_allocation
             );
             if (recentCount >= this.config.termination_min_rebalances) {
               return true;
@@ -378,14 +382,14 @@ export class PortfolioManager {
   activateStrategies(goalId: string, strategyIds: string[]): void {
     if (strategyIds.length === 0) return;
 
-    const allocations = this.calculateInitialAllocations(strategyIds.length);
+    const allocations = calculateInitialAllocations(
+      strategyIds.length,
+      this.config
+    );
 
     for (let i = 0; i < strategyIds.length; i++) {
       const strategyId = strategyIds[i];
-      // Activate through strategyManager (handles state transition)
       this.strategyManager.updateState(strategyId, "active");
-
-      // Set allocation by updating portfolio directly
       this.updateStrategyAllocation(goalId, strategyId, allocations[i]);
     }
   }
@@ -418,51 +422,17 @@ export class PortfolioManager {
     if (!portfolio) return null;
 
     const strategy = portfolio.strategies.find((s) => s.id === strategyId);
-    if (!strategy || !this.isWaitStrategy(strategy)) return null;
+    if (!strategy) return null;
 
-    const waitStrategy = strategy as unknown as WaitStrategy;
-    const waitUntil = new Date(waitStrategy.wait_until).getTime();
-    const now = Date.now();
-
-    // Not yet expired
-    if (now < waitUntil) return null;
-
-    // Measure gap change since strategy started
-    const startGap = strategy.gap_snapshot_at_start;
-    if (startGap === null) return null;
-
-    const currentGap = this.getCurrentGapForDimension(
+    return _handleWaitStrategyExpiry(
       goalId,
-      strategy.primary_dimension
+      strategyId,
+      strategy,
+      (s) => this.isWaitStrategy(s),
+      (gId, dim) => this.getCurrentGapForDimension(gId, dim),
+      (sId, state) => this.strategyManager.updateState(sId, state as "active"),
+      (gId) => this.strategyManager.getPortfolio(gId)?.strategies ?? []
     );
-    if (currentGap === null) return null;
-
-    const gapDelta = currentGap - startGap; // negative = improved
-
-    if (gapDelta < 0) {
-      // Gap improved — wait was justified
-      return null;
-    }
-
-    if (gapDelta === 0) {
-      // Gap unchanged — activate fallback if available
-      if (waitStrategy.fallback_strategy_id) {
-        const fallback = portfolio.strategies.find(
-          (s) => s.id === waitStrategy.fallback_strategy_id
-        );
-        if (fallback && fallback.state === "candidate") {
-          this.strategyManager.updateState(fallback.id, "active");
-        }
-      }
-      return null;
-    }
-
-    // Gap worsened — trigger rebalance
-    return {
-      type: "stall_detected",
-      strategy_id: strategyId,
-      details: `WaitStrategy expired with gap worsening: ${startGap.toFixed(3)} → ${currentGap.toFixed(3)}`,
-    };
   }
 
   /**
@@ -497,43 +467,12 @@ export class PortfolioManager {
     strategy_id: string | null;
     selection_reason: string;
   } | null> {
-    if (goalIds.length === 0) return null;
-
-    const now = Date.now();
-
-    // Sort goals by "most underserved": fewest tasks relative to their allocation
-    const goalTaskCounts = this.goalTaskCounts;
-    const scored = goalIds.map((goalId) => {
-      const allocation = goalAllocations.get(goalId) ?? (1 / goalIds.length);
-      const taskCount = goalTaskCounts.get(goalId) ?? 0;
-      // Goals with allocation > 0 and fewest tasks relative to allocation are most underserved
-      // Use (taskCount / allocation) as the "saturation ratio" — lower = more underserved
-      const saturation = allocation > 0 ? taskCount / allocation : Infinity;
-      return { goalId, saturation, allocation };
-    });
-
-    // Sort ascending by saturation (most underserved first)
-    scored.sort((a, b) => a.saturation - b.saturation);
-
-    // Try each goal in order until one has an available strategy
-    for (const { goalId, saturation } of scored) {
-      const allocation = goalAllocations.get(goalId) ?? 0;
-      if (allocation <= 0) {
-        // Skip goals with zero allocation (waiting state)
-        continue;
-      }
-
-      const selectionResult = this.selectNextStrategyForTask(goalId);
-      if (selectionResult !== null) {
-        return {
-          goal_id: goalId,
-          strategy_id: selectionResult.strategy_id,
-          selection_reason: `Goal selected (saturation=${saturation.toFixed(2)}, allocation=${allocation.toFixed(2)}): ${selectionResult.reason}`,
-        };
-      }
-    }
-
-    return null;
+    return _selectNextStrategyAcrossGoals(
+      goalIds,
+      goalAllocations,
+      this.goalTaskCounts,
+      (goalId) => this.selectNextStrategyForTask(goalId)
+    );
   }
 
   /**
@@ -552,98 +491,20 @@ export class PortfolioManager {
 
   // ─── Private Helpers ───
 
-  /**
-   * Calculate gap delta attributed to a strategy using dimension-target matching.
-   * Sums gap changes across the strategy's target_dimensions.
-   */
-  private calculateGapDeltaForStrategy(
-    strategy: Strategy,
-    goalId: string
-  ): number {
-    let totalDelta = 0;
-
-    for (const dimension of strategy.target_dimensions) {
-      const currentGap = this.getCurrentGapForDimension(goalId, dimension);
-      if (currentGap === null) continue;
-
-      // Use gap_snapshot_at_start as baseline if available
-      const baseline = strategy.gap_snapshot_at_start ?? 1.0;
-      const delta = baseline - currentGap; // positive = improvement (gap closed)
-      totalDelta += delta;
-    }
-
-    return totalDelta;
-  }
-
-  /**
-   * Get the current gap value for a specific dimension of a goal.
-   * Reads from gap history persisted by StateManager.
-   */
-  private getCurrentGapForDimension(
-    goalId: string,
-    dimension: string
-  ): number | null {
-    // Read gap history from state — convention: gaps/<goalId>/current.json
-    const raw = this.stateManager.readRaw(
-      `gaps/${goalId}/current.json`
+  private calculateGapDeltaForStrategy(strategy: Strategy, goalId: string): number {
+    return _calculateGapDeltaForStrategy(
+      strategy,
+      goalId,
+      (path) => this.stateManager.readRaw(path)
     );
-    if (!raw || typeof raw !== "object") return null;
-
-    const gaps = raw as Record<string, unknown>;
-    const dimensionGap = gaps[dimension];
-    if (typeof dimensionGap === "number") return dimensionGap;
-
-    // Try nested structure: { dimensions: { [dim]: { normalized_weighted_gap: number } } }
-    const dimensions = gaps["dimensions"];
-    if (dimensions && typeof dimensions === "object") {
-      const dimData = (dimensions as Record<string, unknown>)[dimension];
-      if (dimData && typeof dimData === "object") {
-        const nwg = (dimData as Record<string, unknown>)[
-          "normalized_weighted_gap"
-        ];
-        if (typeof nwg === "number") return nwg;
-      }
-    }
-
-    return null;
   }
 
-  /**
-   * Calculate initial allocations for N strategies.
-   * Single: [1.0]. Multiple: equal split clamped to [min, max], sum = 1.0.
-   */
-  private calculateInitialAllocations(count: number): number[] {
-    if (count === 1) return [1.0];
-
-    const { min_allocation, max_allocation } = this.config;
-    let base = 1.0 / count;
-
-    // Clamp to bounds
-    base = Math.max(min_allocation, Math.min(max_allocation, base));
-
-    const allocations = new Array<number>(count).fill(base);
-
-    // Normalize to sum = 1.0
-    const sum = allocations.reduce((a, b) => a + b, 0);
-    if (sum > 0 && Math.abs(sum - 1.0) > 0.001) {
-      const factor = 1.0 / sum;
-      for (let i = 0; i < allocations.length; i++) {
-        allocations[i] = Math.max(
-          min_allocation,
-          Math.min(max_allocation, allocations[i] * factor)
-        );
-      }
-      // Final adjustment on last element to ensure exact sum
-      const finalSum = allocations
-        .slice(0, -1)
-        .reduce((a, b) => a + b, 0);
-      allocations[allocations.length - 1] = Math.max(
-        min_allocation,
-        1.0 - finalSum
-      );
-    }
-
-    return allocations;
+  private getCurrentGapForDimension(goalId: string, dimension: string): number | null {
+    return _getCurrentGapForDimension(
+      goalId,
+      dimension,
+      (path) => this.stateManager.readRaw(path)
+    );
   }
 
   /**
@@ -674,161 +535,6 @@ export class PortfolioManager {
   }
 
   /**
-   * Redistribute freed allocation proportionally among remaining strategies
-   * based on effectiveness scores.
-   */
-  private redistributeAllocation(
-    goalId: string,
-    remaining: Strategy[],
-    records: EffectivenessRecord[],
-    freedAllocation: number,
-    result: RebalanceResult
-  ): void {
-    if (remaining.length === 0 || freedAllocation <= 0) return;
-
-    // Get scores for proportional distribution
-    const scoredRemaining = remaining.map((s) => {
-      const record = records.find((r) => r.strategy_id === s.id);
-      return {
-        strategy: s,
-        score: record?.effectiveness_score ?? 0,
-      };
-    });
-
-    const totalScore = scoredRemaining.reduce((sum, r) => sum + Math.max(r.score, 0), 0);
-
-    for (const { strategy, score } of scoredRemaining) {
-      const proportion =
-        totalScore > 0
-          ? Math.max(score, 0) / totalScore
-          : 1.0 / remaining.length;
-      const additionalAllocation = freedAllocation * proportion;
-      const oldAllocation = strategy.allocation;
-      const newAllocation = Math.min(
-        this.config.max_allocation,
-        oldAllocation + additionalAllocation
-      );
-
-      if (Math.abs(newAllocation - oldAllocation) > 0.001) {
-        this.updateStrategyAllocation(goalId, strategy.id, newAllocation);
-        result.adjustments.push({
-          strategy_id: strategy.id,
-          old_allocation: oldAllocation,
-          new_allocation: newAllocation,
-          reason: "Redistribution from terminated strategy",
-        });
-      }
-    }
-  }
-
-  /**
-   * Adjust allocations based on effectiveness scores.
-   * Increases high-performers, decreases low-performers.
-   */
-  private adjustAllocations(
-    goalId: string,
-    strategies: Strategy[],
-    scoredRecords: EffectivenessRecord[],
-    result: RebalanceResult
-  ): void {
-    // Sort by effectiveness score descending
-    const sorted = [...scoredRecords].sort(
-      (a, b) => (b.effectiveness_score ?? 0) - (a.effectiveness_score ?? 0)
-    );
-
-    const totalScore = sorted.reduce(
-      (sum, r) => sum + Math.max(r.effectiveness_score ?? 0, 0),
-      0
-    );
-    if (totalScore <= 0) return;
-
-    const adjustments: AllocationAdjustment[] = [];
-    const newAllocations: Map<string, number> = new Map();
-
-    // Calculate target allocations proportional to scores
-    for (const record of sorted) {
-      const strategy = strategies.find((s) => s.id === record.strategy_id);
-      if (!strategy) continue;
-
-      const proportion = Math.max(record.effectiveness_score ?? 0, 0) / totalScore;
-      let targetAllocation = proportion; // sum of proportions = 1.0
-
-      // Clamp to bounds
-      targetAllocation = Math.max(
-        this.config.min_allocation,
-        Math.min(this.config.max_allocation, targetAllocation)
-      );
-
-      newAllocations.set(strategy.id, targetAllocation);
-    }
-
-    // Normalize to sum = 1.0
-    const rawSum = Array.from(newAllocations.values()).reduce(
-      (a, b) => a + b,
-      0
-    );
-    if (rawSum > 0 && Math.abs(rawSum - 1.0) > 0.001) {
-      const factor = 1.0 / rawSum;
-      for (const [id, alloc] of newAllocations) {
-        newAllocations.set(
-          id,
-          Math.max(this.config.min_allocation, alloc * factor)
-        );
-      }
-    }
-
-    // Apply changes
-    for (const [strategyId, newAllocation] of newAllocations) {
-      const strategy = strategies.find((s) => s.id === strategyId);
-      if (!strategy) continue;
-
-      const oldAllocation = strategy.allocation;
-      if (Math.abs(newAllocation - oldAllocation) > 0.001) {
-        this.updateStrategyAllocation(goalId, strategyId, newAllocation);
-        adjustments.push({
-          strategy_id: strategyId,
-          old_allocation: oldAllocation,
-          new_allocation: newAllocation,
-          reason: `Score-based rebalancing (effectiveness: ${
-            scoredRecords
-              .find((r) => r.strategy_id === strategyId)
-              ?.effectiveness_score?.toFixed(3) ?? "N/A"
-          })`,
-        });
-      }
-    }
-
-    result.adjustments.push(...adjustments);
-  }
-
-  /**
-   * Count how many consecutive recent rebalances a strategy has been the lowest scorer.
-   */
-  private countConsecutiveLowestRebalances(
-    strategyId: string,
-    history: RebalanceResult[]
-  ): number {
-    let count = 0;
-
-    // Walk backwards through history
-    for (let i = history.length - 1; i >= 0; i--) {
-      const rebalance = history[i];
-      // A strategy being adjusted down or being present in adjustments
-      // with lowest allocation indicates it was lowest
-      const adjustment = rebalance.adjustments.find(
-        (a) => a.strategy_id === strategyId
-      );
-      if (adjustment && adjustment.new_allocation <= this.config.min_allocation) {
-        count++;
-      } else {
-        break; // Streak broken
-      }
-    }
-
-    return count;
-  }
-
-  /**
    * Record a rebalance result and update tracking state.
    */
   private recordRebalance(goalId: string, result: RebalanceResult): void {
@@ -838,7 +544,6 @@ export class PortfolioManager {
     history.push(result);
     this.rebalanceHistory.set(goalId, history);
 
-    // Persist rebalance history
     this.stateManager.writeRaw(
       `strategies/${goalId}/rebalance-history.json`,
       history

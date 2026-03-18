@@ -1,0 +1,161 @@
+import { z } from "zod";
+import { StrategySchema } from "../types/strategy.js";
+import { KnowledgeGapSignalSchema } from "../types/knowledge.js";
+import type { StrategyState } from "../types/core.js";
+import type { Strategy } from "../types/strategy.js";
+import type { KnowledgeGapSignal } from "../types/knowledge.js";
+
+// ─── Valid state transitions ───
+
+export const VALID_TRANSITIONS: Record<StrategyState, StrategyState[]> = {
+  candidate: ["active"],
+  active: ["completed", "terminated", "evaluating"],
+  evaluating: ["active", "terminated"],
+  suspended: ["active", "terminated"],
+  completed: [],
+  terminated: [],
+};
+
+// ─── Internal schema for parsing LLM array response ───
+
+export const StrategyArraySchema = z.array(
+  z.object({
+    id: z.string().optional(),
+    hypothesis: z.string(),
+    expected_effect: z.array(
+      z.object({
+        dimension: z.string(),
+        direction: z.enum(["increase", "decrease"]),
+        magnitude: z.enum(["small", "medium", "large"]),
+      })
+    ),
+    resource_estimate: z.object({
+      sessions: z.number(),
+      duration: z.object({
+        value: z.number(),
+        unit: z.enum(["minutes", "hours", "days", "weeks"]),
+      }),
+      llm_calls: z.number().nullable().default(null),
+    }),
+    allocation: z.number().min(0).max(1).default(0),
+  })
+);
+
+// ─── LLM prompt builder ───
+
+export function buildGenerationPrompt(
+  goalId: string,
+  primaryDimension: string,
+  targetDimensions: string[],
+  context: { currentGap: number; pastStrategies: Strategy[] }
+): string {
+  const pastSummary =
+    context.pastStrategies.length > 0
+      ? context.pastStrategies
+          .map(
+            (s) =>
+              `- "${s.hypothesis}" (state: ${s.state}, effectiveness: ${s.effectiveness_score ?? "unknown"})`
+          )
+          .join("\n")
+      : "None";
+
+  return `Generate 1-2 strategic approaches to close the gap for goal "${goalId}".
+
+Primary dimension to improve: ${primaryDimension}
+All target dimensions: ${targetDimensions.join(", ")}
+Current gap score: ${context.currentGap} (0=closed, 1=fully open)
+
+Past strategies tried:
+${pastSummary}
+
+Return a JSON array of strategies. Each strategy must follow this schema:
+{
+  "hypothesis": "string - the core bet/approach",
+  "expected_effect": [
+    { "dimension": "string", "direction": "increase"|"decrease", "magnitude": "small"|"medium"|"large" }
+  ],
+  "resource_estimate": {
+    "sessions": number,
+    "duration": { "value": number, "unit": "hours"|"days"|"weeks"|"minutes" },
+    "llm_calls": number|null
+  },
+  "allocation": number (0-1)
+}
+
+Do not repeat strategies that have already been tried. Respond with only the JSON array inside a markdown code block.`;
+}
+
+// ─── Allocation redistribution helper ───
+
+/**
+ * Redistribute freed allocation proportionally among remaining strategies.
+ * Returns a new array with updated allocations. Pure function.
+ */
+export function redistributeAllocation(
+  strategies: Strategy[],
+  excludeId: string,
+  freedAllocation: number
+): Strategy[] {
+  const remaining = strategies.filter(
+    (s) => s.id !== excludeId && (s.state === "active" || s.state === "evaluating")
+  );
+
+  if (remaining.length === 0 || freedAllocation <= 0) {
+    return strategies;
+  }
+
+  const totalRemainingAlloc = remaining.reduce((sum, s) => sum + s.allocation, 0);
+  return strategies.map((s) => {
+    if (!remaining.some((r) => r.id === s.id)) return s;
+    const share =
+      totalRemainingAlloc > 0
+        ? s.allocation / totalRemainingAlloc
+        : 1.0 / remaining.length;
+    return StrategySchema.parse({
+      ...s,
+      allocation: s.allocation + freedAllocation * share,
+    });
+  });
+}
+
+// ─── Knowledge gap detection (pure function) ───
+
+/**
+ * Detect whether a set of strategy candidates indicates a knowledge gap.
+ *
+ * Rules:
+ *   - Zero candidates → `strategy_deadlock` (no hypotheses can be formed)
+ *   - All candidates have effectiveness_score < 0.3 AND not null →
+ *     `strategy_deadlock` (all known approaches exhausted)
+ *
+ * Returns null when candidates look viable.
+ */
+export function detectStrategyGap(candidates: Strategy[]): KnowledgeGapSignal | null {
+  if (candidates.length === 0) {
+    return KnowledgeGapSignalSchema.parse({
+      signal_type: "strategy_deadlock",
+      missing_knowledge:
+        "No strategies available — domain knowledge needed to generate hypotheses",
+      source_step: "strategy_selection",
+      related_dimension: null,
+    });
+  }
+
+  const scoredCandidates = candidates.filter(
+    (c) => c.effectiveness_score !== null
+  );
+  if (
+    scoredCandidates.length > 0 &&
+    scoredCandidates.every((c) => (c.effectiveness_score ?? 1) < 0.3)
+  ) {
+    return KnowledgeGapSignalSchema.parse({
+      signal_type: "strategy_deadlock",
+      missing_knowledge:
+        "All known strategies have low effectiveness — domain knowledge needed to form new hypotheses",
+      source_step: "strategy_selection",
+      related_dimension: null,
+    });
+  }
+
+  return null;
+}

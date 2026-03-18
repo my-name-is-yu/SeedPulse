@@ -1,24 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { z } from "zod";
-
-const execFileAsync = promisify(execFile);
 import type { StateManager } from "../state-manager.js";
 import type { ILLMClient } from "../llm/llm-client.js";
 import { EthicsGate } from "../traits/ethics-gate.js";
 import { ObservationEngine } from "../observation/observation-engine.js";
 import { GoalSchema } from "../types/goal.js";
-import type { Goal, Dimension } from "../types/goal.js";
-import type { EthicsVerdict } from "../types/ethics.js";
+import type { Goal } from "../types/goal.js";
 import {
-  DimensionDecompositionSchema,
   NegotiationLogSchema,
   FeasibilityResultSchema,
-  CapabilityCheckLogSchema,
 } from "../types/negotiation.js";
 import type {
-  DimensionDecomposition,
   FeasibilityResult,
   NegotiationLog,
   NegotiationResponse,
@@ -32,262 +23,29 @@ import type {
   DecompositionResult,
 } from "../types/goal-tree.js";
 import type { CapabilityDetector } from "../observation/capability-detector.js";
-import {
-  decompositionToDimension,
-  deduplicateDimensionKeys,
-  findBestDimensionMatch,
-} from "./goal-validation.js";
+import { decompositionToDimension } from "./goal-validation.js";
 import {
   decompose as decomposeImpl,
   decomposeIntoSubgoals as decomposeIntoSubgoalsImpl,
 } from "./goal-decomposer.js";
-import {
-  suggestGoals as suggestGoalsImpl,
-  filterSuggestions as filterSuggestionsImpl,
-  buildCapabilityCheckPrompt,
-  CapabilityCheckResultSchema,
-} from "./goal-suggest.js";
+import { suggestGoals as suggestGoalsImpl } from "./goal-suggest.js";
+import { EthicsRejectedError } from "./negotiator-context.js";
+export { gatherNegotiationContext, EthicsRejectedError } from "./negotiator-context.js";
 export type { GoalSuggestion } from "./goal-suggest.js";
-
-// ─── Constants ───
-
-const FEASIBILITY_RATIO_THRESHOLD_REALISTIC = 1.5;
-// FEASIBILITY_RATIO_THRESHOLD_AMBITIOUS is now dynamic — see getFeasibilityThreshold()
-const REALISTIC_TARGET_ACCELERATION_FACTOR = 1.3;
-const DEFAULT_TIME_HORIZON_DAYS = 90;
-const TASK_NOTE_MARKER = "TO" + "DO";
-const ISSUE_MARKER = "FIX" + "ME";
-
-// ─── Workspace Context Scanner ───
-
-/**
- * Gather lightweight workspace facts to ground LLM dimension decomposition.
- * Runs grep/find commands with a 5s total timeout budget.
- * Never throws — returns empty string on any failure.
- */
-export async function gatherNegotiationContext(
-  goalDescription: string,
-  cwd?: string
-): Promise<string> {
-  const dir = cwd ?? process.cwd();
-  const parts: string[] = [];
-
-  try {
-    // Extract keywords from the goal description
-    const STOP_WORDS = new Set([
-      "a", "an", "the", "and", "or", "but", "to", "for", "in", "on", "at",
-      "of", "with", "is", "are", "be", "do", "will", "that", "this", "it",
-      "we", "you", "i", "as", "from", "by", "を", "に", "は", "が", "の",
-      "で", "と", "も", "する", "た", "て", "し", "へ", "な", "こと",
-    ]);
-    const keywords = goalDescription
-      .split(/[\s,./、。（）()「」\-]+/)
-      .map((w) => w.trim())
-      .filter((w) => w.length > 2 && !STOP_WORDS.has(w.toLowerCase()));
-
-    // Project structure: count TypeScript files
-    let tsFileCount = 0;
-    try {
-      const { stdout } = await execFileAsync(
-        "find",
-        [dir + "/src", "-name", "*.ts"],
-        { timeout: 3000 }
-      );
-      const tsFiles = stdout.trim().split("\n").filter(Boolean);
-      tsFileCount = tsFiles.length;
-      parts.push(
-        `Project structure: ${tsFileCount} TypeScript files in src/`
-      );
-
-      // Show up to 20 files for structure overview
-      const sample = tsFiles.slice(0, 20).map((f) => f.replace(dir + "/", ""));
-      if (sample.length > 0) {
-        parts.push(`Sample files:\n  ${sample.join("\n  ")}`);
-      }
-    } catch {
-      // find may fail if src/ doesn't exist — ignore
-    }
-
-    // Keyword occurrence counts
-    const keywordResults: string[] = [];
-    const topKeywords = keywords.slice(0, 5);
-    for (const kw of topKeywords) {
-      try {
-        const { stdout } = await execFileAsync(
-          "grep",
-          ["-rn", "--include=*.ts", "-c", kw, dir + "/src"],
-          { timeout: 2000 }
-        );
-        // Each line is "file:count" — sum them up
-        const totalCount = stdout
-          .trim()
-          .split("\n")
-          .filter(Boolean)
-          .reduce((sum, line) => {
-            const count = parseInt(line.split(":").pop() ?? "0", 10);
-            return sum + (isNaN(count) ? 0 : count);
-          }, 0);
-        const fileCount = stdout
-          .trim()
-          .split("\n")
-          .filter((l) => {
-            const c = parseInt(l.split(":").pop() ?? "0", 10);
-            return !isNaN(c) && c > 0;
-          }).length;
-        if (totalCount > 0) {
-          keywordResults.push(
-            `  - "${kw}": ${totalCount} occurrences across ${fileCount} files`
-          );
-        }
-      } catch {
-        // grep exit 1 = no matches, ignore
-      }
-    }
-
-    const descLower = goalDescription.toLowerCase();
-    if (descLower.includes("todo") || descLower.includes("fixme")) {
-      for (const marker of [TASK_NOTE_MARKER, ISSUE_MARKER] as const) {
-        if (!descLower.includes(marker.toLowerCase())) continue;
-        try {
-          const { stdout: countOut } = await execFileAsync(
-            "grep",
-            ["-rn", "--include=*.ts", marker, dir + "/src"],
-            { timeout: 3000 }
-          );
-          const lines = countOut.trim().split("\n").filter(Boolean);
-          const fileSet = new Set(lines.map((l) => l.split(":")[0]));
-          keywordResults.push(
-            `  - "${marker}": ${lines.length} occurrences across ${fileSet.size} files`
-          );
-
-          // Sample matches (up to 5)
-          const sample = lines.slice(0, 5).map((l) => {
-            const rel = l.replace(dir + "/", "");
-            return `  ${rel}`;
-          });
-          if (sample.length > 0) {
-            parts.push(`Sample ${marker} matches:\n${sample.join("\n")}`);
-          }
-        } catch {
-          // ignore
-        }
-      }
-    }
-
-    if (keywordResults.length > 0) {
-      parts.splice(1, 0, `Keywords found:\n${keywordResults.join("\n")}`);
-    }
-  } catch (err) {
-    console.warn("[gatherNegotiationContext] Unexpected error:", err);
-    return "";
-  }
-
-  if (parts.length === 0) return "";
-
-  return `=== Workspace Context ===\n${parts.join("\n")}`;
-}
-
-// ─── Error class ───
-
-export class EthicsRejectedError extends Error {
-  constructor(public readonly verdict: EthicsVerdict) {
-    super(`Goal rejected by ethics gate: ${verdict.reasoning}`);
-    this.name = "EthicsRejectedError";
-  }
-}
-
-// ─── Prompts ───
-
-function buildDecompositionPrompt(
-  description: string,
-  constraints: string[],
-  availableDataSources?: Array<{ name: string; dimensions: string[] }>,
-  workspaceContext?: string
-): string {
-  const constraintsSection =
-    constraints.length > 0
-      ? `\nConstraints:\n${constraints.map((c) => `- ${c}`).join("\n")}`
-      : "";
-
-  const dataSourcesSection =
-    availableDataSources && availableDataSources.length > 0
-      ? `DataSources (use exact dimension names for overlap; add 1-2 extra only if shell-measurable):
-${availableDataSources.map((ds) => `- "${ds.name}": ${ds.dimensions.join(", ")}`).join("\n")}
-
-`
-      : "";
-
-  const workspaceSection = workspaceContext
-    ? `\nWorkspace:\n${workspaceContext}\nDerive dimensions measurable from this codebase (e.g. "task_note_count" max:0 if TODOs exist).\n`
-    : "";
-
-  return `${dataSourcesSection}Decompose this goal into measurable dimensions.
-
-Goal: ${description}${constraintsSection}${workspaceSection}
-
-Each dimension needs: name (snake_case, prefer exact DataSource name), label, threshold_type ("min"|"max"|"range"|"present"|"match"), threshold_value (number/string/bool or null), observation_method_hint.
-
-Rules:
-- 5-7 dimensions max; prefer mechanically measurable (shell/grep/test runner)
-- "present" only for pure existence checks; use "min" (0.0-1.0) for quality/correctness/completeness
-- No generic dimensions (code_quality, readability) unless goal names them AND a concrete shell command exists
-
-Example:
-[
-  {"name":"test_coverage","label":"Test Coverage","threshold_type":"min","threshold_value":80,"observation_method_hint":"Run test suite, check coverage %"},
-  {"name":"license_file_exists","label":"License File","threshold_type":"present","threshold_value":true,"observation_method_hint":"Check for LICENSE file in root"}
-]`;
-}
-
-function buildFeasibilityPrompt(
-  dimension: string,
-  description: string,
-  baselineValue: number | string | boolean | null,
-  thresholdValue: number | string | boolean | (number | string)[] | null,
-  timeHorizonDays: number
-): string {
-  return `Dimension: ${dimension}
-Goal: ${description}
-Baseline: ${baselineValue === null ? "unknown" : String(baselineValue)}
-Target: ${thresholdValue === null ? "unknown" : String(thresholdValue)}
-Horizon: ${timeHorizonDays} days
-
-{"assessment":"realistic"|"ambitious"|"infeasible","confidence":"high"|"medium"|"low","reasoning":"...","key_assumptions":[...],"main_risks":[...]}`;
-}
-
-function buildResponsePrompt(
-  description: string,
-  responseType: "accept" | "counter_propose" | "flag_as_ambitious",
-  feasibilityResults: FeasibilityResult[],
-  counterProposal?: { realistic_target: number; reasoning: string }
-): string {
-  const feasibilitySummary = feasibilityResults
-    .map((r) => `- ${r.dimension}: ${r.assessment} (${r.confidence})`)
-    .join("\n");
-
-  const instruction =
-    responseType === "accept"
-      ? "Write an encouraging acceptance message."
-      : responseType === "counter_propose"
-        ? `Write a counter-proposal: suggest ${counterProposal?.realistic_target} as a safer target. Reason: ${counterProposal?.reasoning}.`
-        : "Flag this goal as ambitious. Note the risks and ask user to review.";
-
-  return `Goal: ${description}
-Feasibility:
-${feasibilitySummary}
-
-${instruction} Reply in 1-3 sentences, plain text.`;
-}
-
-// ─── Qualitative feasibility schema for LLM parsing ───
-
-const QualitativeFeasibilitySchema = z.object({
-  assessment: z.enum(["realistic", "ambitious", "infeasible"]),
-  confidence: z.enum(["high", "medium", "low"]),
-  reasoning: z.string(),
-  key_assumptions: z.array(z.string()),
-  main_risks: z.array(z.string()),
-});
+import {
+  DEFAULT_TIME_HORIZON_DAYS,
+  REALISTIC_TARGET_ACCELERATION_FACTOR,
+  FEASIBILITY_RATIO_THRESHOLD_REALISTIC,
+  getFeasibilityThreshold,
+  runDecompositionStep,
+  buildInitialBaseline,
+  buildRenegotiationBaseline,
+  evaluateQualitatively,
+  runCapabilityCheckStep,
+  determineResponseType,
+  buildNegotiationResponse,
+  estimateChangeRate,
+} from "./negotiator-steps.js";
 
 // ─── GoalNegotiator ───
 
@@ -307,7 +65,7 @@ export class GoalNegotiator {
     ethicsGate: EthicsGate,
     observationEngine: ObservationEngine,
     characterConfig?: CharacterConfig,
-    satisficingJudge?: SatisficingJudge,  // Phase 2: auto-mapping proposals
+    satisficingJudge?: SatisficingJudge,
     goalTreeManager?: GoalTreeManager,
     adapterCapabilities?: Array<{ adapterType: string; capabilities: string[] }>
   ) {
@@ -321,16 +79,7 @@ export class GoalNegotiator {
     this.adapterCapabilities = adapterCapabilities;
   }
 
-  /**
-   * Compute the feasibility ratio threshold for "ambitious" vs "infeasible".
-   * Driven by caution_level (1=conservative/strict → 2.0, 5=ambitious → 4.0).
-   * Formula: threshold = 1.5 + (caution_level * 0.5)
-   */
-  private getFeasibilityThreshold(): number {
-    return 1.5 + this.characterConfig.caution_level * 0.5;
-  }
-
-  // ─── negotiate() — 6-step flow ───
+  // ─── negotiate() ───
 
   async negotiate(
     rawGoalDescription: string,
@@ -340,19 +89,13 @@ export class GoalNegotiator {
       timeHorizonDays?: number;
       workspaceContext?: string;
     }
-  ): Promise<{
-    goal: Goal;
-    response: NegotiationResponse;
-    log: NegotiationLog;
-  }> {
+  ): Promise<{ goal: Goal; response: NegotiationResponse; log: NegotiationLog }> {
     const goalId = randomUUID();
     const deadline = options?.deadline ?? null;
     const constraints = options?.constraints ?? [];
     const timeHorizonDays = options?.timeHorizonDays ?? DEFAULT_TIME_HORIZON_DAYS;
-    const workspaceContext = options?.workspaceContext;
     const now = new Date().toISOString();
 
-    // Initialize negotiation log
     const log: NegotiationLog = NegotiationLogSchema.parse({
       goal_id: goalId,
       timestamp: now,
@@ -362,196 +105,66 @@ export class GoalNegotiator {
 
     // Step 0: Ethics Gate
     const ethicsVerdict = await this.ethicsGate.check("goal", goalId, rawGoalDescription);
+    if (ethicsVerdict.verdict === "reject") throw new EthicsRejectedError(ethicsVerdict);
+    const ethicsFlags = ethicsVerdict.verdict === "flag" ? ethicsVerdict.risks : undefined;
 
-    if (ethicsVerdict.verdict === "reject") {
-      throw new EthicsRejectedError(ethicsVerdict);
-    }
-
-    const ethicsFlags =
-      ethicsVerdict.verdict === "flag" ? ethicsVerdict.risks : undefined;
-
-    // Step 1: Goal Intake
-    // (parsed from options above)
-
-    // Step 2: Dimension Decomposition (LLM)
-    const availableDataSources = this.observationEngine.getAvailableDimensionInfo();
-    const decompositionPrompt = buildDecompositionPrompt(rawGoalDescription, constraints, availableDataSources, workspaceContext);
-    const decompositionResponse = await this.llmClient.sendMessage(
-      [{ role: "user", content: decompositionPrompt }],
-      { temperature: 0 }
+    // Step 2: Dimension Decomposition
+    const { dimensions } = await runDecompositionStep(
+      rawGoalDescription,
+      constraints,
+      this.observationEngine,
+      this.llmClient,
+      options?.workspaceContext
     );
+    log.step2_decomposition = { dimensions, method: "llm" };
 
-    const dimensions = this.llmClient.parseJSON(
-      decompositionResponse.content,
-      z.array(DimensionDecompositionSchema)
-    );
-
-    // Post-process: map dimension names to DataSource dimensions when similar
-    if (availableDataSources.length > 0) {
-      const allDsNames = availableDataSources.flatMap(ds => ds.dimensions);
-      for (const dim of dimensions) {
-        if (!allDsNames.includes(dim.name)) {
-          // Try to find a similar DataSource dimension
-          const match = findBestDimensionMatch(dim.name, allDsNames);
-          if (match) {
-            dim.name = match;
-          }
-        }
-      }
-
-      // R3-4: Warn if all dimensions were remapped to DataSource dimensions
-      const allRemapped = dimensions.length > 0 && dimensions.every(dim => allDsNames.includes(dim.name));
-      if (allRemapped) {
-        console.warn(
-          "[GoalNegotiator] Warning: all dimensions were remapped to DataSource dimensions. " +
-          "Quality-specific dimensions may be missing. Consider adding dimensions that directly " +
-          "measure the goal's quality aspects."
-        );
-      }
-    }
-
-    // Post-process: ensure all dimension keys are unique (LLM may return duplicates)
-    deduplicateDimensionKeys(dimensions);
-
-    log.step2_decomposition = {
-      dimensions,
-      method: "llm",
-    };
-
-    // Step 3: Baseline Observation
-    const baselineObservations: Array<{
-      dimension: string;
-      value: number | string | boolean | null;
-      confidence: number;
-      method: string;
-    }> = [];
-
-    for (const dim of dimensions) {
-      // For new goals, we don't have observation setup yet
-      // Record null baseline with 0 confidence
-      baselineObservations.push({
-        dimension: dim.name,
-        value: null,
-        confidence: 0,
-        method: "initial_baseline",
-      });
-    }
-
+    // Step 3: Initial Baseline
+    const baselineObservations = buildInitialBaseline(dimensions);
     log.step3_baseline = { observations: baselineObservations };
 
-    // Step 4: Feasibility Evaluation (Hybrid)
+    // Step 4: Feasibility Evaluation
     const feasibilityResults: FeasibilityResult[] = [];
-    let overallPath: "quantitative" | "qualitative" | "hybrid" = "qualitative";
-
     for (const dim of dimensions) {
       const baseline = baselineObservations.find((o) => o.dimension === dim.name);
-      const baselineValue = baseline?.value ?? null;
-
-      // Determine feasibility path
-      if (
-        typeof baselineValue === "number" &&
-        typeof dim.threshold_value === "number"
-      ) {
-        // Quantitative path
-        overallPath = overallPath === "qualitative" ? "hybrid" : overallPath;
-
-        // No observed_change_rate available for new goals, fallback to qualitative
-        const result = await this.evaluateQualitatively(
-          dim.name,
-          rawGoalDescription,
-          baselineValue,
-          dim.threshold_value,
-          timeHorizonDays
-        );
-        feasibilityResults.push(result);
-      } else {
-        // Qualitative path (LLM assessment)
-        const result = await this.evaluateQualitatively(
-          dim.name,
-          rawGoalDescription,
-          baselineValue,
-          dim.threshold_value,
-          timeHorizonDays
-        );
-        feasibilityResults.push(result);
-      }
+      const result = await evaluateQualitatively(
+        this.llmClient,
+        dim.name,
+        rawGoalDescription,
+        baseline?.value ?? null,
+        dim.threshold_value,
+        timeHorizonDays
+      );
+      feasibilityResults.push(result);
     }
-
-    log.step4_evaluation = {
-      path: overallPath,
-      dimensions: feasibilityResults,
-    };
+    log.step4_evaluation = { path: "qualitative", dimensions: feasibilityResults };
 
     // Step 4b: Capability Check
     if (this.adapterCapabilities && this.adapterCapabilities.length > 0) {
-      try {
-        const capCheckPrompt = buildCapabilityCheckPrompt(
-          rawGoalDescription,
-          dimensions,
-          this.adapterCapabilities
-        );
-        const capCheckResponse = await this.llmClient.sendMessage(
-          [{ role: "user", content: capCheckPrompt }],
-          { temperature: 0 }
-        );
-        const capCheckResult = this.llmClient.parseJSON(
-          capCheckResponse.content,
-          CapabilityCheckResultSchema
-        );
-
-        const allCapabilities = this.adapterCapabilities.flatMap((ac) => ac.capabilities);
-        const infeasibleDimensions: string[] = [];
-
-        for (const gap of capCheckResult.gaps) {
-          if (!gap.acquirable) {
-            const existing = feasibilityResults.find((r) => r.dimension === gap.dimension);
-            if (existing) {
-              existing.assessment = "infeasible";
-              existing.reasoning = `Capability gap: ${gap.reason}`;
-            }
-            infeasibleDimensions.push(gap.dimension);
-          }
-        }
-
-        log.step4_capability_check = CapabilityCheckLogSchema.parse({
-          capabilities_available: allCapabilities,
-          gaps_detected: capCheckResult.gaps.map((g) => ({
-            dimension: g.dimension,
-            required_capability: g.required_capability,
-            acquirable: g.acquirable,
-          })),
-          infeasible_dimensions: infeasibleDimensions,
-        });
-      } catch {
-        // Non-critical: capability check failure should not block negotiation
-        console.warn("[GoalNegotiator] Step 4b capability check failed, continuing without it");
-      }
+      await runCapabilityCheckStep(
+        this.llmClient,
+        rawGoalDescription,
+        dimensions,
+        this.adapterCapabilities,
+        feasibilityResults,
+        log
+      );
     }
 
-    // Step 5: Response Generation
-    const { responseType, counterProposal, initialConfidence } =
-      this.determineResponseType(feasibilityResults, baselineObservations, timeHorizonDays);
-
-    // Generate user-facing message via LLM
-    const responsePrompt = buildResponsePrompt(
+    // Step 5: Response
+    const { responseType, counterProposal, initialConfidence } = determineResponseType(
+      feasibilityResults,
+      baselineObservations,
+      timeHorizonDays
+    );
+    const negotiationResponse = await buildNegotiationResponse(
+      this.llmClient,
       rawGoalDescription,
       responseType,
       feasibilityResults,
-      counterProposal
+      counterProposal,
+      ethicsFlags,
+      initialConfidence
     );
-    const responseMessage = await this.llmClient.sendMessage(
-      [{ role: "user", content: responsePrompt }],
-      { temperature: 0 }
-    );
-
-    const negotiationResponse: NegotiationResponse = {
-      type: responseType,
-      message: responseMessage.content.trim(),
-      accepted: responseType === "accept" || responseType === "flag_as_ambitious",
-      initial_confidence: initialConfidence,
-      ...(counterProposal ? { counter_proposal: counterProposal } : {}),
-      ...(ethicsFlags ? { flags: ethicsFlags } : {}),
-    };
 
     log.step5_response = {
       type: responseType,
@@ -559,16 +172,11 @@ export class GoalNegotiator {
       initial_confidence: initialConfidence,
       user_acknowledged: false,
       counter_proposal: counterProposal
-        ? {
-            realistic_target: counterProposal.realistic_target,
-            reasoning: counterProposal.reasoning,
-            alternatives: counterProposal.alternatives,
-          }
+        ? { realistic_target: counterProposal.realistic_target, reasoning: counterProposal.reasoning, alternatives: counterProposal.alternatives }
         : null,
     };
 
-    // Build Goal object
-    const goalDimensions = dimensions.map(decompositionToDimension);
+    // Build & persist Goal
     const goal = GoalSchema.parse({
       id: goalId,
       parent_id: null,
@@ -576,7 +184,7 @@ export class GoalNegotiator {
       title: rawGoalDescription,
       description: rawGoalDescription,
       status: "active",
-      dimensions: goalDimensions,
+      dimensions: dimensions.map(decompositionToDimension),
       gap_aggregation: "max",
       dimension_mapping: null,
       constraints,
@@ -596,7 +204,6 @@ export class GoalNegotiator {
       updated_at: now,
     });
 
-    // Persist
     this.stateManager.saveGoal(goal);
     this.saveNegotiationLog(goalId, log);
 
@@ -627,19 +234,13 @@ export class GoalNegotiator {
     goalId: string,
     trigger: "stall" | "new_info" | "user_request",
     context?: string
-  ): Promise<{
-    goal: Goal;
-    response: NegotiationResponse;
-    log: NegotiationLog;
-  }> {
+  ): Promise<{ goal: Goal; response: NegotiationResponse; log: NegotiationLog }> {
     const existingGoal = this.stateManager.loadGoal(goalId);
-    if (existingGoal === null) {
-      throw new Error(`renegotiate: goal "${goalId}" not found`);
-    }
+    if (existingGoal === null) throw new Error(`renegotiate: goal "${goalId}" not found`);
 
     const now = new Date().toISOString();
+    const timeHorizonDays = DEFAULT_TIME_HORIZON_DAYS;
 
-    // Initialize renegotiation log
     const log: NegotiationLog = NegotiationLogSchema.parse({
       goal_id: goalId,
       timestamp: now,
@@ -648,80 +249,31 @@ export class GoalNegotiator {
     });
 
     // Step 0: Ethics re-check
-    const ethicsVerdict = await this.ethicsGate.check(
-      "goal",
-      goalId,
-      existingGoal.description,
-      context
-    );
+    const ethicsVerdict = await this.ethicsGate.check("goal", goalId, existingGoal.description, context);
+    if (ethicsVerdict.verdict === "reject") throw new EthicsRejectedError(ethicsVerdict);
+    const ethicsFlags = ethicsVerdict.verdict === "flag" ? ethicsVerdict.risks : undefined;
 
-    if (ethicsVerdict.verdict === "reject") {
-      throw new EthicsRejectedError(ethicsVerdict);
-    }
-
-    const ethicsFlags =
-      ethicsVerdict.verdict === "flag" ? ethicsVerdict.risks : undefined;
-
-    // Step 2: Re-decompose dimensions (LLM) using existing goal + context
-    const availableDataSources = this.observationEngine.getAvailableDimensionInfo();
-    const redecompPrompt = buildDecompositionPrompt(
-      `${existingGoal.description}${context ? ` (Renegotiation context: ${context})` : ""}`,
+    // Step 2: Re-decompose
+    const goalDesc = `${existingGoal.description}${context ? ` (Renegotiation context: ${context})` : ""}`;
+    const { dimensions } = await runDecompositionStep(
+      goalDesc,
       existingGoal.constraints,
-      availableDataSources
+      this.observationEngine,
+      this.llmClient
     );
-    const decompositionResponse = await this.llmClient.sendMessage(
-      [{ role: "user", content: redecompPrompt }],
-      { temperature: 0 }
-    );
-
-    const dimensions = this.llmClient.parseJSON(
-      decompositionResponse.content,
-      z.array(DimensionDecompositionSchema)
-    );
-
-    // Post-process: map dimension names to DataSource dimensions when similar
-    if (availableDataSources.length > 0) {
-      const allDsNames = availableDataSources.flatMap(ds => ds.dimensions);
-      for (const dim of dimensions) {
-        if (!allDsNames.includes(dim.name)) {
-          // Try to find a similar DataSource dimension
-          const match = findBestDimensionMatch(dim.name, allDsNames);
-          if (match) {
-            dim.name = match;
-          }
-        }
-      }
-    }
-
-    // Post-process: ensure all dimension keys are unique (LLM may return duplicates)
-    deduplicateDimensionKeys(dimensions);
-
     log.step2_decomposition = { dimensions, method: "llm" };
 
-    // Step 3: Baseline from existing goal state
-    const baselineObservations = dimensions.map((dim) => {
-      const existingDim = existingGoal.dimensions.find((d) => d.name === dim.name);
-      return {
-        dimension: dim.name,
-        value: existingDim?.current_value ?? null,
-        confidence: existingDim?.confidence ?? 0,
-        method: "existing_observation",
-      };
-    });
-
+    // Step 3: Baseline from existing state
+    const baselineObservations = buildRenegotiationBaseline(dimensions, existingGoal.dimensions);
     log.step3_baseline = { observations: baselineObservations };
 
-    // Step 4: Feasibility re-evaluation
+    // Step 4: Feasibility re-evaluation (quantitative when change rate available)
     const feasibilityResults: FeasibilityResult[] = [];
-    const timeHorizonDays = DEFAULT_TIME_HORIZON_DAYS;
-
     for (const dim of dimensions) {
       const baseline = baselineObservations.find((o) => o.dimension === dim.name);
       const baselineValue = baseline?.value ?? null;
-
-      // Check for quantitative path with change rate from history
       const existingDim = existingGoal.dimensions.find((d) => d.name === dim.name);
-      const changeRate = existingDim ? this.estimateChangeRate(existingDim) : null;
+      const changeRate = existingDim ? estimateChangeRate(existingDim) : null;
 
       if (
         typeof baselineValue === "number" &&
@@ -729,15 +281,13 @@ export class GoalNegotiator {
         changeRate !== null &&
         changeRate > 0
       ) {
-        // Quantitative path
-        const necessaryChangeRate =
-          Math.abs(dim.threshold_value - baselineValue) / timeHorizonDays;
+        const necessaryChangeRate = Math.abs(dim.threshold_value - baselineValue) / timeHorizonDays;
         const feasibilityRatio = necessaryChangeRate / changeRate;
 
         let assessment: "realistic" | "ambitious" | "infeasible";
         if (feasibilityRatio <= FEASIBILITY_RATIO_THRESHOLD_REALISTIC) {
           assessment = "realistic";
-        } else if (feasibilityRatio <= this.getFeasibilityThreshold()) {
+        } else if (feasibilityRatio <= getFeasibilityThreshold(this.characterConfig)) {
           assessment = "ambitious";
         } else {
           assessment = "infeasible";
@@ -756,8 +306,8 @@ export class GoalNegotiator {
           })
         );
       } else {
-        // Qualitative fallback
-        const result = await this.evaluateQualitatively(
+        const result = await evaluateQualitatively(
+          this.llmClient,
           dim.name,
           existingGoal.description,
           baselineValue,
@@ -775,73 +325,31 @@ export class GoalNegotiator {
 
     // Step 4b: Capability Check
     if (this.adapterCapabilities && this.adapterCapabilities.length > 0) {
-      try {
-        const capCheckPrompt = buildCapabilityCheckPrompt(
-          existingGoal.description,
-          dimensions,
-          this.adapterCapabilities
-        );
-        const capCheckResponse = await this.llmClient.sendMessage(
-          [{ role: "user", content: capCheckPrompt }],
-          { temperature: 0 }
-        );
-        const capCheckResult = this.llmClient.parseJSON(
-          capCheckResponse.content,
-          CapabilityCheckResultSchema
-        );
-
-        const allCapabilities = this.adapterCapabilities.flatMap((ac) => ac.capabilities);
-        const infeasibleDimensions: string[] = [];
-
-        for (const gap of capCheckResult.gaps) {
-          if (!gap.acquirable) {
-            const existing = feasibilityResults.find((r) => r.dimension === gap.dimension);
-            if (existing) {
-              existing.assessment = "infeasible";
-              existing.reasoning = `Capability gap: ${gap.reason}`;
-            }
-            infeasibleDimensions.push(gap.dimension);
-          }
-        }
-
-        log.step4_capability_check = CapabilityCheckLogSchema.parse({
-          capabilities_available: allCapabilities,
-          gaps_detected: capCheckResult.gaps.map((g) => ({
-            dimension: g.dimension,
-            required_capability: g.required_capability,
-            acquirable: g.acquirable,
-          })),
-          infeasible_dimensions: infeasibleDimensions,
-        });
-      } catch {
-        // Non-critical: capability check failure should not block renegotiation
-        console.warn("[GoalNegotiator] Step 4b capability check failed, continuing without it");
-      }
+      await runCapabilityCheckStep(
+        this.llmClient,
+        existingGoal.description,
+        dimensions,
+        this.adapterCapabilities,
+        feasibilityResults,
+        log
+      );
     }
 
-    // Step 5: Response generation
-    const { responseType, counterProposal, initialConfidence } =
-      this.determineResponseType(feasibilityResults, baselineObservations, timeHorizonDays);
-
-    const responsePrompt = buildResponsePrompt(
+    // Step 5: Response
+    const { responseType, counterProposal, initialConfidence } = determineResponseType(
+      feasibilityResults,
+      baselineObservations,
+      timeHorizonDays
+    );
+    const negotiationResponse = await buildNegotiationResponse(
+      this.llmClient,
       existingGoal.description,
       responseType,
       feasibilityResults,
-      counterProposal
+      counterProposal,
+      ethicsFlags,
+      initialConfidence
     );
-    const responseMessage = await this.llmClient.sendMessage(
-      [{ role: "user", content: responsePrompt }],
-      { temperature: 0 }
-    );
-
-    const negotiationResponse: NegotiationResponse = {
-      type: responseType,
-      message: responseMessage.content.trim(),
-      accepted: responseType === "accept" || responseType === "flag_as_ambitious",
-      initial_confidence: initialConfidence,
-      ...(counterProposal ? { counter_proposal: counterProposal } : {}),
-      ...(ethicsFlags ? { flags: ethicsFlags } : {}),
-    };
 
     log.step5_response = {
       type: responseType,
@@ -849,19 +357,14 @@ export class GoalNegotiator {
       initial_confidence: initialConfidence,
       user_acknowledged: false,
       counter_proposal: counterProposal
-        ? {
-            realistic_target: counterProposal.realistic_target,
-            reasoning: counterProposal.reasoning,
-            alternatives: counterProposal.alternatives,
-          }
+        ? { realistic_target: counterProposal.realistic_target, reasoning: counterProposal.reasoning, alternatives: counterProposal.alternatives }
         : null,
     };
 
-    // Update goal
-    const goalDimensions = dimensions.map(decompositionToDimension);
+    // Update & persist Goal
     const updatedGoal = GoalSchema.parse({
       ...existingGoal,
-      dimensions: goalDimensions,
+      dimensions: dimensions.map(decompositionToDimension),
       confidence_flag: initialConfidence === "low" ? "low" : initialConfidence === "medium" ? "medium" : "high",
       feasibility_note:
         responseType === "counter_propose"
@@ -878,11 +381,6 @@ export class GoalNegotiator {
 
   // ─── decomposeIntoSubgoals() ───
 
-  /**
-   * Decompose a negotiated goal into subgoals using GoalTreeManager.
-   * For depth >= 2, skip negotiation and auto-accept.
-   * Returns null if goalTreeManager is not injected.
-   */
   async decomposeIntoSubgoals(
     goalId: string,
     config?: GoalDecompositionConfig
@@ -902,10 +400,6 @@ export class GoalNegotiator {
 
   // ─── suggestGoals() ───
 
-  /**
-   * Suggest measurable improvement goals based on the given context.
-   * Does NOT save goals — it only suggests. Use negotiate() to register a suggestion.
-   */
   async suggestGoals(
     context: string,
     options?: {
@@ -920,7 +414,7 @@ export class GoalNegotiator {
       this.llmClient,
       this.ethicsGate,
       this.adapterCapabilities,
-      options,
+      options
     );
   }
 
@@ -934,9 +428,18 @@ export class GoalNegotiator {
 
   // ─── Private helpers ───
 
-  private saveNegotiationLog(goalId: string, log: NegotiationLog): void {
-    const parsed = NegotiationLogSchema.parse(log);
-    this.stateManager.writeRaw(`goals/${goalId}/negotiation-log.json`, parsed);
+  // kept for tests that access these via `as unknown as` casting
+
+  private determineResponseType(
+    feasibilityResults: FeasibilityResult[],
+    baselineObservations: Array<{ dimension: string; value: number | string | boolean | null; confidence: number; method: string }>,
+    timeHorizonDays: number
+  ) {
+    return determineResponseType(feasibilityResults, baselineObservations, timeHorizonDays);
+  }
+
+  private estimateChangeRate(dimension: import("../types/goal.js").Dimension): number | null {
+    return estimateChangeRate(dimension);
   }
 
   private async evaluateQualitatively(
@@ -946,169 +449,23 @@ export class GoalNegotiator {
     thresholdValue: number | string | boolean | (number | string)[] | null,
     timeHorizonDays: number
   ): Promise<FeasibilityResult> {
-    const prompt = buildFeasibilityPrompt(
+    return evaluateQualitatively(
+      this.llmClient,
       dimensionName,
       goalDescription,
       baselineValue,
       thresholdValue,
       timeHorizonDays
     );
-
-    const response = await this.llmClient.sendMessage(
-      [{ role: "user", content: prompt }],
-      { temperature: 0 }
-    );
-
-    try {
-      const parsed = this.llmClient.parseJSON(
-        response.content,
-        QualitativeFeasibilitySchema
-      );
-
-      return FeasibilityResultSchema.parse({
-        dimension: dimensionName,
-        path: "qualitative",
-        feasibility_ratio: null,
-        assessment: parsed.assessment,
-        confidence: parsed.confidence,
-        reasoning: parsed.reasoning,
-        key_assumptions: parsed.key_assumptions,
-        main_risks: parsed.main_risks,
-      });
-    } catch {
-      // Conservative fallback on parse failure
-      return FeasibilityResultSchema.parse({
-        dimension: dimensionName,
-        path: "qualitative",
-        feasibility_ratio: null,
-        assessment: "ambitious",
-        confidence: "low",
-        reasoning: "Failed to parse feasibility assessment, defaulting to ambitious.",
-        key_assumptions: [],
-        main_risks: ["Unable to assess feasibility"],
-      });
-    }
   }
 
-  private determineResponseType(
-    feasibilityResults: FeasibilityResult[],
-    baselineObservations: Array<{
-      dimension: string;
-      value: number | string | boolean | null;
-      confidence: number;
-      method: string;
-    }>,
-    timeHorizonDays: number
-  ): {
-    responseType: "accept" | "counter_propose" | "flag_as_ambitious";
-    counterProposal?: {
-      realistic_target: number;
-      reasoning: string;
-      alternatives: string[];
-    };
-    initialConfidence: "high" | "medium" | "low";
-  } {
-    const hasInfeasible = feasibilityResults.some((r) => r.assessment === "infeasible");
-    const hasLowConfidence = feasibilityResults.some((r) => r.confidence === "low");
-    const allRealisticOrAmbitious = feasibilityResults.every(
-      (r) => r.assessment === "realistic" || r.assessment === "ambitious"
-    );
-
-    let initialConfidence: "high" | "medium" | "low";
-    if (hasLowConfidence) {
-      initialConfidence = "low";
-    } else if (feasibilityResults.some((r) => r.confidence === "medium")) {
-      initialConfidence = "medium";
-    } else {
-      initialConfidence = "high";
-    }
-
-    if (hasInfeasible) {
-      // Find the first infeasible dimension to build counter-proposal
-      const infeasible = feasibilityResults.find((r) => r.assessment === "infeasible")!;
-      const baseline = baselineObservations.find((o) => o.dimension === infeasible.dimension);
-      const baselineValue = typeof baseline?.value === "number" ? baseline.value : 0;
-
-      // Calculate realistic target
-      // If we have a feasibility_ratio, we can compute a change rate
-      // realistic_target = baseline + (observed_change_rate * timeHorizonDays * 1.3)
-      // Since observed_change_rate = necessary_change_rate / feasibility_ratio
-      // and necessary_change_rate = |target - baseline| / timeHorizonDays
-      // realistic_target = baseline + (|target - baseline| / feasibility_ratio) * 1.3
-      let realisticTarget: number;
-      if (infeasible.feasibility_ratio !== null && infeasible.feasibility_ratio > 0) {
-        // observed_change_rate = necessary_rate / feasibility_ratio
-        // necessary_rate = |target - baseline| / timeHorizon
-        // realistic_target = baseline + observed_change_rate * timeHorizon * 1.3
-        //   = baseline + (|target - baseline| / feasibility_ratio) * 1.3
-        // Without the original target in scope, approximate via:
-        //   gap = timeHorizonDays * 1.3 / feasibility_ratio (units: days/ratio, a scaled change amount)
-        const gap = (timeHorizonDays * REALISTIC_TARGET_ACCELERATION_FACTOR) / infeasible.feasibility_ratio;
-        realisticTarget = baselineValue + gap;
-      } else {
-        realisticTarget = baselineValue;
-      }
-
-      return {
-        responseType: "counter_propose",
-        counterProposal: {
-          realistic_target: realisticTarget,
-          reasoning: infeasible.reasoning,
-          alternatives: infeasible.main_risks.length > 0
-            ? [`Address risks: ${infeasible.main_risks.join(", ")}`]
-            : ["Consider reducing scope or extending timeline"],
-        },
-        initialConfidence: "low",
-      };
-    }
-
-    if (hasLowConfidence && allRealisticOrAmbitious) {
-      return {
-        responseType: "flag_as_ambitious",
-        initialConfidence: "low",
-      };
-    }
-
-    if (allRealisticOrAmbitious) {
-      return {
-        responseType: "accept",
-        initialConfidence,
-      };
-    }
-
-    return {
-      responseType: "accept",
-      initialConfidence,
-    };
-  }
-
-  /**
-   * Estimate daily change rate from dimension history.
-   * Returns null if insufficient data.
-   */
-  private estimateChangeRate(dimension: Dimension): number | null {
-    const history = dimension.history;
-    if (history.length < 2) return null;
-
-    const numericEntries = history.filter(
-      (h): h is typeof h & { value: number } => typeof h.value === "number"
-    );
-    if (numericEntries.length < 2) return null;
-
-    const first = numericEntries[0]!;
-    const last = numericEntries[numericEntries.length - 1]!;
-
-    const timeDiffMs =
-      new Date(last.timestamp).getTime() - new Date(first.timestamp).getTime();
-    const timeDiffDays = timeDiffMs / (1000 * 60 * 60 * 24);
-    if (timeDiffDays <= 0) return null;
-
-    return Math.abs(last.value - first.value) / timeDiffDays;
+  private saveNegotiationLog(goalId: string, log: NegotiationLog): void {
+    const parsed = NegotiationLogSchema.parse(log);
+    this.stateManager.writeRaw(`goals/${goalId}/negotiation-log.json`, parsed);
   }
 
   /**
    * Calculate counter-proposal target given baseline, change rate, and time horizon.
-   * Uses acceleration factor from character.md.
    */
   static calculateRealisticTarget(
     baseline: number,

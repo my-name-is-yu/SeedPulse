@@ -1,77 +1,37 @@
-import { execFileSync } from "child_process";
-import { z } from "zod";
-import { ObservationLogEntrySchema, ObservationLogSchema } from "../types/state.js";
+import { ObservationLogSchema } from "../types/state.js";
 import type { ObservationLogEntry, ObservationLog } from "../types/state.js";
-import type { ObservationLayer, ObservationMethod, ObservationTrigger, ConfidenceTier } from "../types/core.js";
+import type { ObservationLayer, ObservationMethod } from "../types/core.js";
 import type { StateManager } from "../state-manager.js";
-import { KnowledgeGapSignalSchema } from "../types/knowledge.js";
 import type { KnowledgeGapSignal } from "../types/knowledge.js";
 import type { IDataSourceAdapter } from "./data-source-adapter.js";
-import type { DataSourceQuery } from "../types/data-source.js";
 import type { ILLMClient } from "../llm/llm-client.js";
-import type { VectorIndex } from "../knowledge/vector-index.js";
+import {
+  applyProgressCeiling,
+  getConfidenceTier,
+  createObservationEntry,
+  needsVerificationTask,
+  resolveContradiction,
+  normalizeDimensionName,
+  detectKnowledgeGap,
+  loadOrEmptyObservationLog,
+} from "./observation-helpers.js";
+import type { ObservationEngineOptions, CrossValidationResult } from "./observation-helpers.js";
+import { observeWithLLM as llmObserve } from "./observation-llm.js";
+import {
+  applyObservation as applyObservationFn,
+  observeFromDataSource as observeFromDataSourceFn,
+} from "./observation-apply.js";
 
-// ─── Options ───
-
-export interface ObservationEngineOptions {
-  crossValidationEnabled?: boolean; // default: false
-  divergenceThreshold?: number;     // default: 0.20
-  /** Injectable override for git diff context (used in tests). */
-  gitContextFetcher?: (maxChars: number) => string;
-  /** Optional VectorIndex for indexing dimension names after observation. */
-  vectorIndex?: VectorIndex;
-}
-
-// ─── Cross-Validation Result ───
-
-export interface CrossValidationResult {
-  dimensionName: string;
-  mechanicalValue: number;
-  llmValue: number;
-  diverged: boolean;
-  divergenceRatio: number;
-  resolution: "mechanical_wins";
-}
-
-// ─── Layer Configuration ───
-
-interface LayerConfig {
-  ceiling: number;
-  tier: ConfidenceTier;
-  range: [number, number];
-}
-
-const LAYER_CONFIG: Record<ObservationLayer, LayerConfig> = {
-  mechanical: {
-    ceiling: 1.0,
-    tier: "mechanical",
-    range: [0.85, 1.0],
-  },
-  independent_review: {
-    ceiling: 0.90,
-    tier: "independent_review",
-    range: [0.50, 0.84],
-  },
-  self_report: {
-    ceiling: 0.70,
-    tier: "self_report",
-    range: [0.10, 0.49],
-  },
-};
-
-// ─── Layer Priority ───
-
-const LAYER_PRIORITY: Record<ObservationLayer, number> = {
-  mechanical: 3,
-  independent_review: 2,
-  self_report: 1,
-};
-
-// Zod schema for LLM observation response
-const LLMObservationResponseSchema = z.object({
-  score: z.number().min(0).max(1),
-  reason: z.string(),
-});
+// Re-export types and helpers for backward compatibility
+export type { ObservationEngineOptions, CrossValidationResult } from "./observation-helpers.js";
+export {
+  applyProgressCeiling,
+  getConfidenceTier,
+  createObservationEntry,
+  needsVerificationTask,
+  resolveContradiction,
+  detectKnowledgeGap,
+} from "./observation-helpers.js";
 
 /**
  * ObservationEngine handles the 3-layer observation architecture.
@@ -148,8 +108,7 @@ export class ObservationEngine {
    * Returns min(progress, ceiling).
    */
   applyProgressCeiling(progress: number, layer: ObservationLayer): number {
-    const config = LAYER_CONFIG[layer];
-    return Math.min(progress, config.ceiling);
+    return applyProgressCeiling(progress, layer);
   }
 
   // ─── Confidence Tier ───
@@ -157,9 +116,8 @@ export class ObservationEngine {
   /**
    * Return the ConfidenceTier and valid confidence range for a given layer.
    */
-  getConfidenceTier(layer: ObservationLayer): { tier: ConfidenceTier; range: [number, number] } {
-    const config = LAYER_CONFIG[layer];
-    return { tier: config.tier, range: config.range };
+  getConfidenceTier(layer: ObservationLayer): ReturnType<typeof getConfidenceTier> {
+    return getConfidenceTier(layer);
   }
 
   // ─── Create Observation Entry ───
@@ -168,36 +126,8 @@ export class ObservationEngine {
    * Construct a new ObservationLogEntry.
    * Confidence is clamped to the layer's valid range.
    */
-  createObservationEntry(params: {
-    goalId: string;
-    dimensionName: string;
-    layer: ObservationLayer;
-    method: ObservationMethod;
-    trigger: ObservationTrigger;
-    rawResult: unknown;
-    extractedValue: number | string | boolean | null;
-    confidence: number;
-    notes?: string;
-  }): ObservationLogEntry {
-    const config = LAYER_CONFIG[params.layer];
-    const [minConf, maxConf] = config.range;
-    const clampedConfidence = Math.min(maxConf, Math.max(minConf, params.confidence));
-
-    const entry = ObservationLogEntrySchema.parse({
-      observation_id: crypto.randomUUID(),
-      timestamp: new Date().toISOString(),
-      trigger: params.trigger,
-      goal_id: params.goalId,
-      dimension_name: params.dimensionName,
-      layer: params.layer,
-      method: params.method,
-      raw_result: params.rawResult,
-      extracted_value: params.extractedValue,
-      confidence: clampedConfidence,
-      notes: params.notes ?? null,
-    });
-
-    return entry;
+  createObservationEntry(params: Parameters<typeof createObservationEntry>[0]): ObservationLogEntry {
+    return createObservationEntry(params);
   }
 
   // ─── Evidence Gate ───
@@ -207,179 +137,32 @@ export class ObservationEngine {
    * is below 0.85, meaning a mechanical verification task should be generated.
    */
   needsVerificationTask(effectiveProgress: number, confidence: number, threshold: number): boolean {
-    return effectiveProgress >= threshold && confidence < 0.85;
+    return needsVerificationTask(effectiveProgress, confidence, threshold);
   }
 
   // ─── Contradiction Resolution ───
 
   /**
    * Resolve contradictions among multiple observation entries.
-   *
-   * Resolution rules:
-   *   1. Higher-priority layer wins (mechanical > independent_review > self_report).
-   *   2. Within the same layer, take the pessimistic (lower) numeric value.
-   *   3. For non-numeric values, take the first entry in the winning layer.
-   *
-   * Returns the single "winning" entry.
-   * Throws if entries array is empty.
    */
   resolveContradiction(entries: ObservationLogEntry[]): ObservationLogEntry {
-    if (entries.length === 0) {
-      throw new Error("resolveContradiction: entries array must not be empty");
-    }
-    if (entries.length === 1) {
-      return entries[0]!;
-    }
-
-    // Find highest priority layer present
-    let maxPriority = -1;
-    for (const entry of entries) {
-      const priority = LAYER_PRIORITY[entry.layer];
-      if (priority > maxPriority) {
-        maxPriority = priority;
-      }
-    }
-
-    // Collect all entries at the winning layer
-    const winningLayer = entries.filter(
-      (e) => LAYER_PRIORITY[e.layer] === maxPriority
-    );
-
-    if (winningLayer.length === 1) {
-      return winningLayer[0]!;
-    }
-
-    // Within same layer: pessimistic (lowest numeric value)
-    let best = winningLayer[0]!;
-    for (let i = 1; i < winningLayer.length; i++) {
-      const candidate = winningLayer[i]!;
-      const bestVal = best.extracted_value;
-      const candidateVal = candidate.extracted_value;
-      if (typeof bestVal === "number" && typeof candidateVal === "number") {
-        if (candidateVal < bestVal) {
-          best = candidate;
-        }
-      }
-    }
-
-    return best;
+    return resolveContradiction(entries);
   }
 
-  // ─── Apply Observation to Goal ───
-
-  /**
-   * Apply an observation entry to the corresponding goal dimension.
-   *
-   * Steps:
-   *   1. Load goal via StateManager.
-   *   2. Find dimension by name.
-   *   3. Update current_value and confidence.
-   *   4. Append to dimension history.
-   *   5. Persist observation log entry via StateManager.appendObservation.
-   *   6. Persist updated goal via StateManager.saveGoal.
-   */
   // ─── Dimension Name Normalization ───
 
   /**
    * Strip trailing _2, _3, ... _N suffixes that LLMs sometimes append to
    * deduplicate JSON keys.  Only applied to names from external (LLM) input.
-   *
-   * Examples:
-   *   "todo_count_2"  → "todo_count"
-   *   "quality_3"     → "quality"
-   *   "step_count"    → "step_count"  (trailing token is not a digit-only suffix)
-   *   "coverage"      → "coverage"
    */
-  private normalizeDimensionName(name: string): string {
-    const stripped = name.replace(/_\d+$/, "");
-    if (stripped !== name) {
-      console.warn(`[ObservationEngine] normalizeDimensionName: stripped "${name}" → "${stripped}"`);
-    }
-    return stripped;
+  normalizeDimensionName(name: string): string {
+    return normalizeDimensionName(name);
   }
 
+  // ─── Apply Observation to Goal ───
+
   applyObservation(goalId: string, entry: ObservationLogEntry): void {
-    const goal = this.stateManager.loadGoal(goalId);
-    if (goal === null) {
-      throw new Error(`applyObservation: goal "${goalId}" not found`);
-    }
-
-    const safeName = this.normalizeDimensionName(entry.dimension_name);
-    const dimIndex = goal.dimensions.findIndex((d) => d.name === safeName);
-    if (dimIndex === -1) {
-      throw new Error(
-        `applyObservation: dimension "${entry.dimension_name}" not found in goal "${goalId}"`
-      );
-    }
-
-    const dim = goal.dimensions[dimIndex]!;
-
-    // Monotonic floor for min thresholds: never decrease an observed value below the
-    // current floor. This prevents noise from hiding real progress on "higher is better"
-    // dimensions. Max thresholds are NOT clamped — regressions (e.g. bug count going up)
-    // must remain visible.
-    let effectiveValue = entry.extracted_value;
-    if (typeof effectiveValue === 'number' && typeof dim.current_value === 'number') {
-      // NOTE: range thresholds intentionally not clamped — progress direction is ambiguous.
-      // Assumes earlier observations are reliable; no mechanism to override a false-high floor.
-      if (
-        dim.threshold.type === 'min' &&
-        effectiveValue < dim.current_value &&
-        entry.confidence < (dim.confidence ?? 0)
-      ) {
-        effectiveValue = dim.current_value;
-      }
-    }
-
-    // Determine if the incoming observation should update the dimension's confidence.
-    // Only allow confidence updates from an equal or higher-priority layer.
-    // This prevents a low-layer self_report from downgrading confidence that was
-    // established by a mechanical or independent_review observation.
-    const existingTier = dim.observation_method.confidence_tier as ObservationLayer;
-    const existingPriority = LAYER_PRIORITY[existingTier] ?? 0;
-    const incomingPriority = LAYER_PRIORITY[entry.layer] ?? 0;
-    const shouldUpdateConfidence = incomingPriority >= existingPriority;
-
-    // Update dimension values
-    const updatedDim = {
-      ...dim,
-      current_value: effectiveValue,
-      confidence: shouldUpdateConfidence ? entry.confidence : dim.confidence,
-      last_updated: entry.timestamp,
-      history: [
-        ...dim.history,
-        {
-          value: entry.extracted_value,
-          timestamp: entry.timestamp,
-          confidence: entry.confidence,
-          source_observation_id: entry.observation_id,
-        },
-      ],
-    };
-
-    const updatedDimensions = [...goal.dimensions];
-    updatedDimensions[dimIndex] = updatedDim;
-
-    const updatedGoal = {
-      ...goal,
-      dimensions: updatedDimensions,
-      updated_at: new Date().toISOString(),
-    };
-
-    // Persist observation entry
-    this.stateManager.appendObservation(goalId, entry);
-
-    // Persist updated goal
-    this.stateManager.saveGoal(updatedGoal);
-
-    // Index dimension name for semantic search (fire-and-forget, non-blocking)
-    if (this.options.vectorIndex) {
-      const vi = this.options.vectorIndex;
-      vi.add(`dim:${goalId}:${entry.dimension_name}`, entry.dimension_name, {
-        goal_id: goalId,
-        type: "dimension",
-      }).catch(() => { /* non-fatal */ });
-    }
+    applyObservationFn(goalId, entry, this.stateManager, this.options);
   }
 
   // ─── Observation Log Persistence ───
@@ -389,11 +172,7 @@ export class ObservationEngine {
    * Returns an empty log if none exists.
    */
   getObservationLog(goalId: string): ObservationLog {
-    const existing = this.stateManager.loadObservationLog(goalId);
-    if (existing !== null) {
-      return existing;
-    }
-    return ObservationLogSchema.parse({ goal_id: goalId, entries: [] });
+    return loadOrEmptyObservationLog(this.stateManager, goalId);
   }
 
   /**
@@ -533,7 +312,7 @@ export class ObservationEngine {
       }
 
       // 3. Fall back to self_report
-      const entry = this.createObservationEntry({
+      const entry = createObservationEntry({
         goalId,
         dimensionName: dim.name,
         layer: "self_report",
@@ -558,89 +337,25 @@ export class ObservationEngine {
 
   /**
    * Observe a goal dimension by querying a registered data source.
-   *
-   * Steps:
-   *   1. Find the data source by sourceId.
-   *   2. Build a DataSourceQuery, using dimension_mapping if configured.
-   *   3. Call source.query().
-   *   4. Convert result value to numeric if possible.
-   *   5. Create and persist an ObservationLogEntry.
-   *   6. Return the entry.
    */
   async observeFromDataSource(
     goalId: string,
     dimensionName: string,
     sourceId: string
   ): Promise<ObservationLogEntry> {
-    const source = this.dataSources.find((s) => s.sourceId === sourceId);
-    if (!source) {
-      throw new Error(
-        `observeFromDataSource: data source "${sourceId}" not found. ` +
-          `Available: [${this.dataSources.map((s) => s.sourceId).join(", ")}]`
-      );
-    }
-
-    const query: DataSourceQuery = {
-      dimension_name: dimensionName,
-      timeout_ms: 10000,
-    };
-
-    const expression = source.config.dimension_mapping?.[dimensionName];
-    if (expression !== undefined) {
-      query.expression = expression;
-    }
-
-    const result = await source.query(query);
-
-    let extractedValue: number | string | boolean | null;
-    if (typeof result.value === "number") {
-      extractedValue = result.value;
-    } else if (typeof result.value === "string") {
-      const parsed = parseFloat(result.value);
-      extractedValue = isNaN(parsed) ? result.value : parsed;
-    } else if (typeof result.value === "boolean" || result.value === null) {
-      extractedValue = result.value;
-    } else {
-      extractedValue = 0;
-    }
-
-    if (extractedValue === null || extractedValue === undefined) {
-      throw new Error(
-        `Data source "${sourceId}" returned null for dimension "${dimensionName}"`
-      );
-    }
-
-    const entry = ObservationLogEntrySchema.parse({
-      observation_id: crypto.randomUUID(),
-      timestamp: result.timestamp,
-      trigger: "periodic",
-      goal_id: goalId,
-      dimension_name: dimensionName,
-      layer: "mechanical",
-      method: {
-        type: "mechanical",
-        source: "data_source",
-        schedule: null,
-        endpoint: sourceId,
-        confidence_tier: "mechanical",
-      },
-      raw_result: result.raw,
-      extracted_value: extractedValue,
-      confidence: 0.90,
-      notes: `Data source: ${sourceId}`,
-    });
-
-    this.applyObservation(goalId, entry);
-
-    return entry;
+    return observeFromDataSourceFn(
+      goalId,
+      dimensionName,
+      sourceId,
+      this.dataSources,
+      (gId, entry) => this.applyObservation(gId, entry)
+    );
   }
 
   // ─── DataSource Dimension Lookup ───
 
   /**
    * Find the first DataSource adapter that can serve the given dimension name.
-   * Checks both getSupportedDimensions() and dimension_mapping config keys.
-   * Returns null if no adapter matches.
    */
   private findDataSourceForDimension(dimensionName: string, goalId?: string): IDataSourceAdapter | null {
     const matches = (ds: IDataSourceAdapter): boolean => {
@@ -665,63 +380,10 @@ export class ObservationEngine {
     return null;
   }
 
-  // ─── Git Diff Fallback Context ───
-
-  /**
-   * Fetch a concise workspace context via git diff when no contextProvider is available.
-   * Returns an empty string if git commands fail (e.g., not a git repo).
-   *
-   * Uses execFileSync (not exec/execSync) to avoid shell-injection risks.
-   *
-   * @param maxChars  Maximum characters to return (default: 3000).
-   */
-  private fetchGitDiffContext(maxChars = 3000): string {
-    // Allow test injection via options
-    if (this.options.gitContextFetcher) {
-      return this.options.gitContextFetcher(maxChars);
-    }
-
-    const parts: string[] = [];
-
-    try {
-      const stat = execFileSync("git", ["diff", "--stat"], { timeout: 10000, encoding: "utf8" });
-      if (stat.trim()) {
-        parts.push("[git diff --stat]");
-        parts.push(stat.trim());
-      }
-    } catch {
-      // not a git repo or git unavailable
-    }
-
-    try {
-      const diff = execFileSync("git", ["diff"], { timeout: 10000, encoding: "utf8" });
-      if (diff.trim()) {
-        parts.push("[git diff]");
-        // Reserve space: subtract what we've already accumulated
-        const alreadyUsed = parts.join("\n\n").length;
-        const remaining = Math.max(0, maxChars - alreadyUsed - 20); // 20 for separator
-        const truncated = diff.length > remaining ? diff.slice(0, remaining) + "\n...(truncated)" : diff;
-        parts.push(truncated.trim());
-      }
-    } catch {
-      // ignore
-    }
-
-    return parts.join("\n\n");
-  }
-
   // ─── LLM Observation ───
 
   /**
    * Observe a goal dimension using the LLM client.
-   *
-   * The LLM is asked to score the dimension from 0.0 to 1.0.
-   * The score is used as extractedValue, and confidence is fixed at 0.70
-   * (middle of the independent_review range [0.50, 0.84]).
-   *
-   * If workspaceContext is not provided, a git diff fallback is attempted
-   * so the LLM has actual evidence to evaluate. If that also fails,
-   * the prompt includes an explicit warning and the LLM must score 0.0.
    *
    * @param goalId             The goal being observed.
    * @param dimensionName      The dimension name (snake_case).
@@ -745,105 +407,19 @@ export class ObservationEngine {
     if (!this.llmClient) {
       throw new Error("observeWithLLM: llmClient is not configured");
     }
-
-    console.log(
-      `[ObservationEngine] LLM observation for dimension "${dimensionLabel}" (goal: ${goalId})`
+    return llmObserve(
+      goalId,
+      dimensionName,
+      goalDescription,
+      dimensionLabel,
+      thresholdDescription,
+      this.llmClient,
+      this.options,
+      (gId, entry) => this.applyObservation(gId, entry),
+      workspaceContext,
+      previousScore,
+      dryRun
     );
-
-    // Resolve workspace context: use provided context, fall back to git diff, or warn.
-    let resolvedContext = workspaceContext;
-    if (!resolvedContext || resolvedContext.trim().length === 0) {
-      const gitCtx = this.fetchGitDiffContext(3000);
-      if (gitCtx.trim().length > 0) {
-        resolvedContext = gitCtx;
-        console.log(
-          `[ObservationEngine] No contextProvider output — using git diff fallback for "${dimensionLabel}"`
-        );
-      }
-    }
-
-    // Truncate to 4000 chars max to avoid token waste
-    const MAX_CONTEXT_CHARS = 4000;
-    if (resolvedContext && resolvedContext.length > MAX_CONTEXT_CHARS) {
-      resolvedContext = resolvedContext.slice(0, MAX_CONTEXT_CHARS) + "\n...(truncated)";
-    }
-
-    const hasContext = !!resolvedContext && resolvedContext.trim().length > 0;
-
-    const previousScoreText =
-      previousScore !== undefined && previousScore !== null
-        ? previousScore.toFixed(2)
-        : "none";
-
-    const contextContent = hasContext
-      ? resolvedContext!
-      : "WARNING: No workspace content was provided. Score MUST be 0.0 per Rule 2.";
-
-    const prompt =
-      `Score a goal dimension 0.0 (not achieved) to 1.0 (fully achieved).\n\n` +
-      `CRITICAL RULES:\n` +
-      `1. Use ONLY the evidence below. Do not invent or assume.\n` +
-      `2. If no workspace content is provided, score MUST be 0.0.\n` +
-      `3. Return ONLY valid JSON: {"score": <0.0-1.0>, "reason": "<one sentence>"}\n\n` +
-      `Goal: ${goalDescription}\n` +
-      `Dimension: ${dimensionLabel}\n` +
-      `Target: ${thresholdDescription}\n` +
-      `Previous score: ${previousScoreText}\n\n` +
-      `FEW-SHOT CALIBRATION:\n` +
-      `- Context: grep shows 0 TODO matches → {"score": 1.0, "reason": "No TODOs; target achieved"}\n` +
-      `- Context: grep shows 3 matches: src/foo.ts:42: TODO fix this → {"score": 0.0, "reason": "3 TODOs remain"}\n\n` +
-      `WORKSPACE CONTENT:\n` +
-      `${contextContent}\n\n` +
-      `Score now based strictly on the above content.`;
-
-    const response = await this.llmClient.sendMessage([
-      { role: "user", content: prompt },
-    ]);
-
-    const parsed = this.llmClient.parseJSON(response.content, LLMObservationResponseSchema);
-
-    console.log(
-      `[ObservationEngine] LLM observation result for "${dimensionLabel}": score=${parsed.score.toFixed(3)}`
-    );
-
-    // Scale LLM 0-1 score to threshold's native scale for min/max types.
-    // LLM returns 0.0-1.0 (normalized), but gap-calculator expects the raw
-    // value in the threshold's scale (e.g., min:5 expects value >= 5).
-    let extractedValue: number = parsed.score;
-    try {
-      const threshold = JSON.parse(thresholdDescription);
-      if (threshold.type === "min" && typeof threshold.value === "number" && threshold.value > 1) {
-        extractedValue = parsed.score * threshold.value;
-      } else if (threshold.type === "max" && typeof threshold.value === "number" && threshold.value > 1) {
-        extractedValue = parsed.score * threshold.value;
-      }
-    } catch { /* keep original score if threshold parsing fails */ }
-
-    const entry = ObservationLogEntrySchema.parse({
-      observation_id: crypto.randomUUID(),
-      timestamp: new Date().toISOString(),
-      trigger: "periodic",
-      goal_id: goalId,
-      dimension_name: dimensionName,
-      layer: "independent_review",
-      method: {
-        type: "llm_review",
-        source: "llm",
-        schedule: null,
-        endpoint: null,
-        confidence_tier: "independent_review",
-      },
-      raw_result: { score: parsed.score, reason: parsed.reason },
-      extracted_value: extractedValue,
-      confidence: 0.70,
-      notes: `LLM evaluation: ${parsed.reason}`,
-    });
-
-    if (!dryRun) {
-      this.applyObservation(goalId, entry);
-    }
-
-    return entry;
   }
 
   /**
@@ -855,7 +431,6 @@ export class ObservationEngine {
 
   /**
    * Dynamically add a data source adapter at runtime.
-   * The adapter becomes immediately available for subsequent observe() calls.
    */
   addDataSource(adapter: IDataSourceAdapter): void {
     this.dataSources.push(adapter);
@@ -892,27 +467,11 @@ export class ObservationEngine {
 
   /**
    * Detect whether a set of observation entries indicates a knowledge gap.
-   *
-   * Rule: if ALL entries have confidence < 0.3, interpretation is too
-   * uncertain — emit an `interpretation_difficulty` signal.
-   *
-   * Returns null when confidence is sufficient (no gap detected).
    */
   detectKnowledgeGap(
     entries: ObservationLogEntry[],
     dimensionName?: string
   ): KnowledgeGapSignal | null {
-    if (entries.length === 0) return null;
-
-    const allLowConfidence = entries.every((e) => e.confidence < 0.3);
-    if (!allLowConfidence) return null;
-
-    return KnowledgeGapSignalSchema.parse({
-      signal_type: "interpretation_difficulty",
-      missing_knowledge:
-        "Observation confidence is too low to interpret results reliably",
-      source_step: "gap_recognition",
-      related_dimension: dimensionName ?? null,
-    });
+    return detectKnowledgeGap(entries, dimensionName);
   }
 }
