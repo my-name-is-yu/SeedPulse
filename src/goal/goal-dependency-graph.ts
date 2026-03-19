@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { StateManager } from "../state-manager.js";
 import type { ILLMClient, LLMMessage } from "../llm/llm-client.js";
 import type {
@@ -7,6 +8,18 @@ import type {
 } from "../types/dependency.js";
 import { DependencyGraphSchema } from "../types/dependency.js";
 import type { DependencyType } from "../types/core.js";
+
+const AutoDetectItemSchema = z.object({
+  from_goal_id: z.string(),
+  to_goal_id: z.string(),
+  type: z.enum(["prerequisite", "resource_conflict", "synergy", "conflict"]),
+  condition: z.string().nullable().optional(),
+  affected_dimensions: z.array(z.string()).optional(),
+  reasoning: z.string().nullable().optional(),
+  detection_confidence: z.number().min(0).max(1).optional(),
+});
+
+const AutoDetectResponseSchema = z.array(AutoDetectItemSchema);
 
 /**
  * GoalDependencyGraph manages a DAG of dependencies between goals.
@@ -253,31 +266,33 @@ Return empty array [] if no dependencies found.`;
 
     try {
       const response = await this.llmClient.sendMessage(messages);
-      const parsed: unknown = JSON.parse(response.content);
-      if (!Array.isArray(parsed)) return [];
+      const parsed = AutoDetectResponseSchema.safeParse(
+        JSON.parse(response.content)
+      );
+      if (!parsed.success) {
+        console.warn(
+          `autoDetectDependencies: LLM response failed Zod validation — ${parsed.error.message}`
+        );
+        return [];
+      }
 
       const edges: DependencyEdge[] = [];
-      for (const item of parsed as Record<string, unknown>[]) {
+      for (const item of parsed.data) {
         try {
           const edge = await this.addEdge({
-            from_goal_id: String(item["from_goal_id"] ?? ""),
-            to_goal_id: String(item["to_goal_id"] ?? ""),
-            type: (item["type"] as DependencyType) ?? "conflict",
+            from_goal_id: item.from_goal_id,
+            to_goal_id: item.to_goal_id,
+            type: item.type as DependencyType,
             status: "active",
-            condition: typeof item["condition"] === "string" ? item["condition"] : null,
-            affected_dimensions: Array.isArray(item["affected_dimensions"])
-              ? (item["affected_dimensions"] as string[])
-              : [],
+            condition: item.condition ?? null,
+            affected_dimensions: item.affected_dimensions ?? [],
             mitigation: null,
-            detection_confidence:
-              typeof item["detection_confidence"] === "number"
-                ? item["detection_confidence"]
-                : 0.5,
-            reasoning: typeof item["reasoning"] === "string" ? item["reasoning"] : null,
+            detection_confidence: item.detection_confidence ?? 0.5,
+            reasoning: item.reasoning ?? null,
           });
           edges.push(edge);
         } catch {
-          // Skip malformed items
+          // Skip items that fail addEdge (e.g. duplicate edges)
         }
       }
       return edges;
