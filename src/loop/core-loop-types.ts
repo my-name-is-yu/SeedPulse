@@ -1,5 +1,6 @@
 import { CuriosityEngine } from "../traits/curiosity-engine.js";
 import type { Logger } from "../runtime/logger.js";
+import type { TrustManager } from "../traits/trust-manager.js";
 import type { KnowledgeTransfer } from "../knowledge/knowledge-transfer.js";
 import type { TransferCandidate } from "../types/cross-portfolio.js";
 import type { CrossGoalPortfolio } from "../strategy/cross-goal-portfolio.js";
@@ -166,6 +167,12 @@ export interface CoreLoopDeps {
    *   const loop = new CoreLoop({ ..., memoryLifecycleManager: mlm, driveScoreAdapter: adapter });
    */
   driveScoreAdapter?: DriveScoreAdapter;
+  /**
+   * Optional TrustManager for including per-adapter trust balance in reward logs.
+   * When provided, CoreLoop reads the balance for the configured adapterType and
+   * includes it in logRewardComputation calls (MOTIVA_REWARD_LOG=1).
+   */
+  trustManager?: TrustManager;
   /**
    * Optional ParallelExecutor for TaskGroup execution (M15 Phase 2).
    * When provided, tasks evaluated as "large" complexity will be decomposed

@@ -207,13 +207,21 @@ export async function scoreDrivesAndCheckKnowledge(
     const confidenceAvg =
       gapVector.gaps.reduce((sum, g) => sum + g.confidence, 0) /
       Math.max(gapVector.gaps.length, 1);
+    let trustScore: number | null = null;
+    if (ctx.deps.trustManager) {
+      try {
+        const balance = await ctx.deps.trustManager.getBalance(ctx.config.adapterType);
+        trustScore = balance.balance;
+      } catch {
+        // Non-fatal: trust score is diagnostic-only
+      }
+    }
     logRewardComputation({
       goalId,
       iteration: loopIndex,
       gapAggregate: result.gapAggregate ?? 0,
       confidenceAvg,
-      // TODO: wire to TrustManager once available in phase context
-      trustScore: null,
+      trustScore,
       driveScores,
       completionJudgment: null,
     });
