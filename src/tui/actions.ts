@@ -60,21 +60,27 @@ export class ActionHandler {
   // ─── Handlers ───
 
   private async handleStart(intent: RecognizedIntent): Promise<ActionResult> {
-    // Use explicit goalId from params if provided, otherwise find first active goal
-    let goalId = intent.params?.["goalId"] ?? null;
+    // Use explicit goalId from params if provided
+    const explicitGoalId = intent.params?.["goalId"] ?? null;
+    const goalArg = intent.params?.["goalArg"] ?? null;
 
-    if (!goalId) {
-      const ids = await this.deps.stateManager.listGoalIds();
-      for (const id of ids) {
-        const goal = await this.deps.stateManager.loadGoal(id);
-        if (goal && (goal.status === "active" || goal.status === "waiting")) {
-          goalId = id;
-          break;
-        }
+    if (explicitGoalId) {
+      const goal = await this.deps.stateManager.loadGoal(explicitGoalId);
+      const label = goal?.title ?? explicitGoalId;
+      return { messages: [`Starting loop: ${label}`], startLoop: { goalId: explicitGoalId } };
+    }
+
+    // Load all runnable goals
+    const ids = await this.deps.stateManager.listGoalIds();
+    const runnableGoals: Array<{ id: string; title: string }> = [];
+    for (const id of ids) {
+      const goal = await this.deps.stateManager.loadGoal(id);
+      if (goal && (goal.status === "active" || goal.status === "waiting")) {
+        runnableGoals.push({ id, title: goal.title ?? id });
       }
     }
 
-    if (!goalId) {
+    if (runnableGoals.length === 0) {
       return {
         messages: [
           "No runnable goal found. Create a goal first.",
@@ -83,12 +89,46 @@ export class ActionHandler {
       };
     }
 
-    const goal = await this.deps.stateManager.loadGoal(goalId);
-    const label = goal?.title ?? goalId;
+    // If a goal argument was provided, match by number (1-indexed) or title substring
+    if (goalArg) {
+      const num = parseInt(goalArg, 10);
+      let matched: { id: string; title: string } | undefined;
 
+      if (!isNaN(num) && num >= 1 && num <= runnableGoals.length) {
+        matched = runnableGoals[num - 1];
+      } else {
+        const lower = goalArg.toLowerCase();
+        matched = runnableGoals.find((g) => g.title.toLowerCase().includes(lower));
+      }
+
+      if (!matched) {
+        const list = runnableGoals.map((g, i) => `  ${i + 1}. ${g.title}`).join("\n");
+        return {
+          messages: [
+            `No goal matching "${goalArg}". Available goals:`,
+            list,
+            'Use /start <number> or /start <name>.',
+          ],
+          messageType: "warning",
+        };
+      }
+
+      return { messages: [`Starting loop: ${matched.title}`], startLoop: { goalId: matched.id } };
+    }
+
+    // No argument: if exactly one goal, start it; otherwise list and ask
+    if (runnableGoals.length === 1) {
+      const { id, title } = runnableGoals[0];
+      return { messages: [`Starting loop: ${title}`], startLoop: { goalId: id } };
+    }
+
+    const list = runnableGoals.map((g, i) => `  ${i + 1}. ${g.title}`).join("\n");
     return {
-      messages: [`Starting loop: ${label}`],
-      startLoop: { goalId },
+      messages: [
+        "Multiple goals available. Specify which one to start:",
+        list,
+        'Use /start <number> or /start <name>.',
+      ],
     };
   }
 
