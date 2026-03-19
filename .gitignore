@@ -2,3 +2,5 @@ node_modules/
 dist/
 .motive/
 *.tmp
+web/.next/
+web/node_modules/
