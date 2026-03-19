@@ -76,8 +76,6 @@ export { MemoryLifecycleManager } from "./knowledge/memory-lifecycle.js";
 export { CharacterConfigManager } from "./traits/character-config.js";
 export { CharacterConfigSchema, DEFAULT_CHARACTER_CONFIG } from "./types/character.js";
 export type { CharacterConfig } from "./types/character.js";
-export { SatisficingAggregationEnum } from "./types/goal.js";
-export type { SatisficingAggregation } from "./types/goal.js";
 export { CuriosityEngine } from "./traits/curiosity-engine.js";
 export { GoalDependencyGraph } from "./goal/goal-dependency-graph.js";
 export { KnowledgeGraph } from "./knowledge/knowledge-graph.js";
@@ -110,11 +108,6 @@ export type { EmbeddingConfig, EmbeddingEntry, VectorSearchResult } from "./type
 export { DataSourceRegistry, FileDataSourceAdapter, HttpApiDataSourceAdapter, getNestedValue } from "./observation/data-source-adapter.js";
 export type { IDataSourceAdapter } from "./observation/data-source-adapter.js";
 
-// --- Stage 14 types ---
-export * from "./types/goal-tree.js";
-export * from "./types/cross-portfolio.js";
-export * from "./types/learning.js";
-
 // --- Stage 14 modules ---
 export { GoalTreeManager } from "./goal/goal-tree-manager.js";
 export { StateAggregator, type AggregatedState } from "./goal/state-aggregator.js";
@@ -127,13 +120,3 @@ export { KnowledgeTransfer } from "./knowledge/knowledge-transfer.js";
 // --- Plugin architecture (M12) ---
 export { NotifierRegistry } from "./runtime/notifier-registry.js";
 export { PluginLoader } from "./runtime/plugin-loader.js";
-export type {
-  ConfigField,
-  PluginManifest,
-  PluginState,
-  PluginType,
-  NotificationEventType,
-  NotificationEvent,
-  INotifier,
-} from "./types/plugin.js";
-export { ConfigFieldSchema, PluginManifestSchema, PluginStateSchema } from "./types/plugin.js";
