@@ -50,16 +50,25 @@ export class StrategyManager extends StrategyManagerBase {
       alloc = Math.min(Math.max(raw, MIN), MAX);
     }
 
-    const activated: Strategy[] = [];
-
-    portfolio.strategies = portfolio.strategies.map((s) => {
-      if (!strategyIds.includes(s.id)) return s;
-
+    // Validate all strategies before mutating to avoid partial state
+    for (const id of strategyIds) {
+      const s = portfolio.strategies.find((s) => s.id === id);
+      if (!s) {
+        throw new Error(
+          `activateMultiple: strategy "${id}" not found in portfolio for goal "${goalId}"`
+        );
+      }
       if (s.state !== "candidate") {
         throw new Error(
           `activateMultiple: strategy "${s.id}" is not in candidate state (current: ${s.state})`
         );
       }
+    }
+
+    const activated: Strategy[] = [];
+
+    const updatedStrategies = portfolio.strategies.map((s) => {
+      if (!strategyIds.includes(s.id)) return s;
 
       const updated = StrategySchema.parse({
         ...s,
@@ -72,14 +81,7 @@ export class StrategyManager extends StrategyManagerBase {
       return updated;
     });
 
-    // Verify all requested IDs were found
-    for (const id of strategyIds) {
-      if (!activated.some((s) => s.id === id)) {
-        throw new Error(
-          `activateMultiple: strategy "${id}" not found in portfolio for goal "${goalId}"`
-        );
-      }
-    }
+    portfolio.strategies = updatedStrategies;
 
     await this.savePortfolio(goalId, portfolio);
     return activated;
