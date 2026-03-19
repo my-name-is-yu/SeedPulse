@@ -11,6 +11,8 @@ import { Dashboard } from "./dashboard.js";
 import { Chat, type ChatMessage } from "./chat.js";
 import { HelpOverlay } from "./help-overlay.js";
 import { ApprovalOverlay } from "./approval-overlay.js";
+import { ReportView } from "./report-view.js";
+import type { Report } from "../types/report.js";
 import { useLoop } from "./use-loop.js";
 import type { ActionHandler } from "./actions.js";
 import type { IntentRecognizer } from "./intent-recognizer.js";
@@ -34,6 +36,21 @@ interface AppProps {
   intentRecognizer: IntentRecognizer;
   onApprovalReady?: (requestFn: (req: ApprovalRequest) => void) => void;
 }
+
+const ReportOverlay: React.FC<{ report: Report; onDismiss: () => void }> = ({
+  report,
+  onDismiss,
+}) => {
+  useInput((_input, key) => {
+    if (key.escape) onDismiss();
+  });
+  return (
+    <Box flexDirection="column" flexGrow={1} overflowY="hidden">
+      <ReportView report={report} />
+      <Text dimColor>Press ESC to close</Text>
+    </Box>
+  );
+};
 
 const StatusBar: React.FC<{
   goalCount: number;
@@ -76,6 +93,7 @@ export function App({
   ]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [reportToShow, setReportToShow] = useState<Report | null>(null);
   const [approvalRequest, setApprovalRequest] = useState<ApprovalRequest | null>(null);
   const approvalRequestRef = useRef<ApprovalRequest | null>(null);
 
@@ -101,10 +119,15 @@ export function App({
     ) {
       setShowHelp((prev) => !prev);
     }
-  }, { isActive: !showHelp && approvalRequest === null });
+  }, { isActive: !showHelp && reportToShow === null && approvalRequest === null });
 
   const handleInput = useCallback(
     async (input: string) => {
+      // Dismiss report overlay on any input
+      if (reportToShow !== null) {
+        setReportToShow(null);
+        return;
+      }
       // Add user message
       setMessages((prev) => [...prev, { role: "user" as const, text: input, timestamp: new Date() }].slice(-MAX_MESSAGES));
       setIsProcessing(true);
@@ -122,6 +145,12 @@ export function App({
           return;
         }
 
+        // Handle report overlay signal — do not add messages to chat
+        if (result.showReport) {
+          setReportToShow(result.showReport);
+          return;
+        }
+
         // Add response messages
         setMessages((prev) => [
           ...prev,
@@ -129,9 +158,7 @@ export function App({
             role: "motiva" as const,
             text,
             timestamp: new Date(),
-            messageType: (text.startsWith("Failed") || text.startsWith("Error"))
-              ? ("error" as const)
-              : ("info" as const),
+            messageType: result.messageType ?? ("info" as const),
           })),
         ].slice(-MAX_MESSAGES));
 
@@ -210,6 +237,8 @@ export function App({
                 setApprovalRequest(null);
               }}
             />
+          ) : reportToShow !== null ? (
+            <ReportView report={reportToShow} />
           ) : showHelp ? (
             <HelpOverlay onDismiss={() => setShowHelp(false)} />
           ) : (

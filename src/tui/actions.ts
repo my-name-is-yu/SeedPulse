@@ -2,6 +2,7 @@ import type { RecognizedIntent } from "./intent-recognizer.js";
 import type { StateManager } from "../state-manager.js";
 import type { GoalNegotiator } from "../goal/goal-negotiator.js";
 import type { ReportingEngine } from "../reporting-engine.js";
+import type { Report } from "../types/report.js";
 
 // ─── Types ───
 
@@ -13,9 +14,11 @@ export interface ActionDeps {
 
 export interface ActionResult {
   messages: string[]; // lines to display in chat
+  messageType?: "info" | "error" | "warning" | "success"; // type for all messages in this result
   startLoop?: { goalId: string }; // signal to start the loop
   stopLoop?: boolean; // signal to stop the loop
   showHelp?: boolean; // signal to open the help overlay
+  showReport?: Report; // signal to open the report overlay
 }
 
 // ─── ActionHandler ───
@@ -144,24 +147,20 @@ export class ActionHandler {
       return { messages: ["No goals to generate a report for."] };
     }
 
-    const messages: string[] = [];
-
-    for (const id of ids) {
-      try {
-        const report = await this.deps.reportingEngine.generateDailySummary(id);
-        await this.deps.reportingEngine.saveReport(report);
-        const sections = report.content.split(/\n(?=## )/).filter(s => s.trim());
-        for (const section of sections) {
-          messages.push(section.trim());
-        }
-      } catch (err) {
-        messages.push(
-          `Failed to generate report for goal ${id}: ${err instanceof Error ? err.message : String(err)}`
-        );
-      }
+    // Generate report for the first available goal and show it in the report overlay
+    const id = ids[0];
+    try {
+      const report = await this.deps.reportingEngine.generateDailySummary(id);
+      await this.deps.reportingEngine.saveReport(report);
+      return { messages: [], showReport: report };
+    } catch (err) {
+      return {
+        messages: [
+          `Failed to generate report for goal ${id}: ${err instanceof Error ? err.message : String(err)}`,
+        ],
+        messageType: "error",
+      };
     }
-
-    return { messages };
   }
 
   private async handleGoalList(): Promise<ActionResult> {
@@ -229,6 +228,7 @@ export class ActionHandler {
         err instanceof Error ? err.message : String(err);
       return {
         messages: [`Failed to create goal: ${errorMsg}`],
+        messageType: "error",
       };
     }
   }
