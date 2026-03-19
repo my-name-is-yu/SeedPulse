@@ -58,6 +58,8 @@ export interface CompletionJudgerConfig {
 export interface VerifierDeps {
   stateManager: StateManager;
   llmClient: ILLMClient;
+  /** Optional separate LLM client for review (忖度防止 — sycophancy mitigation) */
+  reviewerLlmClient?: ILLMClient;
   sessionManager: SessionManager;
   trustManager: TrustManager;
   stallDetector: StallDetector;
@@ -610,7 +612,7 @@ Return JSON:
   try {
     response = await withRetry(
       () => withTimeout(
-        deps.llmClient.sendMessage(
+        (deps.reviewerLlmClient ?? deps.llmClient).sendMessage(
           [{ role: "user", content: prompt }],
           {
             system: "Review task results objectively against criteria. Ignore executor self-assessment.",

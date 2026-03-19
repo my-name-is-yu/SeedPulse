@@ -22,6 +22,7 @@ import type { GoalDependencyGraph } from "../goal/goal-dependency-graph.js";
 import type { LearningPipeline } from "../knowledge/learning-pipeline.js";
 import { DriveScoreAdapter } from "../knowledge/memory-lifecycle.js";
 import type { MemoryLifecycleManager } from "../knowledge/memory-lifecycle.js";
+import type { ParallelExecutor } from "../execution/parallel-executor.js";
 import type { Goal } from "../types/goal.js";
 import type { GapVector } from "../types/gap.js";
 import type { DriveContext, DriveScore } from "../types/drive.js";
@@ -165,6 +166,25 @@ export interface CoreLoopDeps {
    *   const loop = new CoreLoop({ ..., memoryLifecycleManager: mlm, driveScoreAdapter: adapter });
    */
   driveScoreAdapter?: DriveScoreAdapter;
+  /**
+   * Optional ParallelExecutor for TaskGroup execution (M15 Phase 2).
+   * When provided, tasks evaluated as "large" complexity will be decomposed
+   * into a TaskGroup and executed in parallel waves.
+   * If not provided, all tasks fall through to the normal single-task flow.
+   */
+  parallelExecutor?: ParallelExecutor;
+  /**
+   * Optional factory function to generate a TaskGroup for a large task.
+   * Provided as a callback so the caller owns the llmClient dependency.
+   * If not provided (or returns null), the normal single-task flow is used.
+   */
+  generateTaskGroupFn?: (context: {
+    goalDescription: string;
+    targetDimension: string;
+    currentState: string;
+    gap: number;
+    availableAdapters: string[];
+  }) => Promise<import("../types/index.js").TaskGroup | null>;
   logger?: Logger;
   /** Optional context provider for workspace-aware task generation */
   contextProvider?: (goalId: string, dimensionName: string) => Promise<string>;

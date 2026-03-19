@@ -7,6 +7,13 @@ import type { IDataSourceAdapter } from "./data-source-adapter.js";
 import type { ILLMClient } from "../llm/llm-client.js";
 import type { Logger } from "../runtime/logger.js";
 import {
+  observeForTask as _observeForTask,
+} from "./observation-task.js";
+import type { TaskDomain } from "../types/pipeline.js";
+import type { AgentTask } from "../execution/adapter-layer.js";
+import type { TaskObservationContext } from "./observation-task.js";
+export type { TaskObservationContext } from "./observation-task.js";
+import {
   applyProgressCeiling,
   getConfidenceTier,
   createObservationEntry,
@@ -478,5 +485,60 @@ export class ObservationEngine {
     dimensionName?: string
   ): KnowledgeGapSignal | null {
     return detectKnowledgeGap(entries, dimensionName);
+  }
+
+  // ─── Task-Scoped Observation ───
+
+  /**
+   * Collect domain-specific pre-execution context for a task.
+   *
+   * Phase 1 MVP: all domains use a unified strategy — concatenate the task
+   * description with any workspace context from `contextProvider`.
+   * Domain-specific collection strategies (file graphs, schema discovery,
+   * metric snapshots, etc.) will be expanded in later phases.
+   *
+   * The assembled context is intended for `implementor` and `researcher`
+   * roles only. Do NOT pass it to `verifier` or `reviewer` (bias prevention).
+   *
+   * @param task    The agent task requiring pre-execution context.
+   * @param domain  The task domain that governs the collection strategy.
+   */
+  async observeForTask(task: AgentTask, domain: TaskDomain): Promise<TaskObservationContext> {
+    const sources: string[] = ["task_description"];
+    const parts: string[] = [`Task: ${task.prompt}`];
+
+    // Attempt to pull workspace context via contextProvider.
+    // Use the domain as the dimension key since AgentTask has no goal_id field.
+    if (this.contextProvider) {
+      try {
+        const workspaceCtx = await this.contextProvider("", domain);
+        if (workspaceCtx) {
+          parts.push(`Workspace context (${domain}):\n${workspaceCtx}`);
+          sources.push("context_provider");
+        }
+      } catch (err) {
+        this.logger?.warn(
+          `[ObservationEngine] observeForTask: contextProvider failed for domain "${domain}": ` +
+          `${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+
+    // Domain-specific label for context framing (expanded per-domain in future phases)
+    const domainLabel: Record<TaskDomain, string> = {
+      code: "Target files, related tests, and module dependencies",
+      data: "Data sources, schemas, and previous observation values",
+      api_action: "API endpoints, rate limits, and authentication state",
+      research: "Known knowledge and unresolved questions",
+      monitoring: "Current metric values, alert thresholds, and recent trends",
+      communication: "Recipient context and message history",
+    };
+    parts.push(`Domain focus (${domain}): ${domainLabel[domain]}`);
+
+    return {
+      context: parts.join("\n\n"),
+      sources,
+      domain,
+    };
   }
 }

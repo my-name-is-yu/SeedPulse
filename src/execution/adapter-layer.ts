@@ -49,14 +49,29 @@ export interface IAdapter {
   checkDuplicate?(task: AgentTask): Promise<boolean>;
 }
 
+// ─── Circuit Breaker ───
+
+type CircuitState = "closed" | "open" | "half_open";
+
+interface CircuitBreaker {
+  state: CircuitState;
+  failure_count: number;
+  last_failure_at: number; // Date.now()
+  cooldown_ms: number;
+}
+
+const FAILURE_THRESHOLD = 5;
+const DEFAULT_COOLDOWN_MS = 60_000;
+
 // ─── AdapterRegistry ───
 
 /**
  * Registry that maps adapter type strings to IAdapter instances.
- * AdapterRegistry itself is stateless beyond the map.
+ * Tracks per-adapter circuit breaker state for fault tolerance.
  */
 export class AdapterRegistry {
   private readonly adapters: Map<string, IAdapter> = new Map();
+  private readonly circuitBreakers: Map<string, CircuitBreaker> = new Map();
 
   /**
    * Register an adapter. Overwrites any previously registered adapter
@@ -97,5 +112,82 @@ export class AdapterRegistry {
       adapterType: type,
       capabilities: adapter.capabilities ? Array.from(adapter.capabilities) : ["general_purpose"],
     }));
+  }
+
+  // ─── Circuit Breaker Methods ───
+
+  private getCircuitBreaker(adapterName: string): CircuitBreaker {
+    if (!this.circuitBreakers.has(adapterName)) {
+      this.circuitBreakers.set(adapterName, {
+        state: "closed",
+        failure_count: 0,
+        last_failure_at: 0,
+        cooldown_ms: DEFAULT_COOLDOWN_MS,
+      });
+    }
+    return this.circuitBreakers.get(adapterName)!;
+  }
+
+  /** Reset failure count and set circuit to closed after a successful execution. */
+  recordSuccess(adapterName: string): void {
+    const cb = this.getCircuitBreaker(adapterName);
+    cb.state = "closed";
+    cb.failure_count = 0;
+  }
+
+  /** Increment failure count; open the circuit when threshold is reached. */
+  recordFailure(adapterName: string): void {
+    const cb = this.getCircuitBreaker(adapterName);
+    cb.failure_count += 1;
+    cb.last_failure_at = Date.now();
+    if (cb.failure_count >= FAILURE_THRESHOLD) {
+      cb.state = "open";
+    }
+  }
+
+  /**
+   * Returns false if the circuit is open and cooldown has not elapsed.
+   * If cooldown has passed, transitions to half_open and returns true (probe attempt).
+   */
+  isAvailable(adapterName: string): boolean {
+    const cb = this.getCircuitBreaker(adapterName);
+    if (cb.state !== "open") {
+      return true;
+    }
+    const elapsed = Date.now() - cb.last_failure_at;
+    if (elapsed >= cb.cooldown_ms) {
+      cb.state = "half_open";
+      return true;
+    }
+    return false;
+  }
+
+  /** Returns the current circuit state for inspection/testing. */
+  getCircuitState(adapterName: string): CircuitState {
+    return this.getCircuitBreaker(adapterName).state;
+  }
+
+  // ─── Capability Matching ───
+
+  /**
+   * Finds the first registered adapter whose capabilities include ALL required strings.
+   * Excludes the named adapter and any adapter whose circuit is open.
+   * Returns the adapter name, or null if no match found.
+   */
+  selectByCapability(required: string[], excludeAdapter?: string): string | null {
+    for (const [name, adapter] of this.adapters) {
+      if (excludeAdapter !== undefined && name === excludeAdapter) {
+        continue;
+      }
+      if (!this.isAvailable(name)) {
+        continue;
+      }
+      const caps = adapter.capabilities ? Array.from(adapter.capabilities) : ["general_purpose"];
+      const hasAll = required.every((r) => caps.includes(r));
+      if (hasAll) {
+        return name;
+      }
+    }
+    return null;
   }
 }

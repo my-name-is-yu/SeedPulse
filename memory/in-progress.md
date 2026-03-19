@@ -1,29 +1,51 @@
 # In-Progress
 
-## 今回のセッション完了（2026-03-19）: M14 仮説検証メカニズム有効化
+## 現在のセッション: M15 マルチエージェント委譲
 
-### コミット
-- e48d390: fix: activate M14 decision history ranking — pass goalType to onStallDetected, update outcome on strategy end
-  - `src/loop/core-loop-phases-b.ts`: onStallDetected() 7箇所に `goal.origin ?? "general"` 追加
-  - `src/knowledge/knowledge-manager.ts`: `updateDecisionOutcome()` メソッド追加
-  - `src/strategy/strategy-manager-base.ts`: updateState()で terminated→failure / completed→success 記録 + try/catch隔離
-- f9f4b64: chore: archive obsolete docs and memory files, update roadmap for M14
+### Phase 1 (MVP) 完了 — 未コミット
 
-### テスト状態: 3741 tests, 155 files パス
+**新規ファイル:**
+- `src/types/pipeline.ts` (~82行) — TaskDomain, TaskRole, PipelineStage, TaskPipeline, StageResult, PipelineState, ImpactAnalysis (Zodスキーマ)
+- `src/execution/pipeline-executor.ts` (~350行) — 逐次ステージ実行 + 永続化 + 冪等性 + ロール別コンテキスト制御 + Plan Gate + 3段階エスカレーション + 戦略フィードバック
+- `tests/execution/pipeline-executor.test.ts` — 10テスト
+- `src/observation/observation-task.ts` — observeForTask standalone関数 + TaskObservationContext型
+- `src/execution/task-pipeline-cycle.ts` — runPipelineTaskCycle()
 
-### M14 発見
-- M14.1（構造化PIVOT/REFINE判断）は既に実装済みだった
-- M14.2（判断履歴の学習ループ）は~70%実装済みだが、2つのバグで機能が無効だった:
-  1. goalType引数省略 → ランキングが一切実行されない
-  2. outcome常にpending → 成功/失敗学習が機能しない
+**変更ファイル:**
+- `src/observation/observation-engine.ts` — observeForTask()メソッド追加
+- `src/execution/task-lifecycle.ts` — runPipelineTaskCycle()メソッド追加
+- `src/types/index.ts` — pipeline.ts + task-group.ts re-export追加
+
+### Phase 2 完了 — 未コミット
+
+**新規ファイル:**
+- `src/types/task-group.ts` (~17行) — TaskGroupSchema
+- `src/execution/parallel-executor.ts` (~230行) — ParallelExecutor + セマフォ付き並列実行
+- `tests/execution/parallel-executor.test.ts` — 17テスト
+
+**変更ファイル:**
+- `src/execution/pipeline-executor.ts` — Plan Gate + 3段階エスカレーション + strategy feedback
+- `src/execution/task-generation.ts` — evaluateTaskComplexity() + generateTaskGroup() + パイプライン自動付与
+- `src/core-loop.ts` — TaskGroup検出 + ParallelExecutor連携
+
+### Phase 3 完了 — 未コミット
+
+**新規ファイル:**
+- `src/execution/result-reconciler.ts` (~120行) — 並列結果の矛盾検出(LLMベース)
+- `src/execution/impact-analyzer.ts` (~80行) — ImpactAnalysis生成(サイドエフェクト検出)
+- `tests/execution/result-reconciler.test.ts` — 6テスト
+- `tests/execution/impact-analyzer.test.ts` — 7テスト
+- `tests/execution/adapter-layer.test.ts` — 9テスト
+
+**変更ファイル:**
+- `src/execution/task-verifier.ts` — reviewerLlmClient追加(忖度防止)
+- `src/execution/adapter-layer.ts` — サーキットブレーカー + selectByCapability()
+- `src/execution/parallel-executor.ts` — 同時実行セマフォ(concurrencyLimit=3)
+
+**テスト状態:** 3774 tests, 158 files パス（event-file-watcher タイムアウト1件は既存不安定テスト）、ビルドクリーン
 
 ---
 
-## 次に取り組む候補
+## 次: コミット
 
-### ロードマップ
-- **M15: マルチエージェント委譲** — 設計: `docs/design/multi-agent-delegation.md`
-- M14 dogfooding (#66): stall recovery検証（M14完了後の検証タスク）
-
-### コード品質
-- #71 500行超ファイル19件の分割
+M15 Phase 1-3 すべて完了。コミット待ち。

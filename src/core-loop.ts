@@ -1,6 +1,9 @@
 import { sleep } from "./utils/sleep.js";
 import type { Logger } from "./runtime/logger.js";
 import type { Goal } from "./types/goal.js";
+import type { TaskGroup } from "./types/index.js";
+import { evaluateTaskComplexity, generateTaskGroup } from "./execution/task-generation.js";
+import type { ParallelExecutionResult } from "./execution/parallel-executor.js";
 
 import type {
   GapCalculatorModule,
@@ -336,6 +339,23 @@ export class CoreLoop {
     // 6b. Dependency block check
     if (checkDependencyBlock(ctx, goalId, result)) return result;
 
+    // 6c. TaskGroup detection and routing (M15 Phase 2)
+    // When parallelExecutor and generateTaskGroupFn are both provided, attempt
+    // to decompose large tasks into a TaskGroup and execute in parallel waves.
+    if (this.deps.parallelExecutor && this.deps.generateTaskGroupFn) {
+      const parallelResult = await this.tryRunParallel(
+        goalId, goal, gapAggregate, result, startTime
+      );
+      if (parallelResult !== null) {
+        // Parallel path completed — skip normal task cycle
+        await this.tryGenerateReport(goalId, loopIndex, result, goal);
+        result.elapsedMs = Date.now() - startTime;
+        return result;
+      }
+      // parallelResult === null means TaskGroup decomposition was skipped or failed;
+      // fall through to normal single-task cycle below.
+    }
+
     // 7. Task cycle with context
     const taskCycleOk = await runTaskCycleWithContext(
       ctx, goalId, goal, gapVector, driveScores, loopIndex, result, startTime,
@@ -401,6 +421,113 @@ export class CoreLoop {
   }
 
   // ─── Private Helpers ───
+
+  /**
+   * Attempt TaskGroup decomposition and parallel execution.
+   *
+   * Returns a ParallelExecutionResult when the parallel path ran successfully,
+   * or null when the caller should fall through to the normal single-task cycle.
+   * Updates result.taskResult with a synthetic entry reflecting the parallel outcome.
+   */
+  private async tryRunParallel(
+    goalId: string,
+    goal: Goal,
+    gapAggregate: number,
+    result: import("./loop/core-loop-types.js").LoopIterationResult,
+    startTime: number
+  ): Promise<ParallelExecutionResult | null> {
+    const { parallelExecutor, generateTaskGroupFn, adapterRegistry } = this.deps;
+    if (!parallelExecutor || !generateTaskGroupFn) return null;
+
+    // Only attempt parallel decomposition for multi-dimension goals (heuristic for "large")
+    if (goal.dimensions.length < 2) return null;
+
+    const topDimension = goal.dimensions[0]?.name ?? "";
+    const currentState = String(goal.dimensions[0]?.current_value ?? "unknown");
+    const availableAdapters = adapterRegistry?.listAdapters() ?? ["default"];
+
+    let group: TaskGroup | null = null;
+    try {
+      group = await generateTaskGroupFn({
+        goalDescription: goal.title ?? goal.id,
+        targetDimension: topDimension,
+        currentState,
+        gap: gapAggregate,
+        availableAdapters,
+      });
+    } catch (err) {
+      this.logger?.warn("CoreLoop: generateTaskGroupFn threw, falling back to single-task", {
+        goalId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+
+    if (!group) {
+      // LLM chose not to decompose — fall through to normal flow
+      return null;
+    }
+
+    this.logger?.info("CoreLoop: TaskGroup detected, routing to ParallelExecutor", {
+      goalId,
+      subtaskCount: group.subtasks.length,
+    });
+
+    // Determine active strategy for feedback
+    let strategyId: string | undefined;
+    try {
+      const activeStrategy = await this.deps.strategyManager.getActiveStrategy(goalId);
+      strategyId = activeStrategy?.id;
+    } catch {
+      // non-fatal
+    }
+
+    let parallelResult: ParallelExecutionResult;
+    try {
+      parallelResult = await parallelExecutor.execute(group, { goalId, strategy_id: strategyId });
+    } catch (err) {
+      this.logger?.error("CoreLoop: ParallelExecutor threw, falling back to single-task", {
+        goalId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+
+    // Map parallel outcome to a synthetic TaskCycleResult so downstream
+    // logic (reporting, portfolio recording) can work without branching.
+    const syntheticTask = group.subtasks[0];
+    if (syntheticTask) {
+      const action =
+        parallelResult.overall_verdict === "pass"
+          ? "completed"
+          : parallelResult.overall_verdict === "partial"
+          ? "keep"
+          : "escalate";
+
+      const confidence = parallelResult.overall_verdict === "pass" ? 0.9 : 0.4;
+      const now = new Date().toISOString();
+
+      result.taskResult = {
+        task: syntheticTask,
+        verificationResult: {
+          task_id: syntheticTask.id,
+          verdict: parallelResult.overall_verdict,
+          confidence,
+          evidence: parallelResult.results.map((r) => ({
+            layer: "mechanical" as const,
+            description: r.output || `subtask ${r.task_id}: ${r.verdict}`,
+            confidence,
+          })),
+          dimension_updates: [],
+          timestamp: now,
+        },
+        action,
+      };
+    }
+
+    result.elapsedMs = Date.now() - startTime;
+    return parallelResult;
+  }
 
   private async getPeriodicReviewInterval(goalId: string): Promise<number> {
     const goal = await this.deps.stateManager.loadGoal(goalId);

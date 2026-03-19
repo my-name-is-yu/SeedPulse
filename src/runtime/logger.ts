@@ -97,8 +97,9 @@ export class Logger {
 
     // Now close the current stream
     if (!this.stream) return;
+    const stream = this.stream;
     return new Promise((resolve) => {
-      this.stream.end(() => {
+      stream.end(() => {
         this.stream = null;
         resolve();
       });

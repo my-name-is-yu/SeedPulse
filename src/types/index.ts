@@ -25,3 +25,5 @@ export * from "./cross-portfolio.js";
 export * from "./learning.js";
 export * from "./suggest.js";
 export * from "./plugin.js";
+export * from "./pipeline.js";
+export * from "./task-group.js";
