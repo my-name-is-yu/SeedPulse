@@ -512,7 +512,9 @@ export class ReportingEngine {
     this.saveReport(report);
 
     // Push notification (non-blocking)
-    this.deliverReport(report).catch(() => {});
+    this.deliverReport(report).catch((err) => {
+      console.warn("ReportingEngine: deliverReport failed", String(err));
+    });
 
     return report;
   }

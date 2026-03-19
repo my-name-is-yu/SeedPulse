@@ -249,10 +249,12 @@ export class TrustManager {
   recordPluginSuccess(pluginName: string, pluginLoader: PluginLoader): void {
     const state = pluginLoader.getPluginState(pluginName);
     if (state === null) return;
-    void pluginLoader.updatePluginState(pluginName, {
+    pluginLoader.updatePluginState(pluginName, {
       trust_score: clamp(state.trust_score + TRUST_SUCCESS_DELTA),
       success_count: state.success_count + 1,
       usage_count: state.usage_count + 1,
+    }).catch((err: unknown) => {
+      console.warn('updatePluginState failed (recordPluginSuccess)', String(err));
     });
   }
 
@@ -263,10 +265,12 @@ export class TrustManager {
   recordPluginFailure(pluginName: string, pluginLoader: PluginLoader): void {
     const state = pluginLoader.getPluginState(pluginName);
     if (state === null) return;
-    void pluginLoader.updatePluginState(pluginName, {
+    pluginLoader.updatePluginState(pluginName, {
       trust_score: clamp(state.trust_score + TRUST_FAILURE_DELTA),
       failure_count: state.failure_count + 1,
       usage_count: state.usage_count + 1,
+    }).catch((err: unknown) => {
+      console.warn('updatePluginState failed (recordPluginFailure)', String(err));
     });
   }
 

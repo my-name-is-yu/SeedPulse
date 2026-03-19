@@ -172,7 +172,9 @@ export class CodexLLMClient implements ILLMClient {
 
       child.on("error", (err: Error) => {
         clearTimeout(timeoutHandle);
-        _cleanupTmp(tmpDir, tmpFile).catch(() => {});
+        _cleanupTmp(tmpDir, tmpFile).catch((cleanupErr) => {
+          console.debug("CodexLLMClient: _cleanupTmp failed (non-critical)", String(cleanupErr));
+        });
         reject(new Error(`CodexLLMClient: spawn error — ${err.message}`));
       });
 
@@ -180,7 +182,9 @@ export class CodexLLMClient implements ILLMClient {
         clearTimeout(timeoutHandle);
 
         if (timedOut) {
-          _cleanupTmp(tmpDir, tmpFile).catch(() => {});
+          _cleanupTmp(tmpDir, tmpFile).catch((cleanupErr) => {
+            console.debug("CodexLLMClient: _cleanupTmp failed (non-critical)", String(cleanupErr));
+          });
           reject(
             new Error(
               `CodexLLMClient: timed out after ${this.timeoutMs}ms`
@@ -190,7 +194,9 @@ export class CodexLLMClient implements ILLMClient {
         }
 
         if (code !== 0) {
-          _cleanupTmp(tmpDir, tmpFile).catch(() => {});
+          _cleanupTmp(tmpDir, tmpFile).catch((cleanupErr) => {
+            console.debug("CodexLLMClient: _cleanupTmp failed (non-critical)", String(cleanupErr));
+          });
           const detail = stderrData.trim() ? ` — ${stderrData.trim().slice(0, 500)}` : "";
           reject(
             new Error(
@@ -203,11 +209,15 @@ export class CodexLLMClient implements ILLMClient {
         // Read response from temp file
         fsp.readFile(tmpFile, "utf-8")
           .then((raw) => {
-            _cleanupTmp(tmpDir, tmpFile).catch(() => {});
+            _cleanupTmp(tmpDir, tmpFile).catch((cleanupErr) => {
+              console.debug("CodexLLMClient: _cleanupTmp failed (non-critical)", String(cleanupErr));
+            });
             resolve(raw.trim());
           })
           .catch((readErr) => {
-            _cleanupTmp(tmpDir, tmpFile).catch(() => {});
+            _cleanupTmp(tmpDir, tmpFile).catch((cleanupErr) => {
+              console.debug("CodexLLMClient: _cleanupTmp failed (non-critical)", String(cleanupErr));
+            });
             reject(
               new Error(
                 `CodexLLMClient: failed to read output file — ${String(readErr)}`
