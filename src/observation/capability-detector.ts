@@ -244,7 +244,7 @@ export class CapabilityDetector {
       };
 
       if (this.pluginLoader && goalDimensions && goalDimensions.length > 0) {
-        result.suggestedPlugins = await this.matchPluginsForGoal(goalDescription, goalDimensions);
+        result.suggestedPlugins = await this.matchPluginsForGoal(goalDimensions);
       }
 
       return result;
@@ -259,11 +259,7 @@ export class CapabilityDetector {
    * Finds installed plugins that match the goal's dimensions.
    * Returns plugins with matchScore >= 0.5, sorted by score then trust.
    */
-  async matchPluginsForGoal(
-    // TODO: _goalDescription reserved for future LLM-based semantic matching (M13.5)
-    _goalDescription: string,
-    goalDimensions: string[]
-  ): Promise<PluginMatchResult[]> {
+  async matchPluginsForGoal(goalDimensions: string[]): Promise<PluginMatchResult[]> {
     if (!this.pluginLoader || goalDimensions.length === 0) {
       return [];
     }

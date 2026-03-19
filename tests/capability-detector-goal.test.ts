@@ -297,7 +297,7 @@ describe("matchPluginsForGoal", () => {
 
   it("returns empty array when no pluginLoader provided", async () => {
     const detector = new CapabilityDetector(matchStateManager, createMockLLMClient([]), matchReportingEngine);
-    const results = await detector.matchPluginsForGoal("improve code coverage", ["test_coverage"]);
+    const results = await detector.matchPluginsForGoal(["test_coverage"]);
     expect(results).toEqual([]);
   });
 
@@ -306,7 +306,7 @@ describe("matchPluginsForGoal", () => {
       { name: "slack-notifier", dimensions: ["notification_sent"] },
     ]);
     const detector = new CapabilityDetector(matchStateManager, createMockLLMClient([]), matchReportingEngine, loader);
-    const results = await detector.matchPluginsForGoal("improve code quality", ["test_coverage", "lint_errors"]);
+    const results = await detector.matchPluginsForGoal(["test_coverage", "lint_errors"]);
     expect(results).toEqual([]);
   });
 
@@ -317,7 +317,7 @@ describe("matchPluginsForGoal", () => {
       { name: "lint-plugin", dimensions: ["lint_errors"], trustScore: 30 },
     ]);
     const detector = new CapabilityDetector(matchStateManager, createMockLLMClient([]), matchReportingEngine, loader);
-    const results = await detector.matchPluginsForGoal("improve code quality", ["test_coverage", "lint_errors"]);
+    const results = await detector.matchPluginsForGoal(["test_coverage", "lint_errors"]);
 
     // quality-plugin: 2/2 = 1.0; coverage-plugin: 1/2 = 0.5; lint-plugin: 1/2 = 0.5
     expect(results[0].pluginName).toBe("quality-plugin");
@@ -332,7 +332,7 @@ describe("matchPluginsForGoal", () => {
       { name: "partial-plugin", dimensions: ["test_coverage", "x", "y"] }, // 1/3 ≈ 0.33
     ]);
     const detector = new CapabilityDetector(matchStateManager, createMockLLMClient([]), matchReportingEngine, loader);
-    const results = await detector.matchPluginsForGoal("improve code quality", ["test_coverage", "lint_errors", "complexity"]);
+    const results = await detector.matchPluginsForGoal(["test_coverage", "lint_errors", "complexity"]);
     expect(results).toEqual([]);
   });
 
@@ -342,7 +342,7 @@ describe("matchPluginsForGoal", () => {
       { name: "low-trust-plugin", dimensions: ["test_coverage"], trustScore: 19 },
     ]);
     const detector = new CapabilityDetector(matchStateManager, createMockLLMClient([]), matchReportingEngine, loader);
-    const results = await detector.matchPluginsForGoal("improve coverage", ["test_coverage"]);
+    const results = await detector.matchPluginsForGoal(["test_coverage"]);
 
     const trusted = results.find((r) => r.pluginName === "trusted-plugin");
     const lowTrust = results.find((r) => r.pluginName === "low-trust-plugin");
@@ -366,7 +366,7 @@ describe("matchPluginsForGoal", () => {
       },
     ]);
     const detector = new CapabilityDetector(matchStateManager, createMockLLMClient([]), matchReportingEngine, mockPluginLoader);
-    const results = await detector.matchPluginsForGoal("improve quality", ["test_coverage", "lint_errors"]);
+    const results = await detector.matchPluginsForGoal(["test_coverage", "lint_errors"]);
     expect(results).toEqual([]);
   });
 
@@ -379,7 +379,7 @@ describe("matchPluginsForGoal", () => {
       },
     ]);
     const detector = new CapabilityDetector(matchStateManager, createMockLLMClient([]), matchReportingEngine, mockPluginLoader);
-    const results = await detector.matchPluginsForGoal("improve quality", []);
+    const results = await detector.matchPluginsForGoal([]);
     expect(results).toEqual([]);
   });
 });
