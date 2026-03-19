@@ -209,7 +209,7 @@ function getGitBranch(): string {
 export async function startTUI(): Promise<void> {
   // 1. Check API key requirements (deferred to buildLLMClient via provider-factory)
   const provider = process.env.MOTIVA_LLM_PROVIDER;
-  if (!process.env.ANTHROPIC_API_KEY && provider !== "ollama" && provider !== "openai") {
+  if (!process.env.ANTHROPIC_API_KEY && provider !== "ollama" && provider !== "openai" && provider !== "codex") {
     getCliLogger().error(
       "Error: ANTHROPIC_API_KEY environment variable is not set.\n" +
         "Set it with: export ANTHROPIC_API_KEY=<your-key>\n" +
