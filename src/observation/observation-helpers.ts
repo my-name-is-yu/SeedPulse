@@ -13,7 +13,7 @@ export interface ObservationEngineOptions {
   crossValidationEnabled?: boolean; // default: false
   divergenceThreshold?: number;     // default: 0.20
   /** Injectable override for git diff context (used in tests). */
-  gitContextFetcher?: (maxChars: number) => string;
+  gitContextFetcher?: (maxChars: number) => string | Promise<string>;
   /** Optional VectorIndex for indexing dimension names after observation. */
   vectorIndex?: VectorIndex;
 }

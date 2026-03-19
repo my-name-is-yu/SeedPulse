@@ -1,5 +1,8 @@
-import { execFileSync } from "child_process";
+import { execFile as execFileCb } from "child_process";
+import { promisify } from "util";
 import { ObservationLogEntrySchema } from "../types/state.js";
+
+const execFile = promisify(execFileCb);
 import type { ObservationLogEntry } from "../types/state.js";
 import type { ILLMClient } from "../llm/llm-client.js";
 import { LLMObservationResponseSchema } from "./observation-helpers.js";
@@ -10,12 +13,12 @@ import type { Logger } from "../runtime/logger.js";
  * Fetch a concise workspace context via git diff when no contextProvider is available.
  * Returns an empty string if git commands fail (e.g., not a git repo).
  *
- * Uses execFileSync (not exec/execSync) to avoid shell-injection risks.
+ * Uses execFile (not exec/execSync) to avoid shell-injection risks and event-loop blocking.
  *
  * @param options   Engine options (may contain gitContextFetcher override).
  * @param maxChars  Maximum characters to return (default: 3000).
  */
-export function fetchGitDiffContext(options: ObservationEngineOptions, maxChars = 3000): string {
+export async function fetchGitDiffContext(options: ObservationEngineOptions, maxChars = 3000): Promise<string> {
   // Allow test injection via options
   if (options.gitContextFetcher) {
     return options.gitContextFetcher(maxChars);
@@ -24,7 +27,7 @@ export function fetchGitDiffContext(options: ObservationEngineOptions, maxChars 
   const parts: string[] = [];
 
   try {
-    const stat = execFileSync("git", ["diff", "--stat"], { timeout: 10000, encoding: "utf8" });
+    const { stdout: stat } = await execFile("git", ["diff", "--stat"], { timeout: 10000, encoding: "utf8" });
     if (stat.trim()) {
       parts.push("[git diff --stat]");
       parts.push(stat.trim());
@@ -34,7 +37,7 @@ export function fetchGitDiffContext(options: ObservationEngineOptions, maxChars 
   }
 
   try {
-    const diff = execFileSync("git", ["diff"], { timeout: 10000, encoding: "utf8" });
+    const { stdout: diff } = await execFile("git", ["diff"], { timeout: 10000, encoding: "utf8" });
     if (diff.trim()) {
       parts.push("[git diff]");
       // Reserve space: subtract what we've already accumulated
@@ -94,7 +97,7 @@ export async function observeWithLLM(
   // Resolve workspace context: use provided context, fall back to git diff, or warn.
   let resolvedContext = workspaceContext;
   if (!resolvedContext || resolvedContext.trim().length === 0) {
-    const gitCtx = fetchGitDiffContext(options, 3000);
+    const gitCtx = await fetchGitDiffContext(options, 3000);
     if (gitCtx.trim().length > 0) {
       resolvedContext = gitCtx;
       logger?.info(
