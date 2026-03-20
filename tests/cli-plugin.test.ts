@@ -92,7 +92,7 @@ vi.mock("../src/llm/provider-factory.js", async (importOriginal) => {
   return {
     ...actual,
     buildLLMClient: vi.fn().mockReturnValue({}),
-    buildAdapterRegistry: vi.fn().mockReturnValue({
+    buildAdapterRegistry: vi.fn().mockResolvedValue({
       register: vi.fn(),
       getAdapterCapabilities: vi.fn().mockReturnValue([]),
     }),

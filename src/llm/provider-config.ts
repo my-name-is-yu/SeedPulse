@@ -36,6 +36,19 @@ export interface ProviderConfig {
     cli_path?: string;
     model?: string;
   };
+
+  /** A2A protocol agent endpoints */
+  a2a?: {
+    /** Map of adapter name -> A2A agent endpoint config */
+    agents?: Record<string, {
+      base_url: string;
+      auth_token?: string;
+      capabilities?: string[];
+      prefer_streaming?: boolean;
+      poll_interval_ms?: number;
+      max_wait_ms?: number;
+    }>;
+  };
 }
 
 // ─── Constants ───
@@ -162,6 +175,11 @@ export async function loadProviderConfig(): Promise<ProviderConfig> {
       ...(fileConfig.codex ?? {}),
       ...(codexModel !== undefined ? { model: codexModel } : {}),
     };
+  }
+
+  // Merge a2a section — pass through from file config
+  if (fileConfig.a2a) {
+    config.a2a = fileConfig.a2a;
   }
 
   return config;

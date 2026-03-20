@@ -3,6 +3,7 @@ import type { ZodSchema } from "zod";
 import { sleep } from "../utils/sleep.js";
 import { BaseLLMClient, DEFAULT_MAX_TOKENS, extractJSON } from "./base-llm-client.js";
 import { LLMError } from "../utils/errors.js";
+import { GuardrailRunner } from "../guardrail-runner.js";
 
 // ─── Inline Types ───
 
@@ -59,8 +60,9 @@ export { extractJSON, DEFAULT_MAX_TOKENS };
  */
 export class LLMClient extends BaseLLMClient implements ILLMClient {
   private readonly client: Anthropic;
+  private guardrailRunner?: GuardrailRunner;
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, guardrailRunner?: GuardrailRunner) {
     super();
     if (!apiKey) {
       throw new LLMError(
@@ -68,6 +70,7 @@ export class LLMClient extends BaseLLMClient implements ILLMClient {
       );
     }
     this.client = new Anthropic({ apiKey });
+    this.guardrailRunner = guardrailRunner;
   }
 
   /**
@@ -81,9 +84,30 @@ export class LLMClient extends BaseLLMClient implements ILLMClient {
     const model = options?.model ?? DEFAULT_MODEL;
     const max_tokens = options?.max_tokens ?? DEFAULT_MAX_TOKENS;
     const temperature = options?.temperature ?? DEFAULT_TEMPERATURE;
-    const system = options?.system;
+    let system = options?.system;
+
+    // before_model guardrail
+    if (this.guardrailRunner) {
+      const beforeResult = await this.guardrailRunner.run("before_model", {
+        checkpoint: "before_model",
+        input: { messages, options },
+        metadata: {},
+      });
+      if (!beforeResult.allowed) {
+        throw new Error(
+          `Guardrail rejected: ${beforeResult.results.map((r) => r.reason).filter(Boolean).join("; ")}`
+        );
+      }
+      if (beforeResult.modified_input) {
+        const modified = beforeResult.modified_input as { messages?: LLMMessage[]; system?: string; options?: LLMRequestOptions };
+        if (modified.messages) messages = modified.messages;
+        if (modified.system) system = modified.system;
+        if (modified.options) options = { ...options, ...modified.options };
+      }
+    }
 
     let lastError: unknown;
+    let result: LLMResponse | undefined;
 
     for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt++) {
       try {
@@ -101,7 +125,7 @@ export class LLMClient extends BaseLLMClient implements ILLMClient {
         const block = response.content[0];
         const content = block && block.type === "text" ? block.text : "";
 
-        return {
+        result = {
           content,
           usage: {
             input_tokens: response.usage.input_tokens,
@@ -109,6 +133,7 @@ export class LLMClient extends BaseLLMClient implements ILLMClient {
           },
           stop_reason: response.stop_reason ?? "unknown",
         };
+        break;
       } catch (err) {
         if (err instanceof Error && 'status' in err && (err as any).status >= 400 && (err as any).status < 500) {
           throw err; // client error, no retry
@@ -120,7 +145,28 @@ export class LLMClient extends BaseLLMClient implements ILLMClient {
       }
     }
 
-    throw lastError;
+    if (result === undefined) {
+      throw lastError;
+    }
+
+    // after_model guardrail
+    if (this.guardrailRunner) {
+      const afterResult = await this.guardrailRunner.run("after_model", {
+        checkpoint: "after_model",
+        input: { response: result, messages, options },
+        metadata: {},
+      });
+      if (!afterResult.allowed) {
+        throw new Error(
+          `Guardrail rejected response: ${afterResult.results.map((r) => r.reason).filter(Boolean).join("; ")}`
+        );
+      }
+      if (afterResult.modified_input !== undefined) {
+        result = afterResult.modified_input as LLMResponse;
+      }
+    }
+
+    return result;
   }
 }
 

@@ -73,7 +73,7 @@ async function buildDeps() {
   const goalDependencyGraph = new GoalDependencyGraph(stateManager, llmClient);
   const sessionManager = new SessionManager(stateManager, goalDependencyGraph);
   const strategyManager = new StrategyManager(stateManager, llmClient);
-  const adapterRegistry = buildAdapterRegistry(llmClient);
+  const adapterRegistry = await buildAdapterRegistry(llmClient);
 
   // TUI approval: routed through ApprovalOverlay in the Ink render loop.
   // requestApproval is set once the App component mounts and calls onApprovalReady.

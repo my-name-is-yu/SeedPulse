@@ -14,6 +14,8 @@ import { ClaudeCodeCLIAdapter } from "../adapters/claude-code-cli.js";
 import { ClaudeAPIAdapter } from "../adapters/claude-api.js";
 import { OpenAICodexCLIAdapter } from "../adapters/openai-codex.js";
 import { GitHubIssueAdapter } from "../adapters/github-issue.js";
+import { A2AAdapter } from "../adapters/a2a-adapter.js";
+import type { ProviderConfig } from "./provider-config.js";
 
 /**
  * Build an LLM client based on provider configuration.
@@ -87,13 +89,43 @@ export async function buildLLMClient(): Promise<ILLMClient> {
 
 /**
  * Build an AdapterRegistry pre-populated with the standard adapters.
- * Registers ClaudeCodeCLIAdapter, ClaudeAPIAdapter, OpenAICodexCLIAdapter, and GitHubIssueAdapter.
+ * Registers ClaudeCodeCLIAdapter, ClaudeAPIAdapter, OpenAICodexCLIAdapter, GitHubIssueAdapter,
+ * and any A2A agents configured in provider config or environment variables.
  */
-export function buildAdapterRegistry(llmClient: ILLMClient): AdapterRegistry {
+export async function buildAdapterRegistry(
+  llmClient: ILLMClient,
+  providerConfig?: ProviderConfig
+): Promise<AdapterRegistry> {
   const registry = new AdapterRegistry();
   registry.register(new ClaudeCodeCLIAdapter());
   registry.register(new ClaudeAPIAdapter(llmClient));
   registry.register(new OpenAICodexCLIAdapter());
   registry.register(new GitHubIssueAdapter());
+
+  // Register A2A agents from config
+  const config = providerConfig ?? await loadProviderConfig();
+  if (config.a2a?.agents) {
+    for (const [name, agentConfig] of Object.entries(config.a2a.agents)) {
+      registry.register(new A2AAdapter({
+        adapterType: name.startsWith("a2a") ? name : `a2a_${name}`,
+        baseUrl: agentConfig.base_url,
+        authToken: agentConfig.auth_token,
+        capabilities: agentConfig.capabilities,
+        preferStreaming: agentConfig.prefer_streaming,
+        pollIntervalMs: agentConfig.poll_interval_ms,
+        maxWaitMs: agentConfig.max_wait_ms,
+      }));
+    }
+  }
+
+  // Single-agent env var shortcut
+  const envBaseUrl = process.env["MOTIVA_A2A_BASE_URL"];
+  if (envBaseUrl && !config.a2a?.agents) {
+    registry.register(new A2AAdapter({
+      baseUrl: envBaseUrl,
+      authToken: process.env["MOTIVA_A2A_AUTH_TOKEN"],
+    }));
+  }
+
   return registry;
 }

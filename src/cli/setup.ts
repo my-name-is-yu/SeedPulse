@@ -110,7 +110,7 @@ export async function buildDeps(
   const goalDependencyGraph = new GoalDependencyGraph(stateManager, llmClient);
   const sessionManager = new SessionManager(stateManager, goalDependencyGraph);
   const strategyManager = new StrategyManager(stateManager, llmClient);
-  const adapterRegistry = buildAdapterRegistry(llmClient);
+  const adapterRegistry = await buildAdapterRegistry(llmClient);
 
   const taskLifecycle = new TaskLifecycle(
     stateManager,
