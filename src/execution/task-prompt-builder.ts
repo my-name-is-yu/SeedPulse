@@ -169,6 +169,7 @@ Return JSON only (inside markdown code block):
   "scope_boundary": {"in_scope": ["included"], "out_of_scope": ["excluded"], "blast_radius": "what could be affected"},
   "constraints": ["any constraints"],
   "reversibility": "reversible|irreversible|unknown",
+  "intended_direction": "increase|decrease|neutral — direction this task intends to move the primary dimension",
   "estimated_duration": {"value": number, "unit": "minutes|hours|days|weeks"} | null
 }`;
 }

@@ -31,6 +31,7 @@ export const LLMGeneratedTaskSchema = z.object({
   }),
   constraints: z.array(z.string()),
   reversibility: z.enum(["reversible", "irreversible", "unknown"]).default("reversible"),
+  intended_direction: z.enum(["increase", "decrease", "neutral"]).optional(),
   estimated_duration: z
     .object({
       value: z.number(),
@@ -259,6 +260,7 @@ export async function generateTask(
     scope_boundary: generated.scope_boundary,
     constraints: generated.constraints,
     reversibility: generated.reversibility,
+    intended_direction: generated.intended_direction,
     estimated_duration: generated.estimated_duration,
     status: "pending",
     created_at: now,

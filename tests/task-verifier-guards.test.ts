@@ -4,7 +4,7 @@ import { StateManager } from "../src/state-manager.js";
 import { SessionManager } from "../src/execution/session-manager.js";
 import { TrustManager } from "../src/traits/trust-manager.js";
 import { StallDetector } from "../src/drive/stall-detector.js";
-import { clampDimensionUpdate, handleVerdict } from "../src/execution/task-verifier.js";
+import { clampDimensionUpdate, handleVerdict, checkDimensionDirection } from "../src/execution/task-verifier.js";
 import type { VerifierDeps } from "../src/execution/task-verifier.js";
 import type { Task, VerificationResult } from "../src/types/task.js";
 import type { Logger } from "../src/runtime/logger.js";
@@ -571,5 +571,55 @@ describe("§4.7: handleVerdict failure context save/clear", () => {
     const ctx = await stateManager.readRaw("tasks/goal-1/last-failure-context.json");
     // After pass, context should be cleared (null written means file contains null → readRaw returns null)
     expect(ctx).toBeNull();
+  });
+});
+
+// ─── §4.5 Guard: dimension_updates direction check ───
+
+describe("§4.5 checkDimensionDirection", () => {
+  let mockLogger: { warn: ReturnType<typeof vi.fn>; info: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn>; debug: ReturnType<typeof vi.fn> };
+
+  beforeEach(() => {
+    mockLogger = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
+  });
+
+  it("skips update when intended=increase but value decreases", () => {
+    const result = checkDimensionDirection("increase", 0.5, 0.3, mockLogger as unknown as Logger);
+    expect(result).toBe(false);
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("dimension_update direction mismatch")
+    );
+  });
+
+  it("skips update when intended=decrease but value increases", () => {
+    const result = checkDimensionDirection("decrease", 0.3, 0.5, mockLogger as unknown as Logger);
+    expect(result).toBe(false);
+    expect(mockLogger.warn).toHaveBeenCalled();
+  });
+
+  it("allows update when direction matches (increase)", () => {
+    const result = checkDimensionDirection("increase", 0.3, 0.5, mockLogger as unknown as Logger);
+    expect(result).toBe(true);
+    expect(mockLogger.warn).not.toHaveBeenCalled();
+  });
+
+  it("allows update when direction matches (decrease)", () => {
+    const result = checkDimensionDirection("decrease", 0.5, 0.3, mockLogger as unknown as Logger);
+    expect(result).toBe(true);
+  });
+
+  it("allows update when intended=neutral", () => {
+    const result = checkDimensionDirection("neutral", 0.5, 0.3, mockLogger as unknown as Logger);
+    expect(result).toBe(true);
+  });
+
+  it("allows update when intended_direction is undefined", () => {
+    const result = checkDimensionDirection(undefined, 0.5, 0.3, mockLogger as unknown as Logger);
+    expect(result).toBe(true);
+  });
+
+  it("allows update when value unchanged", () => {
+    const result = checkDimensionDirection("increase", 0.5, 0.5, mockLogger as unknown as Logger);
+    expect(result).toBe(true);
   });
 });

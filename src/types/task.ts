@@ -47,6 +47,7 @@ export const TaskSchema = z.object({
   estimated_duration: DurationSchema.nullable().default(null),
   consecutive_failure_count: z.number().default(0),
   reversibility: ReversibilityEnum.default("unknown"),
+  intended_direction: z.enum(["increase", "decrease", "neutral"]).optional(),
 
   // Task category — enumerated to enable stall detection comparisons
   task_category: z

@@ -406,6 +406,9 @@ export async function handleVerdict(
             );
             if (update !== undefined && typeof update.new_value === "number") {
               const prev = typeof dim.current_value === "number" ? dim.current_value : 0;
+              if (!checkDimensionDirection(task.intended_direction, prev, update.new_value, deps.logger, String(dim.name))) {
+                continue;
+              }
               dim.current_value = clampDimensionUpdate(prev, update.new_value, deps.logger, String(dim.name));
             }
             // Update last_updated for the primary dimension
@@ -443,6 +446,9 @@ export async function handleVerdict(
               );
               if (update !== undefined && typeof update.new_value === "number") {
                 const prev = typeof dim.current_value === "number" ? dim.current_value : 0;
+                if (!checkDimensionDirection(task.intended_direction, prev, update.new_value, deps.logger, String(dim.name))) {
+                  continue;
+                }
                 dim.current_value = clampDimensionUpdate(prev, update.new_value, deps.logger, String(dim.name));
               }
             }
@@ -903,4 +909,43 @@ export function clampDimensionUpdate(
     );
   }
   return clamped;
+}
+
+// ─── §4.5 Guard: dimension_updates direction check ───
+
+/**
+ * Check whether a proposed dimension update moves in the intended direction.
+ * Returns true if the update should be applied, false if it should be skipped.
+ *
+ * Exported for unit testing.
+ */
+export function checkDimensionDirection(
+  intendedDirection: "increase" | "decrease" | "neutral" | undefined,
+  currentValue: number,
+  proposedValue: number,
+  logger?: { warn: (msg: string) => void },
+  dimName?: string,
+): boolean {
+  if (!intendedDirection || intendedDirection === "neutral") return true;
+
+  const actualDirection =
+    proposedValue > currentValue
+      ? "increase"
+      : proposedValue < currentValue
+        ? "decrease"
+        : "neutral";
+
+  if (intendedDirection === "increase" && actualDirection === "decrease") {
+    logger?.warn(
+      `dimension_update direction mismatch: task intended ${intendedDirection}, but update suggests ${actualDirection} for dim ${dimName ?? "unknown"}`
+    );
+    return false;
+  }
+  if (intendedDirection === "decrease" && actualDirection === "increase") {
+    logger?.warn(
+      `dimension_update direction mismatch: task intended ${intendedDirection}, but update suggests ${actualDirection} for dim ${dimName ?? "unknown"}`
+    );
+    return false;
+  }
+  return true;
 }
