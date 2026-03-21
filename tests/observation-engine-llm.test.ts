@@ -12,6 +12,11 @@ import type { DataSourceConfig } from "../src/types/data-source.js";
 import { makeTempDir } from "./helpers/temp-dir.js";
 import { makeGoal } from "./helpers/fixtures.js";
 
+// ─── Fake workspace context (prevents no-evidence guard from zeroing LLM scores) ───
+
+const fakeWorkspaceContext = "File: src/main.ts\nconst quality = 0.75; // measured by linter";
+const fakeGitContextFetcher = () => fakeWorkspaceContext;
+
 // ─── Helpers ───
 
 const defaultMethod: ObservationMethod = {
@@ -108,7 +113,8 @@ describe("ObservationEngine LLM observation", () => {
         "dim1",
         "Improve code quality to 80%",
         "Code Quality",
-        "min 0.8 (80%)"
+        "min 0.8 (80%)",
+        fakeWorkspaceContext
       );
 
       expect(entry.layer).toBe("independent_review");
@@ -131,7 +137,8 @@ describe("ObservationEngine LLM observation", () => {
         "dim1",
         "Test goal",
         "Code Quality",
-        "min 0.8"
+        "min 0.8",
+        fakeWorkspaceContext
       );
       expect(entryHigh.confidence).toBeLessThanOrEqual(0.84);
     });
@@ -148,7 +155,8 @@ describe("ObservationEngine LLM observation", () => {
         "dim1",
         "Improve quality",
         "Code Quality",
-        "min 0.8"
+        "min 0.8",
+        fakeWorkspaceContext
       );
 
       expect(entry.method.confidence_tier).toBe("independent_review");
@@ -160,7 +168,7 @@ describe("ObservationEngine LLM observation", () => {
   describe("observe() with LLM fallback (no DataSource)", () => {
     it("uses LLM observation (independent_review) when no DataSource and llmClient available", async () => {
       const mockLLMClient = createMockLLMClient(0.72, "LLM observed value");
-      const engine = new ObservationEngine(stateManager, [], mockLLMClient);
+      const engine = new ObservationEngine(stateManager, [], mockLLMClient, undefined, { gitContextFetcher: fakeGitContextFetcher });
 
       const goal = makeGoal({ id: "goal-llm-fallback" });
       await stateManager.saveGoal(goal);
@@ -181,7 +189,7 @@ describe("ObservationEngine LLM observation", () => {
 
     it("LLM sendMessage is called when no DataSource available", async () => {
       const mockLLMClient = createMockLLMClient(0.65, "progress noted");
-      const engine = new ObservationEngine(stateManager, [], mockLLMClient);
+      const engine = new ObservationEngine(stateManager, [], mockLLMClient, undefined, { gitContextFetcher: fakeGitContextFetcher });
 
       const goal = makeGoal({ id: "goal-llm-called" });
       await stateManager.saveGoal(goal);
@@ -327,7 +335,8 @@ describe("ObservationEngine LLM observation", () => {
         "code_quality",
         "Improve code quality to 80%",
         "Code Quality",
-        "min 0.8"
+        "min 0.8",
+        fakeWorkspaceContext
       );
 
       // Load updated goal
@@ -378,7 +387,8 @@ describe("ObservationEngine LLM observation", () => {
         "code_quality",
         "Improve code quality to 80%",
         "Code Quality",
-        "min 0.8"
+        "min 0.8",
+        fakeWorkspaceContext
       );
 
       const updatedGoal = await stateManager.loadGoal("goal-gap-zero");
