@@ -79,7 +79,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  fs.rmSync(tempDir, { recursive: true, force: true });
+  try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* ignore cleanup race */ }
 });
 
 // ─── Helper: save a goal and return it ───
