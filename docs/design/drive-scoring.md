@@ -1,38 +1,38 @@
-# 駆動スコアリングの設計
+# Drive Scoring Design
 
-「次に何を攻めるか」の優先判断をどう数値化するか。Conatusは3つの駆動タイプを定義し、それぞれがギャップベクトルを異なる角度から読む。このドキュメントはその計算構造と設計判断を記述する。
+How to quantify the priority judgment for "what to tackle next." Conatus defines three drive types, each of which reads the gap vector from a different angle. This document describes the calculation structure and design decisions behind that.
 
-前提として、ギャップの計算構造は `gap-calculation.md` を参照。
+As a prerequisite, see `gap-calculation.md` for the gap calculation structure.
 
-**正規化の前提**: 各駆動スコアの入力は `normalized_weighted_gap(dim)` だ。これは `raw_gap → normalized_gap（[0,1]変換） → normalized_weighted_gap（信頼度加重）` のパイプラインを経た値であり、単位（万円、割合、整数、二値）の違いを吸収済みだ。駆動スコアは次元の絶対値スケールに依存しない優先判断を行う。
+**Normalization assumption**: The input to each drive score is `normalized_weighted_gap(dim)`. This is a value that has passed through the pipeline `raw_gap → normalized_gap ([0,1] conversion) → normalized_weighted_gap (confidence-weighted)`, which absorbs differences in units (in thousands of dollars, ratios, integers, booleans). Drive scoring makes priority decisions that are independent of each dimension's absolute scale.
 
 ---
 
-## 1. 不満駆動（Dissatisfaction Drive）
+## 1. Dissatisfaction Drive
 
-「このギャップは大きすぎる。直さなければならない。」
+"This gap is too large. It must be fixed."
 
-最も基本的な駆動力だ。現在のギャップの絶対量が大きいほど優先度が上がる。ただし、繰り返し試みて進展がない次元には一時的にペナルティを与え、同じ壁を延々叩き続けることを防ぐ。
+This is the most fundamental drive force. The larger the current gap, the higher the priority. However, dimensions that have been repeatedly attempted without progress receive a temporary penalty, preventing Conatus from endlessly hammering the same wall.
 
-### スコア式
+### Score Formula
 
 ```
 score_dissatisfaction(dim) = normalized_weighted_gap(dim) × decay_factor(time_since_last_attempt(dim))
 ```
 
-### decay_factor の設計
+### Design of decay_factor
 
-`decay_factor` は直近に試みた次元のスコアを一時的に下げる係数だ。
+`decay_factor` is a coefficient that temporarily reduces the score of dimensions that were recently attempted.
 
 ```
 decay_factor(t) = decay_floor + (1 - decay_floor) × (1 - exp(-t / recovery_time))
 ```
 
-- `t`: 最後に試みてからの経過時間
-- `decay_floor`: 直後の最低値（例: 0.3。完全にゼロにはしない）
-- `recovery_time`: 元の値に戻るまでの時定数（例: 24時間）
+- `t`: Time elapsed since the last attempt
+- `decay_floor`: Minimum value immediately after an attempt (e.g., 0.3 — does not drop to zero)
+- `recovery_time`: Time constant for recovering to the original value (e.g., 24 hours)
 
-#### 動作のイメージ
+#### Behavior Illustration
 
 ```
 decay_factor
@@ -42,43 +42,43 @@ decay_factor
   0.5 ┤         ━━━━━
       │      ━━━
   0.3 ┤━━━━━━
-      └──────────────────────────────────────→ 経過時間
-       試み直後         12h         48h
+      └──────────────────────────────────────→ Time elapsed
+       Immediately after attempt    12h    48h
 ```
 
-試みた直後は `decay_floor`（0.3）まで落ち、時間とともに 1.0 に回復する。完全にゼロにしない理由は、ギャップが極端に大きい次元を完全に無視するリスクを避けるためだ。
+Immediately after an attempt, the score drops to `decay_floor` (0.3), then recovers to 1.0 over time. The reason for not dropping to zero is to avoid the risk of completely ignoring dimensions with an extremely large gap.
 
-### 不満駆動の位置づけ
+### Role of the Dissatisfaction Drive
 
-不満駆動はデフォルトの駆動力だ。締切も機会も存在しないとき、「一番痛いところを攻める」のが最も自然な行動だ。他の駆動が沈黙しているとき、不満駆動が意思決定を支える。
+The Dissatisfaction Drive is the default drive force. When neither a deadline nor an opportunity exists, "attacking the most painful point" is the most natural action. When other drives are silent, the Dissatisfaction Drive underpins decision-making.
 
 ---
 
-## 2. 締切駆動（Deadline Drive）
+## 2. Deadline Drive
 
-「時間が切れる。今すぐ優先しなければならない。」
+"Time is running out. It must be prioritized now."
 
-締切までの残り時間が短くなるにつれ、スコアが急上昇する。締切のないゴール・次元には適用されない（スコア = 0）。
+The score rises sharply as the remaining time to the deadline shortens. It does not apply to goals or dimensions without a deadline (score = 0).
 
-### スコア式
+### Score Formula
 
 ```
 score_deadline(dim) = normalized_weighted_gap(dim) × urgency(time_remaining(dim))
 ```
 
-### urgency 関数の設計
+### Design of the urgency Function
 
-締切が遠いうちは影響が小さく、近づくにつれ急激に上昇する。シグモイドではなく指数関数的な上昇を採用する。
+The impact is small when the deadline is far away and rises sharply as it approaches. An exponential rise is used rather than a sigmoid.
 
 ```
 urgency(T) = exp(urgency_steepness × (1 - T / deadline_horizon))
 ```
 
-- `T`: 残り時間（単位: 時間）
-- `deadline_horizon`: 締切を意識し始める水平線（例: 168時間 = 1週間）
-- `urgency_steepness`: 急上昇の急峻さ（例: 3.0）
+- `T`: Time remaining (in hours)
+- `deadline_horizon`: The horizon at which the deadline begins to register (e.g., 168 hours = 1 week)
+- `urgency_steepness`: Steepness of the sharp rise (e.g., 3.0)
 
-#### カーブの形状
+#### Curve Shape
 
 ```
 urgency
@@ -89,140 +89,140 @@ urgency
    1.0┤   ━━
       │      ━━━━━
       │              ━━━━━━━━━━━━━━━━━━━━
-      └──────────────────────────────────────→ 残り時間
-       0h    24h   72h   168h（deadline_horizon）
+      └──────────────────────────────────────→ Time remaining
+       0h    24h   72h   168h (deadline_horizon)
 ```
 
-`T >= deadline_horizon` のとき `urgency = 1.0`（締切が十分遠ければ緊急度なし）。`T = 0` のとき `urgency = exp(urgency_steepness)`（最大値）。
+When `T >= deadline_horizon`, `urgency = 1.0` (no urgency if the deadline is sufficiently far away). When `T = 0`, `urgency = exp(urgency_steepness)` (maximum value).
 
-### 設計上の補足
+### Additional Design Notes
 
-- **締切なし次元のスコアは厳密に 0**: `urgency` を定義しないのではなく、明示的に 0 を返す。後続の組み合わせ計算で混在しても安全にする。
-- **overdue（期限超過）の扱い**: `T < 0` のとき、スコアを最大値にキャップする。すでに遅れているタスクを最優先にし続けるべきだ。
-- `deadline_horizon` と `urgency_steepness` はゴールごとに調整可能。短期プロジェクトは `deadline_horizon` を短く、長期プロジェクトは長く設定する。
+- **Score is strictly 0 for dimensions without a deadline**: Rather than leaving `urgency` undefined, it explicitly returns 0. This ensures safe mixing in subsequent combined calculations.
+- **Handling overdue (past deadline)**: When `T < 0`, the score is capped at its maximum value. Tasks that are already late should remain the top priority.
+- `deadline_horizon` and `urgency_steepness` are adjustable per goal. Set `deadline_horizon` shorter for short-term projects and longer for long-term ones.
 
 ---
 
-## 3. 機会駆動（Opportunity Drive）
+## 3. Opportunity Drive
 
-「今がチャンスだ。この機会は長くは続かない。」
+"Now is the moment. This window won't last long."
 
-外部状況が特定の次元への対処を有利にしている瞬間を捉える。機会は時間とともに急速に失効する。
+It captures moments when external conditions make addressing a particular dimension particularly advantageous. Opportunities expire rapidly over time.
 
-### スコア式
+### Score Formula
 
 ```
 score_opportunity(dim) = opportunity_value(dim) × freshness_decay(time_since_detected(dim))
 ```
 
-### opportunity_value の要素
+### Elements of opportunity_value
 
-`opportunity_value` は機会の「価値」を表す。以下を考慮して決める。
+`opportunity_value` represents the "value" of an opportunity. It is determined by considering the following.
 
-| 要素 | 説明 | 例 |
-|------|------|-----|
-| 波及効果 | この次元を改善すると他の何個に波及するか | 「これを修正すると下流3タスクが解放される」|
-| 外部好条件 | 外部環境がこの対処を容易にしている | 「依存ライブラリの新バージョンが出た」|
-| タイミング適合 | 季節・サイクル・人的資源の空き | 「この担当者が今週だけ空いている」|
+| Element | Description | Example |
+|---------|-------------|---------|
+| Downstream impact | How many other dimensions does improving this one affect? | "Fixing this unblocks 3 downstream tasks" |
+| External favorable condition | The external environment makes addressing this dimension easier | "A new version of a dependency was released" |
+| Timing fit | Season, cycle, or availability of human resources | "This team member is free only this week" |
 
-これらを単純に合算するのではなく、最大の波及効果を主因子とし、他を補正係数として扱う。
+Rather than simply summing these, the largest downstream impact is the primary factor, with the others treated as correction coefficients.
 
 ```
 opportunity_value(dim) = downstream_impact(dim) × (1 + external_bonus(dim) + timing_bonus(dim))
 ```
 
-### 各入力変数の定義
+### Definition of Each Input Variable
 
-#### downstream_impact（波及効果）
+#### downstream_impact (Downstream Impact)
 
-**定義**: この次元を改善したとき、ゴールツリー内の他の何個の次元・ゴールに波及するか。
+**Definition**: When this dimension is improved, how many other dimensions and goals in the goal tree are affected?
 
-**計算方法**: LLMを使わず、ゴールツリーの構造から機械的に算出する。
+**Calculation**: Computed mechanically from the structure of the goal tree, without using an LLM.
 
 ```
 downstream_impact(dim) = number_of_dependent_dimensions(dim) / total_dimensions_in_tree
 ```
 
-- `number_of_dependent_dimensions(dim)`: この次元を依存元とする下流次元の数
-- `total_dimensions_in_tree`: ゴールツリー内の全次元数
+- `number_of_dependent_dimensions(dim)`: Number of downstream dimensions that depend on this dimension
+- `total_dimensions_in_tree`: Total number of dimensions in the goal tree
 
-**スケール**: 0.0〜1.0
-- 0.0: 他の次元に一切影響しない孤立した次元
-- 1.0: ほぼすべての次元に波及するクリティカルパス
+**Scale**: 0.0 to 1.0
+- 0.0: An isolated dimension that has no effect on any other dimension
+- 1.0: A critical path that affects nearly every dimension
 
-**例**: ゴールツリーが10次元あり、「収益改善」の次元が「プロモーション費用」「採用予算」「設備投資」の3次元に波及する場合 → `downstream_impact = 3/10 = 0.3`
+**Example**: If the goal tree has 10 dimensions and the "revenue improvement" dimension affects 3 others ("promotion budget," "hiring budget," "capital expenditure") → `downstream_impact = 3/10 = 0.3`
 
 ---
 
-#### external_bonus（外部好条件ボーナス）
+#### external_bonus (External Favorable Condition Bonus)
 
-**定義**: 外部環境がこの次元への対処を有利にしているとき付与されるボーナス。
+**Definition**: A bonus granted when the external environment makes it advantageous to address this dimension.
 
-**ソース**: `drive-system.md` で定義するイベントキューからのトリガー。外部イベント（市場変化、ユーザーメッセージ、新データの到着、依存ライブラリの更新等）が検知されたとき、対応する次元に付与される。
+**Source**: Triggered from the event queue defined in `drive-system.md`. Granted to the corresponding dimension when an external event (market change, user message, arrival of new data, dependency library update, etc.) is detected.
 
-**スケール**: 0.0〜0.5
-- 0.0: 関連する外部イベントなし（デフォルト）
-- 0.25: 軽度の外部好条件（関連情報が更新された等）
-- 0.5: 強い外部好条件（競合の脱落、依存関係の解消等）
+**Scale**: 0.0 to 0.5
+- 0.0: No related external event (default)
+- 0.25: Mild external favorable condition (e.g., related information was updated)
+- 0.5: Strong external favorable condition (e.g., a competitor dropped out, a dependency was resolved)
 
-**デフォルト値**: 0.0（関連イベントが存在しない場合）
+**Default value**: 0.0 (when no related event exists)
 
 ```
 external_bonus(dim) =
-  0.0   // イベントキューに関連イベントなし
-  0.25  // 軽度の外部好条件イベントあり
-  0.5   // 強い外部好条件イベントあり
+  0.0   // No related event in the event queue
+  0.25  // Mild external favorable condition event present
+  0.5   // Strong external favorable condition event present
 ```
 
 ---
 
-#### timing_bonus（タイミング適合ボーナス）
+#### timing_bonus (Timing Fit Bonus)
 
-**定義**: この次元に時間限定の有利なタイミングが存在するとき付与されるボーナス。
+**Definition**: A bonus granted when there is a time-limited favorable timing for this dimension.
 
-**ソース**: 戦略選択タイミングでのLLM評価。次元に季節性・競合ギャップ・担当者の空き等、時間限定の優位性が存在するかを判断する。このためLLMを呼ぶ唯一の機会駆動入力だ。
+**Source**: LLM evaluation at strategy selection time. Determines whether time-limited advantages — such as seasonality, a competitor gap, or a team member's availability — exist for the dimension. This is the only opportunity drive input that calls an LLM.
 
-**スケール**: 0.0〜0.5
-- 0.0: 時間限定のアドバンテージなし（デフォルト）
-- 0.25: 軽度の時間的優位性（今週の担当者の空き等）
-- 0.5: 強い時間的優位性（季節ピーク、競合が手薄な時期等）
+**Scale**: 0.0 to 0.5
+- 0.0: No time-limited advantage (default)
+- 0.25: Mild time-based advantage (e.g., a team member's availability this week)
+- 0.5: Strong time-based advantage (e.g., seasonal peak, competitor's slow period)
 
-**デフォルト値**: 0.0（LLM評価が「特別なタイミングなし」と判断した場合）
+**Default value**: 0.0 (when LLM evaluation determines "no special timing")
 
 ```
 timing_bonus(dim) =
-  0.0   // 時間限定の優位性なし
-  0.25  // 軽度の時間的優位性あり（LLM評価）
-  0.5   // 強い時間的優位性あり（LLM評価）
+  0.0   // No time-limited advantage
+  0.25  // Mild time-based advantage present (LLM evaluation)
+  0.5   // Strong time-based advantage present (LLM evaluation)
 ```
 
 ---
 
-#### opportunity_value の取りうる範囲
+#### Possible Range of opportunity_value
 
-3変数を組み合わせた `opportunity_value` の範囲を整理する。
+The range of `opportunity_value` combining the three variables is as follows.
 
 | downstream_impact | external_bonus | timing_bonus | opportunity_value |
 |-------------------|----------------|--------------|-------------------|
-| 0.0 | 0.0 | 0.0 | 0.0（最小: 機会なし） |
-| 0.5 | 0.0 | 0.0 | 0.5（波及効果のみ） |
-| 0.5 | 0.5 | 0.5 | 1.0（波及効果 × 最大補正） |
-| 1.0 | 0.5 | 0.5 | 2.0（最大: クリティカルパス × 全補正） |
+| 0.0 | 0.0 | 0.0 | 0.0 (minimum: no opportunity) |
+| 0.5 | 0.0 | 0.0 | 0.5 (downstream impact only) |
+| 0.5 | 0.5 | 0.5 | 1.0 (downstream impact × maximum correction) |
+| 1.0 | 0.5 | 0.5 | 2.0 (maximum: critical path × all corrections) |
 
-`opportunity_value` の上限は `1.0 × (1 + 0.5 + 0.5) = 2.0` だ。この値は `freshness_decay` で減衰されてから最終スコアに使われる。
+The upper bound of `opportunity_value` is `1.0 × (1 + 0.5 + 0.5) = 2.0`. This value is attenuated by `freshness_decay` before being used in the final score.
 
-### freshness_decay の設計
+### Design of freshness_decay
 
-機会は検知された時点から急速に失効する。半減期を使ったモデルで表現する。
+Opportunities expire rapidly from the moment they are detected. This is modeled using a half-life.
 
 ```
 freshness_decay(t) = exp(-ln(2) × t / half_life)
 ```
 
-- `t`: 機会を検知してからの経過時間
-- `half_life`: 鮮度が半分になるまでの時間（デフォルト: 12時間）
+- `t`: Time elapsed since the opportunity was detected
+- `half_life`: Time for freshness to halve (default: 12 hours)
 
-#### 鮮度の減衰
+#### Freshness Decay
 
 ```
 freshness_decay
@@ -232,196 +232,196 @@ freshness_decay
       │          ━━━━━━
   0.25┤                ━━━━━━━━
       │                          ━━━━━━━━━━━━
-      └──────────────────────────────────────→ 経過時間
+      └──────────────────────────────────────→ Time elapsed
        0h     12h    24h    36h    48h
               ↑half-life
 ```
 
-12時間後にスコアは半減する。48時間後には元の6%程度しか残らない。「翌日に対応しよう」では遅い機会が多いことを前提にした設計だ。
+The score halves after 12 hours. After 48 hours, only about 6% of the original value remains. The design assumes that many opportunities cannot wait until "I'll deal with it tomorrow."
 
-`half_life` はゴールや機会の種類によって変える。依存ライブラリの更新は数日、担当者の空きは数時間、季節性タイミングは数週間。
+`half_life` varies by goal or opportunity type. A dependency library update may last days; a team member's availability may last hours; a seasonal timing window may last weeks.
 
 ---
 
-## 4. スコアの組み合わせ
+## 4. Combining Scores
 
-3つのスコアを最終的な優先スコアにどう統合するか。
+How to integrate the three scores into a final priority score.
 
-### 選択肢の比較
+### Comparison of Options
 
-**Option A: Max（最大値）**
+**Option A: Max**
 
 ```
 final_score(dim) = max(score_dissatisfaction(dim), score_deadline(dim), score_opportunity(dim))
 ```
 
-最も強い動機が優先判断を支配する。
+The strongest motivation dominates the priority decision.
 
-- シンプルで解釈しやすい
-- 1つの強い駆動が存在するとき、他の弱い駆動に引きずられない
-- 複数の駆動が同時に高いケースでも、最大値以上には上がらない（これは問題になりうる）
+- Simple and easy to interpret
+- When one strong drive exists, it is not dragged down by other weak drives
+- Even when multiple drives are simultaneously high, the score does not exceed the maximum — this can be a problem
 
-**Option B: 加重合計（Weighted Sum）**
+**Option B: Weighted Sum**
 
 ```
 final_score(dim) = w_d × score_dissatisfaction + w_dl × score_deadline + w_o × score_opportunity
 ```
 
-3つすべての駆動が加算される。
+All three drives are added together.
 
-- 複数の駆動が重なるとき、スコアが高くなる（「締切も近くて、ギャップも大きい」= 最優先）
-- 重みの調整が必要で、設定が複雑になる
-- ある次元が1つの駆動で突出していても、他の次元が3つの駆動を少しずつ持つと逆転しうる
+- When multiple drives overlap, the score becomes higher ("deadline is close AND the gap is large" = top priority)
+- Requires weight tuning, which makes configuration complex
+- Even if one dimension excels on a single drive, it can be overtaken by another dimension that has moderate scores on all three drives
 
-### 推奨判断: Max + 締切オーバーライド
+### Recommended Decision: Max + Deadline Override
 
-デフォルトは **Max** を採用する。
+**Max** is adopted as the default.
 
-理由は3つ。第一に、駆動は競合するものではなく代替するものだ。「今週は機会があるから」「来週は締切があるから」という形で動機が切り替わるのが自然だ。第二に、解釈のしやすさが優先判断の透明性につながる。第三に、加重合計の重み設定はユーザーの認知負荷が高い。
+There are three reasons. First, drives are not competitive — they are alternatives. It is natural for motivation to switch in the form of "this week there's an opportunity, so..." or "next week there's a deadline, so..." Second, interpretability supports transparency in priority decisions. Third, weight configuration for a weighted sum creates a high cognitive load for users.
 
-ただし、**締切オーバーライドルール**を追加する。
+However, a **Deadline Override Rule** is added.
 
 ```
 if urgency(time_remaining(dim)) >= urgency_override_threshold:
-    final_score(dim) = score_deadline(dim)  // 他の駆動を無視
+    final_score(dim) = score_deadline(dim)  // Ignore other drives
 ```
 
-締切が極めて近い次元（`urgency_override_threshold` を超えた次元）は、不満や機会の計算を無視して最優先にする。これは「明日が締切なのに機会があるから別を先にやる」という非合理な判断を防ぐためのハードルールだ。
+Dimensions whose deadline is extremely close (those that exceed `urgency_override_threshold`) are made the top priority, ignoring the dissatisfaction and opportunity calculations. This is a hard rule to prevent the irrational judgment of "dealing with something else because there's an opportunity, even though the deadline is tomorrow."
 
-### 値域に関する注記
+### Note on Value Ranges
 
-各駆動スコアの値域は異なる（締切駆動: urgency依存で1.0〜20.0、不満駆動: normalized_weighted_gap依存で0.0〜1.0+、機会駆動: 0.0〜2.0）。最終スコアは `max(score_deadline, score_dissatisfaction, score_opportunity)` で選択するため、値域の正規化は不要 — 各駆動力は「この次元をいま動かすべき理由の強さ」を独立に表現し、最も強い理由が採用される。ただし、urgencyの上限（~20）が他を圧倒する可能性がある。締切接近時はこれが意図通りの動作だが、必要に応じて urgency に上限キャップ（例: 10.0）を設けることを検討する。
+The value ranges of each drive score differ (Deadline Drive: urgency-dependent, 1.0 to 20.0; Dissatisfaction Drive: normalized_weighted_gap-dependent, 0.0 to 1.0+; Opportunity Drive: 0.0 to 2.0). Because the final score is selected by `max(score_deadline, score_dissatisfaction, score_opportunity)`, normalization of value ranges is not required — each drive force independently expresses the "strength of the reason to act on this dimension now," and the strongest reason is adopted. However, urgency's upper bound (~20) may dwarf the others. Near deadline, this is the intended behavior, but if needed, consider setting an upper cap on urgency (e.g., 10.0).
 
 ---
 
-## 5. 駆動スコアの可視化
+## 5. Visualization of Drive Scores
 
-時間軸での3つの駆動の挙動を図示する。
+Illustrating the behavior of the three drives over time.
 
 ```
 Score
  ↑
- │         ━━━━ 締切駆動（締切が近づくにつれ指数関数的上昇）
+ │         ━━━━ Deadline Drive (exponential rise as deadline approaches)
  │        ━
  │       ━
  │      ━
  │     ━
- │    ━  ╌╌╌╌ 不満駆動（ゆるやかな減衰、試み後に一時低下）
+ │    ━  ╌╌╌╌ Dissatisfaction Drive (gentle decay, temporary dip after an attempt)
  │   ━╌╌╌
  │ ·· ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
- │·····  ····· 機会駆動（検知後に急速な鮮度減衰）
+ │·····  ····· Opportunity Drive (rapid freshness decay after detection)
  │
- └──────────────────────────────────────────→ 時間
-   t=0     t+12h  t+24h  t+72h  (締切)
+ └──────────────────────────────────────────→ Time
+   t=0     t+12h  t+24h  t+72h  (deadline)
 ```
 
-- 機会駆動は検知直後がピークで急速に減衰する
-- 不満駆動は比較的安定しているが、試みた直後に一時的に低下する
-- 締切駆動は締切が近づくにつれ急上昇し、他の駆動を圧倒する
+- The Opportunity Drive peaks immediately after detection and decays rapidly
+- The Dissatisfaction Drive is relatively stable but temporarily dips immediately after an attempt
+- The Deadline Drive rises sharply as the deadline approaches, overwhelming the other drives
 
 ---
 
-## 6. 分離原則: スコアリング vs. タスク生成
+## 6. Separation Principle: Scoring vs. Task Generation
 
-**駆動スコアリングは「どの次元を攻めるか」を決める。タスク生成は「どうやって攻めるか」を決める。この二つは明確に分離する。**
+**Drive scoring decides "which dimension to tackle." Task generation decides "how to tackle it." These two are clearly separated.**
 
-| 役割 | 担当 | 判断の根拠 |
-|------|------|-----------|
-| どの次元を優先するか | 駆動スコアリング（コード） | ギャップ量・時間・機会の数値 |
-| どんなタスクを作るか | タスク生成（LLM） | 優先次元の文脈・制約・過去の試み |
+| Role | Responsible | Basis for decision |
+|------|-------------|-------------------|
+| Which dimension to prioritize | Drive scoring (code) | Gap quantity, time, and opportunity numbers |
+| What tasks to create | Task generation (LLM) | Context, constraints, and past attempts for the prioritized dimension |
 
-この分離がなければ、LLM は「重要なこと」ではなく「面白いこと」「得意なこと」を選ぶ傾向がある。駆動スコアがどの次元に集中すべきかを決めてからLLMに渡すことで、LLMはHOW（どう実現するか）に専念できる。
+Without this separation, the LLM tends to select "interesting" or "familiar" things rather than "important" things. By having the drive score determine which dimension to focus on before passing it to the LLM, the LLM can concentrate on HOW (how to achieve it).
 
-LLMが優先判断に口を挟む余地は設けない。優先次元はコードが決め、LLMはその次元へのアプローチを生成するだけだ。
+There is no room for the LLM to interfere with the priority decision. Code determines the priority dimension; the LLM only generates the approach for that dimension.
 
 ---
 
-## 7. 期限なしゴールのペース制御
+## 7. Pacing Control for Open-Ended Goals
 
-期限なしゴール（例: 「愛犬と幸せに暮らす」「健康を維持する」）には締切駆動が適用されない（スコア = 0）。不満駆動と機会駆動だけで動き続けるため、「いつ、どのくらいの頻度でループを回すか」の制御メカニズムが必要だ。締切がないことは、いつでもいいという意味ではない。持続可能なペースで、変化を見逃さず、かつ過剰に動かないバランスを取る。
+Open-ended goals (e.g., "Live happily with my dog," "Maintain health") do not have the Deadline Drive applied (score = 0). Because they run on only the Dissatisfaction Drive and Opportunity Drive, a control mechanism is needed for "when and how often to run the loop." No deadline does not mean anytime is fine. The balance must be struck: a sustainable pace that does not miss changes while also not over-reacting.
 
-### 活動リズム設計
+### Activity Rhythm Design
 
-期限なしゴールには、最小チェック間隔と最大チェック間隔を設定する。
+Open-ended goals have both a minimum and maximum check interval configured.
 
-| パラメータ | 意味 | デフォルト |
-|-----------|------|-----------|
-| `min_check_interval` | これより短い間隔ではループを回さない | 1時間 |
-| `max_check_interval` | これより長い間隔が空いたら強制的にループを回す | 24時間 |
-| `current_interval` | 現在の適応的チェック間隔 | `min_check_interval` から開始 |
+| Parameter | Meaning | Default |
+|-----------|---------|---------|
+| `min_check_interval` | No loop is run at shorter intervals than this | 1 hour |
+| `max_check_interval` | A loop is forcibly run if this interval is exceeded | 24 hours |
+| `current_interval` | Current adaptive check interval | Starts at `min_check_interval` |
 
-最小間隔はノイズへの過剰反応を防ぐ。最大間隔は放置を防ぐ。この範囲内で、変化の有無に応じて間隔が適応的に伸縮する（後述の「変化ベースのトリガー」参照）。
+The minimum interval prevents over-reaction to noise. The maximum interval prevents neglect. Within this range, the interval adaptively stretches or contracts based on the presence or absence of change (see "Change-Based Trigger" below).
 
-`min_check_interval` と `max_check_interval` はゴールの性質に応じて調整可能だ。健康モニタリング（`min: 15分, max: 4時間`）とビジネス目標（`min: 6時間, max: 72時間`）では桁が異なる。
+`min_check_interval` and `max_check_interval` are adjustable based on the nature of the goal. Health monitoring (`min: 15 minutes, max: 4 hours`) and business objectives (`min: 6 hours, max: 72 hours`) differ by an order of magnitude.
 
-### バーンアウト防止
+### Burnout Prevention
 
-ギャップが大きいままでも、期限がなければ連続して集中攻撃する必要はない。連続活動の制御ルールを設ける。
+Even with a large gap, if there is no deadline, there is no need to apply continuous intensive attention. Control rules for consecutive activity are set.
 
 ```
 if consecutive_actions(goal) >= max_consecutive_actions:
     enter_cooldown(goal, cooldown_duration)
 ```
 
-| パラメータ | 意味 | デフォルト |
-|-----------|------|-----------|
-| `max_consecutive_actions` | 連続してタスクを生成・実行できる上限回数 | 5回 |
-| `cooldown_duration` | 連続上限到達後の冷却期間 | 6時間 |
+| Parameter | Meaning | Default |
+|-----------|---------|---------|
+| `max_consecutive_actions` | Maximum number of tasks that can be consecutively generated and executed | 5 |
+| `cooldown_duration` | Cooldown period after reaching the consecutive limit | 6 hours |
 
-冷却期間中もイベント駆動の観測は受け付ける（緊急事態を見逃さないため）。ただし、新規タスクの生成は抑制される。
+During the cooldown period, event-driven observation is still accepted (to avoid missing emergencies). However, generation of new tasks is suppressed.
 
-**設計意図**: 期限なしゴールの本質は「持続」だ。短期的な集中で燃え尽きるのではなく、長期間にわたって一定の注意を保ち続けることが重要だ。この制約がなければ、大きなギャップを持つ期限なしゴールが不満駆動で過剰にリソースを消費し、他のゴールや将来のループ品質を圧迫するリスクがある。
+**Design intent**: The essence of an open-ended goal is "persistence." Rather than burning out through short-term intensity, what matters is maintaining a steady level of attention over the long term. Without this constraint, open-ended goals with large gaps could over-consume resources through the Dissatisfaction Drive, crowding out other goals and degrading future loop quality.
 
-### 変化ベースのトリガー（適応的ポーリング）
+### Change-Based Trigger (Adaptive Polling)
 
-変化がないときにループを回しても意味がない。チェック間隔を変化量に応じて適応的に伸縮させる。
+Running the loop when nothing has changed is pointless. The check interval adapts and stretches or contracts based on the degree of change.
 
 ```
 after_observation(goal):
-    change = abs(current_state - previous_state)  // 正規化済みギャップの変化量
+    change = abs(current_state - previous_state)  // Amount of change in normalized gap
     if change >= significant_change_threshold:
-        current_interval = min_check_interval  // 変化あり → 間隔を最短に戻す
+        current_interval = min_check_interval  // Change detected → reset to shortest interval
     else:
         current_interval = min(current_interval × backoff_factor, max_check_interval)
 ```
 
-| パラメータ | 意味 | デフォルト |
-|-----------|------|-----------|
-| `significant_change_threshold` | 「意味のある変化」と見なす閾値 | 0.05（正規化ギャップの5%変化） |
-| `backoff_factor` | 変化なし時の間隔拡大倍率 | 1.5 |
+| Parameter | Meaning | Default |
+|-----------|---------|---------|
+| `significant_change_threshold` | Threshold for what is considered a "meaningful change" | 0.05 (5% change in normalized gap) |
+| `backoff_factor` | Interval growth multiplier when no change is detected | 1.5 |
 
-#### 適応的ポーリングの動作イメージ
+#### Adaptive Polling Behavior Illustration
 
 ```
-チェック間隔
+Check interval
  24h ┤                              ━━━━━━━━━━━━ max_check_interval
      │                     ━━━━━━━━
      │              ━━━━━━━
  6h  ┤        ━━━━━━
      │   ━━━━━
- 1h  ┤━━━         ━━ ← 変化検出で間隔リセット
-     └──────────────────────────────────────→ 時間
-      開始   変化なし期間     変化検出
+ 1h  ┤━━━         ━━ ← Interval reset on change detection
+     └──────────────────────────────────────→ Time
+      Start   No-change period    Change detected
 ```
 
-変化がなければ徐々に間隔が延び、最大間隔に到達するとそこで安定する。変化が検出されたら即座に最短間隔に戻り、集中的な観測を行う。
+When there is no change, the interval gradually lengthens until it stabilizes at the maximum. When change is detected, it immediately resets to the shortest interval for intensive observation.
 
-### 駆動スコアへの影響
+### Impact on Drive Scores
 
-ペース制御は駆動スコアの計算自体には影響しない。スコアの計算式は変わらない。ペース制御が制御するのは「いつスコアを計算するか」（ループのトリガータイミング）だ。スコアリングとペーシングの分離原則は §6 と同じ精神だ。
+Pacing control does not affect the drive score calculation itself. The scoring formulas do not change. What pacing controls is "when to compute the scores" (the loop trigger timing). The separation principle between scoring and pacing mirrors the spirit of §6.
 
 ---
 
-## 設計上の判断まとめ
+## Summary of Design Decisions
 
-| 判断項目 | 選択 | 理由 |
-|---------|------|------|
-| 駆動スコアへのギャップ入力 | normalized_weighted_gap（[0,1]正規化済み） | 単位の異なる次元を直接比較可能にする |
-| 不満駆動の減衰 | 試み後に一時低下・時間回復 | 繰り返し失敗した壁への固執を防ぐ |
-| 締切カーブ形状 | 指数関数的上昇 | 締切接近の緊張感を自然に表現 |
-| 締切なし次元 | スコア厳密に 0 | 計算の安全な混在を保証 |
-| 機会の半減期 | デフォルト 12 時間 | 機会の短命性をモデル化 |
-| スコア統合方式 | Max + 締切オーバーライド | シンプルさと安全ネットの両立 |
-| 優先判断 | コード（駆動スコア）が決定 | LLMの嗜好バイアスを排除 |
-| 期限なしゴールのペース制御 | 適応的ポーリング + バーンアウト防止 | 持続可能な長期運用を保証 |
-| ペース制御とスコアリングの関係 | 分離（ペースは「いつ計算するか」のみ制御） | §6の分離原則と一貫 |
+| Decision item | Choice | Rationale |
+|---------------|--------|-----------|
+| Gap input to drive score | normalized_weighted_gap ([0,1] normalized) | Enables direct comparison of dimensions with different units |
+| Dissatisfaction Drive decay | Temporary dip after an attempt, recovers over time | Prevents fixation on a wall after repeated failures |
+| Deadline curve shape | Exponential rise | Naturally expresses the tension of an approaching deadline |
+| Dimensions without a deadline | Score is strictly 0 | Ensures safe mixing in calculations |
+| Opportunity half-life | Default 12 hours | Models the short-lived nature of opportunities |
+| Score combination method | Max + Deadline Override | Balances simplicity with a safety net |
+| Priority decision | Code (drive score) decides | Eliminates LLM preference bias |
+| Pacing control for open-ended goals | Adaptive polling + burnout prevention | Ensures sustainable long-term operation |
+| Relationship between pacing and scoring | Separated (pacing controls only "when to compute") | Consistent with the separation principle of §6 |

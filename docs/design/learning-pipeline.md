@@ -1,274 +1,274 @@
-# 学習パイプライン設計
+# Learning Pipeline Design
 
-> 関連: `curiosity.md`, `session-and-context.md`, `stall-detection.md`, `observation.md`, `portfolio-management.md`
+> Related: `curiosity.md`, `session-and-context.md`, `stall-detection.md`, `observation.md`, `portfolio-management.md`
 
 ---
 
-## 1. 概要
+## 1. Overview
 
-学習パイプラインは**経験からの構造的学習システム**だ。ゴール追求の過程で得られた経験（タスク実行結果・ギャップ変化・戦略効果）を分析し、4ステップ（観測・ギャップ・戦略・タスク）へのフィードバックとして適用する。
+The learning pipeline is a **structured learning system built from experience**. It analyzes experience gathered during goal pursuit (task execution results, Gap changes, strategy effectiveness) and applies it as feedback to the four steps — Observation, Gap, Strategy, and Task.
 
 ```
-経験ログ（タスク結果・ギャップ変化・戦略効果）
+Experience log (task results, Gap changes, strategy effectiveness)
     │
     ↓
-分析パイプライン（LLMバッチ分析）
-    │ 状態→行動→結果トリプレット抽出
-    │ パターン検出・信頼度計算
+Analysis pipeline (LLM batch analysis)
+    │ Extract state→action→outcome triplets
+    │ Pattern detection, confidence calculation
     ↓
-LearnedPattern（登録）
+LearnedPattern (registered)
     │
-    ├── 観測精度パターン → ObservationEngine へのフィードバック
-    ├── 戦略選択パターン → StrategyManager へのフィードバック
-    ├── スコープサイジングパターン → TaskLifecycle へのフィードバック
-    └── タスク生成パターン → TaskLifecycle へのフィードバック
+    ├── Observation accuracy patterns → Feedback to ObservationEngine
+    ├── Strategy selection patterns   → Feedback to StrategyManager
+    ├── Scope-sizing patterns         → Feedback to TaskLifecycle
+    └── Task generation patterns      → Feedback to TaskLifecycle
 ```
 
-**学習の目的**: Conatusは同じゴールを何度も追う可能性がある。学習なしでは毎回同じ失敗を繰り返す。学習パイプラインは「経験の蓄積を次のループに活かす」仕組みだ。
+**Purpose of learning**: Conatus may pursue the same goal multiple times. Without learning, it would repeat the same mistakes every time. The learning pipeline is the mechanism to "put accumulated experience to use in the next loop."
 
 ---
 
-## 2. 学習トリガー
+## 2. Learning Triggers
 
-学習分析は以下の4つのイベントで発動する。
+Learning analysis is triggered by the following four events.
 
-### 2.1 マイルストーン到達（milestone_reached）
-
-```
-条件: ゴールの特定次元がマイルストーン閾値を通過した
-意味: 部分的な成功の記録と分析を行う
-```
-
-何が効いたかを、効果が出た直後に記録する。時間が経つと状態が変化して因果関係が不明瞭になるため、到達直後のバッチ分析が重要だ。
-
-### 2.2 停滞検知（stall_detected）
+### 2.1 Milestone Reached (milestone_reached)
 
 ```
-条件: stall-detection.md の第1・第2検知がトリガーされた
-意味: 何が効かなかったかを記録し、同じ失敗を避けるパターンを抽出する
+Condition: A specific dimension of the goal has crossed a milestone threshold
+Meaning: Record and analyze partial success
 ```
 
-停滞時は「なぜ効かなかったか」の分析を行う。タスクレベルの失敗パターン（スコープが大きすぎる、前提条件が抜けているなど）が主な抽出対象だ。
+Record what worked immediately after it takes effect. Over time, the state changes and causal relationships become unclear, so batch analysis right after reaching the milestone is important.
 
-### 2.3 定期レビュー（periodic_review）
-
-```
-条件: 最後の学習分析から定期インターバルが経過
-```
-
-| ゴール種別 | デフォルト間隔 |
-|-----------|-------------|
-| 短期（1ヶ月以内） | 72時間（3日） |
-| 中期（1〜6ヶ月） | 1週間 |
-| 長期（6ヶ月以上） | 2週間 |
-
-進行中のゴールでも定期的に蓄積されたログを分析し、パターンを更新する。
-
-### 2.4 ゴール完了（goal_completed）
+### 2.2 Stall Detected (stall_detected)
 
 ```
-条件: ゴールが satisficing.md の完了判定を通過した
-意味: ゴール全体のレトロスペクティブ。最も包括的な分析を行う
+Condition: First or second detection from stall-detection.md has triggered
+Meaning: Record what did not work and extract patterns to avoid repeating the same failure
 ```
 
-完了時の分析は最も重要だ。ゴール全体の経験を総括し、クロスゴール共有（§6）の元データになる。
+During a stall, analyze "why it did not work." Task-level failure patterns (scope too large, missing prerequisites, etc.) are the primary extraction targets.
+
+### 2.3 Periodic Review (periodic_review)
+
+```
+Condition: A defined interval has elapsed since the last learning analysis
+```
+
+| Goal Type | Default Interval |
+|-----------|-----------------|
+| Short-term (within 1 month) | 72 hours (3 days) |
+| Medium-term (1–6 months) | 1 week |
+| Long-term (6+ months) | 2 weeks |
+
+Even for in-progress goals, periodically analyze the accumulated logs and update patterns.
+
+### 2.4 Goal Completed (goal_completed)
+
+```
+Condition: The goal has passed the completion judgment in satisficing.md
+Meaning: A full retrospective of the entire goal. The most comprehensive analysis.
+```
+
+Completion analysis is the most important. It summarizes the experience across the entire goal and becomes the source data for cross-goal sharing (§6).
 
 ---
 
-## 3. 分析パイプライン
+## 3. Analysis Pipeline
 
-### 3.1 入力データ
+### 3.1 Input Data
 
 ```
-分析バッチ入力 {
+Analysis batch input {
   goal_id: string
   analysis_window: { start: DateTime, end: DateTime }
-  task_results: TaskResult[]       // 期間内の全タスク結果
-  gap_history: GapSnapshot[]       // ギャップ変化の時系列
-  strategy_history: Strategy[]     // 試みた戦略と効果スコア
-  observation_accuracy_log: ObservationAccuracyEntry[]  // 観測精度の記録
+  task_results: TaskResult[]       // All task results within the window
+  gap_history: GapSnapshot[]       // Time series of Gap changes
+  strategy_history: Strategy[]     // Strategies tried and their effectiveness scores
+  observation_accuracy_log: ObservationAccuracyEntry[]  // Observation accuracy records
 }
 ```
 
-### 3.2 トリプレット抽出
+### 3.2 Triplet Extraction
 
-LLMは入力データから**状態→行動→結果トリプレット**を抽出する。
+The LLM extracts **state→action→outcome triplets** from the input data.
 
 ```
-トリプレット {
-  state_context: string     // どんな状態のときに
-  action_taken: string      // どんな行動を取ったか
-  outcome: string           // どんな結果になったか
-  gap_delta: number         // ギャップ変化量（定量）
+Triplet {
+  state_context: string     // What state was in place
+  action_taken: string      // What action was taken
+  outcome: string           // What outcome resulted
+  gap_delta: number         // Quantitative Gap change
 }
 ```
 
-### 3.3 パターン検出
+### 3.3 Pattern Detection
 
-抽出されたトリプレットを集約し、繰り返しパターンを検出する。
+Aggregate the extracted triplets and detect recurring patterns.
 
-**信頼度計算**:
+**Confidence calculation**:
 
 ```
 confidence = occurrence_frequency × result_consistency
 
 occurrence_frequency = tripletsWithSameAction.length / totalTriplets
 result_consistency   = consistentOutcomes / tripletsWithSameAction.length
-  // consistentOutcomes: 同方向の結果（改善 or 悪化）が出た回数
+  // consistentOutcomes: number of times the outcome went in the same direction (improvement or degradation)
 ```
 
-`min_confidence_threshold`（デフォルト: 0.6）以上のパターンのみ LearnedPattern として登録する。
+Only patterns at or above the `min_confidence_threshold` (default: 0.6) are registered as LearnedPatterns.
 
-### 3.4 具体性チェック
+### 3.4 Specificity Check
 
-登録前に、パターンの具体性を確認する。**曖昧な記述は却下する**。
+Before registration, verify the specificity of the pattern. **Vague descriptions are rejected**.
 
-| 記述例 | 判定 | 理由 |
-|--------|------|------|
-| 「もっと良くする」 | 却下 | 行動を特定できない |
-| 「見積もりを1.5倍にする」 | 採用 | 具体的な行動が特定できる |
-| 「スコープを小さくする」 | 却下 | 何をどの程度か不明 |
-| 「タスクを3ステップ以内に分割する」 | 採用 | 行動が明確 |
+| Description Example | Judgment | Reason |
+|---------------------|----------|--------|
+| "Make it better" | Rejected | Cannot identify the action |
+| "Multiply the estimate by 1.5" | Accepted | A specific action is identifiable |
+| "Make the scope smaller" | Rejected | Unclear what or by how much |
+| "Split the task into 3 steps or fewer" | Accepted | Action is clear |
 
 ---
 
-## 4. パターンタイプ
+## 4. Pattern Types
 
-### 4.1 observation_accuracy（観測精度）
-
-```
-対象: ObservationEngine の観測精度
-例: 「このゴールのドメインでは、LLM推定値がファイルベース計測より平均20%過大評価する」
-適用先: 観測時のconfidence補正係数
-```
-
-### 4.2 strategy_selection（戦略選択）
+### 4.1 observation_accuracy
 
 ```
-対象: StrategyManager の戦略候補生成
-例: 「このドメインでは、コンテンツ施策は初期ギャップ>0.5のときのみ有効」
-適用先: 戦略生成プロンプトへの制約追加
+Target: Observation accuracy of ObservationEngine
+Example: "In this goal's domain, LLM estimates average 20% higher than file-based measurements"
+Applied to: Confidence correction factor during observation
 ```
 
-### 4.3 scope_sizing（スコープサイジング）
+### 4.2 strategy_selection
 
 ```
-対象: TaskLifecycle のタスクスコープ決定
-例: 「このゴールでは、1タスクのスコープが3ステップを超えると失敗率が2倍になる」
-適用先: タスク生成プロンプトへのスコープ指示
+Target: Strategy candidate generation by StrategyManager
+Example: "In this domain, content initiatives are only effective when initial gap > 0.5"
+Applied to: Adding constraints to strategy generation prompts
 ```
 
-### 4.4 task_generation（タスク生成）
+### 4.3 scope_sizing
 
 ```
-対象: TaskLifecycle のタスク内容生成
-例: 「このドメインでは、タスクに前提条件チェックステップを最初に入れると成功率が向上する」
-適用先: タスク生成プロンプトへのフォーマット指示
+Target: Task scope decisions in TaskLifecycle
+Example: "In this goal, the failure rate doubles when a single task's scope exceeds 3 steps"
+Applied to: Scope instructions in task generation prompts
+```
+
+### 4.4 task_generation
+
+```
+Target: Task content generation in TaskLifecycle
+Example: "In this domain, including a prerequisite check step first in the task improves success rate"
+Applied to: Format instructions in task generation prompts
 ```
 
 ---
 
-## 5. フィードバック適用
+## 5. Applying Feedback
 
-### 5.1 SessionManagerへの注入
+### 5.1 Injection into SessionManager
 
-登録された LearnedPattern は SessionManager のコンテキストに注入される。各LLMコールの際、関連するパターンがコンテキストとして渡される。
+Registered LearnedPatterns are injected into the SessionManager's context. When each LLM call is made, relevant patterns are passed as context.
 
 ```
-セッションコンテキスト（追加フィールド）:
+Session context (additional fields):
   learned_patterns: {
     pattern_type: PatternType
-    description: string         // 具体的なパターン内容
+    description: string          // Specific pattern content
     confidence: number
-    applicable_condition: string // どんな状況で適用するか
+    applicable_condition: string // The conditions under which to apply it
   }[]
 ```
 
-### 5.2 適用後の効果追跡
+### 5.2 Tracking Effectiveness After Application
 
-パターン適用後の結果を追跡し、パターンの信頼度を更新する。
+Track outcomes after a pattern is applied and update the pattern's confidence accordingly.
 
 ```
-パターン適用後
+After pattern application
     │
-    ↓（次の分析トリガー時）
-効果評価
+    ↓ (at the next analysis trigger)
+Effectiveness evaluation
     │
-    ├── positive（ギャップ縮小が加速）   → confidence += 0.1
-    ├── neutral（変化なし）               → confidence は変更なし
-    └── negative（ギャップ縮小が鈍化）   → confidence -= 0.15
+    ├── positive (Gap reduction accelerates)   → confidence += 0.1
+    ├── neutral (no change)                    → confidence unchanged
+    └── negative (Gap reduction slows)         → confidence -= 0.15
 ```
 
-信頼度が `min_confidence_threshold` を下回った場合、パターンを無効化する。
+If confidence falls below `min_confidence_threshold`, the pattern is invalidated.
 
-### 5.3 パターン数の上限
+### 5.3 Pattern Count Limit
 
-1ゴールあたりの LearnedPattern 数の上限は `max_patterns_per_goal`（デフォルト: 50）。
+The maximum number of LearnedPatterns per goal is `max_patterns_per_goal` (default: 50).
 
-上限到達時は、信頼度が最も低いパターンを削除して新しいパターンを追加する（LRU的な更新）。
+When the limit is reached, the pattern with the lowest confidence is removed to make room for a new one (LRU-style update).
 
 ---
 
-## 6. クロスゴール共有
+## 6. Cross-Goal Sharing
 
-### 6.1 共有の仕組み
+### 6.1 How Sharing Works
 
-あるゴールで学んだパターンを、類似する別のゴールに共有する。
+Patterns learned from one goal are shared with similar goals.
 
 ```
-共有フロー:
-1. ゴール完了時（goal_completed トリガー）に共有候補を検索
-2. VectorIndex で類似ゴールを検索（類似度 >= 0.7）
-3. 共有先ゴールのドメイン・次元との互換性確認（LLM）
-4. 互換性ありと判断されたパターンを共有先ゴールに injected_from_goal_id 付きで登録
-5. 効果追跡（§5.2と同様）
+Sharing flow:
+1. On goal_completed trigger, search for sharing candidates
+2. Search for similar goals via VectorIndex (similarity >= 0.7)
+3. LLM verifies compatibility with the target goal's domain and dimensions
+4. Patterns judged compatible are registered in the target goal with injected_from_goal_id
+5. Track effectiveness (same as §5.2)
 ```
 
-### 6.2 共有パターンの信頼度補正
+### 6.2 Confidence Discount for Shared Patterns
 
-転移元ゴールでの信頼度をそのまま使うのではなく、共有時に初期割引を適用する。
+Rather than using the source goal's confidence as-is, an initial discount is applied at the time of sharing.
 
 ```
 transferred_confidence = original_confidence × 0.7
 ```
 
-理由: ドメイン・文脈が完全に同一ではないため、初期信頼度を保守的に設定する。効果が確認されれば§5.2のルールで信頼度が上昇する。
+Reason: The domain and context are not completely identical, so the initial confidence is set conservatively. If effectiveness is confirmed, confidence rises following the rules in §5.2.
 
-### 6.3 制御フラグ
+### 6.3 Control Flag
 
-`cross_goal_sharing_enabled`（デフォルト: true）フラグで制御する。ユーザーがプライバシー上の理由でゴール間の知識共有を禁止したい場合に false に設定できる。
+Controlled by the `cross_goal_sharing_enabled` flag (default: `true`). Users who wish to prohibit knowledge sharing between goals for privacy reasons can set this to `false`.
 
 ---
 
 ## 7. MVP vs Phase 2
 
-### MVP（Phase 1 / Stage 14E）
+### MVP (Phase 1 / Stage 14E)
 
-| 項目 | MVP仕様 |
-|------|---------|
-| 分析対象 | 同一ゴール内のみ |
-| クロスゴール共有 | goal_completed トリガー時のみ（手動確認付き） |
-| フィードバック適用 | SessionManager への注入のみ |
-| パターン数上限 | 50 / ゴール |
-| 定期レビュー間隔 | ゴール種別で固定（§2.3の表） |
+| Item | MVP Specification |
+|------|------------------|
+| Analysis scope | Within the same goal only |
+| Cross-goal sharing | Only on goal_completed trigger (with manual confirmation) |
+| Feedback application | Injection into SessionManager only |
+| Pattern count limit | 50 per goal |
+| Periodic review interval | Fixed per goal type (table in §2.3) |
 
 ### Phase 2
 
-| 項目 | Phase 2仕様 |
-|------|------------|
-| リアルタイム適用 | タスク生成直前にパターンを動的注入 |
-| 自動信頼度調整 | 適用結果を即時フィードバック |
-| パターンのバージョン管理 | パターン変化の履歴を保持 |
-| ユーザーへのパターン可視化 | 「学んだこと」をレポートに含める |
+| Item | Phase 2 Specification |
+|------|----------------------|
+| Real-time application | Dynamically inject patterns just before task generation |
+| Automatic confidence adjustment | Immediate feedback from application results |
+| Pattern version management | Maintain history of pattern changes |
+| Pattern visualization for users | Include "what was learned" in reports |
 
 ---
 
-## 設計原則のまとめ
+## Summary of Design Principles
 
-| 原則 | 具体的な設計決定 |
-|------|----------------|
-| 具体性のないパターンは登録しない | 具体性チェックで曖昧な記述を除外 |
-| 信頼度は証拠で変動する | 適用結果によって confidence を更新 |
-| 転移は割引付きで | 他ゴールから共有されたパターンは初期信頼度を0.7倍 |
-| 分析はイベント駆動 | 4つのトリガーで適切なタイミングに学習 |
-| パターン数は上限あり | max_patterns_per_goal で無制限蓄積を防ぐ |
+| Principle | Specific Design Decision |
+|-----------|--------------------------|
+| Do not register vague patterns | Exclude ambiguous descriptions via the specificity check |
+| Confidence changes with evidence | Update confidence based on application outcomes |
+| Apply a discount to transferred patterns | Patterns shared from other goals start at 0.7× confidence |
+| Analysis is event-driven | Learning triggered at appropriate times by 4 triggers |
+| Cap the number of patterns | Prevent unlimited accumulation with max_patterns_per_goal |

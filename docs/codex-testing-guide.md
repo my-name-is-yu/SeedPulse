@@ -1,67 +1,67 @@
-# OpenAI / Codex テストガイド
+# OpenAI / Codex Testing Guide
 
-MotivaをOpenAI APIおよびOpenAI Codex CLIで動かすためのガイドです。
+A guide for running Conatus with the OpenAI API and OpenAI Codex CLI.
 
-## 前提条件
+## Prerequisites
 
-- ChatGPT Plus（$20/月）または OpenAI API 別途契約
-  - **重要**: ChatGPT PlusサブスクリプションとOpenAI APIは完全に別課金です。APIキーを使った呼び出しは従量課金になります。Codex CLIはChatGPT Plusのサブスク枠内で利用可能です。
+- ChatGPT Plus ($20/month) or a separate OpenAI API subscription
+  - **Important**: ChatGPT Plus and the OpenAI API are billed completely separately. Calls made using an API key are pay-as-you-go. Codex CLI is available within the ChatGPT Plus subscription.
 - Node.js 20+
-- Motivaビルド済み（`npm run build`）
-- OpenAI Codex CLI インストール済み（タスクをCodexで実行する場合のみ）
+- Conatus built (`npm run build`)
+- OpenAI Codex CLI installed (only required when running tasks via Codex)
 
-### OpenAI API Key の取得
+### Obtaining an OpenAI API Key
 
-1. [https://platform.openai.com](https://platform.openai.com) にアクセス
-2. 「API Keys」→「Create new secret key」
-3. 生成されたキー（`sk-...`）を安全な場所に保管
+1. Go to [https://platform.openai.com](https://platform.openai.com)
+2. Navigate to "API Keys" → "Create new secret key"
+3. Store the generated key (`sk-...`) somewhere safe
 
-### Codex CLI のインストール
+### Installing Codex CLI
 
 ```bash
 npm install -g @openai/codex
 
-# インストール確認
+# Verify the installation
 codex --version
 ```
 
-### Codex CLI の OAuth 認証
+### OAuth Authentication for Codex CLI
 
-初回起動時にブラウザでOAuth認証が必要です。
+The first time you run Codex CLI, it requires OAuth authentication via your browser.
 
-1. `codex` を初回実行するとブラウザが開き、OpenAI/ChatGPTのOAuth認証画面が表示されます
-2. ChatGPTアカウント（ChatGPT Plusプラン）でログインして認証を完了します
-3. 認証後は `codex exec --full-auto` が非対話モードで動作します（追加の認証不要）
+1. Running `codex` for the first time will open a browser window showing the OpenAI/ChatGPT OAuth screen
+2. Log in with your ChatGPT account (ChatGPT Plus plan) to complete authentication
+3. After authentication, `codex exec --full-auto` will work in non-interactive mode without further prompts
 
 ---
 
-## 1. 環境変数の設定
+## 1. Setting Environment Variables
 
-### 必須
+### Required
 
 ```bash
 export MOTIVA_LLM_PROVIDER=openai
 export OPENAI_API_KEY=sk-...
 ```
 
-### オプション
+### Optional
 
 ```bash
-# 使用モデル（デフォルト: gpt-4o）
-export OPENAI_MODEL=gpt-4o          # デフォルト
-export OPENAI_MODEL=gpt-4o-mini     # コスト削減（ChatGPT Plus $20プランにおすすめ）
-export OPENAI_MODEL=o3              # 高性能reasoning model
-export OPENAI_MODEL=o4-mini         # reasoning model（軽量）
+# Model to use (default: gpt-4o)
+export OPENAI_MODEL=gpt-4o          # default
+export OPENAI_MODEL=gpt-4o-mini     # lower cost (recommended for ChatGPT Plus $20 plan)
+export OPENAI_MODEL=o3              # high-performance reasoning model
+export OPENAI_MODEL=o4-mini         # reasoning model (lightweight)
 
-# Azure OpenAI やプロキシ経由の場合
+# When using Azure OpenAI or a proxy
 export OPENAI_BASE_URL=https://<your-endpoint>.openai.azure.com/
 ```
 
-> **注意**: `o1` / `o3` / `o4` 系のreasoningモデルは `temperature` パラメータ非対応です。Motivaは自動的にtemperatureを省略して送信します。
+> **Note**: The `o1` / `o3` / `o4` reasoning models do not support the `temperature` parameter. Conatus automatically omits temperature when calling these models.
 
-### .envファイルを使う場合
+### Using a .env File
 
-プロジェクトルートに `.env` を作成（**gitignoreに追加済みか確認**）：
+Create a `.env` file at the project root (**confirm it is in .gitignore**):
 
 ```bash
 # .env
@@ -69,33 +69,33 @@ MOTIVA_LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxx
 OPENAI_MODEL=gpt-4o
 
-# Anthropicとの切り替え用（後述）
+# For switching to Anthropic (see below)
 # ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxx
 ```
 
-読み込み：
+Load it:
 
 ```bash
-source .env  # または set -a; source .env; set +a
+source .env  # or: set -a; source .env; set +a
 ```
 
 ---
 
-## 2. Motivaのエントリポイント
+## 2. Conatus Entry Point
 
 ```bash
-# ビルド済みバイナリを直接実行
-node dist/cli-runner.js <サブコマンド>
+# Run the built binary directly
+node dist/cli-runner.js <subcommand>
 
-# またはnpx経由
-npx motiva <サブコマンド>
+# Or via npx
+npx motiva <subcommand>
 ```
 
 ---
 
-## 3. 段階的テスト手順
+## 3. Step-by-Step Testing
 
-### Step 1: 接続確認
+### Step 1: Verify the Connection
 
 ```bash
 MOTIVA_LLM_PROVIDER=openai \
@@ -103,24 +103,24 @@ OPENAI_API_KEY=sk-... \
 node dist/cli-runner.js status
 ```
 
-エラーなく起動し、ゴール一覧（空でも可）が表示されれば接続OK。
+If the command starts without errors and displays the goal list (even if empty), the connection is working.
 
-### Step 2: ゴールを追加する
+### Step 2: Add a Goal
 
 ```bash
 MOTIVA_LLM_PROVIDER=openai \
 OPENAI_API_KEY=sk-... \
-node dist/cli-runner.js goal add "ファイルhello.txtを作成して'Hello, Motiva!'と書く"
+node dist/cli-runner.js goal add "Create a file hello.txt and write 'Hello, Conatus!' in it"
 ```
 
-GoalNegotiatorがLLMを呼び出し、ゴールの次元・閾値・実現可能性を評価します。
-登録確認：
+GoalNegotiator will call the LLM to evaluate the goal's dimensions, thresholds, and feasibility.
+Confirm registration:
 
 ```bash
 node dist/cli-runner.js goal list
 ```
 
-### Step 3: コアループを1回実行
+### Step 3: Run One Core Loop Cycle
 
 ```bash
 MOTIVA_LLM_PROVIDER=openai \
@@ -128,17 +128,17 @@ OPENAI_API_KEY=sk-... \
 node dist/cli-runner.js run
 ```
 
-observe → gap → score → task → verify の1サイクルが実行されます。
+This executes one full cycle: observe → gap → score → task → verify.
 
-### Step 4: Codexアダプターでタスク実行
+### Step 4: Run a Task via the Codex Adapter
 
-ゴールの `adapter_type` を `openai_codex_cli` に設定してCodexにタスクを委譲します。
+Set the goal's `adapter_type` to `openai_codex_cli` to delegate tasks to Codex.
 
-ゴールJSON例（`goal-codex-test.json`）：
+Example goal JSON (`goal-codex-test.json`):
 
 ```json
 {
-  "description": "hello.txtを作成して'Hello, Motiva!'と書く",
+  "description": "Create hello.txt and write 'Hello, Conatus!' in it",
   "adapter_type": "openai_codex_cli",
   "dimensions": [
     {
@@ -149,7 +149,7 @@ observe → gap → score → task → verify の1サイクルが実行されま
 }
 ```
 
-実行：
+Run:
 
 ```bash
 MOTIVA_LLM_PROVIDER=openai \
@@ -157,104 +157,104 @@ OPENAI_API_KEY=sk-... \
 node dist/cli-runner.js run
 ```
 
-Codexアダプターは内部で以下のコマンドを実行します：
+The Codex adapter internally executes:
 
 ```bash
 codex exec --full-auto "PROMPT"
 ```
 
-`--model` を指定したい場合は `OpenAICodexCLIAdapter` のコンストラクタに渡す（コード変更が必要）。
+To specify `--model`, pass it to the `OpenAICodexCLIAdapter` constructor (requires a code change).
 
 ---
 
-## 4. テスト用ゴール例
+## 4. Example Goals for Testing
 
-### A. シンプルなファイル作成タスク（Codexで実行しやすい）
+### A. Simple File Creation Task (easy to run with Codex)
 
 ```bash
-node dist/cli-runner.js goal add "カレントディレクトリにhello.txtを作成し'Hello from Motiva!'と書く"
+node dist/cli-runner.js goal add "Create hello.txt in the current directory and write 'Hello from Conatus!'"
 ```
 
-### B. テスト実行タスク
+### B. Run Tests Task
 
 ```bash
-node dist/cli-runner.js goal add "npx vitest run を実行してテストがすべてpassすることを確認する"
+node dist/cli-runner.js goal add "Run npx vitest run and confirm all tests pass"
 ```
 
-### C. ドキュメント生成タスク
+### C. Documentation Generation Task
 
 ```bash
-node dist/cli-runner.js goal add "README.mdを作成してプロジェクトの概要を3行で説明する"
+node dist/cli-runner.js goal add "Create README.md and describe the project in 3 lines"
 ```
 
 ---
 
-## 5. トラブルシューティング
+## 5. Troubleshooting
 
-### API Keyが未設定のとき
+### API Key Not Set
 
 ```
 OpenAILLMClient: no API key provided. Pass apiKey to constructor or set OPENAI_API_KEY env var.
 ```
 
-→ `export OPENAI_API_KEY=sk-...` を実行してから再試行。
+→ Run `export OPENAI_API_KEY=sk-...` and try again.
 
-### Codex CLIが未インストールのとき
+### Codex CLI Not Installed
 
 ```
 Error: spawn codex ENOENT
 ```
 
-→ `npm install -g @openai/codex` を実行。インストール後 `codex --version` で確認。
+→ Run `npm install -g @openai/codex`. After installation, verify with `codex --version`.
 
-### レート制限（429エラー）
+### Rate Limit (429 Error)
 
 ```
 OpenAILLMClient: HTTP 429 Too Many Requests
 ```
 
-OpenAILLMClientは最大3回（1s → 2s → 4sの指数バックオフ）自動リトライします。
-それでも失敗する場合はしばらく待ってから再実行、またはTier上位のAPIプランに切り替え。
+OpenAILLMClient will automatically retry up to 3 times with exponential backoff (1s → 2s → 4s).
+If it still fails, wait a while before retrying, or upgrade to a higher-tier API plan.
 
-### reasoning modelでtemperatureエラー
+### Temperature Error with Reasoning Models
 
-`o1` / `o3` / `o4` 系モデルはtemperatureを受け付けません。
-Motivaは自動的にtemperatureを省略するため、通常は問題ありません。
-もし外部から直接パラメータを渡す場合は注意してください。
+The `o1` / `o3` / `o4` model families do not accept the temperature parameter.
+Conatus automatically omits temperature, so this is normally not an issue.
+Take care if you are passing parameters directly from outside Conatus.
 
-### モデル名が間違っている
+### Incorrect Model Name
 
 ```
 OpenAILLMClient: HTTP 404 ...
 ```
 
-→ `OPENAI_MODEL` の値を確認。利用可能なモデル名は [https://platform.openai.com/docs/models](https://platform.openai.com/docs/models) を参照。
+→ Check the value of `OPENAI_MODEL`. For available model names, refer to [https://platform.openai.com/docs/models](https://platform.openai.com/docs/models).
 
 ---
 
-## 6. AnthropicとOpenAIの切り替え
+## 6. Switching Between Anthropic and OpenAI
 
-環境変数を変えるだけで切り替えできます。
+You can switch providers simply by changing environment variables.
 
-### OpenAI を使う
+### Use OpenAI
 
 ```bash
 export MOTIVA_LLM_PROVIDER=openai
 export OPENAI_API_KEY=sk-...
-# OPENAI_MODEL=gpt-4o  # 省略時デフォルト
+# OPENAI_MODEL=gpt-4o  # omit to use default
 ```
 
-### Anthropic（デフォルト）に戻す
+### Switch Back to Anthropic (Default)
 
 ```bash
 unset MOTIVA_LLM_PROVIDER
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-### .envで両方を用意しておく例
+### Example .env with Both Providers
 
 ```bash
-# .env — 使いたいプロバイダーのコメントを外して source .env
+# .env — uncomment the provider you want to use, then run: source .env
 
 # --- OpenAI ---
 MOTIVA_LLM_PROVIDER=openai
@@ -268,9 +268,9 @@ OPENAI_MODEL=gpt-4o
 
 ---
 
-## 7. 状態リセット
+## 7. Resetting State
 
-テストデータをクリアして最初からやり直す場合：
+To clear test data and start fresh:
 
 ```bash
 rm -rf ~/.motiva
@@ -278,25 +278,25 @@ rm -rf ~/.motiva
 
 ---
 
-## 8. 自動E2Eテスト
+## 8. Automated E2E Tests
 
-MotivaにはOpenAI/Codex向けのE2Eテストが含まれています。APIキーやCodex CLIが未設定の場合は自動的にスキップされます。
+Conatus includes E2E tests for OpenAI/Codex. They are skipped automatically if an API key or Codex CLI is not configured.
 
-### テストファイル
+### Test Files
 
-| ファイル | 内容 | テスト数 |
-|----------|------|----------|
-| `tests/e2e/openai-e2e.test.ts` | OpenAI API直接呼び出しテスト | 3テスト |
-| `tests/e2e/codex-cli-e2e.test.ts` | Codex CLIアダプターテスト | 3テスト |
+| File | Description | Test Count |
+|------|-------------|------------|
+| `tests/e2e/openai-e2e.test.ts` | Direct OpenAI API call tests | 3 tests |
+| `tests/e2e/codex-cli-e2e.test.ts` | Codex CLI adapter tests | 3 tests |
 
-### 実行方法
+### How to Run
 
 ```bash
-# E2Eテストのみ実行
+# Run E2E tests only
 OPENAI_API_KEY=sk-... npx vitest run tests/e2e/
 ```
 
-### スキップ条件
+### Skip Conditions
 
-- `OPENAI_API_KEY` が未設定の場合 → `openai-e2e.test.ts` が自動スキップ
-- Codex CLIが未インストールの場合 → `codex-cli-e2e.test.ts` が自動スキップ
+- If `OPENAI_API_KEY` is not set → `openai-e2e.test.ts` is skipped automatically
+- If Codex CLI is not installed → `codex-cli-e2e.test.ts` is skipped automatically

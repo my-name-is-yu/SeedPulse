@@ -1,311 +1,311 @@
-# 好奇心（メタ動機）設計
+# Curiosity (Meta-Motivation) Design
 
-> 関連: `drive-system.md`, `drive-scoring.md`, `stall-detection.md`, `observation.md`, `satisficing.md`
+> Related: `drive-system.md`, `drive-scoring.md`, `stall-detection.md`, `observation.md`, `satisficing.md`
 
 ---
 
-## 1. 好奇心の役割
+## 1. The Role of Curiosity
 
-好奇心は**ゴールレベルのメタ動機**だ。3つの駆動力（不満・締切・機会）がゴールの中でタスクを選ぶのに対し、好奇心はゴールそのものを生成・更新する。
+Curiosity is a **goal-level meta-motivation**. While the three drive forces (Dissatisfaction, Deadline, Opportunity) select tasks within a goal, curiosity generates and updates goals themselves.
 
 ```
-好奇心（メタ動機）
+Curiosity (meta-motivation)
   │
-  ├─→ 新しいゴールを提案する
-  └─→ 既存ゴールの構造・定義を更新する
+  ├─→ Proposes new goals
+  └─→ Updates the structure and definition of existing goals
        ↑
-   学習フィードバック（蓄積された観測・結果ログ）
+   Learning feedback (accumulated observations and result logs)
 
-3つの駆動力（不満・締切・機会）
+Three drive forces (Dissatisfaction, Deadline, Opportunity)
   │
-  └─→ 既存ゴールの中でタスクを選ぶ
+  └─→ Select tasks within existing goals
 ```
 
-好奇心はランダムな探索ではない。過去のループで何が起きたか、どのアプローチが効いたか、どこに盲点があるかという**学習フィードバックに方向づけられた探索**だ。
+Curiosity is not random exploration. It is **exploration directed by learning feedback** — by what happened in past loops, which approaches worked, and where blind spots exist.
 
-### 2つの機能
+### Two Functions
 
-**a. 新ゴール発見**: まだ追っていない領域で、ユーザーにとって価値があるかもしれないゴールを提案する。提案の根拠は常に過去の経験（どのドメインで改善余地があったか、どのパターンが転用できるか）に基づく。
+**a. New goal discovery**: Proposes goals that might be valuable to the user in areas not yet being pursued. The basis for proposals is always grounded in past experience (which domains had room for improvement, which patterns could transfer).
 
-**b. 既存ゴールの再定義**: 現在のゴール構造が現実に合っていないと判断したとき、ゴールの分解・次元・閾値の見直しを提案する。タスクレベルのリトライではなく、ゴール構造そのものを問い直す。
+**b. Redefining existing goals**: When the current goal structure is judged to no longer match reality, it proposes revisiting the goal's decomposition, dimensions, or thresholds. Rather than retrying at the task level, it questions the goal structure itself.
 
 ---
 
-## 2. 発動条件
+## 2. Activation Conditions
 
-好奇心は以下の5つの条件で発動する。複数が同時に成立することもある。
+Curiosity activates under five conditions. Multiple conditions may be satisfied simultaneously.
 
-### 2.1 タスクキュー空
-
-```
-条件: アクティブなユーザーゴールがすべて「達成」または「待機中」状態
-意味: やることがなくなった。次に何を追うべきか？
-```
-
-最も自然な発動タイミング。すべてのユーザーゴールが満たされた（または外部依存で待ち中の）状態では、Conatusはアイドルにならず好奇心モードに入る。`satisficing.md` の完了判断と連動して、「満足化が成立した直後」に発動する。
-
-### 2.2 予測外の観測
+### 2.1 Task Queue Empty
 
 ```
-条件: 状態ベクトルが現在のモデルの予測範囲を外れた変化をした
-意味: 何か理解していないことが起きている
+Condition: All active user goals are in "achieved" or "waiting" status
+Meaning: There is nothing left to do. What should be pursued next?
 ```
 
-`observation.md` の観測ループが返す値が、Conatusの期待レンジを大きく外れたとき。例えば、アクティブな施策がないのに特定の指標が急改善した、あるいは安定していた次元が突然悪化した。これは既存のゴール構造で説明できない現象であり、「何を追うべきか」の再検討を促す。
+The most natural activation timing. When all user goals are satisfied (or waiting on external dependencies), Conatus does not go idle — it enters curiosity mode. This is linked with the completion judgment in `satisficing.md`, activating "immediately after satisficing is established."
 
-しきい値の目安: 期待値から標準偏差の2倍以上の乖離、またはモデルが「変化なし」を予測していた期間に5%以上の変化。
-
-### 2.3 ドメイン内の繰り返し失敗
+### 2.2 Unexpected Observation
 
 ```
-条件: 同一ゴールの同一次元で、タスクの consecutive_failure_count が閾値以上
-意味: タスクレベルの問題ではなく、ゴール構造レベルの問題かもしれない
+Condition: The state vector has changed in a way that falls outside the current model's predicted range
+Meaning: Something is happening that is not understood
 ```
 
-失敗カウントおよびエスカレーション閾値（デフォルト3回）は `task-lifecycle.md` §2.7 で一元管理されている。本ドキュメントでは独自に閾値を定義しない。
+When the value returned by the observation loop in `observation.md` deviates significantly from Conatus's expected range. For example, a particular metric has improved sharply despite no active measures being in place, or a previously stable dimension has suddenly deteriorated. This is a phenomenon that cannot be explained by the existing goal structure, and it prompts a reconsideration of "what should be pursued."
 
-`stall-detection.md` の停滞検知が「同種タスクの繰り返し失敗」パターンを検出したとき、停滞解消と並行して好奇心が発動する。停滞対処（情報収集・ピボット・エスカレーション）が「既存のゴール枠内」での解決を試みるのに対し、好奇心は「ゴール定義自体を変えるべきか？」という問いを立てる。
+Threshold guideline: deviation greater than two standard deviations from the expected value, or a change of 5% or more during a period when the model predicted "no change."
 
-好奇心が発動する停滞タイプ: 主に `stall-detection.md` §2.3（連続失敗型）および §2.4（全体停滞型）。§2.1（次元レベル停滞）と §2.2（時間超過）は戦略変更で対処するため、好奇心トリガーにはならない。
-
-### 2.4 Goal Reviewerが未定義の問題を発見
+### 2.3 Repeated Failures Within a Domain
 
 ```
-条件: 観測・評価プロセスで、既存のどの次元にもマップできない重要な問題が浮上
-意味: 追うべき何かが、現在のゴール構造の外にある
+Condition: The consecutive_failure_count for tasks on the same dimension of the same goal exceeds the threshold
+Meaning: This may be a goal-structure-level problem, not a task-level problem
 ```
 
-**Goal Reviewerとは**: `session-and-context.md` で定義されるセッションタイプ `goal_review` に相当する定期レビューセッションだ。`drive-system.md` のスケジュール駆動トリガーによって設定間隔（デフォルト: 週1回）で起動される。目的は「現在のゴールが依然として適切か・十分に分解されているか・実行可能かどうか」を評価することにある。
+The failure count and escalation threshold (default: 3) are managed centrally in `task-lifecycle.md` §2.7. This document does not define its own thresholds independently.
 
-Conatusのレビュープロセス（ギャップ認識ステップでの観測統合）が、既存ゴールツリーのどの次元にも当てはまらない重要な状態変化を発見したとき。これは「現在のゴール構造が観測空間をカバーしきれていない」サインであり、新ゴールの候補になる。
+When stall detection in `stall-detection.md` detects a pattern of repeated failures on tasks of the same type, curiosity activates alongside stall resolution. While stall handling (information gathering, pivoting, escalation) attempts to resolve the issue "within the existing goal framework," curiosity raises the question: "Should the goal definition itself be changed?"
 
-### 2.5 定期探索
+Stall types that trigger curiosity: primarily `stall-detection.md` §2.3 (consecutive failure type) and §2.4 (overall stall type). §2.1 (dimension-level stall) and §2.2 (time overrun) are addressed through strategy changes and do not trigger curiosity.
+
+### 2.4 Goal Reviewer Discovers an Undefined Problem
 
 ```
-条件: 最後の好奇心発動からT時間経過（デフォルト: 72時間）
-意味: 順調でも、盲点を定期的に確認する
+Condition: During observation/evaluation, a significant problem surfaces that cannot be mapped to any existing dimension
+Meaning: Something worth pursuing exists outside the current goal structure
 ```
 
-ユーザーゴールが順調に進んでいても、追えていない領域・追い方の改善余地がないかを定期的に確認する。頻度はユーザーのゴールの数・活動量に応じてスケールする（多忙な状態では間隔を広げ、アイドル状態では縮める）。
+**What is the Goal Reviewer**: A periodic review session corresponding to the session type `goal_review` defined in `session-and-context.md`. It is launched at a configured interval (default: once per week) by the schedule-driven trigger in `drive-system.md`. Its purpose is to evaluate whether "the current goals are still appropriate, sufficiently decomposed, and actionable."
+
+When Conatus's review process (observation integration in the gap recognition step) discovers a significant state change that does not map to any dimension in the existing goal tree — this is a sign that "the current goal structure does not cover the full observation space," and it becomes a candidate for a new goal.
+
+### 2.5 Periodic Exploration
+
+```
+Condition: T hours have elapsed since the last curiosity activation (default: 72 hours)
+Meaning: Even when things are going well, check for blind spots periodically
+```
+
+Even when user goals are progressing smoothly, Conatus periodically checks whether there are unexplored areas or room to improve how things are being pursued. The frequency scales with the number of user goals and level of activity (longer intervals when busy, shorter when idle).
 
 ---
 
-## 3. 好奇心ゴール vs ユーザーゴール
+## 3. Curiosity Goals vs. User Goals
 
-ゴールには起源（origin）フィールドがある。起源によって扱いが根本的に異なる。
+Goals have an origin field. How they are treated differs fundamentally based on origin.
 
-| 属性 | ユーザーゴール | 好奇心ゴール |
-|------|--------------|------------|
+| Attribute | User goal | Curiosity goal |
+|-----------|-----------|---------------|
 | origin | `user` | `curiosity` |
-| 設定者 | ユーザー（明示的） | Conatusが自動生成 |
-| 性質 | 命令 | 提案 |
-| 承認 | 不要（即追求） | 必要（ユーザーが受諾/拒否） |
-| 優先度 | 常に最高 | ユーザーゴールより常に低い |
-| クローズ | ユーザーのみ | 自動失効あり |
-| 失効 | なし | 未承認なら12時間で自動失効 |
-| 追求タイミング | 常時 | ユーザーゴールが全満足/ブロック時のみ |
-| 自動クローズ | 不可 | 非生産的と判断されれば可 |
+| Set by | User (explicitly) | Auto-generated by Conatus |
+| Nature | Command | Proposal |
+| Approval | Not required (pursued immediately) | Required (user accepts/declines) |
+| Priority | Always highest | Always lower than user goals |
+| Closing | User only | Can expire automatically |
+| Expiry | None | Auto-expires in 12 hours if not approved |
+| Pursuit timing | Always | Only when all user goals are satisfied/blocked |
+| Auto-close | Not permitted | Permitted if judged unproductive |
 
-**優先順位の原則**: ユーザーゴール > 好奇心ゴール（例外なし）。好奇心ゴールがいかに重要に見えても、アクティブなユーザーゴールがある限り、好奇心ゴールへのリソース投入は制限される（後述のリソース予算参照）。
-
----
-
-## 4. 学習フィードバックによる方向づけ
-
-好奇心が何を提案するかは、蓄積された経験ログによって決まる。4つのパターンで方向づけられる。
-
-### 4.1 高インパクトドメインの優先
-
-過去のループで、特定のドメインや次元への介入が状態ベクトルを大きく改善した記録がある場合、そのドメインの隣接領域を探索する。
-
-```
-記録: ドメインXへのアプローチAが、状態改善量+30%をもたらした
-→ 好奇心提案: 「ドメインXの別の次元Yにも改善余地があるかもしれない」
-```
-
-インパクトは絶対値ではなく比率で評価する。小さなドメインで大きな改善率を出したアプローチは、大きなドメインで小さな改善率を出したアプローチより優先度が高い。
-
-### 4.2 失敗パターンからの再構成提案
-
-同一のアプローチが異なるゴールでも繰り返し失敗している場合、そのゴール群の構造に共通の問題がある可能性を示す。好奇心はゴールの再分解や次元の再定義を提案する。
-
-```
-記録: ゴールA・ゴールBの両方で「アプローチC」が3回以上失敗
-→ 好奇心提案: 「ゴールA・Bの分解が適切でない可能性。以下の再構成を検討」
-```
-
-### 4.3 ゴール間の転用提案（クロスゴール転移）
-
-あるゴールで効いた戦略・アプローチが、別のゴールの停滞次元に適用できないかを評価する。`drive-scoring.md` の戦略スコアリングログをゴールをまたいで照合することで発見する。
-
-```
-記録: ゴールAの次元Xで「戦略P」がギャップを30%縮小
-       ゴールBの次元Yが3ループ停滞中
-       次元Xと次元Yが同種の課題構造を持つ
-→ 好奇心提案: 「ゴールAで効いた戦略Pを、ゴールBの次元Yに転用してみる」
-```
-
-転用提案の前提条件: 課題構造の類似性スコア（次元の種類・ギャップサイズ・失敗パターンの照合）が閾値を超えること。類似していない課題への無根拠な転用は提案しない。
-
-**MVP実装 vs Phase 2**
-
-| 段階 | 類似性判定の方法 |
-|------|----------------|
-| **MVP** | `dimension_name` の完全一致（同名次元を持つゴール間で転用候補を検出）。埋め込み計算は不要。 |
-| **Phase 2** | 意味的埋め込みによるファジー類似度スコア（異なる名前でも構造的に同種の次元を検出）。 |
-
-MVPでは、`dimension_name` が完全に一致する次元を持つゴール同士を「転用候補あり」とみなす。ファジーマッチング（例: "monthly_revenue" と "revenue_monthly" の同一視）はPhase 2以降に対応する。
-
-### 4.4 盲点領域の検出
-
-これまで一度も観測・追跡したことがない次元・ドメインのうち、ユーザーの全体的な活動領域に関連しそうなものを発見する。
-
-```
-記録: ユーザーのゴール群がドメインA・Bをカバーしているが、
-       通常Aに伴うドメインCが一度も追跡されていない
-→ 好奇心提案: 「ドメインCを観測したことがない。追跡する価値があるか確認する」
-```
-
-盲点検出の根拠: ゴール群の全次元リストと、類似ドメインで一般的に追跡される次元のベースラインとの差分。完全にゼロから思いつくのではなく、既存のゴール構造からの類推に基づく。
-
-**MVP実装 vs Phase 2**
-
-| 段階 | 検出方法 | 確信度 |
-|------|---------|--------|
-| **MVP** | LLMプロンプティング: ゴールXの次元リスト[A, B, C]を渡し「このゴール領域で一般的に追跡されるが、このリストにない次元は何か？」と質問する。 | `detection_method: "llm_heuristic"` / 確信度: 低〜中 |
-| **Phase 2** | 埋め込み類似度で「類似ドメインのゴール群」とベースライン比較。 | `detection_method: "embedding_similarity"` / 確信度: 高 |
-
-MVPでは埋め込みインフラなしで動作する。ただし LLM ヒューリスティックは質的判断であり、誤検出・見落としを伴う。`detection_method: "llm_heuristic"` と明記し、ユーザーへの提示時に確信度が低い旨を添付する。
+**Priority principle**: User goals > Curiosity goals (no exceptions). No matter how promising a curiosity goal appears, as long as there are active user goals, curiosity goals come second. While user goal task queues are not empty, resource investment in curiosity goals is limited to the resource budget (see 5.5).
 
 ---
 
-## 5. 好奇心の制約
+## 4. Direction Provided by Learning Feedback
 
-制御なき好奇心はスコープ拡散を起こす。以下の制約が必須だ。
+What curiosity proposes is determined by the accumulated experience log. Direction is provided through four patterns.
 
-### 5.1 ユーザーゴール優先（絶対ルール）
+### 4.1 Prioritizing High-Impact Domains
 
-好奇心ゴールがいかに有望に見えても、アクティブなユーザーゴールがある限り、好奇心ゴールは後回しになる。ユーザーゴールのタスクキューが空でないうちは、好奇心ゴールへのリソース投入はリソース予算（5.5参照）の範囲内に限定する。
-
-### 5.2 同時提案数の上限
+When past loops show that interventions in a specific domain or dimension have significantly improved the state vector, curiosity explores adjacent areas of that domain.
 
 ```
-最大アクティブ好奇心ゴール数: N（デフォルト: 3）
+Record: Approach A in Domain X produced a +30% state improvement
+→ Curiosity proposal: "Another dimension Y in Domain X may also have room for improvement"
 ```
 
-同時にN個を超える好奇心ゴールを提案・追跡しない。Nを超える提案が生まれた場合、学習フィードバックによるスコアが低い提案を保留する。ユーザーが1つを拒否したタイミングで次の候補を提案する。
+Impact is evaluated by ratio, not absolute value. An approach that produced a large improvement rate in a small domain is given higher priority than one that produced a small improvement rate in a large domain.
 
-### 5.3 自動失効
+### 4.2 Reconstruction Proposals from Failure Patterns
 
-```
-未承認の好奇心ゴール: 12時間で自動失効（デフォルト）
-承認済みで非生産的な好奇心ゴール: Nループ（デフォルト: 3）で成果なければ自動クローズ
-```
-
-ユーザーが気づかないうちに好奇心ゴールが蓄積することを防ぐ。失効したゴールはログに残り、再度同じ提案が出た際の判断材料になる。
-
-### 5.4 スコープ制約
-
-好奇心ゴールは、ユーザーの現在のゴール群が属するドメインに関連していなければならない。無関係な領域への探索提案は生成しない。
-
-スコープの定義: 現在のユーザーゴールツリーの全次元・ドメインと、それらから1ステップ隣接する関連ドメイン。2ステップ以上離れた領域は提案しない。
-
-### 5.5 リソース予算
+When the same approach has repeatedly failed across different goals, this suggests a common structural problem in that group of goals. Curiosity proposes redecomposing the goals or redefining their dimensions.
 
 ```
-ユーザーゴールが存在する場合の好奇心ゴールへの最大リソース割合:
-  アクティブなユーザーゴールあり → 最大20%
-  全ユーザーゴールが「待機中」 → 最大50%
-  全ユーザーゴールが「達成」   → 制限なし（ただし提案数上限は維持）
+Record: "Approach C" has failed 3+ times in both Goal A and Goal B
+→ Curiosity proposal: "The decomposition of Goals A and B may be inappropriate. Consider the following reconstruction"
 ```
 
-リソースの単位はLoopサイクル数（何回分のタスク発見ループを好奇心ゴールに使うか）で計算する。
+### 4.3 Cross-Goal Transfer Proposals
+
+It evaluates whether a strategy or approach that worked for one goal could be applied to a stalling dimension in another. This is discovered by cross-referencing the strategy scoring logs in `drive-scoring.md` across goals.
+
+```
+Record: "Strategy P" reduced the gap on Dimension X of Goal A by 30%
+         Dimension Y of Goal B has been stalled for 3 loops
+         Dimension X and Dimension Y share the same type of challenge structure
+→ Curiosity proposal: "Try applying Strategy P — which worked for Goal A — to Dimension Y of Goal B"
+```
+
+Precondition for transfer proposals: the similarity score of challenge structures (matching dimension type, gap size, and failure patterns) must exceed a threshold. Unsupported transfers to dissimilar challenges are not proposed.
+
+**MVP implementation vs. Phase 2**
+
+| Phase | Similarity detection method |
+|-------|-----------------------------|
+| **MVP** | Exact match on `dimension_name` (transfer candidates detected between goals sharing the same named dimension). No embedding computation needed. |
+| **Phase 2** | Fuzzy similarity score using semantic embeddings (detects structurally similar dimensions even with different names). |
+
+In the MVP, goals sharing a dimension with exactly the same `dimension_name` are treated as "transfer candidates." Fuzzy matching (e.g., treating "monthly_revenue" and "revenue_monthly" as identical) is deferred to Phase 2 and beyond.
+
+### 4.4 Detecting Blind Spots
+
+It discovers dimensions or domains that have never been observed or tracked but appear relevant to the user's overall activity area.
+
+```
+Record: The user's goals cover Domains A and B,
+         but Domain C — which typically accompanies A — has never been tracked
+→ Curiosity proposal: "Domain C has never been observed. Check whether it's worth tracking"
+```
+
+Basis for blind spot detection: the difference between the full dimension list across the goal set and the baseline of dimensions typically tracked in similar domains. This is not conjecture from scratch — it is based on inference from the existing goal structure.
+
+**MVP implementation vs. Phase 2**
+
+| Phase | Detection method | Confidence |
+|-------|-----------------|------------|
+| **MVP** | LLM prompting: pass the dimension list [A, B, C] for Goal X and ask "What dimensions are commonly tracked in this goal domain but absent from this list?" | `detection_method: "llm_heuristic"` / Confidence: low–medium |
+| **Phase 2** | Baseline comparison against "similar-domain goal sets" using embedding similarity. | `detection_method: "embedding_similarity"` / Confidence: high |
+
+The MVP operates without an embedding infrastructure. However, LLM heuristics are qualitative judgments and carry the risk of false positives and misses. Mark with `detection_method: "llm_heuristic"` and note the low confidence when presenting to the user.
 
 ---
 
-## 6. タスク発見ループへの接続
+## 5. Constraints on Curiosity
 
-承認された好奇心ゴールは、通常のゴールツリーに挿入される。挿入後の動作はユーザーゴールと同一だ。
+Unconstrained curiosity causes scope creep. The following constraints are mandatory.
 
-### 挿入フロー
+### 5.1 User Goals Take Priority (Absolute Rule)
+
+No matter how promising a curiosity goal appears, as long as there are active user goals, curiosity goals are deferred. While the user goal task queue is not empty, resource investment in curiosity goals is limited to the resource budget (see 5.5).
+
+### 5.2 Cap on Simultaneous Proposals
 
 ```
-好奇心エンジン
-  │ 候補ゴールを生成
+Maximum active curiosity goals: N (default: 3)
+```
+
+No more than N curiosity goals are proposed or tracked simultaneously. When proposals exceed N, those with lower scores based on learning feedback are held back. The next candidate is proposed when the user declines one.
+
+### 5.3 Automatic Expiry
+
+```
+Unapproved curiosity goals: auto-expire in 12 hours (default)
+Approved but unproductive curiosity goals: auto-closed after N loops (default: 3) without results
+```
+
+This prevents curiosity goals from accumulating without the user noticing. Expired goals remain in the log and serve as reference when the same proposal arises again.
+
+### 5.4 Scope Constraint
+
+Curiosity goals must be related to the domains the user's current goals belong to. Exploration proposals in unrelated areas are not generated.
+
+Scope definition: all dimensions and domains in the current user goal tree, plus domains one step adjacent. Areas two or more steps removed are not proposed.
+
+### 5.5 Resource Budget
+
+```
+Maximum resource share for curiosity goals when user goals exist:
+  Active user goals present    → max 20%
+  All user goals "waiting"     → max 50%
+  All user goals "achieved"    → unlimited (but proposal count cap is maintained)
+```
+
+Resources are measured in loop cycle count (how many task-discovery loops are spent on curiosity goals).
+
+---
+
+## 6. Connection to the Task Discovery Loop
+
+Approved curiosity goals are inserted into the normal goal tree. Their behavior after insertion is identical to user goals.
+
+### Insertion Flow
+
+```
+Curiosity engine
+  │ Generates candidate goal
   ↓
-ユーザーへの提案（notification）
-  │ 承認 / 拒否
-  ↓（承認時）
-Advisorがゴールを正規化
-  │ - 次元の定義
-  │ - 各次元の閾値設定
-  │ - 初期状態ベクトルの設定（観測に基づく）
+Proposal to user (notification)
+  │ Approve / Decline
+  ↓ (on approval)
+Advisor normalizes the goal
+  │ - Define dimensions
+  │ - Set thresholds for each dimension
+  │ - Set initial state vector (based on observation)
   ↓
-ゴールツリーに挿入（origin: curiosity を保持）
+Inserted into goal tree (origin: curiosity is retained)
   │
-  └→ 3つの駆動力（不満・締切・機会）が通常通り動作開始
+  └→ Three drive forces (Dissatisfaction, Deadline, Opportunity) begin operating normally
 ```
 
-Advisorによる正規化が必要な理由: 好奇心エンジンが生成した提案は「追う価値がありそう」という方向感であり、具体的な次元・閾値は観測と対話から定める必要があるため（詳細: `drive-system.md` のゴール設定フロー参照）。
+Why Advisor normalization is needed: the proposal generated by the curiosity engine represents a directional sense of "worth pursuing" — specific dimensions and thresholds must be determined through observation and dialogue (see the goal-setting flow in `drive-system.md`).
 
-### 自動クローズの条件
+### Conditions for Auto-Close
 
-好奇心ゴールは以下の条件で、ユーザー確認なしにクローズできる：
+Curiosity goals can be closed without user confirmation under the following conditions:
 
-- 設定した閾値をすべての次元で達成（通常の完了）
-- Nループにわたって成果なし、かつ学習フィードバックが転用値なしと判断（非生産的）
-- ユーザーゴールの新規追加によってスコープから外れた
+- All dimensions have met their configured thresholds (normal completion)
+- No results across N loops, and learning feedback judges there is no transfer value (unproductive)
+- Addition of new user goals places it outside scope
 
-ユーザーゴールは同じ条件では自動クローズできない。
-
----
-
-## 7. 具体例
-
-### 例1: ゴール達成後の隣接提案
-
-> 状況: ユーザーゴール「体重を3kg減らす」が達成条件を満たし、satisficingで完了判断。タスクキューが空になった。
->
-> 学習フィードバック: このゴールの追跡中に「睡眠時間」が間接的に体重変化と相関していたことをログが示している。ただし睡眠はユーザーゴールとして設定されたことがない。
->
-> 好奇心提案: 「体重ゴール達成時のログを見ると、睡眠7時間以上の週に減少速度が1.4倍だった。睡眠の質・量をゴールとして追うことを検討しますか？」
-
-提案の根拠が経験ログにある点が重要だ。「一般的に睡眠は大事」ではなく、「このユーザーの観測履歴においてこの相関があった」という根拠を示す。
-
-### 例2: 繰り返し失敗によるゴール再定義提案
-
-> 状況: ゴール「新規顧客獲得数を月30件に増やす」の次元「リード獲得数」で、3種類のアプローチ（広告増額・コンテンツ拡充・紹介施策）がいずれも3ループ以上成果なし。stall-detectionが停滞を検出済み。
->
-> 好奇心の判断: タスクレベルの問題ではなく、ゴール構造レベルの問題の可能性がある。「リード獲得数」という次元設定自体が、実際のボトルネックをカバーしていないかもしれない。
->
-> 好奇心提案: 「3種類のアプローチが効果なし。ゴールの分解を見直す余地があります。提案: 次元を『リード獲得数』から『リード→商談転換率』と『リード質スコア』に分割して、どこに本当のギャップがあるかを測り直す。」
-
-このケースでは、新ゴール提案ではなく既存ゴールの再定義提案になる。再定義後はAdvisorが改めて次元・閾値を設定する。
-
-### 例3: クロスゴール転移
-
-> 状況:
-> - ゴールA「社内ドキュメント整備」の次元「検索ヒット率」が停滞中（3ループ）
-> - ゴールB「顧客サポート効率化」で「FAQのタグ付け再構成」が検索ヒット率を40%改善した記録あり
->
-> 好奇心の判断: ゴールBのFAQタグ付け手法がゴールAの社内ドキュメント検索に転用できる可能性がある。課題構造（「検索ヒット率の低さ = タグ・分類の設計問題」）が一致している。
->
-> 好奇心提案: 「ゴールBで効果があったFAQタグ付け再構成のアプローチを、ゴールAの社内ドキュメント検索に転用するタスクを生成しますか？」
-
-### 例4: 定期探索での盲点検出
-
-> 状況: ユーザーのアクティブゴールが「製品開発速度の向上」「顧客離脱率の低下」の2つ。72時間の定期探索タイミング。
->
-> 好奇心の分析: 顧客離脱率ゴールでは「オンボーディング完了率」を次元として追っているが、「オンボーディング完了後30日間の利用頻度」を一度も観測したことがない。この指標は離脱予測に高い相関を持つことが一般的に知られており、かつユーザーのゴール構造から1ステップ隣接している。
->
-> 好奇心提案: 「顧客離脱率ゴールで観測していない指標があります: オンボーディング完了後30日以内の利用頻度。追跡を開始しますか？」
+User goals cannot be auto-closed under the same conditions.
 
 ---
 
-## 設計メモ
+## 7. Concrete Examples
 
-**好奇心はシステムのセーフティネットでもある。** ユーザーが明示的に設定できなかった重要なゴール、経験が積まれて初めて気づく盲点、タスクの失敗を通じてのみ見えてくるゴール構造の問題 — これらは事前に設計できない。好奇心メカニズムはこれらを後から補完する仕組みだ。
+### Example 1: Adjacent Proposal After Goal Achievement
 
-**提案の明示的根拠が必須。** 好奇心ゴールの提案には、「なぜこれを提案するか」の根拠（どのログ・パターンに基づくか）を必ず添付する。根拠のない提案は、ユーザーが承認/拒否の判断ができないだけでなく、Conatusへの信頼を損なう。
+> Situation: The user goal "Lose 3kg" has met its completion criteria and been completed by satisficing. The task queue is now empty.
+>
+> Learning feedback: The log shows that during tracking of this goal, "sleep hours" were indirectly correlated with weight change. However, sleep has never been set as a user goal.
+>
+> Curiosity proposal: "Looking at the log from your weight goal, weeks with 7+ hours of sleep showed a 1.4× faster rate of decrease. Would you consider tracking sleep quality and quantity as a goal?"
 
-**過去に拒否されたゴールの扱い。** ユーザーが一度拒否した好奇心ゴールは、最低N時間（デフォルト: 168時間=1週間）は再提案しない。同じ提案を繰り返すことはユーザーの意思を無視することになる。ただし、状況が大きく変化した場合（拒否時と比べて関連指標が30%以上変化など）は例外とする。
+What matters is that the proposal's rationale is grounded in the experience log. It is not "sleep is generally important" — it is "this correlation was found in this user's observation history."
+
+### Example 2: Goal Redefinition Proposal from Repeated Failures
+
+> Situation: For the goal "Increase new customer acquisition to 30 per month," three types of approaches (increased ad spend, content expansion, referral campaigns) have each shown no results for 3+ loops on the "lead acquisition count" dimension. Stall detection has already flagged the stall.
+>
+> Curiosity judgment: This may be a goal-structure-level problem rather than a task-level problem. The dimension setting of "lead acquisition count" itself may not be covering the actual bottleneck.
+>
+> Curiosity proposal: "Three types of approaches have shown no effect. There may be room to revisit the goal's decomposition. Proposal: split the dimension from 'lead acquisition count' into 'lead-to-meeting conversion rate' and 'lead quality score,' and re-measure where the real gap is."
+
+In this case, the proposal is a redefinition of an existing goal, not a new goal proposal. After redefinition, the Advisor will configure the dimensions and thresholds afresh.
+
+### Example 3: Cross-Goal Transfer
+
+> Situation:
+> - Dimension "search hit rate" of Goal A "Organize internal documentation" has been stalled for 3 loops
+> - Goal B "Improve customer support efficiency" has a record of "FAQ tag restructuring" improving the search hit rate by 40%
+>
+> Curiosity judgment: The FAQ tagging methodology from Goal B may be transferable to the internal document search of Goal A. The challenge structure ("low search hit rate = tag and categorization design problem") is a match.
+>
+> Curiosity proposal: "Would you like to generate a task to apply the FAQ tag restructuring approach that worked for Goal B to the internal document search of Goal A?"
+
+### Example 4: Blind Spot Detection in Periodic Exploration
+
+> Situation: The user's active goals are "Improve product development speed" and "Reduce customer churn rate." Periodic exploration timing (72 hours).
+>
+> Curiosity analysis: The churn rate goal tracks "onboarding completion rate" as a dimension, but "usage frequency within 30 days after onboarding completion" has never been observed. This metric is generally known to correlate highly with churn prediction, and it is one step adjacent to the user's goal structure.
+>
+> Curiosity proposal: "There is a metric not being observed in your churn rate goal: usage frequency within 30 days of onboarding completion. Would you like to start tracking it?"
+
+---
+
+## Design Notes
+
+**Curiosity is also a safety net for the system.** Important goals the user couldn't explicitly set, blind spots that only become apparent as experience accumulates, goal structure problems visible only through task failures — these cannot be designed for in advance. The curiosity mechanism supplements them after the fact.
+
+**Explicit rationale for proposals is mandatory.** Every curiosity goal proposal must include the basis for "why this is being proposed" (which log or pattern it is based on). A proposal without rationale not only makes it impossible for the user to approve or decline — it also erodes trust in Conatus.
+
+**Handling previously declined goals.** A curiosity goal that the user has once declined will not be re-proposed for at least N hours (default: 168 hours = 1 week). Repeating the same proposal ignores the user's stated preference. However, if the situation has changed significantly (e.g., a relevant metric has changed by 30% or more compared to when the goal was declined), this may be treated as an exception.

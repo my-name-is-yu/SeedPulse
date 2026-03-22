@@ -1,188 +1,188 @@
-# ゴールツリー設計
+# Goal Tree Design
 
-> 関連: `portfolio-management.md`, `gap-calculation.md`, `satisficing.md`, `drive-scoring.md`, `session-and-context.md`
-
----
-
-## 1. 概要
-
-ゴールツリーは**N層ゴール自動分解システム**だ。曖昧な上位ゴールを具体的なサブゴールに再帰的に分解し、各ノードで独立したタスク発見ループを実行する。
-
-```
-ユーザーゴール（root）
-  │
-  ├── サブゴールA（depth 1）
-  │     ├── サブゴールA-1（depth 2 / leaf）
-  │     └── サブゴールA-2（depth 2 / leaf）
-  │
-  └── サブゴールB（depth 1）
-        └── サブゴールB-1（depth 2 / leaf）
-```
-
-**分解の目的**: 抽象的な上位ゴールをそのままタスク発見ループに渡すと、LLMが具体的なタスクを生成できない。ゴールツリーは「ゴールの曖昧さ」をコアループの外で解消し、leafノードに至るまで各レベルが独立して追跡可能な形に変換する。
+> Related: `portfolio-management.md`, `gap-calculation.md`, `satisficing.md`, `drive-scoring.md`, `session-and-context.md`
 
 ---
 
-## 2. データモデル
+## 1. Overview
 
-### 2.1 ゴールノード
+The goal tree is an **N-layer automatic goal decomposition system**. It recursively decomposes ambiguous top-level goals into concrete sub-goals, running an independent task discovery loop at each node.
+
+```
+User goal (root)
+  │
+  ├── Sub-goal A (depth 1)
+  │     ├── Sub-goal A-1 (depth 2 / leaf)
+  │     └── Sub-goal A-2 (depth 2 / leaf)
+  │
+  └── Sub-goal B (depth 1)
+        └── Sub-goal B-1 (depth 2 / leaf)
+```
+
+**Purpose of decomposition**: Passing an abstract top-level goal directly to the task discovery loop prevents the LLM from generating concrete tasks. The goal tree resolves "goal ambiguity" outside the core loop and transforms goals into a form where each level is independently trackable down to the leaf nodes.
+
+---
+
+## 2. Data Model
+
+### 2.1 Goal Node
 
 ```
 GoalNode {
-  id: string                        // 一意識別子
-  parent_id: string | null          // 親ゴールのID（nullはroot）
-  root_id: string                   // ルートゴールのID
-  depth: number                     // ツリーの深さ（rootは0）
+  id: string                        // Unique identifier
+  parent_id: string | null          // Parent goal ID (null for root)
+  root_id: string                   // Root goal ID
+  depth: number                     // Depth in the tree (root is 0)
 
-  goal_definition: GoalDefinition   // 次元・閾値・制約
-  specificity_score: number         // 具体性スコア（0.0〜1.0）
-  is_leaf: boolean                  // 子ノードが存在しないか
+  goal_definition: GoalDefinition   // Dimensions, thresholds, constraints
+  specificity_score: number         // Specificity score (0.0–1.0)
+  is_leaf: boolean                  // Whether child nodes exist
 
-  state: GoalNodeState              // 現在の状態（§2.2）
-  pruned_reason: PrunedReason | null // 剪定理由（§4）
+  state: GoalNodeState              // Current state (§2.2)
+  pruned_reason: PrunedReason | null // Reason for pruning (§4)
 
   created_at: DateTime
   decomposed_at: DateTime | null
   completed_at: DateTime | null
 
-  children: string[]                // 子ゴールIDリスト
-  loop_state: LoopState | null      // leafノードのループ状態（§5）
+  children: string[]                // List of child goal IDs
+  loop_state: LoopState | null      // Loop state for leaf nodes (§5)
 }
 ```
 
-### 2.2 ノードの状態遷移
+### 2.2 Node State Transitions
 
 ```
 pending → decomposing → active → completed
                      → pruned
 ```
 
-| 状態 | 意味 |
-|------|------|
-| `pending` | 作成されたが、具体性評価・分解がまだ |
-| `decomposing` | LLMによる分解中 |
-| `active` | 追跡中（leafは独立ループ実行中、非leafは子ゴールの状態集約中） |
-| `completed` | 完了判定済み |
-| `pruned` | 剪定済み（§4参照） |
+| State | Meaning |
+|-------|---------|
+| `pending` | Created, but specificity evaluation and decomposition not yet done |
+| `decomposing` | Being decomposed by LLM |
+| `active` | Being tracked (leaf: running its own loop; non-leaf: aggregating child goal states) |
+| `completed` | Completion judgment finalized |
+| `pruned` | Pruned (see §4) |
 
 ---
 
-## 3. 分解ロジック（Phase 1 / Stage 14B）
+## 3. Decomposition Logic (Phase 1 / Stage 14B)
 
-### 3.1 分解フロー
+### 3.1 Decomposition Flow
 
 ```
-ゴールノード（pending）
+Goal node (pending)
     │
     ↓
-具体性スコア評価（LLM）
+Specificity score evaluation (LLM)
     │
     ├── specificity_score >= min_specificity (0.7)
-    │     → leafノードとして確定。ループ開始
+    │     → Finalized as leaf node. Loop starts.
     │
     └── specificity_score < min_specificity (0.7)
           │
           ↓
     depth < max_depth (5) ?
           │
-          ├── Yes → LLMによるサブゴール生成（§3.2）
+          ├── Yes → Generate sub-goals via LLM (§3.2)
           │
-          └── No  → 強制的にleafとして確定（分解打ち切り）
+          └── No  → Forced leaf finalization (decomposition halted)
 ```
 
-### 3.2 LLMへの入力
+### 3.2 LLM Input
 
-分解プロンプトに含める情報:
+Information to include in the decomposition prompt:
 
-**必須入力**:
-- 分解対象ゴールの定義（仮説・文脈・制約）
-- 親ゴールの定義（rootまで遡った制約の連鎖）
-- 既存の次元リスト（重複サブゴールを防ぐ）
-- 現在の depth と max_depth（「あと何段階まで分解できるか」をLLMに伝える）
+**Required inputs**:
+- Definition of the goal to be decomposed (hypothesis, context, constraints)
+- Parent goal definitions (chain of constraints traced back to root)
+- Existing dimension list (to prevent duplicate sub-goals)
+- Current depth and max_depth (to inform the LLM of "how many more levels it can decompose into")
 
-**出力フォーマット**:
+**Output format**:
 
 ```
 [
   {
-    hypothesis: string,         // このサブゴールが解決しようとすること
-    dimensions: Dimension[],    // 次元と閾値
-    constraints: Constraint[],  // このサブゴールに固有の制約
-    expected_specificity: number // 分解後の想定具体性スコア
+    hypothesis: string,         // What this sub-goal aims to solve
+    dimensions: Dimension[],    // Dimensions and thresholds
+    constraints: Constraint[],  // Constraints specific to this sub-goal
+    expected_specificity: number // Expected specificity score after decomposition
   }
 ]
 ```
 
-### 3.3 分解結果の検証
+### 3.3 Validating Decomposition Results
 
-LLM出力を受け取った後、以下の検証を実施する。
+After receiving the LLM output, perform the following validations.
 
-**カバレッジ検証**: 生成されたサブゴール群を合わせると、親ゴールの全次元をカバーするか（LLMに再評価させる）。
+**Coverage validation**: Do the generated sub-goals collectively cover all dimensions of the parent goal? (Have the LLM re-evaluate.)
 
-**次元整合性チェック**: 子ゴールの次元が親ゴールの次元と整合しているか（方向・スケールの一致）。
+**Dimension consistency check**: Are the child goal dimensions consistent with the parent goal dimensions (matching direction and scale)?
 
-**循環参照チェック**: GoalDependencyGraph を使用し、新しいサブゴールが既存のゴールと循環依存しないことを確認する。
+**Circular reference check**: Use GoalDependencyGraph to confirm that new sub-goals do not create circular dependencies with existing goals.
 
-### 3.4 設計上の決定
+### 3.4 Design Decisions
 
-| パラメータ | デフォルト値 | 理由 |
-|-----------|------------|------|
-| `min_specificity` | 0.7 | LLMの出力品質を考慮した保守的な値。0.6以下では具体的なタスクが生成できないケースが多い |
-| `max_depth` | 5 | 過分解を防ぐ。深さ5を超えると各ノードの意味が失われる傾向がある |
-| `max_children_per_node` | 5 | LLMが生成するサブゴールの上限。5以上は相互依存が複雑になる |
-
----
-
-## 4. 剪定
-
-### 4.1 剪定条件
-
-| 剪定理由 | 定義 |
-|---------|------|
-| `no_progress` | Nループ（デフォルト: ゴールの性質による、3〜10）以上ギャップが改善しない |
-| `superseded` | 上位ゴールの方針変更により、このノードの追求が不要になった |
-| `merged` | 他のサブゴールと実質的に同一と判断され、統合された |
-| `user_requested` | ユーザーが明示的に削除を指示した |
-
-### 4.2 剪定の影響
-
-剪定されたノードの allocation は、同一親ノードの兄弟ゴールに再分配される。兄弟ノードがすべて剪定済みの場合、親ノードにエスカレーションする。
-
-剪定はログに記録され、好奇心エンジンのフィードバック（`curiosity.md` §4.2）の材料になる。
+| Parameter | Default value | Rationale |
+|-----------|--------------|-----------|
+| `min_specificity` | 0.7 | Conservative value accounting for LLM output quality. Below 0.6, concrete tasks often cannot be generated. |
+| `max_depth` | 5 | Prevents over-decomposition. Beyond depth 5, each node tends to lose its meaningful scope. |
+| `max_children_per_node` | 5 | Upper limit on sub-goals generated by LLM. More than 5 creates complex interdependencies. |
 
 ---
 
-## 5. 状態集約と伝播
+## 4. Pruning
 
-### 5.1 下位→上位（集約）
+### 4.1 Pruning Conditions
 
-leafノードの完了・進捗状態を親ノードに集約する。
+| Pruning reason | Definition |
+|---------------|-----------|
+| `no_progress` | Gap has not improved for N loops (default: 3–10, depending on goal nature) |
+| `superseded` | The pursuit of this node is no longer needed due to a change in the parent goal's direction |
+| `merged` | Determined to be substantively identical to another sub-goal and consolidated |
+| `user_requested` | The user explicitly requested deletion |
 
-**ギャップ集約**: `satisficing.md` の SatisficingAggregation 方式に従う。デフォルトはボトルネック集約（min）。
+### 4.2 Impact of Pruning
+
+The allocation of a pruned node is redistributed to its sibling goals under the same parent node. If all sibling nodes are also pruned, the issue escalates to the parent node.
+
+Pruning is logged and becomes input for the curiosity engine's feedback (`curiosity.md` §4.2).
+
+---
+
+## 5. State Aggregation and Propagation
+
+### 5.1 Bottom-Up (Aggregation)
+
+The completion and progress state of leaf nodes is aggregated up to parent nodes.
+
+**Gap aggregation**: Follows the SatisficingAggregation method in `satisficing.md`. Default is bottleneck aggregation (min).
 
 ```
 parent_gap = aggregate(children_gaps, method)
 
 method:
-  "min"          → 最も進んでいない子ゴールのギャップ（ボトルネック）
-  "avg"          → 全子ゴールの加重平均
-  "max"          → 最もギャップが大きい子ゴール
-  "all_required" → 全子ゴールが完了しなければ親も完了しない
+  "min"          → gap of the least-progressed child goal (bottleneck)
+  "avg"          → weighted average across all child goals
+  "max"          → gap of the child goal with the largest gap
+  "all_required" → parent does not complete until all children complete
 ```
 
-**confidence集約**: 子ゴール群の confidence の最小値を採用する（保守的）。
+**Confidence aggregation**: The minimum confidence value among child goals is adopted (conservative).
 
 ```
 parent_confidence = min(children_confidence)
 ```
 
-### 5.2 上位→下位（伝播）
+### 5.2 Top-Down (Propagation)
 
-親ゴールの変更を子ゴールに伝播する。
+Changes to a parent goal are propagated to child goals.
 
-**制約の追加・変更**: 親ゴールの制約が更新された場合、全子ゴールに即座に伝播する。子ゴールのタスク生成前に制約チェックを再実行する。
+**Adding or changing constraints**: When a parent goal's constraints are updated, they are immediately propagated to all child goals. The constraint check is re-run before task generation for child goals.
 
-**締切の比例調整**: 親ゴールの締切が変更された場合、子ゴールの締切を比例調整する。
+**Proportional deadline adjustment**: When a parent goal's deadline changes, child goal deadlines are adjusted proportionally.
 
 ```
 child_new_deadline =
@@ -191,42 +191,42 @@ child_new_deadline =
 
 ---
 
-## 6. 完了判定
+## 6. Completion Determination
 
-### 6.1 leafノードの完了
+### 6.1 Leaf Node Completion
 
-leafノードは `satisficing.md` の通常の完了判定フロー（threshold達成 + SatisficingJudgeの確認）によって完了する。
+A leaf node completes via the normal completion determination flow in `satisficing.md` (threshold met + SatisficingJudge confirmation).
 
-### 6.2 非leafノードの完了
+### 6.2 Non-leaf Node Completion
 
 ```
-全子ゴールが "completed" or "pruned(merged)" 状態
+All child goals are in "completed" or "pruned(merged)" state
     │
     ↓
-親ゴールの各次元の集約ギャップを計算
+Calculate the aggregated gap of each parent goal dimension
     │
     ↓
-集約ギャップが閾値を満たすか確認
+Confirm whether the aggregated gap meets the threshold
     │
-    ├── Yes → 親ゴールの完了判定トリガー
-    └── No  → 追加のサブゴール生成を検討
+    ├── Yes → Trigger parent goal completion determination
+    └── No  → Consider generating additional sub-goals
 ```
 
-完了判定は leaf から root に向かって連鎖的に伝播する（leaf → depth N-1 → ... → root）。
+Completion determination propagates in a chain from leaf to root (leaf → depth N-1 → ... → root).
 
 ---
 
-## 7. ループ並列実行（Phase 1 / Stage 14C）
+## 7. Parallel Loop Execution (Phase 1 / Stage 14C)
 
-### 7.1 leafノードのループ起動
+### 7.1 Launching Loops for Leaf Nodes
 
-leafノードが確定した時点で、独立したタスク発見ループを起動する。各leafノードは独立したループ状態（LoopState）を持つ。
+When a leaf node is finalized, an independent task discovery loop is started. Each leaf node has its own independent loop state (LoopState).
 
 ```
-leafノード確定
+Leaf node finalized
     │
     ↓
-LoopState 初期化
+Initialize LoopState
     │
     ├── loop_iteration: 0
     ├── last_gap_snapshot: null
@@ -234,92 +234,92 @@ LoopState 初期化
     └── stall_count: 0
 ```
 
-### 7.2 並列実行の制御
+### 7.2 Controlling Parallel Execution
 
-同時に実行するループ数を `parallel_loop_limit`（デフォルト: 3）で制御する。
+The number of loops running simultaneously is controlled by `parallel_loop_limit` (default: 3).
 
-**ノード選択アルゴリズム**:
+**Node selection algorithm**:
 
 ```
-1. 全 active leaf ノードを収集
-2. 各ノードのスコアを計算:
+1. Collect all active leaf nodes
+2. Calculate a score for each node:
      score = gap_magnitude × depth_weight × (1 / dependency_penalty)
-     depth_weight = 1 / (depth + 1)  // 深いノードほど優先度を下げる
-     dependency_penalty = blocked_by_count + 1  // 依存ブロック数
-3. スコア上位 parallel_loop_limit 個のノードをアクティブ実行
-4. 残りは waiting 状態で待機
+     depth_weight = 1 / (depth + 1)  // lower priority for deeper nodes
+     dependency_penalty = blocked_by_count + 1  // number of dependency blocks
+3. Activate the top parallel_loop_limit nodes by score
+4. The rest wait in waiting state
 ```
 
-### 7.3 MVP: ラウンドロビン式の擬似並列
+### 7.3 MVP: Round-Robin Pseudo-Parallelism
 
-MVP では真の並列実行ではなく、1イテレーションで1ノードを処理するラウンドロビン式を採用する。
+In MVP, rather than true parallel execution, a round-robin approach is used, processing one node per iteration.
 
 ```
 loop iteration:
-  1. active_nodes のうち、最も長く待たされているノードを選択
-  2. そのノードの1サイクル（observe → gap → score → task）を実行
-  3. 次のノードへ
+  1. Among active_nodes, select the one that has been waiting longest
+  2. Execute one cycle for that node (observe → gap → score → task)
+  3. Move to the next node
 ```
 
-これにより、並列実行の複雑さ（レースコンディション・状態競合）を避けながら、複数ノードを均等に進行させる。
+This avoids the complexity of true parallel execution (race conditions, state contention) while advancing multiple nodes evenly.
 
-### 7.4 設計上の決定
+### 7.4 Design Decisions
 
-| パラメータ | デフォルト値 | 理由 |
-|-----------|------------|------|
-| `parallel_loop_limit` | 3 | リソース制約（LLMコスト・エージェントセッション）と品質のバランス |
+| Parameter | Default value | Rationale |
+|-----------|--------------|-----------|
+| `parallel_loop_limit` | 3 | Balance between resource constraints (LLM cost, agent sessions) and quality |
 
 ---
 
-## 8. 既存設計との統合
+## 8. Integration with Existing Design
 
-### 8.1 GoalDependencyGraph との関係
+### 8.1 Relationship with GoalDependencyGraph
 
-`goal-dependency.md` の GoalDependencyGraph を、ゴールツリーのノード間依存管理に使用する。
+The GoalDependencyGraph from `goal-dependency.md` is used to manage dependencies between goal tree nodes.
 
-- ゴールツリーの親子関係は `parent_child` 型の依存として登録する
-- クロスブランチの依存（例: サブゴールA-1 が サブゴールB-1 の完了を前提とする）も `prerequisite` 型で登録できる
-- 循環参照検出は GoalDependencyGraph の既存ロジックを流用する
+- Parent-child relationships in the goal tree are registered as `parent_child` type dependencies
+- Cross-branch dependencies (e.g., Sub-goal A-1 requires Sub-goal B-1 to complete first) can also be registered as `prerequisite` type
+- Circular reference detection reuses the existing logic of GoalDependencyGraph
 
-### 8.2 PortfolioManager との関係
+### 8.2 Relationship with PortfolioManager
 
-各leafノードは独立した Portfolio を持つ（戦略管理の単位が leafゴール）。非leafノードはポートフォリオを持たず、子ゴールの状態集約のみを行う。
+Each leaf node has its own Portfolio (the strategy management unit is the leaf goal). Non-leaf nodes do not have portfolios; they only aggregate child goal states.
 
-### 8.3 KnowledgeManager との関係
+### 8.3 Relationship with KnowledgeManager
 
-ゴール分解の結果（どのサブゴールが生成されたか、どの分解が効果的だったか）は KnowledgeManager に記録される。類似ゴールの分解時に参照される（`learning-pipeline.md` §3 参照）。
+The results of goal decomposition (which sub-goals were generated, which decompositions were effective) are recorded in KnowledgeManager. They are referenced when decomposing similar goals in the future (see `learning-pipeline.md` §3).
 
 ---
 
 ## 9. MVP vs Phase 2
 
-### MVP（Phase 1 / Stage 14B-C）
+### MVP (Phase 1 / Stage 14B-C)
 
-| 項目 | MVP仕様 |
-|------|---------|
-| 分解の自動化 | LLMによる自動分解（ユーザー確認付き） |
-| 並列実行 | ラウンドロビン式（真の並列なし） |
-| 状態集約 | ボトルネック集約（min）固定 |
-| 剪定 | `no_progress` と `user_requested` のみ自動。その他は手動 |
-| ループ並列上限 | 3 |
+| Item | MVP specification |
+|------|-----------------|
+| Decomposition automation | Automatic LLM decomposition (with user confirmation) |
+| Parallel execution | Round-robin (no true parallelism) |
+| State aggregation | Bottleneck aggregation (min) fixed |
+| Pruning | Only `no_progress` and `user_requested` are automatic. Others are manual. |
+| Parallel loop limit | 3 |
 
 ### Phase 2
 
-| 項目 | Phase 2仕様 |
-|------|------------|
-| 並列実行 | 真の並列実行（非同期ループ） |
-| 状態集約 | 集約メソッドをノードごとに設定可能 |
-| 剪定 | 全4条件の自動判断 |
-| ダイナミックリバランス | leafノードのスコア変化に応じてラウンドロビンの配分を動的調整 |
+| Item | Phase 2 specification |
+|------|----------------------|
+| Parallel execution | True parallel execution (async loops) |
+| State aggregation | Aggregation method configurable per node |
+| Pruning | Automatic judgment for all 4 conditions |
+| Dynamic rebalancing | Dynamically adjust round-robin allocation based on changes in leaf node scores |
 
 ---
 
-## 設計原則のまとめ
+## Summary of Design Principles
 
-| 原則 | 具体的な設計決定 |
-|------|----------------|
-| 分解は具体性が出るまで | min_specificity 未満ならLLMが分解。max_depth で強制停止 |
-| 集約は保守的に | confidence は最小値、デフォルト集約はボトルネック（min） |
-| 完了は連鎖的に | leaf から root へ順番に完了を伝播 |
-| 並列は制限付きで | parallel_loop_limit でリソース消費を制御 |
-| MVPは擬似並列 | ラウンドロビンで複雑さを回避しながら複数ノードを進める |
+| Principle | Concrete design decision |
+|-----------|------------------------|
+| Decompose until specific enough | LLM decomposes when below min_specificity. Hard stop at max_depth. |
+| Aggregate conservatively | Confidence uses minimum value; default aggregation is bottleneck (min). |
+| Completion propagates in a chain | Completion propagates from leaf to root in order. |
+| Parallelism is bounded | Resource consumption controlled by parallel_loop_limit. |
+| MVP uses pseudo-parallelism | Round-robin advances multiple nodes while avoiding complexity. |

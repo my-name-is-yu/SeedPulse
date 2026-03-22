@@ -1,38 +1,38 @@
-# マルチエージェント委譲設計
+# Multi-Agent Delegation Design
 
-> Issue #33。Conatusが単一のタスクを複数エージェントに役割分担して委譲する仕組みを定義する。
-> 基本方針: **適切なロールを定義し、適切なケイパビリティに委譲する。ロールはドメイン非依存で拡張可能。**
+> Issue #33. Defines how Conatus delegates a single task across multiple agents with divided responsibilities.
+> Core principle: **Define appropriate roles and delegate to appropriate capabilities. Roles are domain-agnostic and extensible.**
 
 ---
 
-## 1. コアコンセプト: TaskRole（タスクロール）
+## 1. Core Concept: TaskRole
 
-**「適切なエージェントを選ぶのではなく、適切な役割を与え、適切なケイパビリティに委譲する。」**
+**"Rather than selecting the right agent, assign the right role and delegate to the right capability."**
 
-ロールとは「プロンプトコンテキスト + 実行設定」の組み合わせだ。同じアダプタ（例: `claude_code_cli`）でも、与えるロールによって振る舞いが変わる。新しいアダプタ型は不要——ロールはアダプタと直交する概念だ。
+A role is a combination of "prompt context + execution configuration." The same adapter (e.g., `claude_code_cli`) behaves differently depending on the role assigned to it. No new adapter types are required — roles are orthogonal to adapters.
 
 ```typescript
 type TaskRole = "implementor" | "reviewer" | "verifier" | "researcher";
 ```
 
-| ロール | 責務 | コンテキスト共有 |
-|--------|------|----------------|
-| `implementor` | タスクを実行する（コード変更・API呼び出し・アクション） | タスク定義 + スコープ境界 + 事前観測コンテキスト |
-| `verifier` | 機械的検証を実行する（テスト・lint・API応答確認） | タスク定義 + 成果物アクセス手段 |
-| `reviewer` | 成果物を独立評価する（品質・意味的整合性） | 成功基準 + 成果物のみ（実行コンテキスト**なし**） |
-| `researcher` | 事前コンテキスト収集と知識獲得 | タスク定義 + ドメイン知識 + 既存観測結果 |
+| Role | Responsibility | Context sharing |
+|------|---------------|----------------|
+| `implementor` | Execute the task (code changes, API calls, actions) | Task definition + scope boundaries + pre-execution observation context |
+| `verifier` | Run mechanical verification (tests, lint, API response checks) | Task definition + access to artifacts |
+| `reviewer` | Independently evaluate artifacts (quality, semantic consistency) | Success criteria + artifacts only (**no** execution context) |
+| `researcher` | Gather pre-execution context and acquire knowledge | Task definition + domain knowledge + existing observation results |
 
-`reviewer` が実行コンテキストを受け取らないのは、既存設計書（`task-lifecycle.md` §5 Layer 2）の意図通りだ。バイアスのない評価を保証する。`researcher` は `implementor` に先立ち、必要な知識・コンテキストを収集してパイプラインの `shared_context` に注入する。
+The `reviewer` receives no execution context — this is intentional as per the existing design (`task-lifecycle.md` §5 Layer 2), ensuring unbiased evaluation. The `researcher` runs before the `implementor`, collecting the knowledge and context it needs and injecting it into the pipeline's `shared_context`.
 
-ロールは拡張可能だ。将来の候補として `deployer`（デプロイ委譲）、`monitor`（継続監視）、`notifier`（通知送信）がある。拡張手順は§9を参照。
+Roles are extensible. Future candidates include `deployer` (deploy delegation), `monitor` (continuous monitoring), and `notifier` (sending notifications). See §9 for the extension procedure.
 
 ---
 
-## 2. スキーマ定義
+## 2. Schema Definitions
 
-### TaskDomain（`src/types/pipeline.ts`）
+### TaskDomain (`src/types/pipeline.ts`)
 
-タスクの対象ドメインを表す。`observeForTask()` の収集戦略とパイプラインのケイパビリティマッチングに使用する。
+Represents the target domain of a task. Used by `observeForTask()` to determine collection strategy and by pipeline capability matching.
 
 ```typescript
 import { z } from "zod";
@@ -43,7 +43,7 @@ export const TaskDomainSchema = z.enum([
 export type TaskDomain = z.infer<typeof TaskDomainSchema>;
 ```
 
-### TaskPipeline（`src/types/pipeline.ts`）
+### TaskPipeline (`src/types/pipeline.ts`)
 
 ```typescript
 export const TaskRoleSchema = z.enum(["implementor", "reviewer", "verifier", "researcher"]);
@@ -53,7 +53,7 @@ export const PipelineStageSchema = z.object({
   role: TaskRoleSchema,
   capability_requirement: z.object({
     domain: TaskDomainSchema,
-    preferred_adapter: z.string().optional(), // 強い選好があれば指定
+    preferred_adapter: z.string().optional(), // specify if there is a strong preference
   }).optional(),
   prompt_override: z.string().optional(),
 });
@@ -63,7 +63,7 @@ export const TaskPipelineSchema = z.object({
   stages: z.array(PipelineStageSchema).min(1),
   fail_fast: z.boolean().default(true),
   shared_context: z.string().optional(),
-  strategy_id: z.string().optional(), // このパイプラインが属する戦略ID
+  strategy_id: z.string().optional(), // strategy this pipeline belongs to
 });
 export type TaskPipeline = z.infer<typeof TaskPipelineSchema>;
 
@@ -98,9 +98,9 @@ export const ImpactAnalysisSchema = z.object({
 export type ImpactAnalysis = z.infer<typeof ImpactAnalysisSchema>;
 ```
 
-### TaskGroup（`src/types/task-group.ts`）
+### TaskGroup (`src/types/task-group.ts`)
 
-複雑なタスクをサブタスク群に分解する。LLMが単一タスク vs TaskGroup を判断する。
+Breaks a complex task down into a set of subtasks. The LLM decides whether to use a single task or a TaskGroup.
 
 ```typescript
 import { z } from "zod";
@@ -120,252 +120,252 @@ export type TaskGroup = z.infer<typeof TaskGroupSchema>;
 
 ---
 
-## 3. ObservationEngine: ドメイン別タスクスコープ観測
+## 3. ObservationEngine: Domain-Specific Task Scope Observation
 
-### `observeForTask(task, domain)` — 事前コンテキスト収集
+### `observeForTask(task, domain)` — Pre-execution context collection
 
-`TaskDomain` に応じて収集戦略を切り替える。
+Switches collection strategy based on `TaskDomain`.
 
 ```typescript
 async observeForTask(task: AgentTask, domain: TaskDomain): Promise<TaskObservationContext>
 ```
 
-| ドメイン | 収集内容 |
-|----------|----------|
-| `code` | 対象ファイル・関連テスト・依存モジュール（importグラフ1段） |
-| `data` | データソース・スキーマ・前回観測値 |
-| `api_action` | エンドポイント仕様・レート制限・認証状態 |
-| `research` | 既知の知識（KnowledgeManager）・未解決の問いリスト |
-| `monitoring` | 現在のメトリクス値・アラート閾値・直近の変化傾向 |
-| `communication` | 受信者コンテキスト・メッセージ履歴 |
+| Domain | What is collected |
+|--------|------------------|
+| `code` | Target files, related tests, dependency modules (1-hop import graph) |
+| `data` | Data sources, schemas, previous observation values |
+| `api_action` | Endpoint specs, rate limits, authentication status |
+| `research` | Known knowledge (KnowledgeManager), list of unresolved questions |
+| `monitoring` | Current metric values, alert thresholds, recent trend |
+| `communication` | Recipient context, message history |
 
-コンテキスト共有ルール:
-- `implementor` と `researcher` が観測コンテキストを受け取る
-- `verifier` / `reviewer` には渡さない（バイアス防止）
+Context sharing rules:
+- `implementor` and `researcher` receive the observation context
+- `verifier` / `reviewer` do not (to prevent bias)
 
 ---
 
-## 4. PipelineExecutor: 動的オーケストレーションルール
+## 4. PipelineExecutor: Dynamic Orchestration Rules
 
-### タスクサイズ別パイプライン構成
+### Pipeline configuration by task size
 
-| タスクサイズ | パイプライン | 説明 |
-|------------|------------|------|
-| Small（1ファイル、軽微変更） | `implementor` のみ | 既存 `runTaskCycle()` と同等 |
-| Medium（1ファイル、6行以上） | `implementor → verifier` | 機械的検証を追加 |
-| Large（複数ファイル or TaskGroup） | `researcher → implementor(並列) → verifier → reviewer` | researcher が事前コンテキスト収集; ファイル所有権 + shared_context |
+| Task size | Pipeline | Description |
+|-----------|----------|-------------|
+| Small (1 file, minor changes) | `implementor` only | Equivalent to the existing `runTaskCycle()` |
+| Medium (1 file, 6+ lines) | `implementor → verifier` | Adds mechanical verification |
+| Large (multiple files or TaskGroup) | `researcher → implementor(parallel) → verifier → reviewer` | researcher gathers pre-execution context; file ownership + shared_context |
 
-LLM がタスク生成時にサイズを判断し、適切なパイプラインを付与する。
+The LLM assesses size at task generation time and assigns the appropriate pipeline.
 
-### Plan Approval Gate（Large タスク向け）
+### Plan Approval Gate (for Large tasks)
 
-Large タスクの `implementor` ステージは2サブフェーズに分かれる:
+The `implementor` stage of a Large task is split into two sub-phases:
 
-1. **plan** — implementor が実行計画を生成（読み取りのみ、変更なし）
-2. Conatus が計画を戦略仮説と照合し、承認/却下を判断
-3. **execute** — 承認された計画を implementor が実行
+1. **plan** — the implementor generates an execution plan (read-only, no changes)
+2. Conatus compares the plan against the strategy hypothesis and decides to approve or reject
+3. **execute** — the approved plan is executed by the implementor
 
-自動承認条件: アダプタの `trust_score >= 20`（高信頼境界）の場合、計画承認を自動化できる。それ以外は `EthicsGate` 経由で人間承認を要求する。
+Auto-approval condition: if the adapter's `trust_score >= 20` (high-trust boundary), plan approval can be automated. Otherwise, human approval is requested via `EthicsGate`.
 
-### 3段階エスカレーション
+### Three-strike escalation
 
 ```
-Strike 1 → プロンプト調整して同ステージをリトライ（同アダプタ）
-Strike 2 → CapabilityRegistry から代替アダプタで再試行（利用可能な場合のみ）
-Strike 3 → EthicsGate の approval フロー経由で人間にエスカレーション
+Strike 1 → retry the same stage with adjusted prompt (same adapter)
+Strike 2 → retry with an alternative adapter from CapabilityRegistry (if available)
+Strike 3 → escalate to human via EthicsGate approval flow
 ```
 
-ステージ種別に応じた分岐:
-- `verifier` 連続失敗 → 環境問題と分類し、環境確認タスクを先に生成する
-- `reviewer` 失敗 → `task-lifecycle.md` §5 の L1/L2 矛盾解消ルールに従う
+Branch by stage type:
+- Consecutive `verifier` failures → classified as an environment issue; generate an environment-check task first
+- `reviewer` failure → follow the L1/L2 contradiction resolution rules from `task-lifecycle.md` §5
 
-### 不可逆操作ゲート
+### Irreversible action gate
 
-タスクに `irreversible: true` フラグが立っている場合、実行前に必ず承認を取る（既存 `EthicsGate` と統合）。マルチエージェントパイプラインでも例外なし。
+If a task has the `irreversible: true` flag, approval must be obtained before execution (integrated with the existing `EthicsGate`). No exceptions even in multi-agent pipelines.
 
-### パイプライン永続化
+### Pipeline persistence
 
-`PipelineExecutor` は各ステージ完了後に `PipelineState` を `StateManager` 経由でディスクに書き込む。再起動時に `CoreLoop` が `status: "interrupted"` のパイプラインを検出し、`current_stage_index` から再開する。
+`PipelineExecutor` writes `PipelineState` to disk via `StateManager` after each stage completes. On restart, `CoreLoop` detects pipelines with `status: "interrupted"` and resumes from `current_stage_index`.
 
-冪等性保証: ステージ実行前に `idempotency_key`（`${task_id}:${stage_index}:${attempt}`）が `completed_stages` に存在するかチェックし、存在すればスキップする。
+Idempotency guarantee: before executing a stage, check whether the `idempotency_key` (`${task_id}:${stage_index}:${attempt}`) already exists in `completed_stages`; if so, skip.
 
-### 戦略フィードバック
+### Strategy feedback
 
-パイプライン完了時に `strategy_id` が設定されている場合、`PortfolioManager.recordTaskResult()` を呼び出してパイプラインの verdict と各ステージ結果を渡す。これにより「仮説 → 実行 → 計測 → リバランス」のサイクルが閉じる。
+When a pipeline completes and `strategy_id` is set, call `PortfolioManager.recordTaskResult()` and pass the pipeline's verdict and per-stage results. This closes the "hypothesis → execute → measure → rebalance" cycle.
 
-### `TaskVerifier`: サイドエフェクト探索と確信度ラベル
+### `TaskVerifier`: Side-effect detection and confidence labeling
 
-`verifier` ステージ後に `ImpactAnalysis` を生成し、意図しない副作用を検出する。
+After the `verifier` stage, generate an `ImpactAnalysis` to detect unintended side effects.
 
 ```
 verdict: "pass" / "partial" / "fail"
-side_effects: ["テストY が破壊された", "型定義Zが変わった"]
+side_effects: ["test Y was broken", "type definition Z changed"]
 confidence: "confirmed" | "likely" | "uncertain"
 ```
 
-`confidence` ラベルは観測エンジンと同じ基準（`>=0.50` で verified、`<0.50` で self-reported）を使う。
+The `confidence` label uses the same criteria as the observation engine (`>=0.50` = verified, `<0.50` = self-reported).
 
 ---
 
-## 5. 実装フェーズ
+## 5. Implementation Phases
 
-### Phase 1（MVP）: 逐次パイプライン + ドメイン別観測 + 永続化 + 冪等性
+### Phase 1 (MVP): Sequential pipeline + domain-specific observation + persistence + idempotency
 
-**新規ファイル:**
-- `src/types/pipeline.ts` — TaskDomain, TaskRole, PipelineStage, TaskPipeline, StageResult, PipelineState, ImpactAnalysis（~100行）
-- `src/execution/pipeline-executor.ts` — 逐次ステージ実行 + エラーエスカレーション + 永続化 + 冪等性チェック（~200行）
+**New files:**
+- `src/types/pipeline.ts` — TaskDomain, TaskRole, PipelineStage, TaskPipeline, StageResult, PipelineState, ImpactAnalysis (~100 lines)
+- `src/execution/pipeline-executor.ts` — sequential stage execution + error escalation + persistence + idempotency check (~200 lines)
 
-**変更ファイル:**
-- `src/observation/observation-engine.ts` — `observeForTask()` に `domain: TaskDomain` パラメータ追加、ドメイン別収集戦略
-- `src/execution/task-lifecycle.ts` — `runPipelineTaskCycle()` を `runTaskCycle()` の隣に追加。既存 `runTaskCycle()` は変更しない
+**Modified files:**
+- `src/observation/observation-engine.ts` — add `domain: TaskDomain` parameter to `observeForTask()`, domain-specific collection strategies
+- `src/execution/task-lifecycle.ts` — add `runPipelineTaskCycle()` alongside `runTaskCycle()`. Existing `runTaskCycle()` is unchanged.
 
-**テスト:** `tests/execution/pipeline-executor.test.ts`
+**Tests:** `tests/execution/pipeline-executor.test.ts`
 
-`runPipelineTaskCycle()` の流れ:
+Flow of `runPipelineTaskCycle()`:
 
 ```
-1. selectTargetDimension()     <- 既存ロジック（変更なし）
-2. generateTask()              <- pipeline フィールド付きで生成
-3. observeForTask(task, domain) <- ドメイン別事前コンテキスト収集
-4. runPreExecutionChecks()     <- 既存ロジック（変更なし、不可逆ゲート含む）
-5. PipelineExecutor.run()      <- ステージを逐次実行 + 永続化 + 冪等性
-6. handleVerdict()             <- 既存ロジック（変更なし）
+1. selectTargetDimension()     <- existing logic (unchanged)
+2. generateTask()              <- generated with a pipeline field
+3. observeForTask(task, domain) <- domain-specific pre-execution context collection
+4. runPreExecutionChecks()     <- existing logic (unchanged, includes irreversible gate)
+5. PipelineExecutor.run()      <- sequential stage execution + persistence + idempotency
+6. handleVerdict()             <- existing logic (unchanged)
 ```
 
-**後方互換性**: パイプラインはオプトイン。`pipeline` フィールドなしのタスクは既存 `runTaskCycle()` を使い続ける。
+**Backward compatibility**: Pipelines are opt-in. Tasks without a `pipeline` field continue to use the existing `runTaskCycle()`.
 
-### Phase 2: タスク分解 + 並列実行 + Plan Gate + 戦略フィードバック
+### Phase 2: Task decomposition + parallel execution + Plan Gate + strategy feedback
 
-**新規ファイル:**
-- `src/types/task-group.ts` — TaskGroup スキーマ（~30行）
-- `src/execution/parallel-executor.ts` — `Promise.all` + ファイル所有権チェック（~150行）
+**New files:**
+- `src/types/task-group.ts` — TaskGroup schema (~30 lines)
+- `src/execution/parallel-executor.ts` — `Promise.all` + file ownership check (~150 lines)
 
-**変更ファイル:**
-- `src/execution/task-generation.ts` — TaskGroup + plan 生成。LLM がタスク複雑度を評価し、単一タスク vs TaskGroup を決定
-- `src/core-loop.ts` — `runOneIteration()` が TaskGroup を検出し `ParallelExecutor` に渡す
-- `src/execution/pipeline-executor.ts` — Plan Approval Gate + 3段階エスカレーション + `strategy_id` フィードバック
+**Modified files:**
+- `src/execution/task-generation.ts` — TaskGroup + plan generation. LLM evaluates task complexity and decides between single task vs TaskGroup.
+- `src/core-loop.ts` — `runOneIteration()` detects TaskGroup and hands it to `ParallelExecutor`
+- `src/execution/pipeline-executor.ts` — Plan Approval Gate + three-strike escalation + `strategy_id` feedback
 
-**テスト:** `tests/execution/parallel-executor.test.ts`
+**Tests:** `tests/execution/parallel-executor.test.ts`
 
-### Phase 3: 自動パイプライン + サイドエフェクト検出 + 矛盾検出 + 耐障害性
+### Phase 3: Auto pipeline + side-effect detection + contradiction detection + fault tolerance
 
-**新規ファイル:**
-- `src/execution/result-reconciler.ts` — 並列結果の矛盾検出（~120行）
+**New files:**
+- `src/execution/result-reconciler.ts` — contradiction detection in parallel results (~120 lines)
 
-**変更ファイル:**
-- `src/execution/task-verifier.ts` — `ImpactAnalysis` 生成 + 忖度防止（別モデルインスタンス使用）
-- `src/execution/task-generation.ts` — タスクサイズ評価でパイプラインを自動構成
-- `src/execution/adapter-layer.ts` — ケイパビリティマッチング + サーキットブレーカー
-- `src/execution/parallel-executor.ts` — 同時実行セマフォ
+**Modified files:**
+- `src/execution/task-verifier.ts` — `ImpactAnalysis` generation + sycophancy mitigation (uses a different model instance)
+- `src/execution/task-generation.ts` — auto-configure pipeline based on task size evaluation
+- `src/execution/adapter-layer.ts` — capability matching + circuit breaker
+- `src/execution/parallel-executor.ts` — concurrency semaphore
 
-**テスト:** `tests/execution/result-reconciler.test.ts`
+**Tests:** `tests/execution/result-reconciler.test.ts`
 
 ---
 
-## 6. ファイル構成
+## 6. File Structure
 
 ```
 src/types/
-  pipeline.ts                    <- 新規 (~100行)
-  task-group.ts                  <- 新規 (~30行)
+  pipeline.ts                    <- new (~100 lines)
+  task-group.ts                  <- new (~30 lines)
 
 src/execution/
-  pipeline-executor.ts           <- 新規 (~200行)
-  parallel-executor.ts           <- 新規 (~150行)
-  result-reconciler.ts           <- 新規 (~120行)
-  task-lifecycle.ts              <- 変更 (runPipelineTaskCycle 追加)
-  task-generation.ts             <- 変更 (pipeline生成 + TaskGroup分解)
-  task-verifier.ts               <- 変更 (ImpactAnalysis + 忖度防止, Phase 3)
-  adapter-layer.ts               <- 変更 (capability matching + circuit breaker, Phase 3)
+  pipeline-executor.ts           <- new (~200 lines)
+  parallel-executor.ts           <- new (~150 lines)
+  result-reconciler.ts           <- new (~120 lines)
+  task-lifecycle.ts              <- modified (add runPipelineTaskCycle)
+  task-generation.ts             <- modified (pipeline generation + TaskGroup decomposition)
+  task-verifier.ts               <- modified (ImpactAnalysis + sycophancy mitigation, Phase 3)
+  adapter-layer.ts               <- modified (capability matching + circuit breaker, Phase 3)
 
 src/observation/
-  observation-engine.ts          <- 変更 (ドメイン別 observeForTask)
+  observation-engine.ts          <- modified (domain-specific observeForTask)
 
 tests/execution/
-  pipeline-executor.test.ts      <- 新規
-  parallel-executor.test.ts      <- 新規
-  result-reconciler.test.ts      <- 新規
+  pipeline-executor.test.ts      <- new
+  parallel-executor.test.ts      <- new
+  result-reconciler.test.ts      <- new
 ```
 
-全ファイルが500行制限内に収まる設計。
+All files are designed to stay within the 500-line limit.
 
 ---
 
-## 7. 主要設計判断
+## 7. Key Design Decisions
 
-| 判断 | 理由 | ビジョン根拠 |
-|------|------|-------------|
-| パイプラインはオプトイン | 既存の `runTaskCycle()` を壊さない | — |
-| 新アダプタ型不要 | ロールはプロンプトの差異。`IAdapter` インタフェースを変更しない | — |
-| `reviewer` へ実行コンテキストを渡さない | バイアスのない評価を保証（task-lifecycle.md §5 L2） | — |
-| `observeForTask` を `implementor` と `researcher` のみに渡す | `verifier`/`reviewer` に事前コンテキストを渡すとバイアスが生じる | — |
-| `file_ownership` でファイル競合防止 | 並列 implementor が同じファイルを編集すると結果が不定になる | — |
-| 矛盾検出はLLM | 意味的矛盾はルールベースで判断できない | — |
-| TaskGroup はLLMが判断 | タスク複雑度の評価はLLMに委ねる | — |
-| PipelineState 永続化 | 再起動・クラッシュをまたぐパイプライン継続 | vision §3「年単位で動き続ける」 |
-| TaskDomain 導入 | コード以外のドメイン（データ・API・監視等）に汎用化 | vision §5.7「外部世界の観測」 |
-| `capability_requirement` | 静的アダプタ指定でなく動的ケイパビリティマッチング | vision §5.3「Capability Registry」 |
-| `strategy_id` フィードバック | パイプライン結果を戦略効果計測に接続 | vision §5.4「Strategy Engine」 |
-| Plan Approval Gate | Large タスクの実行前に計画を検証し無駄な実行を防ぐ | vision §5.8「委譲レイヤー」品質制御 |
-| 3段階エスカレーション | 2-strike では長期稼働で通知疲れが発生する | vision §3「長期稼働での通知疲れ防止」 |
-
----
-
-## 8. 既存設計との接続
-
-本設計は `task-lifecycle.md` §5（3層検証）を完全に踏まえた拡張だ。
-
-- `verifier` ロール → Layer 1（機械的検証）に対応
-- `reviewer` ロール → Layer 2（タスクレビュアー）に対応
-- 既存の Layer 1/2 の矛盾解消ルール（§5 の表）は `result-reconciler.ts` で実装
-
-パイプラインが成熟した後、Phase 3 で既存 `task-verifier.ts` の L2 を `reviewer` ロール経由に統合する経路を残す。
-
-**戦略統合**: `strategy_id` フィードバックにより、`portfolio-management.md` の `Strategy` エンティティが持つ `hypothesis` → `effectiveness_score` のサイクルがパイプライン実行結果で閉じる。`PortfolioManager.recordTaskResult()` を介して自動的にリバランスがトリガーされる。
+| Decision | Rationale | Vision basis |
+|----------|-----------|-------------|
+| Pipelines are opt-in | Does not break the existing `runTaskCycle()` | — |
+| No new adapter types | Roles are prompt differences. `IAdapter` interface is not changed | — |
+| Do not pass execution context to `reviewer` | Ensures unbiased evaluation (task-lifecycle.md §5 L2) | — |
+| Pass `observeForTask` only to `implementor` and `researcher` | Passing pre-execution context to `verifier`/`reviewer` introduces bias | — |
+| `file_ownership` prevents file conflicts | Parallel implementors editing the same file produces indeterminate results | — |
+| Contradiction detection uses LLM | Semantic contradictions cannot be judged by rule-based logic | — |
+| LLM decides TaskGroup | Task complexity evaluation is delegated to the LLM | — |
+| `PipelineState` persistence | Pipeline continuity across restarts and crashes | vision §3 "running for years" |
+| `TaskDomain` introduced | Generalize beyond code to other domains (data, API, monitoring, etc.) | vision §5.7 "observing the external world" |
+| `capability_requirement` | Dynamic capability matching rather than static adapter assignment | vision §5.3 "Capability Registry" |
+| `strategy_id` feedback | Connect pipeline results to strategy effectiveness measurement | vision §5.4 "Strategy Engine" |
+| Plan Approval Gate | Validate the plan before executing Large tasks to prevent wasted execution | vision §5.8 "delegation layer" quality control |
+| Three-strike escalation | Two strikes causes notification fatigue in long-running operation | vision §3 "preventing notification fatigue in long-running operation" |
 
 ---
 
-## 9. ロール拡張ガイド
+## 8. Connection to Existing Design
 
-新しいロールを追加する手順:
+This design is a fully considered extension of `task-lifecycle.md` §5 (3-layer verification).
 
-1. **`TaskRoleSchema` に追加** — `src/types/pipeline.ts` の enum に新ロール文字列を追加
-2. **コンテキスト共有ルールを定義** — 新ロールが受け取る情報と受け取らない情報を§1のテーブルに追記
-3. **ドメイン別観測を追加** — `observeForTask()` で新ロールに必要な収集内容を定義（必要に応じて）
-4. **PipelineExecutor のステージディスパッチを更新** — 新ロールのステージ実行ロジックを追加
-5. **テストを追加** — `pipeline-executor.test.ts` に新ロールのユニットテスト
+- `verifier` role → corresponds to Layer 1 (mechanical verification)
+- `reviewer` role → corresponds to Layer 2 (task reviewer)
+- The existing L1/L2 contradiction resolution rules (table in §5) are implemented in `result-reconciler.ts`
 
-将来のロール候補:
+After the pipeline matures, a path is left open in Phase 3 to integrate the existing `task-verifier.ts` L2 through the `reviewer` role.
 
-| ロール | 責務 | 想定フェーズ |
-|--------|------|-------------|
-| `deployer` | 適切なシステムへのデプロイ委譲 | M14+ |
-| `monitor` | ウェアラブル・DB・API等の継続監視 | M14+ |
-| `notifier` | メッセージングシステムへの通知送信 | M14+ |
+**Strategy integration**: The `strategy_id` feedback closes the `hypothesis` → `effectiveness_score` cycle of the `Strategy` entity in `portfolio-management.md` using pipeline execution results. Rebalancing is automatically triggered via `PortfolioManager.recordTaskResult()`.
 
 ---
 
-## 10. 耐障害性パターン（Phase 3）
+## 9. Role Extension Guide
 
-### サーキットブレーカー
+Steps to add a new role:
 
-`AdapterLayer` にアダプタごとの連続失敗カウントを追加する。
+1. **Add to `TaskRoleSchema`** — add the new role string to the enum in `src/types/pipeline.ts`
+2. **Define context sharing rules** — add to the §1 table which information the new role receives and which it does not
+3. **Add domain-specific observation** — define what the new role needs collected in `observeForTask()` (if applicable)
+4. **Update PipelineExecutor stage dispatch** — add stage execution logic for the new role
+5. **Add tests** — add unit tests for the new role in `pipeline-executor.test.ts`
+
+Future role candidates:
+
+| Role | Responsibility | Expected phase |
+|------|---------------|----------------|
+| `deployer` | Delegate deployment to the appropriate system | M14+ |
+| `monitor` | Continuous monitoring of wearables, DB, APIs, etc. | M14+ |
+| `notifier` | Send notifications to messaging systems | M14+ |
+
+---
+
+## 10. Fault Tolerance Patterns (Phase 3)
+
+### Circuit Breaker
+
+Add a per-adapter consecutive failure count to `AdapterLayer`.
 
 ```
-closed → 5回連続失敗 → open → cooldown経過 → half_open → 成功 → closed
-                                             → 失敗 → open
+closed → 5 consecutive failures → open → cooldown elapsed → half_open → success → closed
+                                                           → failure → open
 ```
 
-`PipelineExecutor` はアダプタ選択時に `open` 状態のアダプタを除外する。`capability_requirement` に `preferred_adapter` が指定されていても、そのアダプタが `open` なら代替を選択する。
+`PipelineExecutor` excludes adapters in `open` state when selecting an adapter. Even if a `preferred_adapter` is specified in `capability_requirement`, if that adapter is `open`, an alternative is selected.
 
-### バックプレッシャー
+### Backpressure
 
-`parallel-executor.ts` にセマフォを組み込む。デフォルト `concurrency_limit = 3`。`CrossGoalPortfolio` の `allocation` 比率をウェイトとして使い、優先度の高いゴールから先にスロットを確保する。
+Embed a semaphore in `parallel-executor.ts`. Default `concurrency_limit = 3`. Use `CrossGoalPortfolio`'s `allocation` ratio as weights to reserve slots for higher-priority goals first.
 
-### 忖度防止（Sycophancy Mitigation）
+### Sycophancy Mitigation
 
-L2 `reviewer` は `implementor` と異なるモデルインスタンス/プロバイダを使用する。同一モデルが自分の出力を評価すると、確証バイアスにより品質が低下するリスクがある（CONSENSAGENT, ACL 2025）。
+The L2 `reviewer` uses a different model instance/provider than the `implementor`. When the same model evaluates its own output, confirmation bias degrades quality (CONSENSAGENT, ACL 2025).
 
-### イベントソース拡張（将来パス）
+### Event Source Extension (Future Path)
 
-`PipelineState` のスナップショット永続化は、将来的に完全な不変イベントログへ拡張できる。各ステージの開始・完了・失敗をイベントとして記録し、任意の時点からのリプレイを可能にする。Phase 3 の範囲では `PipelineState` スナップショットで十分だが、拡張パスを閉じない設計にする。
+The `PipelineState` snapshot persistence can be extended in the future into a full immutable event log. Each stage's start, completion, and failure would be recorded as events, enabling replay from any point in time. For Phase 3, `PipelineState` snapshots are sufficient, but the design leaves this extension path open.

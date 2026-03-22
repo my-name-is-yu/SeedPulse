@@ -1,67 +1,67 @@
-# 仮説検証メカニズム設計
+# Hypothesis Verification Mechanism Design
 
-> AutoResearchClawのPIVOT/REFINE決定ループ・自己学習・収束検出からインスパイアされた3つの設計改善案。
-> Conatusのオーケストレーションループをより自律的・適応的にする。
-
----
-
-## 背景
-
-### AutoResearchClawとは
-
-[AutoResearchClaw](https://github.com/aiming-lab/AutoResearchClaw) は自律研究パイプラインで、23ステージ・8フェーズの構造を持つ。特徴は以下の通り:
-
-- 仮説生成 → 実験設計 → 実行 → 評価の繰り返しループ
-- **PIVOT/REFINE決定ループ**: 実験失敗時に「パラメータ調整(REFINE)」か「方針転換(PIVOT)」かを自動判断
-- **自己学習**: 過去の判断結果をメタ知識として蓄積し、次の判断に活用
-- **収束検出**: 単純な閾値判定ではなく、推移パターンから収束/停滞を区別
-
-### Motivaへの適用動機
-
-Motivaのコアループ（observe → gap → score → task → execute → verify）は構造としては健全だが、以下の課題がある:
-
-1. **stall検出後のアクションが未定義** — StallDetectorが「止まった」と判断しても、CoreLoopは限定的な分岐しか持たない
-2. **戦略判断のメタ知識ゼロ** — 過去に同種のゴールでどの戦略が有効だったか、記録も参照もない
-3. **収束と停滞の区別ができない** — gap < thresholdの絶対値判定だけでは「惜しいが届かない」ケースを扱えない
-
-AutoResearchClawのアプローチはこれら3課題に直接対応する。ただしMotiviaはループが本質であり、論文生成などのドメイン固有ロジックは取り込まない。
+> Three design improvements inspired by AutoResearchClaw's PIVOT/REFINE decision loop, self-learning, and convergence detection.
+> These make Conatus's orchestration loop more autonomous and adaptive.
 
 ---
 
-## 改善1: 構造化PIVOT/REFINE判断
+## Background
 
-**対象モジュール**: `stall-detector.ts`, `strategy-manager.ts`, `core-loop.ts`, `types/`
-**工数**: 中（2〜3日）
+### What is AutoResearchClaw?
 
-### 現状の問題
+[AutoResearchClaw](https://github.com/aiming-lab/AutoResearchClaw) is an autonomous research pipeline with a 23-stage, 8-phase structure. Its key characteristics are:
+
+- A repeating loop of: hypothesis generation → experiment design → execution → evaluation
+- **PIVOT/REFINE decision loop**: automatically decides whether to "tune parameters (REFINE)" or "change direction (PIVOT)" when an experiment fails
+- **Self-learning**: accumulates past decision outcomes as meta-knowledge and uses them in future decisions
+- **Convergence detection**: distinguishes convergence from stagnation based on transition patterns rather than simple threshold checks
+
+### Motivation for Applying This to Conatus
+
+Conatus's core loop (observe → gap → score → task → execute → verify) is structurally sound, but has the following issues:
+
+1. **No defined action after stall detection** — Even when StallDetector determines "it has stalled," CoreLoop has only limited branching
+2. **Zero meta-knowledge for strategy decisions** — There is no record of which strategies were effective for similar goals in the past, and no way to look that up
+3. **Cannot distinguish convergence from stagnation** — An absolute threshold check on `gap < threshold` alone cannot handle the case where progress is "close but not quite there"
+
+AutoResearchClaw's approach directly addresses these three issues. However, Conatus is fundamentally loop-based and should not adopt domain-specific logic such as paper generation.
+
+---
+
+## Improvement 1: Structured PIVOT/REFINE Decision
+
+**Affected modules**: `stall-detector.ts`, `strategy-manager.ts`, `core-loop.ts`, `types/`
+**Effort**: Medium (2–3 days)
+
+### Current Problem
 
 ```
-observe → gap → stall? → YES → switch_strategy (根拠曖昧)
+observe → gap → stall? → YES → switch_strategy (rationale unclear)
                        → NO  → continue
 ```
 
-StallDetectorは「stall detected」を返すが、**なぜ止まったか**の原因分析がない。StrategyManagerは戦略切り替えロジックを持つが、どの状況でどう切り替えるかの判断基準が曖昧。
+StallDetector returns "stall detected," but there is no root cause analysis of **why** it stalled. StrategyManager has strategy-switching logic, but the criteria for deciding when and how to switch are vague.
 
-### 提案設計
+### Proposed Design
 
 ```
 observe → gap → stall?
   ├─ NO  → continue
   └─ YES → analyze_cause()          ← NEW
-       ├─ parameter_issue → REFINE  (パラメータ調整して再実行)
-       ├─ strategy_wrong  → PIVOT   (戦略切り替え、ゴール維持)
-       └─ goal_unreachable → ESCALATE (ゴール再交渉)
+       ├─ parameter_issue → REFINE  (adjust parameters and retry)
+       ├─ strategy_wrong  → PIVOT   (switch strategy, keep goal)
+       └─ goal_unreachable → ESCALATE (re-negotiate goal)
 ```
 
-### StallDetectorへの追加: `analyzeStallCause()`
+### Addition to StallDetector: `analyzeStallCause()`
 
-直近の gap 推移パターンから原因を推定する。
+Infers the cause from the recent Gap transition pattern.
 
-| パターン | 判定 | 定義 |
-|----------|------|------|
-| oscillating（振動） | `parameter_issue` | gap が上下を繰り返す（variance 高、mean 変化なし） |
-| flat（横ばい） | `strategy_wrong` | gap の変化量がほぼゼロ |
-| diverging（悪化） | `goal_unreachable` | gap が単調増加 |
+| Pattern | Judgment | Definition |
+|---------|----------|------------|
+| oscillating | `parameter_issue` | Gap repeatedly goes up and down (high variance, mean unchanged) |
+| flat | `strategy_wrong` | Gap change is nearly zero |
+| diverging | `goal_unreachable` | Gap monotonically increases (worsening) |
 
 ```typescript
 type StallCause = 'parameter_issue' | 'strategy_wrong' | 'goal_unreachable';
@@ -69,56 +69,56 @@ type StallCause = 'parameter_issue' | 'strategy_wrong' | 'goal_unreachable';
 interface StallAnalysis {
   cause: StallCause;
   confidence: number;   // 0.0–1.0
-  evidence: string;     // 人間向け説明
+  evidence: string;     // Human-readable explanation
 }
 ```
 
-### StrategyManagerへの追加: rollback target
+### Addition to StrategyManager: Rollback Target
 
-各戦略に「この戦略が失敗した場合の戻り先」を定義する。
+Define a "fallback destination when this strategy fails" for each strategy.
 
 ```typescript
 interface StrategyDefinition {
   id: string;
-  rollbackTarget?: string;   // PIVOT時の遷移先strategy id
-  maxPivotCount: number;     // デフォルト 2（AutoResearchClawに合わせる）
+  rollbackTarget?: string;   // Target strategy id on PIVOT
+  maxPivotCount: number;     // Default 2 (aligned with AutoResearchClaw)
 }
 ```
 
-### CoreLoopの変更
+### CoreLoop Changes
 
-既存のstall分岐を3方向に拡張:
+Extend the existing stall branch to three directions:
 
 ```typescript
 if (stallDetected) {
   const analysis = await stallDetector.analyzeStallCause(gapHistory);
   switch (analysis.cause) {
-    case 'parameter_issue': return 'REFINE';    // パラメータ調整して継続
-    case 'strategy_wrong':  return 'PIVOT';     // 戦略切り替え
-    case 'goal_unreachable': return 'ESCALATE'; // ゴール再交渉へ
+    case 'parameter_issue': return 'REFINE';    // Adjust parameters and continue
+    case 'strategy_wrong':  return 'PIVOT';     // Switch strategy
+    case 'goal_unreachable': return 'ESCALATE'; // Proceed to goal re-negotiation
   }
 }
 ```
 
-最大pivot回数を超えた場合はESCALATEに昇格する。
+If the maximum pivot count is exceeded, escalate to ESCALATE.
 
 ---
 
-## 改善2: 判断履歴の学習ループ
+## Improvement 2: Decision History Learning Loop
 
-**対象モジュール**: `knowledge-manager.ts`, `strategy-manager.ts`, `types/`
-**工数**: 中〜大（3〜5日）、M13と同時実装推奨
+**Affected modules**: `knowledge-manager.ts`, `strategy-manager.ts`, `types/`
+**Effort**: Medium–Large (3–5 days); recommended to implement alongside M13
 
-### 現状の問題
+### Current Problem
 
-KnowledgeManagerはゴール内の知識（実行ログ、観測結果）を蓄積するが、**戦略判断のメタ知識**（どの種の戦略がどの種のゴールで有効か）は保持しない。同じ失敗を繰り返す可能性がある。
+KnowledgeManager accumulates knowledge within a goal (execution logs, observation results), but it does not retain **meta-knowledge about strategy decisions** (which type of strategy was effective for which type of goal). This means the same mistakes may be repeated.
 
-### 提案設計: DecisionRecord スキーマ
+### Proposed Design: DecisionRecord Schema
 
 ```typescript
 interface DecisionRecord {
-  goalType: string;       // ゴールの種別（例: "code_quality", "test_coverage"）
-  strategyId: string;     // 使用した戦略
+  goalType: string;       // Type of goal (e.g., "code_quality", "test_coverage")
+  strategyId: string;     // Strategy used
   decision: 'proceed' | 'refine' | 'pivot' | 'escalate';
   context: {
     gapValue: number;
@@ -131,105 +131,105 @@ interface DecisionRecord {
 }
 ```
 
-### KnowledgeManagerへの追加API
+### New API Added to KnowledgeManager
 
 ```typescript
-// 判断を記録
+// Record a decision
 recordDecision(record: DecisionRecord): Promise<void>;
 
-// 類似ゴールでの過去判断を取得（time-decayあり）
+// Retrieve past decisions for similar goals (with time-decay)
 queryDecisions(goalType: string, limit?: number): Promise<DecisionRecord[]>;
 ```
 
-**time-decay**: 30日（AutoResearchClawと同じ）。古い記録は重みを下げて参照し、長期間後に自動削除。
+**Time-decay**: 30 days (same as AutoResearchClaw). Old records are referenced with reduced weight and automatically deleted after a long period.
 
-### StrategyManager.selectStrategy()への統合
+### Integration into StrategyManager.selectStrategy()
 
-戦略選択時に過去の判断履歴を参照:
+Reference past decision history when selecting a strategy:
 
-1. 「過去に同種ゴールでPIVOTされた戦略」を候補から除外
-2. 「同種ゴールで成功率の高い戦略」を優先
-3. 履歴が十分でない場合（＜3件）は従来ロジックにフォールバック
+1. Exclude strategies that were previously PIVOTed away from on similar goals
+2. Prioritize strategies with a high success rate on similar goals
+3. Fall back to the existing logic when history is insufficient (fewer than 3 records)
 
-### M13との統合
+### Integration with M13
 
-M13で予定されているゴール横断のセマンティック知識共有（KnowledgeManager Phase 2）と自然に統合できる。DecisionRecordをセマンティック検索の対象に含めることで、「類似ゴール」の判定精度が向上する。
+This naturally integrates with the cross-goal semantic knowledge sharing planned for M13 (KnowledgeManager Phase 2). Including DecisionRecords as targets for semantic search improves the accuracy of "similar goal" matching.
 
 ---
 
-## 改善3: 収束判定の強化
+## Improvement 3: Strengthened Convergence Detection
 
-**対象モジュール**: `satisficing-judge.ts`, `types/`
-**工数**: 小（半日〜1日）
+**Affected modules**: `satisficing-judge.ts`, `types/`
+**Effort**: Small (half a day to 1 day)
 
-### 現状の問題
+### Current Problem
 
-SatisficingJudgeは `gap < threshold` の絶対値判定のみ。「惜しいが閾値に届かない、かつ改善も停滞している」状態と「まだ改善中」の状態を区別できない。
+SatisficingJudge uses only an absolute value check of `gap < threshold`. It cannot distinguish between "close but not yet at the threshold, and improvement has stalled" and "still improving."
 
 ```
 gap = 0.15, threshold = 0.10
-→ 現状: 未達成として継続し続ける
-→ 理想: 収束を検出してStallDetectorに委譲すべき
+→ Current: Continues indefinitely as unachieved
+→ Ideal: Should detect convergence and delegate to StallDetector
 ```
 
-### 提案設計: 収束検出ロジック
+### Proposed Design: Convergence Detection Logic
 
-直近N回（デフォルトN=5）のgap値をリングバッファで保持し、分散が小さければ収束と判定する。
+Maintain the last N Gap values (default N=5) in a ring buffer, and declare convergence if the variance is small.
 
-| 条件 | 判定 | アクション |
-|------|------|------------|
-| `gap < threshold` | satisficed | 完了（既存） |
-| `variance < ε AND gap ≤ threshold × 1.5` | converged_satisficed | 完了（NEW） |
-| `variance < ε AND gap > threshold × 1.5` | stalled | StallDetectorへ委譲（NEW） |
-| それ以外 | in_progress | 継続 |
+| Condition | Judgment | Action |
+|-----------|----------|--------|
+| `gap < threshold` | satisficed | Complete (existing) |
+| `variance < ε AND gap ≤ threshold × 1.5` | converged_satisficed | Complete (NEW) |
+| `variance < ε AND gap > threshold × 1.5` | stalled | Delegate to StallDetector (NEW) |
+| Otherwise | in_progress | Continue |
 
-パラメータのデフォルト値:
+Default parameter values:
 
 ```typescript
-const CONVERGENCE_WINDOW = 5;       // リングバッファサイズ
-const CONVERGENCE_EPSILON = 0.01;   // 分散の閾値（要チューニング）
-const ACCEPTABLE_RANGE_FACTOR = 1.5; // threshold の何倍まで許容するか
+const CONVERGENCE_WINDOW = 5;       // Ring buffer size
+const CONVERGENCE_EPSILON = 0.01;   // Variance threshold (requires tuning)
+const ACCEPTABLE_RANGE_FACTOR = 1.5; // How many multiples of threshold to accept
 ```
 
-`converged_satisficed` はsatisficingの精神（完璧を追わない）に合致する。threshold × 1.5 の範囲内なら「実質的に十分」と判断する。
+`converged_satisficed` aligns with the spirit of satisficing (don't chase perfection). If the value is within threshold × 1.5, it is judged as "effectively sufficient."
 
-### 型定義への追加
+### Additions to Type Definitions
 
 ```typescript
 type SatisficingResult =
   | 'satisficed'
   | 'converged_satisficed'   // NEW
-  | 'stalled'                // NEW（StallDetectorへ委譲）
+  | 'stalled'                // NEW (delegated to StallDetector)
   | 'in_progress';
 ```
 
 ---
 
-## 実装順序
+## Implementation Order
 
-| 順序 | 改善 | 理由 |
-|------|------|------|
-| 1 | **改善3** 収束判定強化 | 独立性が高く即着手可能。既存テストへの影響が限定的 |
-| 2 | **改善1** PIVOT/REFINE判断 | StallDetectorの価値を大幅に向上。改善3の結果（stalled判定）を活用 |
-| 3 | **改善2** 学習ループ | 改善1のDecisionが蓄積されてから意味を持つ。M13と同時実装で効率化 |
-
----
-
-## AutoResearchClawから取り入れないもの
-
-| 要素 | 理由 |
-|------|------|
-| 23ステージ線形パイプライン | Motivaはループが本質。線形フローはアンチパターン |
-| ドメイン固有ロジック（LaTeX/論文） | Motivaはドメイン非依存のオーケストレーター |
-| 固定回数ループ上限 | Motivaはsatisficingで判断。回数上限は自律性を損なう |
-| 実験設計の自動生成 | TaskLifecycleが担う役割。重複しない |
+| Order | Improvement | Rationale |
+|-------|-------------|-----------|
+| 1 | **Improvement 3** Convergence detection | Highly independent and immediately actionable. Limited impact on existing tests |
+| 2 | **Improvement 1** PIVOT/REFINE decision | Greatly increases StallDetector's value. Leverages the `stalled` judgment from Improvement 3 |
+| 3 | **Improvement 2** Learning loop | Only meaningful after Decisions from Improvement 1 have accumulated. Efficient to implement alongside M13 |
 
 ---
 
-## 参考
+## What Not to Adopt from AutoResearchClaw
+
+| Element | Reason |
+|---------|--------|
+| 23-stage linear pipeline | Conatus is fundamentally loop-based. Linear flow is an anti-pattern |
+| Domain-specific logic (LaTeX/papers) | Conatus is a domain-agnostic orchestrator |
+| Fixed loop count cap | Conatus judges via satisficing. A count cap undermines autonomy |
+| Automatic experiment design generation | This is the role of TaskLifecycle. No overlap needed |
+
+---
+
+## References
 
 - [AutoResearchClaw](https://github.com/aiming-lab/AutoResearchClaw)
-- [docs/module-map.md](../module-map.md) — 関連モジュール境界マップ
-- [docs/design/stall-detector.md](stall-detector.md) — StallDetector設計
-- [docs/design/satisficing.md](satisficing.md) — SatisficingJudge設計
-- [docs/design/knowledge-acquisition.md](knowledge-acquisition.md) — KnowledgeManager設計
+- [docs/module-map.md](../module-map.md) — Related module boundary map
+- [docs/design/stall-detector.md](stall-detector.md) — StallDetector design
+- [docs/design/satisficing.md](satisficing.md) — SatisficingJudge design
+- [docs/design/knowledge-acquisition.md](knowledge-acquisition.md) — KnowledgeManager design

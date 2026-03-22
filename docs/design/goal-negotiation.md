@@ -1,357 +1,358 @@
-# ゴール交渉メカニズム設計
+# Goal Negotiation Mechanism Design
 
-> mechanism.md の「3. ゴールの扱い」がゴール交渉の概念を定義する。本ドキュメントはその交渉メカニズムの具体的な設計を定義する。「10倍は困難、2倍なら実現可能」という正直な評価をどのように実現するかを記述する。
-
----
-
-## 1. ゴール交渉の役割
-
-ゴール交渉は、ユーザーが提示したゴールを「そのまま受け入れる」のではなく、「実現可能性を評価した上で合意する」プロセスだ。
-
-交渉が必要な理由は単純だ。ゴールが達成不可能であれば、いくらループを回しても無駄だ。達成不可能と知りながら盲目的に従うことは、ユーザーへの誠実さに反する。Conatusはゴールの実現可能性を評価し、問題があれば正直に伝え、合意したゴールに対してのみ全力を尽くす。
-
-ゴール交渉は一度きりのプロセスではない。実行中に新しい情報が得られれば、再交渉が発生することがある。
+> `mechanism.md` "3. Handling Goals" defines the concept of goal negotiation. This document defines the concrete design of that negotiation mechanism — specifically how to achieve the honest assessment that "10× is difficult, but 2× is achievable."
 
 ---
 
-## 2. 交渉フロー（6ステップ）
+## 1. The Role of Goal Negotiation
 
-```
-Step 0: 倫理・法的ゲート（`goal-ethics.md` 参照）
-  ↓
-Step 1: ゴール受け取り（ユーザー入力の解釈）
-  ↓
-Step 2: 次元分解プローブ（測定可能な次元への変換）
-  ↓
-Step 3: ベースライン観測（現在地の確立）
-  ↓
-Step 4: 実現可能性評価（ハイブリッド方式）
-  ↓
-Step 5: 応答（受諾 / カウンター提案 / 要注意フラグ）
-```
+Goal negotiation is the process of not simply "accepting" a user-provided goal as-is, but rather "agreeing on it after evaluating its feasibility."
 
-Step 0（倫理・法的ゲート）はゴールの目的と手段が倫理的・法的に許容されるかを判定する。詳細は `goal-ethics.md` を参照。拒否判定が出た場合、Step 1以降には進まない。
+The reason negotiation is necessary is simple. If a goal is unachievable, running the loop indefinitely is pointless. Blindly complying while knowing a goal is unachievable is a breach of honesty with the user. Conatus evaluates the feasibility of a goal, communicates problems honestly, and commits fully only to goals it has agreed upon.
 
-### Step 1: ゴール受け取り
-
-ユーザーはゴールを曖昧な自然言語で与える。「売上を大きく伸ばしたい」「もっと健康になりたい」「新しいサービスを立ち上げたい」。
-
-この段階でConatusがやることは2つだ。
-
-**曖昧さの受け入れ**: 最初から精密な定義を要求しない。交渉の目的は曖昧さを解消することではなく、実現可能性を評価することだ。曖昧なゴールでも評価を始められる。
-
-**スコープの確認**: ゴールの大まかなスコープを把握する。時間軸（「いつまでに」）、規模感（「どのくらい」）、制約（「何はできないか」）。これらが不明な場合、Conatusはデフォルト値を仮定して進め、後で確認する。
-
-### Step 2: 次元分解プローブ
-
-受け取ったゴールを、測定可能な次元に分解する。これはLLMによる分解だ。
-
-分解の目的は2つある。
-- 実現可能性評価のための「何を測るか」を定義すること
-- ゴールが複数の独立した側面を持つことを認識すること
-
-**分解の例**:
-
-```
-ユーザーゴール: 「新サービスの売上を3ヶ月で2倍にしたい」
-
-分解された次元:
-  [月次売上]    現在: 50万円 → 目標: 100万円（min(1000000)）
-  [アクティブ顧客数] 現在: 20社  → 目標: 40社以上（min(40)）
-  [顧客獲得コスト] 現在: 不明  → 目標: 現行以下（max(current)）
-  [解約率]     現在: 不明  → 目標: 5%以下（max(0.05)）
-```
-
-この分解は暫定的なものだ。ベースライン観測を経て修正されることがある。
-
-### Step 3: ベースライン観測
-
-分解された次元に対して、最初の観測サイクルを実行する。この観測が「今どこにいるか」を確立する。
-
-ベースライン観測で得られる情報:
-- 各次元の現在値（`current_value`）
-- 各次元の観測信頼度（`confidence`）
-- 観測できない次元の特定（データソースが存在しない等）
-- 変化の傾向（過去のデータが入手可能な場合）
-
-**観測結果の解釈**: 観測できた次元と観測できなかった次元を区別する。観測できなかった次元は「データなし」として記録し、実現可能性評価では定性的経路（後述）を使う。
-
-### Step 4: 実現可能性評価（ハイブリッド方式）
-
-評価は「過去データがある次元」と「新規ドメインの次元」で経路が分かれる。
+Goal negotiation is not a one-time process. If new information emerges during execution, renegotiation may occur.
 
 ---
 
-## 3. 実現可能性評価の2経路
-
-### 3.1 定量的評価経路（歴史データあり）
-
-**適用条件**: 対象次元に変化率を計算できる過去データが存在する場合。
-
-定量的評価は3つのチェックで構成される。
-
-#### チェック 1: 変化率分析
+## 2. Negotiation Flow (6 Steps)
 
 ```
-必要変化量 = |目標値 - 現在値|
-利用可能時間 = ゴールの期限（日数）
-必要変化率 = 必要変化量 / 利用可能時間
-
-観測変化率 = 過去データから算出した1日あたりの平均変化量
+Step 0: Ethics and Legal Gate (see goal-ethics.md)
+  ↓
+Step 1: Receive goal (interpret user input)
+  ↓
+Step 2: Dimension decomposition probe (convert to measurable dimensions)
+  ↓
+Step 3: Baseline observation (establish current state)
+  ↓
+Step 4: Feasibility evaluation (hybrid method)
+  ↓
+Step 5: Response (Accept / Counter-propose / Flag-as-ambitious)
 ```
 
-**判定**:
+Step 0 (ethics and legal gate) determines whether the purpose and means of the goal are ethically and legally acceptable. See `goal-ethics.md` for details. If a rejection is issued, the flow does not proceed to Step 1 or beyond.
 
-| 条件 | 評価 |
-|---|---|
-| 必要変化率 ≤ 観測変化率 × 1.5 | 現実的（Realistic） |
-| 必要変化率 ≤ 観測変化率 × 3.0 | 挑戦的（Ambitious） |
-| 必要変化率 > 観測変化率 × 3.0 | 困難（Infeasible） |
+### Step 1: Receive Goal
 
-係数1.5および3.0はデフォルト値だ。ゴール設定時にAdvisorが調整できる。
+Users provide goals in vague natural language. "I want to grow revenue significantly," "I want to be healthier," "I want to launch a new service."
 
-**変化率が算出できない場合の扱い**: 過去データが存在するが点が少なすぎる（3点未満）場合は、変化率の信頼性が低い。この場合、定量的評価の重みを下げ、定性的評価と組み合わせる。
+At this stage, Conatus does two things.
 
-#### チェック 2: 能力チェック
+**Accepting ambiguity**: Do not demand a precise definition from the start. The purpose of negotiation is not to resolve ambiguity, but to evaluate feasibility. Evaluation can begin even with an ambiguous goal.
 
-Conatusが委譲できる能力（Capability Registry）と、ゴール達成に必要な能力を照合する。
+**Confirming scope**: Grasp the rough scope of the goal. Time horizon ("by when"), scale ("how much"), constraints ("what cannot be done"). When these are unclear, Conatus assumes default values and proceeds, confirming later.
 
-```
-必要な能力 = ゴール達成に必要なアクション・データソースの一覧
-利用可能な能力 = Capability Registryの現在の状態
+### Step 2: Dimension Decomposition Probe
 
-能力ギャップ = 必要な能力 - 利用可能な能力
-```
+Decompose the received goal into measurable dimensions. This decomposition is performed by an LLM.
 
-**判定**:
+Decomposition serves two purposes:
+- Define "what to measure" for the feasibility evaluation
+- Recognize that the goal has multiple independent aspects
 
-| 状態 | 評価への影響 |
-|---|---|
-| 能力ギャップ = なし | 評価に影響しない |
-| 能力ギャップあり、追加可能 | 「能力追加が前提条件」として記録 |
-| 能力ギャップあり、追加不可 | 実現可能性を下方修正 |
-
-#### チェック 3: リソースチェック
-
-ゴール達成に必要な外部リソース（データソース、API、外部サービス）が利用可能かを確認する。
+**Example decomposition**:
 
 ```
-必要なリソース = ゴール実現に前提となるリソース一覧
-利用可能なリソース = 現在アクセス可能なリソース
+User goal: "I want to double revenue from the new service in 3 months"
 
-リソースギャップ = 必要なリソース - 利用可能なリソース
+Decomposed dimensions:
+  [Monthly revenue]      Current: ¥500k   → Target: ¥1M (min(1000000))
+  [Active customers]     Current: 20       → Target: 40+ (min(40))
+  [Customer acquisition cost] Current: unknown → Target: at or below current (max(current))
+  [Churn rate]           Current: unknown → Target: 5% or below (max(0.05))
 ```
 
-**判定**:
+This decomposition is provisional. It may be revised after the baseline observation.
 
-| 状態 | 評価への影響 |
-|---|---|
-| リソースギャップ = なし | 評価に影響しない |
-| ギャップあり、獲得可能 | 「リソース獲得が前提条件」として記録 |
-| ギャップあり、獲得不可 | 実現可能性を下方修正 |
+### Step 3: Baseline Observation
 
-#### 定量的評価の総合判定
+Run the first observation cycle on the decomposed dimensions. This observation establishes "where we are right now."
 
-3つのチェックの結果を統合して、次元ごとの実現可能性スコアを出す。
+Information obtained from the baseline observation:
+- Current value of each dimension (`current_value`)
+- Observation confidence for each dimension (`confidence`)
+- Dimensions that cannot be observed (no data source exists, etc.)
+- Trend of change (when historical data is available)
+
+**Interpreting observation results**: Distinguish between dimensions that could and could not be observed. Dimensions that could not be observed are recorded as "no data" and use the qualitative path (described below) in the feasibility evaluation.
+
+### Step 4: Feasibility Evaluation (Hybrid Method)
+
+Evaluation branches based on whether a dimension has historical data or is in a new domain.
+
+---
+
+## 3. Two Paths for Feasibility Evaluation
+
+### 3.1 Quantitative Evaluation Path (with Historical Data)
+
+**Applicable condition**: Historical data exists for the target dimension from which a rate of change can be calculated.
+
+Quantitative evaluation consists of three checks.
+
+#### Check 1: Rate of Change Analysis
 
 ```
-次元の実現可能性 = 最も制約的なチェック結果
+Required change = |target value - current value|
+Available time = goal deadline (in days)
+Required rate of change = required change / available time
 
-// 例: 変化率は「現実的」だが能力ギャップが「追加不可」なら、
-// 総合判定は「困難」
+Observed rate of change = average daily change calculated from historical data
 ```
 
-### 3.2 定性的評価経路（新規ドメイン）
+**Judgment**:
 
-**適用条件**: ベースライン観測で変化率を算出できるデータが存在しない場合、または過去データが存在しないカテゴリのゴールの場合。
+| Condition | Assessment |
+|-----------|-----------|
+| Required rate ≤ observed rate × 1.5 | Realistic |
+| Required rate ≤ observed rate × 3.0 | Ambitious |
+| Required rate > observed rate × 3.0 | Infeasible |
 
-定性的評価はLLMが担う。LLMにはゴールの構造・制約・ドメイン知識を渡し、以下を評価させる。
+The coefficients 1.5 and 3.0 are default values. The Advisor can adjust them at goal setup time.
 
-**評価の入力**:
-- ゴールの定義と目標次元
-- 利用可能な能力とリソース
-- 時間軸と制約
-- ドメインの一般的な成長パターン（LLMの事前知識）
+**Handling cases where rate of change cannot be calculated**: When historical data exists but there are too few data points (fewer than 3), the rate of change is unreliable. In this case, the weight of quantitative evaluation is reduced and combined with qualitative evaluation.
 
-**評価の出力**:
+#### Check 2: Capability Check
+
+Cross-reference the capabilities Conatus can delegate (Capability Registry) with the capabilities required to achieve the goal.
+
+```
+Required capabilities = list of actions and data sources needed to achieve the goal
+Available capabilities = current state of the Capability Registry
+
+Capability gap = required capabilities - available capabilities
+```
+
+**Judgment**:
+
+| State | Impact on assessment |
+|-------|---------------------|
+| Capability gap = none | No impact on assessment |
+| Gap exists, can be added | Recorded as "capability addition is a prerequisite" |
+| Gap exists, cannot be added | Downgrade feasibility assessment |
+
+#### Check 3: Resource Check
+
+Confirm whether the external resources (data sources, APIs, external services) required to achieve the goal are available.
+
+```
+Required resources = list of resources that are prerequisites for achieving the goal
+Available resources = resources currently accessible
+
+Resource gap = required resources - available resources
+```
+
+**Judgment**:
+
+| State | Impact on assessment |
+|-------|---------------------|
+| Resource gap = none | No impact on assessment |
+| Gap exists, can be acquired | Recorded as "resource acquisition is a prerequisite" |
+| Gap exists, cannot be acquired | Downgrade feasibility assessment |
+
+#### Overall Judgment for Quantitative Evaluation
+
+Integrate the results of the three checks to produce a per-dimension feasibility score.
+
+```
+Dimension feasibility = the most restrictive check result
+
+// Example: if the rate of change is "realistic" but there is an unaddressable capability gap,
+// the overall judgment is "infeasible"
+```
+
+### 3.2 Qualitative Evaluation Path (New Domain)
+
+**Applicable condition**: No data was found in the baseline observation from which to calculate a rate of change, or the goal is in a category with no historical data.
+
+Qualitative evaluation is handled by an LLM. The LLM is given the goal structure, constraints, and domain knowledge, and evaluates the following.
+
+**Evaluation inputs**:
+- Goal definition and target dimensions
+- Available capabilities and resources
+- Time horizon and constraints
+- Typical growth patterns in the domain (LLM's prior knowledge)
+
+**Evaluation output**:
 
 ```
 {
-  "assessment": "現実的" | "挑戦的" | "困難",
-  "confidence": "高" | "中" | "低",
-  "reasoning": "評価の根拠（1〜3文）",
-  "key_assumptions": ["評価が成り立つ前提条件のリスト"],
-  "main_risks": ["主要なリスク要因のリスト"]
+  "assessment": "Realistic" | "Ambitious" | "Infeasible",
+  "confidence": "High" | "Medium" | "Low",
+  "reasoning": "Basis for the assessment (1–3 sentences)",
+  "key_assumptions": ["List of assumptions the assessment depends on"],
+  "main_risks": ["List of key risk factors"]
 }
 ```
 
-**保守的バイアスの原則**: 定性的評価は不確実性が高い。不確実なときは「受諾」ではなく「要注意フラグ」寄りに評価する。「おそらく大丈夫」は「受諾」にならない。「不明確だが問題ないかも」は「要注意フラグ」になる。
+**Conservative bias principle**: Qualitative evaluation carries high uncertainty. When uncertain, lean toward "flag-as-ambitious" rather than "accept." "Probably fine" does not become "accept." "Unclear but might be okay" becomes "flag-as-ambitious."
 
 ---
 
-## 4. Step 5: 応答（3種類）
+## 4. Step 5: Response (3 Types)
 
-評価結果に基づき、Conatusは3種類の応答を返す。
+Based on the evaluation results, Conatus returns one of three response types.
 
-### 応答 A: 受諾（Accept）
+### Response A: Accept
 
-**条件**: すべての次元が「現実的」または「挑戦的」で、かつ主要な能力・リソースが揃っている。
+**Condition**: All dimensions assess as "realistic" or "ambitious," and the key capabilities and resources are in place.
 
-Conatusはゴールをそのまま受け入れ、タスク発見ループを開始する。
-
-```
-応答例:
-「売上を3ヶ月で2倍にするゴールを受け入れました。現在の成長率と
- 利用可能なリソースから見て、挑戦的ですが実現可能です。
- 現在の月次成長率（+8%/月）を維持し、顧客獲得コストを抑えれば
- 3ヶ月で目標に到達できます。追跡を開始します。」
-```
-
-### 応答 B: カウンター提案（Counter-propose）
-
-**条件**: いくつかの次元が「困難」の評価を受けたが、代替目標なら実現可能と判断できる場合。
-
-Conatusは元のゴールを否定せず、実現可能な代替目標を提案する。
-
-**カウンター提案の構成**:
-1. 現状の評価（なぜ元のゴールが困難か）
-2. 代替目標の提示（具体的な数値と根拠）
-3. 中間マイルストーンの提案（段階的な達成経路）
-4. 元のゴールを維持したい場合の選択肢
+Conatus accepts the goal as-is and begins the task discovery loop.
 
 ```
-応答例:
-「3ヶ月で売上2倍は現在の成長率（+8%/月）から計算すると困難です。
- 現実的な代替目標を提案します：
-
- [提案1] 6ヶ月で売上2倍（+12%/月の加速が必要）
- [提案2] 3ヶ月で売上1.5倍（現在の成長率の2倍の加速が必要）
-
- 中間マイルストーン（提案1の場合）:
-   1ヶ月後: 60万円（+20%）
-   3ヶ月後: 75万円（+50%）
-   6ヶ月後: 100万円（+100%）
-
- 元のゴール（3ヶ月2倍）を維持する場合、追跡は継続しますが
- 初期信頼度を「低」に設定します。」
+Example response:
+"I've accepted the goal of doubling revenue in 3 months. Based on the current
+ growth rate and available resources, it is ambitious but achievable.
+ If we maintain the current monthly growth rate (+8%/month) and keep
+ customer acquisition costs low, we can reach the target in 3 months.
+ Starting to track."
 ```
 
-#### カウンター提案のトリガー条件
+### Response B: Counter-propose
+
+**Condition**: Some dimensions received an "infeasible" assessment, but an alternative goal is judged to be achievable.
+
+Conatus does not reject the original goal outright, but proposes a feasible alternative.
+
+**Structure of a counter-proposal**:
+1. Assessment of the current situation (why the original goal is difficult)
+2. Alternative goal proposal (specific numbers and rationale)
+3. Intermediate milestones (a phased path to achievement)
+4. Options if the user wants to maintain the original goal
 
 ```
-gap_to_time_ratio = 必要変化量 / 利用可能時間
-feasibility_ratio = gap_to_time_ratio / 観測変化率
+Example response:
+"Doubling revenue in 3 months is difficult based on the current growth rate (+8%/month).
+ Here are some realistic alternatives:
+
+ [Option 1] Double revenue in 6 months (requires acceleration to +12%/month)
+ [Option 2] 1.5× revenue in 3 months (requires 2× acceleration of current growth rate)
+
+ Intermediate milestones (for Option 1):
+   After 1 month: ¥600k (+20%)
+   After 3 months: ¥750k (+50%)
+   After 6 months: ¥1M (+100%)
+
+ If you maintain the original goal (2× in 3 months), tracking will continue
+ but the initial confidence will be set to 'low'."
+```
+
+#### Counter-proposal Trigger Conditions
+
+```
+gap_to_time_ratio = required change / available time
+feasibility_ratio = gap_to_time_ratio / observed rate of change
 
 if feasibility_ratio > 3.0:
-    → カウンター提案を生成する
+    → Generate a counter-proposal
 
-代替目標の算出:
-  realistic_target = 現在値 + (観測変化率 × 利用可能時間 × 1.5)
-  // 現在の変化率の1.5倍の加速を前提とした現実的上限
+Alternative target calculation:
+  realistic_target = current value + (observed rate of change × available time × 1.5)
+  // Realistic upper bound assuming 1.5× acceleration of the current rate of change
 ```
 
-### 応答 C: 要注意フラグ（Flag-as-ambitious）
+### Response C: Flag-as-ambitious
 
-**条件**: 評価の信頼度が低い（新規ドメイン、データ不足）、または定性的評価で主要なリスクが特定された場合。
+**Condition**: Evaluation confidence is low (new domain, insufficient data), or qualitative evaluation identified key risks.
 
-Conatusはゴールを受け入れるが、不確実性とリスクを明示する。
-
-```
-応答例:
-「このゴールは新しいドメインへの参入のため、実現可能性の評価に
- 十分なデータがありません。ゴールを受け入れ追跡を開始しますが、
- 初期信頼度を「低」に設定します。
-
- 主なリスク:
-  - 市場規模が仮定より小さい可能性がある
-  - 競合他社の動向が未把握
-  - 必要なAPIの利用規約の確認が必要
-
- 最初の4週間を「探索フェーズ」とし、実現可能性の確認を優先します。
- 4週間後に評価を更新します。」
-```
-
----
-
-## 5. ユーザーが困難なゴールを押し通した場合
-
-カウンター提案に対してユーザーが元のゴールを維持することを選択した場合、Conatusはそれを受け入れる。ただし以下を設定する。
+Conatus accepts the goal but makes the uncertainty and risks explicit.
 
 ```
-goal.confidence = "low"           // 初期信頼度を低に設定
-goal.flag = "user-override"       // ユーザー意志による維持を記録
-goal.feasibility_note = "評価時点での推定実現可能性: 困難"
-```
+Example response:
+"This goal involves entering a new domain, so we do not have sufficient data
+ to evaluate its feasibility. The goal is accepted and tracking will begin,
+ but the initial confidence is set to 'low'.
 
-ユーザーの意志を尊重しつつ、評価結果は記録に残す。「盲目的に従う」のではなく「評価した上で、ユーザーの選択を記録して追跡する」。
+ Key risks:
+  - Market size may be smaller than assumed
+  - Competitor landscape is not yet understood
+  - Terms of service for required APIs need to be confirmed
 
----
-
-## 6. 再交渉トリガー
-
-ゴール交渉は初回だけではない。以下のトリガーで再交渉が発生する。
-
-### トリガー 1: 停滞検知後
-
-`stall-detection.md` が停滞を検知したとき、停滞の原因が「ゴール自体の実現可能性」にある場合、再交渉が起動する。
-
-判定フロー:
-```
-停滞を検知
-  ↓
-停滞の原因分析
-  ↓
-「ゴール設定が不適切」と判定された場合
-  ↓
-ゴール交渉を再起動（ベースライン観測 → 評価 → 応答）
-```
-
-### トリガー 2: 新情報による実現可能性の変化
-
-実行中に得られた情報が、初回評価の前提を大きく変える場合。
-
-具体例:
-- 観測変化率が初回予測と大きく乖離した（例: 予測+10%/月に対して実績+2%/月が3ヶ月続いた）
-- 能力またはリソースの制約が判明した（例: 重要なAPIの提供終了）
-- ドメイン状況が急変した（例: 競合の大規模参入）
-
-```
-変化率乖離の検出条件:
-  観測変化率 < 評価時の仮定変化率 × 0.5  // 50%以下に落ちた
-  AND 連続N回のループでその状態が続いている（Nはゴール設定時に指定、デフォルト3）
-
-上記条件を満たした場合、再交渉プロセスを起動する
-```
-
-### トリガー 3: ユーザーによる明示的な再評価要求
-
-ユーザーが「このゴールを今一度見直したい」と明示した場合、即座に再交渉を起動する。
-
----
-
-## 7. ゴール交渉とゴールツリーの関係
-
-ゴール交渉はゴールツリーのどの階層でも発生する。
-
-**上位ゴールの交渉**: ゴール全体の実現可能性を評価する。上位ゴールが困難なら、代替の上位ゴールを提案する。
-
-**サブゴールの交渉**: 上位ゴールを受諾した後、サブゴールを定義する段階で個別に実現可能性を評価する。サブゴールが困難でも、上位ゴールの交渉をやり直すとは限らない。サブゴールを修正することで上位ゴールを実現できる場合、サブゴールレベルでのカウンター提案を行う。
-
-```
-上位ゴール: 「6ヶ月で売上2倍」（受諾済み）
-  ↓
-サブゴールA: 「顧客数を3倍にする」← 実現可能性評価: 困難
-  ↓
-サブゴールAへのカウンター提案: 「顧客数を2倍にしつつ単価を1.5倍に」
-  ↓
-上位ゴール（売上2倍）は維持したまま、達成経路を修正する
+ The first 4 weeks are set as an 'exploration phase' to prioritize
+ confirming feasibility. The assessment will be updated after 4 weeks."
 ```
 
 ---
 
-## 8. 交渉の記録と透明性
+## 5. When the User Insists on a Difficult Goal
 
-交渉のすべてのステップは永続ファイルに記録される。
+If the user chooses to maintain the original goal in response to a counter-proposal, Conatus accepts that decision. However, the following are set:
+
+```
+goal.confidence = "low"           // Initial confidence set to low
+goal.flag = "user-override"       // Record that the user chose to maintain the goal
+goal.feasibility_note = "Estimated feasibility at time of evaluation: Infeasible"
+```
+
+The user's will is respected, but the evaluation result remains on record. Not "blindly comply," but "evaluate, record the user's choice, and then track."
+
+---
+
+## 6. Renegotiation Triggers
+
+Goal negotiation does not happen only at the start. Renegotiation is triggered by the following.
+
+### Trigger 1: After Stall Detection
+
+When `stall-detection.md` detects a stall, if the cause of the stall is "the feasibility of the goal itself," renegotiation is initiated.
+
+Decision flow:
+```
+Stall detected
+  ↓
+Analyze the cause of the stall
+  ↓
+If determined to be "inappropriate goal setting"
+  ↓
+Restart goal negotiation (baseline observation → evaluation → response)
+```
+
+### Trigger 2: Change in Feasibility Due to New Information
+
+When information obtained during execution significantly changes the assumptions made in the initial evaluation.
+
+Specific examples:
+- The observed rate of change diverges greatly from the initial prediction (e.g., predicted +10%/month vs. actual +2%/month persisting for 3 months)
+- A capability or resource constraint is discovered (e.g., a key API is being discontinued)
+- The domain situation changes drastically (e.g., a large competitor enters the market)
+
+```
+Rate of change divergence detection condition:
+  Observed rate of change < assumed rate of change at evaluation × 0.5  // dropped to below 50%
+  AND that state continues for N consecutive loops (N is specified at goal setup, default 3)
+
+When the above condition is met, initiate the renegotiation process
+```
+
+### Trigger 3: Explicit Re-evaluation Request from the User
+
+If the user explicitly states "I'd like to revisit this goal," renegotiation is initiated immediately.
+
+---
+
+## 7. Relationship Between Goal Negotiation and the Goal Tree
+
+Goal negotiation can occur at any level of the goal tree.
+
+**Top-level goal negotiation**: Evaluate the overall feasibility of the goal. If the top-level goal is infeasible, propose an alternative top-level goal.
+
+**Sub-goal negotiation**: After accepting the top-level goal, feasibility is evaluated individually for each sub-goal when they are defined. Even if a sub-goal is infeasible, that does not necessarily mean the top-level goal negotiation must restart. If the top-level goal can be achieved by revising the sub-goal, a counter-proposal is made at the sub-goal level.
+
+```
+Top-level goal: "Double revenue in 6 months" (accepted)
+  ↓
+Sub-goal A: "Triple customer count" ← Feasibility: Infeasible
+  ↓
+Counter-proposal for Sub-goal A: "Double customer count and increase unit price 1.5×"
+  ↓
+Keep the top-level goal (double revenue) intact while revising the path to achieve it
+```
+
+---
+
+## 8. Recording and Transparency of Negotiations
+
+All steps of the negotiation are recorded in a persistent file.
 
 ```
 goal_negotiation_log:
@@ -359,58 +360,58 @@ goal_negotiation_log:
   timestamp: "2026-03-10T09:00:00Z"
 
   step2_decomposition:
-    dimensions: [月次売上, アクティブ顧客数, 解約率]
-    method: "LLM分解"
+    dimensions: [monthly_revenue, active_customers, churn_rate]
+    method: "LLM decomposition"
 
   step3_baseline:
     observations:
-      - dimension: 月次売上
+      - dimension: monthly_revenue
         value: 500000
         confidence: 0.98
-        method: "会計DB"
-      - dimension: 解約率
+        method: "accounting DB"
+      - dimension: churn_rate
         value: null
         confidence: 0.0
-        method: "観測不可（データソースなし）"
+        method: "unobservable (no data source)"
 
   step4_evaluation:
-    path: "hybrid"  // 定量 + 定性の混在
+    path: "hybrid"  // mix of quantitative + qualitative
     dimensions:
-      - name: 月次売上
+      - name: monthly_revenue
         path: "quantitative"
         feasibility_ratio: 2.1
-        assessment: "挑戦的"
-      - name: 解約率
+        assessment: "Ambitious"
+      - name: churn_rate
         path: "qualitative"
-        assessment: "不明"
-        confidence: "低"
-        reasoning: "データソースが存在しない。想定リスクあり。"
+        assessment: "Unknown"
+        confidence: "Low"
+        reasoning: "No data source exists. Assumed risk."
 
   step5_response:
     type: "flag-as-ambitious"
     accepted: true
-    initial_confidence: "低"
+    initial_confidence: "Low"
     user_acknowledged: true
 ```
 
-この記録により、「なぜこのゴールがこの信頼度で設定されたか」が後から追跡できる。
+This record makes it possible to retroactively trace "why this goal was set with this confidence level."
 
 ---
 
-## 9. 設計上の判断と根拠
+## 9. Design Decisions and Rationale
 
-**なぜハイブリッド方式なのか**
+**Why the hybrid method?**
 
-定量的評価だけでは、歴史データが存在しない新規ドメインのゴールを評価できない。定性的評価だけでは、数値で表せるゴールに対して不必要に不確実性を持ち込む。両方を組み合わせることで、データがある領域では精度を上げ、データがない領域では正直に不確実性を表明できる。
+Quantitative evaluation alone cannot assess goals in new domains where historical data does not exist. Qualitative evaluation alone unnecessarily introduces uncertainty for goals that can be expressed numerically. Combining both enables greater accuracy where data exists, while honestly expressing uncertainty where it does not.
 
-**なぜカウンター提案に数値的な根拠を要求するのか**
+**Why require numerical rationale for counter-proposals?**
 
-「3ヶ月では難しい」だけでは、ユーザーは判断できない。「現在の成長率から計算すると、3ヶ月で達成可能な上限はX%増です」という根拠があって初めて、ユーザーが「では目標を修正しよう」または「それでも3ヶ月でやる」を選べる。根拠なきカウンター提案はユーザーへの責任転嫁だ。
+Saying "3 months seems difficult" alone does not give the user enough to decide. The rationale "based on the current growth rate, the upper bound achievable in 3 months is X% growth" is what allows the user to choose "then let's revise the target" or "we'll do it in 3 months anyway." A counter-proposal without rationale is shifting responsibility to the user.
 
-**なぜ保守的バイアスを定性的評価に課すのか**
+**Why impose a conservative bias on qualitative evaluation?**
 
-不確実なゴールを安易に受諾した場合のコストは、リソースの浪費と機会損失だ。一方、不確実なゴールに要注意フラグを立てたコストは、ユーザーとの確認コストだけだ。非対称なコスト構造から、不確実なときは保守的に判断する設計になる。
+The cost of carelessly accepting an uncertain goal is resource waste and opportunity loss. The cost of flagging an uncertain goal as ambitious is only the cost of confirming with the user. This asymmetric cost structure leads to conservative judgment when uncertain.
 
-**なぜユーザーの意志を最終的に尊重するのか**
+**Why ultimately respect the user's will?**
 
-Conatusは助言者であり、決定者ではない。評価結果を正直に伝えた上で、最終的な選択はユーザーに委ねる。「困難と言ったのに聞かなかった」ではなく、「困難と評価し、ユーザーが選択した事実を記録して、その上で全力を尽くす」。
+Conatus is an advisor, not a decision-maker. Having communicated the evaluation honestly, the final choice is left to the user. Not "they didn't listen when I said it was difficult," but "evaluated as difficult, recorded the user's choice, and then committed fully."

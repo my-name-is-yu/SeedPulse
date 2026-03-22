@@ -1,47 +1,47 @@
-# 知識転移設計
+# Knowledge Transfer Design
 
-> 関連: `learning-pipeline.md`, `curiosity.md`, `portfolio-management.md`, `goal-tree.md`, `trust-and-safety.md`
-
----
-
-## 1. 概要
-
-知識転移は**ゴール間の知識・戦略転移システム**だ。あるゴールで学んだパターンや成功戦略を、類似する別のゴールに自動的に適用する。
-
-```
-ゴールA（完了・進行中）
-  └── LearnedPattern群 / 成功戦略履歴
-        │
-        ↓ 類似度検索 + LLMによるコンテキスト適応
-        │
-ゴールB（進行中）
-  └── 転移された知識・戦略テンプレート
-        │
-        └→ タスク発見ループへのフィードバック
-```
-
-**転移の目的**: `learning-pipeline.md` が「単一ゴール内の経験学習」であるのに対し、知識転移は「ゴールをまたいだ経験の再利用」だ。同じドメインで複数のゴールを追う場合、最初のゴールの失敗・成功が後続ゴールの効率を大幅に向上させる。
+> Related: `learning-pipeline.md`, `curiosity.md`, `portfolio-management.md`, `goal-tree.md`, `trust-and-safety.md`
 
 ---
 
-## 2. データモデル
+## 1. Overview
 
-### 2.1 転移候補（TransferCandidate）
+Knowledge transfer is a **cross-goal knowledge and strategy transfer system**. It automatically applies patterns and successful strategies learned in one goal to similar goals.
+
+```
+Goal A (completed / in progress)
+  └── LearnedPattern set / successful strategy history
+        │
+        ↓ Similarity search + LLM context adaptation
+        │
+Goal B (in progress)
+  └── Transferred knowledge / strategy templates
+        │
+        └→ Feedback to the task discovery loop
+```
+
+**Purpose of transfer**: While `learning-pipeline.md` handles "experiential learning within a single goal," knowledge transfer handles "reuse of experience across goals." When pursuing multiple goals in the same domain, failures and successes from the first goal can substantially improve efficiency on subsequent goals.
+
+---
+
+## 2. Data Model
+
+### 2.1 TransferCandidate
 
 ```
 TransferCandidate {
   id: string
-  source_goal_id: string          // 転移元ゴール
-  target_goal_id: string          // 転移先ゴール
-  transfer_type: TransferType     // 転移タイプ（§3）
-  source_item_id: string          // 元のパターン/戦略のID
+  source_goal_id: string          // Source goal
+  target_goal_id: string          // Target goal
+  transfer_type: TransferType     // Transfer type (§3)
+  source_item_id: string          // ID of the original pattern/strategy
 
-  similarity_score: number        // ゴール間の埋め込み類似度（0.0〜1.0）
-  domain_tag_match: boolean       // ドメインタグが一致するか
-  adapted_content: string | null  // LLMによるコンテキスト適応後の内容
+  similarity_score: number        // Embedding similarity between goals (0.0–1.0)
+  domain_tag_match: boolean       // Whether domain tags match
+  adapted_content: string | null  // Content after LLM context adaptation
 
   state: TransferCandidateState   // pending / proposed / applied / rejected / invalidated
-  effectiveness_score: number | null  // 適用後の効果スコア（§5）
+  effectiveness_score: number | null  // Effectiveness score after application (§5)
 
   proposed_at: DateTime
   applied_at: DateTime | null
@@ -49,272 +49,272 @@ TransferCandidate {
 }
 ```
 
-### 2.2 ゴール横断ナレッジベース（CrossGoalKnowledgeBase）
+### 2.2 CrossGoalKnowledgeBase
 
 ```
 CrossGoalKnowledgeBase {
-  meta_patterns: MetaPattern[]    // ドメイン横断メタパターン（§6）
-  strategy_templates: StrategyTemplate[]  // 戦略テンプレート（§3.2参照）
+  meta_patterns: MetaPattern[]    // Cross-domain meta-patterns (§6)
+  strategy_templates: StrategyTemplate[]  // Strategy templates (see §3.2)
   last_aggregated_at: DateTime
 }
 ```
 
 ---
 
-## 3. 転移タイプ
+## 3. Transfer Types
 
-| タイプ | 内容 | 転移元 |
-|--------|------|--------|
-| `knowledge` | ドメイン知識の転移（観測精度・スコープサイジングパターン） | LearnedPattern |
-| `strategy` | 成功戦略のテンプレート適用 | Strategy（effectiveness_score >= 0.5 かつ completed） |
-| `pattern` | 学習パターンの共有（`learning-pipeline.md` §4と同一タイプ） | LearnedPattern |
+| Type | Content | Source |
+|------|---------|--------|
+| `knowledge` | Domain knowledge transfer (observation accuracy, scope-sizing patterns) | LearnedPattern |
+| `strategy` | Application of successful strategy templates | Strategy (effectiveness_score >= 0.5 and completed) |
+| `pattern` | Sharing of learned patterns (same type as `learning-pipeline.md` §4) | LearnedPattern |
 
 ---
 
-## 4. 転移候補の検出
+## 4. Transfer Candidate Detection
 
-### 4.1 検出タイミング
+### 4.1 Detection Timing
 
-5イテレーションに1回、転移候補の検出サイクルを実行する。
+A transfer candidate detection cycle runs once every 5 iterations.
 
 ```
-検出サイクル
+Detection cycle
     │
     ↓
-アクティブな全ゴールを取得
+Retrieve all active goals
     │
     ↓
-各ゴールペアの転移候補をスコアリング（§4.2）
+Score transfer candidates for each goal pair (§4.2)
     │
     ↓
-スコア上位の候補を TransferCandidate として保存
+Save top-scoring candidates as TransferCandidates
 ```
 
-### 4.2 スコアリング
+### 4.2 Scoring
 
 ```
 transfer_score =
   similarity_score × original_confidence × effectiveness_score_normalized
 
 similarity_score:
-  VectorIndex でゴール埋め込みの cosine similarity を計算
+  Calculate cosine similarity of goal embeddings via VectorIndex
 
 original_confidence:
-  転移元 LearnedPattern または戦略の confidence / effectiveness_score
+  confidence / effectiveness_score of the source LearnedPattern or strategy
 
 effectiveness_score_normalized:
-  転移元で適用済みの場合は実績スコア（0.0〜1.0）
-  未適用の場合は 0.5（中立）
+  If already applied at source: actual effectiveness score (0.0–1.0)
+  If not yet applied: 0.5 (neutral)
 ```
 
-**検索範囲**:
-1. `KnowledgeManager.searchAcrossGoals()` で関連知識を検索
-2. `VectorIndex` でゴール定義の埋め込み類似度を計算（similarity_score >= 0.7 のみ対象）
-3. `LearnedPattern.domain_tags` のマッチング（タグが1つ以上一致する場合、スコアに +0.1 ボーナス）
+**Search scope**:
+1. Search for related knowledge via `KnowledgeManager.searchAcrossGoals()`
+2. Calculate embedding similarity of goal definitions via `VectorIndex` (only where similarity_score >= 0.7)
+3. Match `LearnedPattern.domain_tags` (if at least one tag matches, add +0.1 bonus to score)
 
 ---
 
-## 5. 適用プロセス
+## 5. Application Process
 
-### 5.1 フロー
+### 5.1 Flow
 
 ```
-TransferCandidate（proposed）
+TransferCandidate (proposed)
     │
     ↓
-LLMによるコンテキスト適応
-    │ - 転移元の表現を転移先のドメイン・次元に合わせて書き換える
-    │ - 転移元の文脈依存部分を抽象化
+LLM context adaptation
+    │ - Rewrite the source expression to fit the target domain/dimensions
+    │ - Abstract context-dependent parts from the source
     ↓
-安全チェック（§5.2）
+Safety check (§5.2)
     │
-    ├── 不適合 → TransferCandidate を rejected に更新
+    ├── Incompatible → Update TransferCandidate to rejected
     │
-    └── 適合 → ユーザーへの提案（Phase 1）
+    └── Compatible → Proposal to user (Phase 1)
                     │
-                    ├── 承認 → applied に更新 → SessionManager に注入
-                    └── 拒否 → rejected に更新
+                    ├── Approved → Update to applied → Inject into SessionManager
+                    └── Rejected → Update to rejected
 ```
 
-### 5.2 安全チェック
+### 5.2 Safety Check
 
-**ドメイン制約の互換性確認**: 転移先ゴールの制約（`constraints`）と転移されたパターン・戦略の前提条件が矛盾しないか確認する。LLMが互換性を評価し、矛盾が検出された場合は rejected にする。
+**Domain constraint compatibility check**: Verify that the constraints of the target goal (`constraints`) are not in conflict with the prerequisites of the transferred pattern or strategy. The LLM evaluates compatibility, and any detected conflict results in rejection.
 
-**倫理ゲート**: `ethics-gate.md` の checkGoal() を通過させる。転移適用は新しい行動方針の注入に相当するため、倫理チェックは必須だ。
+**Ethics gate**: Pass through the `checkGoal()` function in `ethics-gate.md`. Since applying a transfer equates to injecting a new action policy, the ethics check is mandatory.
 
-**自動適用の禁止（Phase 1）**: Phase 1 では転移は常にユーザーへの提案とする。自動適用は行わない。
+**No automatic application (Phase 1)**: In Phase 1, all transfers are always presented as proposals to the user. Automatic application is not performed.
 
 ---
 
-## 6. 効果評価
+## 6. Effectiveness Evaluation
 
-### 6.1 効果の測定
+### 6.1 Measuring Effectiveness
 
-転移適用後、次の学習トリガー（`learning-pipeline.md` §2）で効果を評価する。
+After a transfer is applied, effectiveness is evaluated at the next learning trigger (`learning-pipeline.md` §2).
 
 ```
 effectiveness_delta =
   gap_reduction_rate_after_transfer - gap_reduction_rate_before_transfer
 
-  gap_reduction_rate: 単位時間あたりのギャップ縮小量（normalized）
+  gap_reduction_rate: Amount of Gap reduction per unit time (normalized)
 ```
 
-### 6.2 信頼度の更新
+### 6.2 Confidence Updates
 
 ```
-効果あり（effectiveness_delta > 0.05）   → original_confidence += 0.1
-効果なし（-0.05 <= delta <= 0.05）        → 変化なし
-悪化（effectiveness_delta < -0.05）       → original_confidence -= 0.15
+Effective (effectiveness_delta > 0.05)       → original_confidence += 0.1
+No effect (-0.05 <= delta <= 0.05)           → no change
+Degraded (effectiveness_delta < -0.05)       → original_confidence -= 0.15
 ```
 
-### 6.3 自動無効化
+### 6.3 Automatic Invalidation
 
 ```
-3回連続 neutral または negative の評価
+3 consecutive neutral or negative evaluations
     │
     ↓
-TransferCandidate を invalidated に更新
-転移元パターン/戦略の cross_goal_applicable フラグを false に設定
+Update TransferCandidate to invalidated
+Set cross_goal_applicable flag on source pattern/strategy to false
 ```
 
 ---
 
-## 7. ゴール横断ナレッジベース
+## 7. Cross-Goal Knowledge Base
 
-### 7.1 メタパターン抽出
+### 7.1 Meta-Pattern Extraction
 
-全ゴールの LearnedPattern を集約し、LLMでドメイン横断のメタパターンを抽出する。
+Aggregate all goals' LearnedPatterns and use the LLM to extract cross-domain meta-patterns.
 
 ```
-メタパターン抽出
-    │ 入力: 全ゴールの LearnedPattern (confidence >= 0.6)
+Meta-pattern extraction
+    │ Input: All goals' LearnedPatterns (confidence >= 0.6)
     │
     ↓
-LLMによるクラスタリングと抽象化
-    │ - 同種のパターンをグループ化
-    │ - ゴール固有の部分を除去し汎化
+LLM clustering and abstraction
+    │ - Group similar patterns together
+    │ - Remove goal-specific parts and generalize
     │
     ↓
-MetaPattern として CrossGoalKnowledgeBase に登録
+Register as MetaPattern in CrossGoalKnowledgeBase
     │
-    └→ VectorIndex へ埋め込み生成 + 登録
+    └→ Generate embedding + register in VectorIndex
 ```
 
-### 7.2 メタパターンの活用
+### 7.2 Applying Meta-Patterns
 
-新しいゴールが追加されたとき、CrossGoalKnowledgeBase から類似メタパターンを検索し、セッションコンテキストに注入する。これにより「過去に似たゴールで何が効いたか」を最初から参照できる。
+When a new goal is added, search the CrossGoalKnowledgeBase for similar meta-patterns and inject them into the session context. This allows Conatus to reference "what worked for similar goals in the past" from the very beginning.
 
 ---
 
-## 8. 安全弁のまとめ
+## 8. Safety Guardrails Summary
 
-| 制約 | 詳細 |
-|------|------|
-| 類似度閾値 | 0.7 以上のゴールペアのみ転移候補として検出 |
-| LLMによる互換性チェック | ドメイン制約の矛盾検出 |
-| 倫理ゲート通過必須 | 全転移候補は ethics-gate.md のチェックを通過 |
-| ユーザー承認（Phase 1） | 自動適用なし、常に提案→承認フロー |
-| 自動無効化 | 3回連続で効果なし/悪化なら自動無効化 |
-| 信頼度の割引 | 転移時に confidence × 0.7 でスタート（`learning-pipeline.md` §6.2） |
+| Constraint | Details |
+|------------|---------|
+| Similarity threshold | Only goal pairs with similarity >= 0.7 are detected as transfer candidates |
+| LLM compatibility check | Detects domain constraint conflicts |
+| Ethics gate required | All transfer candidates must pass the check in ethics-gate.md |
+| User approval (Phase 1) | No automatic application; always follows propose → approve flow |
+| Automatic invalidation | Auto-invalidated after 3 consecutive ineffective/degrading results |
+| Confidence discount | Transfers start at confidence × 0.7 (`learning-pipeline.md` §6.2) |
 
 ---
 
 ## 9. MVP vs Phase 2
 
-### MVP（Phase 1 / Stage 14F）
+### MVP (Phase 1 / Stage 14F)
 
-| 項目 | MVP仕様 |
-|------|---------|
-| 検出タイミング | 5イテレーションに1回 |
-| 類似度計算 | VectorIndex の cosine similarity |
-| 自動適用 | なし（全てユーザー提案） |
-| メタパターン抽出 | goal_completed トリガー時のみ |
-| ナレッジベース更新 | バッチ（手動トリガー） |
+| Item | MVP Specification |
+|------|------------------|
+| Detection timing | Once every 5 iterations |
+| Similarity calculation | Cosine similarity via VectorIndex |
+| Automatic application | None (all presented as user proposals) |
+| Meta-pattern extraction | Only on goal_completed trigger |
+| Knowledge base updates | Batch (manual trigger) |
 
 ### Phase 2
 
-| 項目 | Phase 2仕様 |
-|------|------------|
-| 自動適用 | 高信頼度（confidence >= 0.85）パターンは自動適用 |
-| リアルタイム検出 | タスク生成直前に動的に転移候補をスキャン |
-| ナレッジベース更新 | 継続的（各学習トリガーで増分更新） |
-| 転移効果の可視化 | レポートに「転移で時短できた時間」を表示 |
+| Item | Phase 2 Specification |
+|------|----------------------|
+| Automatic application | High-confidence (confidence >= 0.85) patterns applied automatically |
+| Real-time detection | Transfer candidates scanned dynamically just before task generation |
+| Knowledge base updates | Continuous (incremental updates on each learning trigger) |
+| Transfer effectiveness visualization | Display "time saved via transfer" in reports |
 
 ---
 
-## 設計原則のまとめ
+## Summary of Design Principles
 
-| 原則 | 具体的な設計決定 |
-|------|----------------|
-| 転移は提案、人が決める | Phase 1では自動適用なし。常にユーザーが最終判断 |
-| 類似性の根拠を示す | similarity_score と domain_tag_match を可視化する |
-| 安全チェックは必須 | 互換性チェック + 倫理ゲートを全転移候補に適用 |
-| 効果を追跡して改善 | 転移結果のフィードバックで信頼度を継続的に更新 |
-| 失敗した転移は無効化 | 3回連続失敗で自動無効化してノイズを除去 |
+| Principle | Specific Design Decision |
+|-----------|--------------------------|
+| Transfer is proposed; humans decide | No automatic application in Phase 1. The user always makes the final call |
+| Show the basis for similarity | Visualize similarity_score and domain_tag_match |
+| Safety checks are mandatory | Compatibility check + ethics gate applied to all transfer candidates |
+| Track and improve effectiveness | Continuously update confidence based on transfer outcome feedback |
+| Invalidate failed transfers | Auto-invalidate after 3 consecutive failures to remove noise |
 
 ---
 
-## 外部参考: claude-mem
+## External Reference: claude-mem
 
-> 参照元: [claude-mem](https://github.com/thedotmack/claude-mem) — セッション間記憶注入ライブラリ。以下の知見をConatus M16設計に反映する。
+> Source: [claude-mem](https://github.com/thedotmack/claude-mem) — A library for injecting memory across sessions. The following insights are reflected in the Conatus M16 design.
 
-### A. session_summaries の構造化フィールド設計（データ構造パターン）
+### A. Structured Field Design for session_summaries (Data Structure Pattern)
 
-claude-mem はセッションサマリーを `investigated / learned / completed / next_steps` の構造化フィールドに分離して保存する。非構造化テキストと比べて、フィールド単位の検索・マッチングが可能になり、転移時の精度が大幅に向上する。
+claude-mem stores session summaries in structured fields: `investigated / learned / completed / next_steps`. Compared to unstructured text, this enables field-level search and matching, greatly improving transfer accuracy.
 
-**M16への適用**: KnowledgeTransfer Phase 2 の転移元データ（DecisionRecord 等）に以下のフィールドを追加し、転移元データを構造化する。
+**Application to M16**: Add the following fields to transfer source data (e.g., DecisionRecord) in KnowledgeTransfer Phase 2 to structure the transfer source data.
 
 ```
-DecisionRecord（拡張案）{
-  // 既存フィールド...
+DecisionRecord (extended proposal) {
+  // Existing fields...
 
-  // Phase 2 追加フィールド（claude-mem パターン）
-  what_worked: string[]    // 効果があったアプローチ・戦略
-  what_failed: string[]    // 失敗したアプローチ・その理由
-  suggested_next: string[] // 次のゴールへの示唆・推奨アクション
+  // Phase 2 additional fields (claude-mem pattern)
+  what_worked: string[]    // Approaches/strategies that were effective
+  what_failed: string[]    // Approaches that failed and their reasons
+  suggested_next: string[] // Suggestions/recommended actions for the next goal
 }
 ```
 
-構造化によって転移時のマッチングが「全文類似度」から「フィールド単位の比較」に変わり、「失敗パターンの回避」と「成功パターンの再利用」を分離して扱えるようになる。
+Structuring the data changes transfer matching from "full-text similarity" to "field-level comparison," enabling separate handling of "avoiding failure patterns" and "reusing success patterns."
 
-### B. Progressive Disclosure（3段階取得戦略）
+### B. Progressive Disclosure (Three-Phase Fetch Strategy)
 
-claude-mem は `search → timeline → get_observations` の3段階フェッチで約10倍のトークン削減を実現している。
+claude-mem achieves approximately a 10x token reduction with a three-phase fetch: `search → timeline → get_observations`.
 
-| フェーズ | 内容 | トークン量 |
-|---------|------|-----------|
-| search | インデックスのみ返す | ~50〜100 tokens/件 |
-| timeline | アンカーID周辺の時系列コンテキスト | 中間 |
-| get_observations | IDリストで全文取得 | ~500〜1000 tokens/件 |
+| Phase | Content | Token Volume |
+|-------|---------|--------------|
+| search | Returns index only | ~50–100 tokens/item |
+| timeline | Chronological context around an anchor ID | Medium |
+| get_observations | Full text retrieval by ID list | ~500–1000 tokens/item |
 
-**M16への適用**: コンテキスト選択の動的バジェット化（Phase 2）において、現在の固定 top-4 取得を段階的取得に変える。
+**Application to M16**: In Phase 2's dynamic context budget approach, change the current fixed top-4 retrieval to progressive retrieval.
 
 ```
-現在（固定top-4）:
-  全候補を全文取得 → 上位4件選択
+Current (fixed top-4):
+  Fetch all candidates in full → Select top 4
 
-改善案（Progressive Disclosure）:
-  Step 1: 全候補のインデックス（ID + タイトル + スコア）を取得      ← 低コスト
-  Step 2: スコア上位N件に絞り込み（バジェット制約内）
-  Step 3: 絞り込んだ候補のみ全文取得                               ← 必要分のみ
+Improved approach (Progressive Disclosure):
+  Step 1: Fetch index of all candidates (ID + title + score)    ← Low cost
+  Step 2: Narrow to top N candidates (within budget constraints)
+  Step 3: Fetch full text only for the narrowed candidates      ← Only what's needed
 ```
 
-この段階的アプローチにより、コンテキストバジェットが厳しい場面でも幅広い候補を考慮した上で最適な知識を選択できる。
+This progressive approach allows Conatus to consider a wide set of candidates and select the optimal knowledge even when the context budget is tight.
 
-### C. 小粒だが参考になる設計パターン
+### C. Small but Useful Design Patterns
 
-| パターン | claude-mem での実装 | M16への適用可能性 |
-|---------|-------------------|----------------|
-| `discovery_tokens` フィールド | 知識取得コストを記録 | TransferCandidate にトークンコストを記録し、バジェット配分の根拠にする |
-| `concepts` JSON配列 | スキーマ非依存の概念タグ | LearnedPattern の `domain_tags` を拡張し、ゴール横断マッチングの精度向上に活用 |
-| `timeline` パターン | アンカーID周辺の時系列取得 | 戦略変更前後に何が起きたか（stall検知 → 戦略切替 → 回復）を効率的に取得 |
+| Pattern | claude-mem Implementation | Applicability to M16 |
+|---------|--------------------------|----------------------|
+| `discovery_tokens` field | Records the token cost of knowledge retrieval | Record token costs in TransferCandidate to use as a basis for budget allocation |
+| `concepts` JSON array | Schema-independent concept tags | Extend LearnedPattern's `domain_tags` to improve cross-goal matching accuracy |
+| `timeline` pattern | Chronological retrieval around an anchor ID | Efficiently retrieve what happened around a strategy change (stall detection → strategy switch → recovery) |
 
-### D. claude-mem にない部分（Conatus独自設計が必要な領域）
+### D. What claude-mem Does Not Cover (Areas Requiring Conatus-Specific Design)
 
-claude-mem はシングルセッション間の記憶注入に特化しており、以下はConatus独自に設計が必要だ。
+claude-mem specializes in memory injection between single sessions; the following require original Conatus design.
 
-| 機能 | 理由 |
-|------|------|
-| ゴール横断知識転移 | claude-mem は単一セッション間の注入のみ。Conatusは並列・直列に複数ゴールが走る |
-| 転移信頼スコア学習 | 転移の効果をフィードバックして信頼度を更新する仕組み（§6.2）はConatus独自 |
-| 動的バジェット強制 | claude-mem の TokenCalculator はコスト計算のみでバジェット強制なし。Conatusはバジェット超過時の優先度ベース削減が必要 |
+| Feature | Reason |
+|---------|--------|
+| Cross-goal knowledge transfer | claude-mem handles single-session injection only. Conatus runs multiple goals in parallel and in series |
+| Transfer confidence score learning | The mechanism to update confidence by feeding back transfer effectiveness (§6.2) is unique to Conatus |
+| Dynamic budget enforcement | claude-mem's TokenCalculator only calculates costs without enforcing budgets. Conatus needs priority-based reduction when budget is exceeded |

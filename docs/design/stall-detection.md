@@ -1,288 +1,288 @@
-# 停滞検知設計
+# Stall Detection Design
 
 ---
 
-## 1. なぜ停滞検知が必要か
+## 1. Why Stall Detection Is Necessary
 
-Conatusのループは止まらない。ゴールが達成されるかユーザーが止めるまで回り続ける。この「止まらない」という性質は、通常は強みだ。1回のループが不完全でも、次のループで補正される。
+Conatus's loop never stops. It keeps running until a goal is achieved or the user intervenes. This "never stopping" quality is normally a strength. Even if one loop iteration is imperfect, the next corrects it.
 
-しかし、ある種の問題においては、この性質が欠陥になる。
+However, for certain types of problems, this same quality becomes a flaw.
 
-- 同じアプローチで壁にぶつかり続ける
-- 解決不可能な問題に全リソースを注ぎ込む
-- 外部の変化を待つ必要があるのに無駄にループを回す
+- Hitting the same wall over and over with the same approach
+- Pouring all resources into an unsolvable problem
+- Spinning the loop uselessly when what is needed is to wait for an external change
 
-停滞検知は**サーキットブレーカー**だ。ループが無意味に回り続けることを検出し、介入の引き金を引く。停滞検知がなければ、Conatusは解けない問題の前で永遠に同じ手を打ち続ける。
-
----
-
-## 2. 検知指標
-
-停滞には4つの種類がある。それぞれ独立して検知する。
-
-### 2.1 次元レベルの停滞
-
-特定の次元のギャップが、N回の連続ループを経ても縮まっていない状態。
-
-```
-次元: 売上
-ループ1: ギャップ = 80
-ループ2: ギャップ = 79
-ループ3: ギャップ = 80
-ループ4: ギャップ = 81
-ループ5: ギャップ = 79
-→ ギャップの実質的な変化なし
-```
-
-**設計上の注意点**: Nは次元ごとに設定可能。一部の次元（例: 組織体制、市場ポジション）は性質上ゆっくり動く。これらに対して、素早く動く次元と同じNを適用すると誤検知が発生する。
-
-| 次元の種類 | 推奨N（連続ループ数） |
-|------------|----------------------|
-| 即時反映（テスト結果、API応答） | 3 |
-| 中期反映（売上、顧客満足度） | 5 |
-| 長期反映（組織、市場） | 10 |
-
-ギャップの「縮まり」は絶対値ではなくパーセンテージで判断する。大きなギャップが小さな値だけ縮まっても、停滞とはみなさない。
-
-### 2.2 時間超過
-
-タスクまたはゴールの見積もり時間に対して、実際にかかっている時間が2倍を超えた状態。
-
-```
-タスク「オンボーディングフローの改善」
-見積もり: 3日
-実際: 6日経過 → 2x超過で検知
-```
-
-時間超過は「このアプローチが機能していない可能性」を示す。見積もり自体が間違っていた可能性もあるが、それも含めて「状況の再評価が必要」というシグナルとして扱う。
-
-時間超過の閾値は2xを基本とするが、ゴールのドメインや過去の実績に応じて調整する。探索的な作業（調査タスク）には余裕を持たせ、定型的な作業（既知の修正）には厳しく設定する。
-
-**`estimated_duration` が `null` の場合のフォールバック**（`task-lifecycle.md` §2.7 参照）: 見積もりが設定されていないタスクは、ドメイン別の絶対時間閾値を使用する。
-
-| タスクドメイン | デフォルト閾値 |
-|--------------|--------------|
-| コーディング・実装 | 2時間 |
-| 調査・リサーチ | 4時間 |
-| その他・不明 | 3時間 |
-
-これらの値はゴール定義時に上書き可能だ。`null` タスクに「時間超過なし」というデフォルトを与えることは禁止する（無限待機を防ぐため）。
-
-### 2.3 連続失敗
-
-同じ種類のタスクが連続でTask Reviewerの検証に失敗した状態。
-
-```
-タスク種別「パフォーマンス改善」
-試行1: 実行 → 検証失敗（改善未達）
-試行2: 実行 → 検証失敗（改善未達）
-試行3: 実行 → 検証失敗（改善未達）
-→ 連続失敗検知
-```
-
-「同じ種類」の判定は、タスクのカテゴリと対象次元の組み合わせで行う。まったく異なる戦略による別のカテゴリのタスクは、連続失敗カウントをリセットする。
-
-**失敗カウントとエスカレーション閾値はタスク構造（`task-lifecycle.md` §2.8 `consecutive_failure_count` フィールド）で一元管理する。** 閾値のデフォルト値（3回）および設定可能パラメータ `failure_escalation_threshold` の定義もそちらを参照すること。
-
-3という数字は「同じことをやって違う結果を期待する」という非合理な行動を防ぐための閾値だ。1回の失敗は偶発的でありうる。2回は警戒すべき。3回は戦略の問題だ。
-
-### 2.4 全体停滞
-
-**すべての**次元で、直近N回のループにわたってギャップの改善が見られない状態。個別次元の停滞ではなく、ゴール全体が動いていないことを示す。
-
-```
-ループ N-4 〜 N:
-  売上次元: 変化なし
-  満足度次元: 変化なし
-  体制次元: 変化なし
-  基盤次元: 変化なし
-→ 全体停滞検知
-```
-
-全体停滞は最も深刻な状態だ。何か根本的なことが間違っている可能性が高い。ゴール定義自体の問題、実行環境の障害、前提条件の崩壊など。
-
-### 2.5 意図的待機による停滞検知の抑制（plateau_until）
-
-`plateau_until` フィールド（`task-lifecycle.md` §2.6 参照）が設定されているとき、停滞検知の動作を以下のように変更する。
-
-**抑制条件**: タスクまたは次元に `plateau_until` が設定されており、かつ現在時刻が `plateau_until` より前である場合。
-
-```
-plateau_until が設定されている AND 現在時刻 < plateau_until
-  → この次元の停滞検知をすべて抑制する
-  → §2.1〜§2.4 のいずれの検知も発動しない
-```
-
-**抑制解除**: `plateau_until` が過去の日時になった瞬間から、通常の停滞検知を再開する。抑制期間中に蓄積されたギャップの変化は、抑制解除後の最初のループで評価する。
-
-**誤用防止**: `plateau_until` は意図的な待機のためのフィールドだ。「停滞を隠すため」に使うことを禁止する。設定できるのは戦略層（タスク生成時のLLM）のみであり、実行者がアドホックに変更することはできない。
-
-**§6 のプラトーとの関係**: §6「停滞 vs. プラトー」でいう「意図的な『待つ』戦略」が `plateau_until` で形式化されたものだ。`plateau_until` が設定されていれば機械的に抑制が適用される。設定なしで停滞が発生した場合は §4 の段階的対応を通常通り適用する。
+Stall detection is a **circuit breaker**. It detects when the loop is spinning meaninglessly and triggers an intervention. Without stall detection, Conatus would keep making the same moves forever in front of an unsolvable problem.
 
 ---
 
-## 3. 停滞の分類と対応
+## 2. Detection Metrics
 
-停滞を検知したら、その原因を分類し、分類に応じた対応を取る。
+There are four types of stalls. Each is detected independently.
 
-### 3.1 情報不足
+### 2.1 Dimension-Level Stall
 
-**判断基準**: 観測の信頼度が低い次元で停滞が発生している。現在地が正確にわかっていないため、何をすべきかも定まらない。
-
-**対応**: 調査・検証タスクを新規セッションで生成する。
+The gap on a specific dimension has not narrowed over N consecutive loop iterations.
 
 ```
-停滞原因: 情報不足
-生成タスク: 「顧客離脱の実態調査 — インタビュー5件実施、離脱理由を3つ特定する」
+Dimension: Revenue
+Loop 1: Gap = 80
+Loop 2: Gap = 79
+Loop 3: Gap = 80
+Loop 4: Gap = 81
+Loop 5: Gap = 79
+→ No meaningful change in gap
 ```
 
-調査タスクは通常のタスクと区別して管理する。調査タスクの完了が、次のループの戦略選択に直接影響する。
+**Design note**: N is configurable per dimension. Some dimensions (e.g., organizational structure, market position) naturally move slowly. Applying the same N as a fast-moving dimension would cause false positives.
 
-### 3.2 アプローチ失敗
+| Dimension type | Recommended N (consecutive loops) |
+|----------------|----------------------------------|
+| Immediately reflected (test results, API responses) | 3 |
+| Medium-term (revenue, customer satisfaction) | 5 |
+| Long-term (organization, market) | 10 |
 
-**判断基準**: 情報は十分にある（観測信頼度が高い）が、ギャップが縮まらない。現在の戦略が機能していない。
+Whether a gap has "narrowed" is judged by percentage, not absolute value. A small decrease in a large gap is not considered a stall.
 
-**対応**: 別の戦略に切り替える。戦略の候補が残っていれば、次の候補を選択する。なければ、新しい仮説を生成する。
+### 2.2 Time Overrun
 
-```
-停滞原因: アプローチ失敗
-現在の戦略: 「オンボーディングUI改善」
-次の戦略候補: 「サポートチャンネルの強化」「価格プランの見直し」
-→ 「サポートチャンネルの強化」に切り替え
-```
-
-仮説の生成にはLLMを使う。「今まで試みた戦略一覧と結果」を入力として与え、「試していない可能性のある戦略」を提案させる。
-
-### 3.3 能力の限界
-
-**判断基準**: タスクの要件が、Conatusが現在使えるツール・権限・知識の範囲を超えている。何を試しても、そもそもタスクを実行できない。
-
-**対応**: 人間にエスカレーションし、新しい能力の付与を要求する。
+The actual time taken for a task or goal has exceeded twice its estimated duration.
 
 ```
-停滞原因: 能力の限界
-状況: 「本番データベースのクエリ分析が必要だが、本番環境への読み取り権限がない」
-エスカレーション内容:
-  - 必要なこと: 本番DBへの読み取り権限
-  - 代替案: 匿名化したダンプの提供
-  - 影響: この権限がない限り、当該次元のギャップを縮めることができない
+Task: "Improve Onboarding Flow"
+Estimate: 3 days
+Actual: 6 days elapsed → Detected as 2x overrun
 ```
 
-能力の限界は失敗ではない。Conatusが自分の境界を正確に認識していることの証拠だ。エスカレーションは具体的に行う。「できない」ではなく「これがあればできる」を伝える。
+A time overrun signals "this approach may not be working." The estimate itself may have been wrong, but that too is treated as a signal that "the situation needs to be re-evaluated."
 
-### 3.4 外部依存
+The baseline threshold for time overrun is 2x, but this is adjusted based on the goal's domain and past performance. Exploratory tasks (research tasks) are given more leeway; routine tasks (known fixes) are held to a stricter standard.
 
-**判断基準**: タスクの前提条件が外部の変化待ちになっている。Conatusが何をしても進められない。
+**Fallback when `estimated_duration` is `null`** (see `task-lifecycle.md` §2.7): Tasks without an estimate use absolute time thresholds based on their domain.
 
-**対応**: このゴールを一時停止し、他のゴールに切り替える。外部依存が解消されたときに再開するトリガーを設定する。
+| Task domain | Default threshold |
+|------------|------------------|
+| Coding / implementation | 2 hours |
+| Research / investigation | 4 hours |
+| Other / unknown | 3 hours |
 
-```
-停滞原因: 外部依存
-状況: 「サードパーティAPIのバージョンアップ待ち — 新機能がないと実装できない」
-対応:
-  - このゴールの状態を「待機中」にマーク
-  - 再開条件: 「APIがv3.0以上を提供したとき」
-  - 今すぐできること: 待機中に別のゴールへリソースを移行
-```
+These values can be overridden at goal definition time. Giving `null` tasks a default of "no time overrun" is prohibited (to prevent infinite waiting).
 
-外部依存を検知できないと、Conatusは無限に「APIが対応するかもしれない」という期待で空ループを回し続ける。
+### 2.3 Consecutive Failures
 
-### 3.5 ゴール実行不可能
-
-**判断基準**: 複数のピボットを経ても全体停滞が続いている。ゴール自体の定義に問題がある可能性がある。
-
-**対応**: 人間にエスカレーションし、正直な評価を伝える。
+The same type of task has failed consecutive Task Reviewer verifications.
 
 ```
-停滞原因: ゴール実行不可能（疑い）
-状況:
-  - 戦略を3回ピボット済み
-  - 全次元で改善なし（直近8ループ）
-  - これ以上試みる戦略の仮説が生成できない
-Conatusの評価:
-  「現在の制約条件下では、このゴールの達成が困難です。
-   ゴールの再定義、スコープの縮小、または前提条件の見直しを提案します。
-   具体的には: [可能なオプション一覧]」
+Task type: "Performance Improvement"
+Attempt 1: Executed → Verification failed (improvement not achieved)
+Attempt 2: Executed → Verification failed (improvement not achieved)
+Attempt 3: Executed → Verification failed (improvement not achieved)
+→ Consecutive failure detected
 ```
 
-このエスカレーションは失敗の報告ではない。Conatusが限界を認識し、より生産的な議論にユーザーを引き込むための能動的な提案だ。
+"Same type" is determined by the combination of task category and target dimension. A different-category task produced by a completely different strategy resets the consecutive failure count.
+
+**The failure count and escalation threshold are centrally managed in the task structure (`task-lifecycle.md` §2.8 `consecutive_failure_count` field).** Refer there for the default value (3) and the configurable parameter `failure_escalation_threshold`.
+
+The threshold of 3 is what prevents the irrational behavior of "doing the same thing and expecting a different result." One failure can be accidental. Two warrants caution. Three is a strategy problem.
+
+### 2.4 Global Stall
+
+**All** dimensions show no improvement in the gap across the last N loop iterations. This indicates not an individual dimension stall, but that the goal as a whole has stopped moving.
+
+```
+Loops N-4 to N:
+  Revenue dimension: no change
+  Satisfaction dimension: no change
+  Structure dimension: no change
+  Infrastructure dimension: no change
+→ Global stall detected
+```
+
+A global stall is the most serious state. Something fundamental is likely wrong — perhaps the goal definition itself, an execution environment failure, or a collapse of preconditions.
+
+### 2.5 Suppressing Stall Detection During Intentional Waits (plateau_until)
+
+When the `plateau_until` field (see `task-lifecycle.md` §2.6) is set, stall detection behavior changes as follows.
+
+**Suppression condition**: A task or dimension has `plateau_until` set, and the current time is before `plateau_until`.
+
+```
+plateau_until is set AND current_time < plateau_until
+  → Suppress all stall detection for this dimension
+  → None of the detection types from §2.1–§2.4 are triggered
+```
+
+**Lifting suppression**: Normal stall detection resumes the moment `plateau_until` becomes a past datetime. Gap changes that accumulated during the suppression period are evaluated in the first loop after suppression is lifted.
+
+**Preventing misuse**: `plateau_until` is a field for intentional waiting. Using it to "hide a stall" is prohibited. Only the strategy layer (the LLM when generating tasks) can set it; executors cannot change it ad hoc.
+
+**Relationship to §6's plateau concept**: The "intentional 'waiting' strategy" described in §6 ("Stall vs. Plateau") is formalized through `plateau_until`. If `plateau_until` is set, suppression is applied mechanically. If a stall occurs without it being set, the graduated response in §4 applies normally.
 
 ---
 
-## 3.6 停滞タイプ → 原因分類の診断マッピング
+## 3. Stall Classification and Response
 
-4つの停滞タイプと5つの原因分類の間には、経験的な対応関係がある。これは硬直したルールではなく**診断の手がかり**だ。実際の判断は観測信頼度・コンテキスト・過去ログを合わせて行う。
+When a stall is detected, its cause is classified and a response is taken based on that classification.
 
-| 停滞タイプ | 可能性が高い原因 | 可能性が低い原因 |
-|------------|----------------|----------------|
-| 次元レベルの停滞（§2.1） | アプローチ失敗、能力の限界 | ゴール実行不可能、外部依存 |
-| 時間超過（§2.2） | 外部依存、アプローチ失敗（見積もり誤り） | 能力の限界、ゴール実行不可能 |
-| 連続失敗（§2.3） | アプローチ失敗、能力の限界、ゴール実行不可能 | 情報不足、外部依存 |
-| 全体停滞（§2.4） | ゴール実行不可能、外部依存 | 情報不足、アプローチ失敗（単独では全体停滞に至らない） |
+### 3.1 Insufficient Information
 
-**マッピングの使い方**: 停滞タイプが確定したら、上表を起点に対応する原因分類（§3.1〜§3.5）の判断基準を順番に確認する。「可能性が高い原因」から評価を始め、合致しなければ次の候補へ移る。
+**Diagnosis**: A stall has occurred in a dimension with low observation confidence. Because the current position is not accurately known, there is no way to determine what should be done.
 
-**注意点**: 複数の停滞タイプが同時に発生することがある（例: 次元レベルの停滞が連続失敗と同時）。その場合、より深刻な停滞タイプ（全体停滞 > 連続失敗 > 時間超過 > 次元レベル）が示す原因分類を優先する。
+**Response**: Generate an investigation or verification task in a new session.
+
+```
+Stall cause: Insufficient information
+Generated task: "Investigate actual customer churn — conduct 5 interviews, identify 3 reasons for churn"
+```
+
+Investigation tasks are tracked separately from regular tasks. The completion of an investigation task directly affects strategy selection in the next loop.
+
+### 3.2 Approach Failure
+
+**Diagnosis**: There is sufficient information (high observation confidence), but the gap is not narrowing. The current strategy is not working.
+
+**Response**: Switch to a different strategy. If alternative strategy candidates remain, select the next one. If none remain, generate a new hypothesis.
+
+```
+Stall cause: Approach failure
+Current strategy: "Improve Onboarding UI"
+Next strategy candidates: "Strengthen Support Channels", "Revise Pricing Plans"
+→ Switch to "Strengthen Support Channels"
+```
+
+Hypothesis generation uses an LLM. The LLM is given "a list of strategies tried so far and their results" as input and asked to propose "strategies that have not yet been tried."
+
+### 3.3 Capability Limitation
+
+**Diagnosis**: The task requirements exceed the tools, permissions, or knowledge currently available to Conatus. No matter what is tried, the task cannot be executed in the first place.
+
+**Response**: Escalate to a human and request the provision of new capabilities.
+
+```
+Stall cause: Capability limitation
+Situation: "Query analysis of the production database is needed, but there is no read access to the production environment"
+Escalation content:
+  - What is needed: Read access to the production database
+  - Alternative: Provision of an anonymized dump
+  - Impact: Without this access, it is impossible to narrow the gap in this dimension
+```
+
+A capability limitation is not a failure. It is evidence that Conatus accurately recognizes its own boundaries. Escalation should be concrete. Not "I can't do this" but "I can do this if I have that."
+
+### 3.4 External Dependency
+
+**Diagnosis**: The task's preconditions are waiting on an external change. Conatus cannot make progress no matter what it does.
+
+**Response**: Pause this goal and switch to other goals. Set a trigger to resume when the external dependency is resolved.
+
+```
+Stall cause: External dependency
+Situation: "Waiting for a third-party API version upgrade — the new feature is required for implementation"
+Response:
+  - Mark this goal's state as "waiting"
+  - Resumption condition: "When the API provides v3.0 or higher"
+  - What can be done now: Redirect resources to another goal during the wait
+```
+
+Without detecting external dependencies, Conatus would spin in an empty loop forever, expecting "the API might support it eventually."
+
+### 3.5 Goal Infeasibility
+
+**Diagnosis**: A global stall continues despite multiple pivots. The goal definition itself may be the problem.
+
+**Response**: Escalate to a human with an honest assessment.
+
+```
+Stall cause: Goal infeasibility (suspected)
+Situation:
+  - Strategy has been pivoted 3 times
+  - No improvement on any dimension (last 8 loops)
+  - No further strategy hypotheses can be generated
+Conatus's assessment:
+  "Achieving this goal under the current constraints appears to be difficult.
+   I suggest redefining the goal, narrowing the scope, or revisiting the preconditions.
+   Specifically: [list of possible options]"
+```
+
+This escalation is not a failure report. It is an active proposal by Conatus — recognizing its limits and inviting the user into a more productive conversation.
 
 ---
 
-## 4. 対応の段階化
+## 3.6 Diagnostic Mapping: Stall Type → Cause Classification
 
-停滞を検知しても、即座に最大の対応を取らない。段階的に対応する。
+There are empirical associations between the four stall types and the five cause classifications. These are **diagnostic hints**, not rigid rules. Actual judgment is made by combining observation confidence, context, and past logs.
 
-```
-第1検知（同一停滞の1回目）
-  → 同じ戦略の中で別のアプローチを試みる
-  　 例: 戦略「UI改善」の中で、別のUI要素を対象にする
+| Stall type | More likely causes | Less likely causes |
+|------------|-------------------|-------------------|
+| Dimension-level stall (§2.1) | Approach failure, capability limitation | Goal infeasibility, external dependency |
+| Time overrun (§2.2) | External dependency, approach failure (wrong estimate) | Capability limitation, goal infeasibility |
+| Consecutive failures (§2.3) | Approach failure, capability limitation, goal infeasibility | Insufficient information, external dependency |
+| Global stall (§2.4) | Goal infeasibility, external dependency | Insufficient information, approach failure (alone rarely leads to global stall) |
 
-第2検知（同一停滞の2回目）
-  → 別の戦略に切り替える
-  　 例: 「UI改善」から「サポート強化」へピボット
+**How to use the mapping**: Once the stall type is confirmed, use the table above as a starting point and check the judgment criteria for the corresponding cause classifications (§3.1–§3.5) in order. Begin with the "more likely causes" and move to the next candidate if none match.
 
-第3検知（同一停滞の3回目）
-  → 人間にエスカレーション
-  　 例: 状況の説明と、可能なオプションの提示
-```
-
-段階化の目的は、一時的な停滞（プラトー）と本質的な停滞を区別することだ。新しい施策は効果が出るまでに時間がかかる。その時間を待たずに「停滞だ」と判断してしまうと、戦略が本当に機能しているのに切り替えてしまう。
-
-段階のリセット条件: 停滞していた次元で有意な改善（閾値以上のギャップ縮小）が見られたとき、その次元の段階カウントをゼロに戻す。
+**Note**: Multiple stall types can occur simultaneously (e.g., a dimension-level stall alongside consecutive failures). In that case, prioritize the cause classification indicated by the more severe stall type (global stall > consecutive failures > time overrun > dimension-level).
 
 ---
 
-## 5. スコアリングへのフィードバック
+## 4. Graduated Response
 
-停滞検知の結果は、`mechanism.md`の不満駆動スコアにフィードバックされる。
-
-**停滞中の次元の扱い**: 停滞が検知された次元は、不満駆動スコアに`decay_factor`を適用して一時的に引き下げる。
+When a stall is detected, do not immediately apply the maximum response. Respond in stages.
 
 ```
-不満スコア（通常） = gap_size × urgency_weight
-不満スコア（停滞中） = gap_size × urgency_weight × decay_factor
-  where decay_factor < 1.0 (例: 0.6)
+1st detection (first occurrence of the same stall)
+  → Try a different approach within the same strategy
+    e.g.: Within strategy "UI Improvement," target a different UI element
+
+2nd detection (second occurrence of the same stall)
+  → Switch to a different strategy
+    e.g.: Pivot from "UI Improvement" to "Strengthen Support"
+
+3rd detection (third occurrence of the same stall)
+  → Escalate to a human
+    e.g.: Explain the situation and present possible options
 ```
 
-**なぜこれが必要か**: 停滞している次元を高い優先度のまま放置すると、Conatusは同じ壁に繰り返しぶつかり続ける。decay_factorにより、一時的に別の次元に注意が向く。停滞が解消されれば、decay_factorは元に戻る。
+The purpose of graduated responses is to distinguish temporary stalls (plateaus) from genuine ones. New initiatives take time to show results. Judging "it's a stall" without waiting for that time would cause Conatus to abandon a strategy that is actually working.
 
-**decay_factorの回復**: 停滞からの回復が確認されたとき（対応策の実施後に改善が観測されたとき）、次のスケジュールで元に戻す。
-
-```
-decay_factor の回復スケジュール:
-  停滞解消直後: 0.6 → 0.75
-  2ループ後:    0.75 → 0.9
-  4ループ後:    0.9 → 1.0（正常）
-```
-
-急激な回復は避ける。「また停滞するかもしれない」という不確実性を残したまま、徐々に通常モードに戻す。
+Reset condition for stages: When meaningful improvement (gap reduction above the threshold) is observed in a stalled dimension, reset the stage count for that dimension to zero.
 
 ---
 
-## 6. 設計上の判断と境界
+## 5. Feedback to Scoring
 
-**停滞 vs. プラトー**: 停滞は「問題がある」、プラトーは「今は動いていないが問題ではない」。区別の基準は、意図的な「待つ」戦略が選択されているかどうか。「N日後に計測する」という戦略が明示されているならプラトーであり、停滞カウントを進めない。
+The results of stall detection are fed back into the dissatisfaction-driven score in `mechanism.md`.
 
-**誤検知コスト**: 停滞を見逃すコストと、停滞を誤検知するコストは非対称ではない。どちらも高い。見逃すと無駄なループ。誤検知すると効果的な戦略を途中で切る。両方を防ぐために、検知は保守的に（Nを多めに）設定し、対応は段階的に行う。
+**Handling stalled dimensions**: Dimensions with a detected stall have a `decay_factor` applied to their dissatisfaction-driven score, temporarily reducing it.
 
-**停滞検知の範囲**: 停滞検知はゴールレベルとタスクレベルの両方で動く。タスクレベルの停滞（連続失敗）が積み重なるとゴールレベルの停滞（全体停滞）になる。
+```
+Dissatisfaction score (normal) = gap_size × urgency_weight
+Dissatisfaction score (stalled) = gap_size × urgency_weight × decay_factor
+  where decay_factor < 1.0 (e.g., 0.6)
+```
 
-**ユーザーへの通知**: 停滞検知自体はサイレントに動く。第1検知・第2検知はConatusが自律的に対応する。第3検知（エスカレーション）になって初めてユーザーに通知する。これにより、一時的な停滞のたびにユーザーに通知が届く状況を防ぐ。
+**Why this is necessary**: Leaving a stalled dimension at high priority causes Conatus to keep hitting the same wall. The `decay_factor` temporarily redirects attention to other dimensions. When the stall is resolved, the `decay_factor` returns to normal.
+
+**Recovery of `decay_factor`**: When recovery from a stall is confirmed (when improvement is observed after countermeasures are applied), the factor is restored on the following schedule.
+
+```
+decay_factor recovery schedule:
+  Immediately after stall resolved: 0.6 → 0.75
+  After 2 loops:                   0.75 → 0.9
+  After 4 loops:                   0.9 → 1.0 (normal)
+```
+
+Avoid an abrupt recovery. Return to normal mode gradually, leaving some uncertainty about "whether it might stall again."
+
+---
+
+## 6. Design Decisions and Boundaries
+
+**Stall vs. plateau**: A stall means "there is a problem." A plateau means "it's not moving right now, but that's not a problem." The distinguishing factor is whether an intentional "wait" strategy has been selected. If a strategy of "measure in N days" is explicitly stated, that is a plateau, and the stall count does not advance.
+
+**Cost of false positives vs. false negatives**: The cost of missing a stall and the cost of a false positive are not asymmetric — both are high. Missing a stall results in wasteful loops. A false positive causes an effective strategy to be cut short. To prevent both, detection is configured conservatively (with a higher N), and responses are applied gradually.
+
+**Scope of stall detection**: Stall detection operates at both the goal level and the task level. Task-level stalls (consecutive failures) accumulate into goal-level stalls (global stalls).
+
+**User notification**: Stall detection itself runs silently. The 1st and 2nd detections are handled autonomously by Conatus. Only the 3rd detection (escalation) triggers a user notification. This prevents users from being notified every time a temporary stall occurs.

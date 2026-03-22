@@ -1,63 +1,63 @@
-Motivaを実際に使うユースケースです。これらを可能にしたい
+These are real-world use cases we want to make possible with Conatus.
 
 ---
 
-## ユースケース１：慢性疾患持ちの老犬の飼い主の例
+## Use Case 1: Owner of an Elderly Dog with a Chronic Illness
 
-呼吸器に関する慢性疾患を患う老犬を飼う飼い主がいました。飼い主には経過観察するための技術も、適切なケアをする知識もありません。
+There was a dog owner whose elderly dog suffered from a chronic respiratory condition. The owner had neither the technical skills to monitor the dog's condition nor the knowledge to provide appropriate care.
 
-そこで、飼い主は犬の呼吸ペースや動きなどを把握するウェアラブル型の首輪を犬に装着し、Motivaにその情報へのアクセス権を与え、こう言いました。
+So the owner equipped the dog with a wearable collar that tracked breathing pace and movement, granted Conatus access to that data, and said:
 
-「僕の犬は呼吸器の慢性疾患を患っている。一緒に幸せに暮らしたい」
+"My dog has a chronic respiratory condition. I want us to live happily together."
 
-Motivaはゴールを受け取り、タスク発見ループを開始しました。
+Conatus accepted the goal and started the task discovery loop.
 
-**ゴール分解**: 「一緒に幸せに暮らす」を分解し、健康状態の継続監視・緊急時対応・ステージ別ケアという3つのサブゴールを定義しました。
+**Goal decomposition**: Conatus broke down "live happily together" into three sub-goals: continuous health monitoring, emergency response, and stage-appropriate care.
 
-**最初のギャップ認識**: 首輪からのデータは取得できるが、それを定期的に分析して飼い主に届ける仕組みがない。これが最大のギャップだと判断しました。
+**Initial gap recognition**: Conatus determined that the biggest gap was that while data from the collar was available, there was no mechanism to regularly analyze it and deliver the results to the owner.
 
-**委譲 — モニタリング基盤の構築**: Motivaはエージェントに対し、「首輪センサーデータを読み取り、呼吸ペースの異常を検知するモニタリングスクリプトを実装してほしい。毎朝6時に前日のサマリーを飼い主のスマホに送信し、緊急閾値を超えた場合は即座にアラートを発火する」という具体的な成功基準とともにタスクを指示しました。エージェントがコードを実装し、Motivaがその動作を検証しました。
+**Delegation — building the monitoring foundation**: Conatus instructed an agent with a concrete success criterion: "Please implement a monitoring script that reads the collar sensor data and detects abnormalities in breathing pace. It should send a daily summary to the owner's phone at 6 AM, and fire an immediate alert if an emergency threshold is exceeded." The agent implemented the code, and Conatus verified that it worked correctly.
 
-**委譲 — 緊急通知の設定**: 実装されたスクリプトをもとに、Motivaは通知システムに緊急アラートの設定を委譲しました。
+**Delegation — setting up emergency notifications**: Based on the implemented script, Conatus delegated the configuration of emergency alerts to the notification system.
 
-**定期ループ（以降3年間）**: 毎朝、Motivaは観測ループを回しました。
-- センサーデータのサマリーをエージェントに分析させる
-- ギャップ（異常の予兆、ケアの不足）を認識する
-- 必要であれば対応タスクをエージェントに委譲する
-- 飼い主へのレポートをメッセージングシステムに委譲して送信する
+**Recurring loop (for the following 3 years)**: Every morning, Conatus ran the observation loop:
+- Had an agent analyze the sensor data summary
+- Recognized gaps (early warning signs of abnormalities, care deficiencies)
+- If necessary, delegated response tasks to an agent
+- Delegated the owner's report to the messaging system for delivery
 
-**ステージ適応**: 疾患が進行するにつれ、Motivaは観測データからステージの変化を認識しました。「現在のケア提案はステージIIを前提にしているが、観測データはステージIIIへの移行を示唆している」というギャップを検知し、Motivaは医療知識を持つエージェントに最新の呼吸器疾患ケアプロトコルの調査を委譲し、その結果を飼い主に提案しました。獣医への相談が必要と判断したケースでは、Motivaは飼い主に確認を求めました（不可逆な医療判断は人間が行う）。
+**Stage adaptation**: As the disease progressed, Conatus recognized changes in stage from the observation data. Detecting a gap — "the current care recommendations assume Stage II, but observation data suggests a transition to Stage III" — Conatus delegated research on the latest respiratory disease care protocols to an agent with medical knowledge, and proposed the results to the owner. In cases where a vet consultation was deemed necessary, Conatus asked the owner for confirmation (irreversible medical decisions are made by humans).
 
-結果、老犬が寿命を迎えるまでの3年間、Motivaは飼い主のいわば専属のケアコーディネーターとして動き続けました。Motivaが自らコードを書いたわけでも、自ら通知を送ったわけでもありません。しかし、それらすべてが「実現されるように」を、3年間、ゴールが終わるまで指揮し続けました。
+As a result, for three years until the elderly dog's life came to an end, Conatus worked as the owner's dedicated care coordinator. Conatus didn't write the code itself, nor did it send the notifications itself. But it directed all of that to be realized — for three years, until the goal was complete.
 
 ---
 
-## ユースケース２：とあるSaaS会社の例
+## Use Case 2: A Struggling SaaS Company
 
-売り上げに伸び悩むSaaS会社がありました。経営者は全データ・システムへのアクセス権をMotivaに付与し、こう言いました。
+There was a SaaS company whose revenue had stalled. The CEO granted Conatus access to all data and systems, and said:
 
-「半年で売り上げを10倍にしたい」
+"I want to 10x revenue in six months."
 
-Motivaはまず実現可能性を評価し、こう返しました。
+Conatus first evaluated feasibility and responded:
 
-「10倍は難しいですが、2倍ならできます」
+"10x will be difficult, but 2x is achievable."
 
-経営者はそれに合意しました。ここからMotivaのタスク発見ループが始まります。
+The CEO agreed. From here, Conatus's task discovery loop began.
 
-**ゴール分解**: 「売上2倍」を達成するためのサブゴールを定義しました。チャーン率の削減、新規獲得の改善、ARPU（顧客単価）の向上の3軸です。
+**Goal decomposition**: Conatus defined sub-goals for achieving "2x revenue": reducing churn rate, improving new customer acquisition, and increasing ARPU (average revenue per user).
 
-**第1ループ — 現状把握**: 最初のギャップを認識する前に、現実を正確に知る必要があります。Motivaはデータ分析エージェントに対し、「直近6ヶ月のチャーン率、チャーンした顧客の共通パターン、コンバージョンファネルの各ステップの離脱率を分析し、レポートにまとめてほしい」と委譲しました。
+**Loop 1 — understanding the current state**: Before recognizing the first gap, it was necessary to accurately understand reality. Conatus delegated to a data analysis agent: "Please analyze the churn rate for the past 6 months, the common patterns among churned customers, and the dropout rate at each step of the conversion funnel, and compile a report."
 
-**第2ループ — 最大ギャップの特定**: 分析結果を受け取ったMotivaは、最大のギャップがオンボーディング完了率（業界平均60%に対して同社は30%）にあると判断しました。オンボーディングを改善すれば、チャーン率とARPUの両方に波及効果があると推論しました。
+**Loop 2 — identifying the biggest gap**: Receiving the analysis results, Conatus determined that the biggest gap was in onboarding completion rate (the company was at 30% versus an industry average of 60%). It reasoned that improving onboarding would have a ripple effect on both churn rate and ARPU.
 
-**委譲 — オンボーディング改善**: Motivaはエージェントに「既存のオンボーディングフローにインタラクティブなチュートリアルを追加してほしい。完了率がベースラインから10%以上改善されることを成功基準とする」と指示しました。実装完了後、Motivaは別のエージェントに動作検証を委譲しました。
+**Delegation — improving onboarding**: Conatus instructed an agent: "Please add an interactive tutorial to the existing onboarding flow. The success criterion is that the completion rate improves by more than 10% from the baseline." After implementation was complete, Conatus delegated verification of the functionality to a separate agent.
 
-**委譲 — A/Bテストの設定**: チュートリアルの効果を計測するために、MotivaはA/Bテスト基盤の設定をエージェントに委譲しました。
+**Delegation — setting up A/B testing**: To measure the effectiveness of the tutorial, Conatus delegated the setup of the A/B testing infrastructure to an agent.
 
-**「待つ」という戦略**: 施策を打った後、Motivaは2週間のウェイト期間を設けました。この間、オンボーディング以外のギャップ（ARPUの改善）に並行して取り組みました。
+**"Wait" as a strategy**: After launching the initiative, Conatus established a two-week waiting period. During this time, it worked in parallel on other gaps (improving ARPU).
 
-**第3ループ以降 — 計測と調整**: 2週間後、Motivaはデータ分析エージェントにA/Bテスト結果の分析を委譲しました。チュートリアル完了率が42%に改善（+12%）したことを確認し、オンボーディング改善の戦略を継続判断しました。同時に、効果の薄かった施策はカットし、次の最大ギャップ（アップグレードの促進）へ移行しました。
+**Loop 3 and beyond — measurement and adjustment**: Two weeks later, Conatus delegated analysis of the A/B test results to a data analysis agent. Confirming that tutorial completion rate had improved to 42% (+12%), it decided to continue the onboarding improvement strategy. At the same time, it cut initiatives that had shown little effect and moved to the next biggest gap (promoting upgrades).
 
-**ループが閉じる**: この「観測 → ギャップ認識 → 委譲 → 結果観測」のループを半年間繰り返した結果、売上は2倍を達成しました。
+**The loop closes**: After repeating this "observe → recognize gaps → delegate → observe results" loop for six months, revenue had achieved 2x growth.
 
-Motivaが自らコードを書いたわけでも、直接データを分析したわけでもありません。しかし、「何を次にやるべきか」を半年間決め続け、最適なエージェントにその実行を指示し続けた結果として、ゴールは達成されました。
+Conatus didn't write the code itself, nor did it analyze the data directly. But by deciding "what to do next" for six months and continuously instructing the optimal agents to execute, the goal was achieved.

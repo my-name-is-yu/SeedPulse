@@ -1,54 +1,54 @@
-# ポートフォリオ管理設計 --- 戦略の発見・並列実行・リバランス
+# Portfolio Management Design — Strategy Discovery, Parallel Execution, and Rebalancing
 
-> ゴールのギャップを埋める「戦略」を明示的なエンティティとして管理し、
-> 複数戦略をポートフォリオとして並列実行・効果計測・リバランスする仕組みを定義する。
+> This document defines the mechanism for managing "strategies" — the means of closing a Goal's Gap — as explicit entities,
+> and for running multiple strategies in parallel as a portfolio, measuring their effectiveness, and rebalancing resources.
 
-> vision.md が描く「Strategy Engine」と「ポートフォリオ管理」の具体設計であり、
-> mechanism.md 2.3「戦略選択」を詳細化するドキュメントだ。
+> This is the concrete design of the "Strategy Engine" and "Portfolio Management" described in vision.md,
+> and it elaborates on mechanism.md §2.3 "Strategy Selection."
 
 ---
 
-## 1. 戦略（Strategy）のデータモデル
+## 1. Strategy Data Model
 
-戦略は、ギャップを埋めるための**仮説**を明示的なエンティティとしてモデル化したものだ。「オンボーディングを改善すれば解約率が下がるはず」「価格プランを見直せばARPUが上がるはず」――こうした仮説がそれぞれ1つの戦略になる。
+A strategy is a **hypothesis** about how to close a Gap, modeled as an explicit entity. "If we improve onboarding, churn rate will drop." "If we revise pricing, ARPU will increase." Each such hypothesis becomes a single strategy.
 
-### 1.1 戦略の構造
+### 1.1 Strategy Structure
 
 ```
 Strategy {
-  id: string                        // 一意識別子（例: "strat-churn-onboarding-v1"）
-  goal_id: string                   // 所属するゴールID
-  target_dimensions: string[]       // 攻める次元（1つ以上）
-  primary_dimension: string         // 主要な次元（効果計測の主軸）
+  id: string                        // Unique identifier (e.g., "strat-churn-onboarding-v1")
+  goal_id: string                   // ID of the Goal this strategy belongs to
+  target_dimensions: string[]       // Dimensions this strategy targets (one or more)
+  primary_dimension: string         // Primary dimension (main axis for effectiveness measurement)
 
-  hypothesis: string                // 仮説（自然言語）
+  hypothesis: string                // Hypothesis (natural language)
   expected_effect: {
-    dimension: string               // 効果を期待する次元
+    dimension: string               // Dimension where effect is expected
     direction: "increase" | "decrease"
-    magnitude: "small" | "medium" | "large"  // LLMによる定性的見積もり
+    magnitude: "small" | "medium" | "large"  // Qualitative estimate by LLM
   }[]
 
   resource_estimate: {
-    sessions: number                // 想定エージェントセッション数
-    duration: Duration              // 想定所要期間
-    llm_calls: number | null        // 想定LLM呼び出し回数（null=不明）
+    sessions: number                // Expected number of agent sessions
+    duration: Duration              // Expected duration
+    llm_calls: number | null        // Expected number of LLM calls (null = unknown)
   }
 
-  state: StrategyState              // 現在の状態（§1.2）
-  allocation: number                // リソース配分比率（0.0〜1.0）（§4）
+  state: StrategyState              // Current state (§1.2)
+  allocation: number                // Resource allocation ratio (0.0–1.0) (§4)
 
   created_at: DateTime
   started_at: DateTime | null
   completed_at: DateTime | null
 
-  gap_snapshot_at_start: number | null    // 開始時点の primary_dimension の normalized_weighted_gap
-  tasks_generated: string[]               // この戦略から生成されたタスクID群
-  effectiveness_score: number | null      // 効果スコア（§5で計算）
-  consecutive_stall_count: number         // 連続停滞検知回数（デフォルト: 0）
+  gap_snapshot_at_start: number | null    // normalized_weighted_gap of primary_dimension at start
+  tasks_generated: string[]               // IDs of tasks generated from this strategy
+  effectiveness_score: number | null      // Effectiveness score (calculated in §5)
+  consecutive_stall_count: number         // Number of consecutive stall detections (default: 0)
 }
 ```
 
-### 1.2 戦略の状態遷移
+### 1.2 Strategy State Transitions
 
 ```
 candidate → active → (evaluating → active | suspended | terminated)
@@ -56,439 +56,439 @@ candidate → active → (evaluating → active | suspended | terminated)
                    → terminated
 ```
 
-| 状態 | 意味 |
-|------|------|
-| `candidate` | 生成されたが未実行。リソース配分待ち |
-| `active` | 実行中。タスクが生成・委譲されている |
-| `evaluating` | 効果計測中。新しいタスクの生成を一時停止し、結果を観測している |
-| `suspended` | 一時停止。リソースを他の戦略に回している |
-| `completed` | 目標次元のギャップ解消に成功した |
-| `terminated` | 効果なしと判断され、打ち切られた |
+| State | Meaning |
+|-------|---------|
+| `candidate` | Generated but not yet running. Awaiting resource allocation |
+| `active` | Running. Tasks are being generated and delegated |
+| `evaluating` | Measuring effectiveness. Task generation is paused to observe results |
+| `suspended` | Paused. Resources have been shifted to other strategies |
+| `completed` | Successfully closed the Gap in the target dimension |
+| `terminated` | Deemed ineffective and discontinued |
 
-`evaluating` 状態は `task-lifecycle.md` 2.6 の `plateau_until` と連動する。効果計測のために意図的に待機している期間であり、停滞検知を抑制する。
-
----
-
-## 2. 戦略の生成
-
-戦略はゴールのギャップから自動的に生成される。`drive-scoring.md` 6 の分離原則（「どの次元を攻めるか」はコード、「どう攻めるか」はLLM）に従い、LLMは**優先次元が確定した後に**戦略候補を生成する。
-
-### 2.1 生成フロー
-
-```
-ドライブスコアリング（コード）
-    │ 優先次元を確定
-    ↓
-戦略生成プロンプト（LLM）
-    │ 入力:
-    │   - 優先次元とそのギャップ
-    │   - ゴールの文脈（制約、ドメイン情報）
-    │   - 過去に試みた戦略とその結果（失敗記録を含む）
-    │   - 利用可能な能力（Capability Registry）
-    │ 出力:
-    │   - 戦略候補 1〜3個（仮説 + 期待効果 + リソース見積もり）
-    ↓
-戦略の登録（state: candidate）
-```
-
-### 2.2 LLM への入力制約
-
-LLMに戦略生成を依頼するとき、以下を明示的に含める。
-
-**必須入力**:
-- 優先次元の `normalized_weighted_gap` 値と閾値型
-- 過去に `terminated` された戦略の `hypothesis` と `effectiveness_score`（同じ失敗を繰り返さないため）
-- ゴールの制約リスト（`constraints`）
-
-**禁止事項**:
-- LLMに優先次元の選択をさせない（コードが決定済み）
-- 1回の生成で4個以上の候補を要求しない（選択肢が多すぎると評価コストが増大する）
-
-### 2.3 初回生成と追加生成
-
-**初回生成**: ゴールの交渉完了後、最初のループで実行される。ギャップベクトル全体を見て、最も重要な次元群に対する戦略候補を生成する。
-
-**追加生成のトリガー**:
-- 既存の全 `active` 戦略が `terminated` された
-- 停滞検知で戦略ピボットが判断された（`stall-detection.md` 4 第2検知）
-- 新しい次元が発見された（ゴールツリーの動的変更）
-- リバランス（6）の結果、空き配分が生じた
+The `evaluating` state works in conjunction with `plateau_until` from task-lifecycle.md §2.6. It is a deliberate waiting period for effectiveness measurement and suppresses stall detection.
 
 ---
 
-## 3. ポートフォリオ構造
+## 2. Strategy Generation
 
-### 3.1 同一ゴール内の戦略管理
+Strategies are generated automatically from a Goal's Gap. Following the separation principle from drive-scoring.md §6 ("which dimension to target" is decided by code, "how to target it" is decided by LLM), the LLM generates strategy candidates **after** the priority dimension has been determined.
 
-ポートフォリオは同一ゴール内の戦略群を管理する単位だ。
+### 2.1 Generation Flow
+
+```
+Drive Scoring (code)
+    │ Determines priority dimension
+    ↓
+Strategy generation prompt (LLM)
+    │ Input:
+    │   - Priority dimension and its Gap
+    │   - Goal context (constraints, domain information)
+    │   - Previously attempted strategies and their results (including failures)
+    │   - Available capabilities (Capability Registry)
+    │ Output:
+    │   - 1–3 strategy candidates (hypothesis + expected effect + resource estimate)
+    ↓
+Strategy registration (state: candidate)
+```
+
+### 2.2 Input Constraints for LLM
+
+When requesting strategy generation from the LLM, explicitly include the following.
+
+**Required inputs**:
+- The `normalized_weighted_gap` value and threshold type of the priority dimension
+- The `hypothesis` and `effectiveness_score` of previously `terminated` strategies (to avoid repeating the same failures)
+- The Goal's constraint list (`constraints`)
+
+**Prohibited**:
+- Do not let the LLM choose the priority dimension (already determined by code)
+- Do not request more than 3 candidates in a single generation (too many options increases evaluation cost)
+
+### 2.3 Initial Generation and Subsequent Generation
+
+**Initial generation**: Executed on the first loop after goal negotiation completes. Looks at the full Gap vector and generates strategy candidates for the most important set of dimensions.
+
+**Triggers for subsequent generation**:
+- All existing `active` strategies have been `terminated`
+- A strategy pivot was determined by stall detection (stall-detection.md §4 second detection)
+- A new dimension was discovered (dynamic change in the goal tree)
+- Rebalancing (§6) resulted in unallocated capacity
+
+---
+
+## 3. Portfolio Structure
+
+### 3.1 Managing Strategies Within a Single Goal
+
+A portfolio is the unit that manages all strategies within a single Goal.
 
 ```
 Portfolio {
   goal_id: string
-  strategies: Strategy[]            // 全戦略（状態問わず）
-  active_strategies: Strategy[]     // state が active | evaluating の戦略
-  total_allocation: number          // active_strategies の allocation 合計（= 1.0）
-  rebalance_interval: Duration      // リバランス頻度（§6）
+  strategies: Strategy[]            // All strategies (regardless of state)
+  active_strategies: Strategy[]     // Strategies in state active | evaluating
+  total_allocation: number          // Sum of allocations for active_strategies (= 1.0)
+  rebalance_interval: Duration      // Rebalancing frequency (§6)
   last_rebalanced_at: DateTime
 }
 ```
 
-**制約**:
-- `active_strategies` の `allocation` 合計は常に 1.0
-- 1つのゴールに `active` 戦略が0個の場合、戦略生成を即座にトリガーする（戦略不在状態を許容しない）
+**Constraints**:
+- The sum of `allocation` across `active_strategies` is always 1.0
+- If a Goal has 0 `active` strategies, strategy generation is triggered immediately (a strategy-less state is not permitted)
 
-### 3.2 並列実行のモデル
+### 3.2 Parallel Execution Model
 
-並列実行とは、複数の戦略が同時に `active` 状態にあり、それぞれからタスクが生成・委譲されることを意味する。
+Parallel execution means multiple strategies are simultaneously `active`, each generating and delegating tasks.
 
 ```
-ポートフォリオ（ゴール: チャーン率半減）
+Portfolio (Goal: halve churn rate)
     │
-    ├── 戦略A: オンボーディング改善（allocation: 0.5）
-    │     └── タスク: チュートリアル動線の再設計
+    ├── Strategy A: Improve onboarding (allocation: 0.5)
+    │     └── Task: Redesign tutorial flow
     │
-    ├── 戦略B: サポート体制強化（allocation: 0.3）
-    │     └── タスク: FAQ自動応答の構築
+    ├── Strategy B: Strengthen support (allocation: 0.3)
+    │     └── Task: Build FAQ auto-responder
     │
-    └── 戦略C: 価格プラン見直し（allocation: 0.2）
-          └── タスク: 競合価格調査
+    └── Strategy C: Revise pricing (allocation: 0.2)
+          └── Task: Competitive pricing research
 ```
 
-タスク発見ループの各イテレーションで、ポートフォリオから「次にどの戦略のタスクを実行するか」を選択する。選択は `allocation` に比例した確率的選択ではなく、以下の決定論的ルールで行う。
+In each iteration of the task discovery loop, the portfolio selects which strategy's task to execute next. Selection is not probabilistic based on `allocation`; instead it follows these deterministic rules.
 
-### 3.3 タスク選択ルール
+### 3.3 Task Selection Rules
 
 ```
-1. active_strategies を allocation 降順にソート
-2. 各戦略の「最終タスク完了からの経過時間 / allocation」を計算
-   → この値が最大の戦略が「最も待たされている」
-   → 初回選択時（タスク完了実績がない場合）は、ポートフォリオ作成時刻を「最終タスク完了時刻」の初期値として扱う
-3. 最も待たされている戦略から次のタスクを生成
+1. Sort active_strategies by allocation descending
+2. For each strategy, calculate "time since last task completion / allocation"
+   → The strategy with the highest value is "most starved"
+   → On first selection (no task completion history), use portfolio creation time as the initial "last task completion time"
+3. Generate the next task from the most starved strategy
 ```
 
-このルールにより、`allocation: 0.5` の戦略は `allocation: 0.2` の戦略の 2.5 倍の頻度でタスクが生成される。確率的選択ではないため、再現性がある。
+This rule ensures that a strategy with `allocation: 0.5` generates tasks at 2.5 times the frequency of a strategy with `allocation: 0.2`. Because selection is deterministic rather than probabilistic, the behavior is reproducible.
 
 ---
 
-## 4. リソース配分
+## 4. Resource Allocation
 
-### 4.1 リソースの定義
+### 4.1 Definition of Resources
 
-ポートフォリオ管理における「リソース」は以下の3種類だ。
+"Resources" in portfolio management refers to three types:
 
-| リソース種別 | 単位 | 制約 |
-|------------|------|------|
-| エージェントセッション | 回数 | 並列セッション数の上限（`drive-system.md` 6 のリソース競合解消参照） |
-| 時間 | 時間 / 日 | ゴールの期限から逆算 |
-| LLM呼び出し | 回数 | コスト上限（ユーザー設定） |
+| Resource Type | Unit | Constraint |
+|---------------|------|------------|
+| Agent sessions | Count | Upper limit on concurrent sessions (see drive-system.md §6 for resource contention resolution) |
+| Time | Hours / day | Back-calculated from the Goal's deadline |
+| LLM calls | Count | Cost ceiling (user-configured) |
 
-### 4.2 初期配分
+### 4.2 Initial Allocation
 
-戦略が `candidate` から `active` に遷移する際、初期配分を決定する。
+When a strategy transitions from `candidate` to `active`, its initial allocation is determined.
 
-**単一戦略の場合**: `allocation = 1.0`（全リソースを投入）
+**Single strategy**: `allocation = 1.0` (all resources invested)
 
-**複数戦略の場合**: LLMが各戦略の `expected_effect` と `resource_estimate` を評価し、初期配分を提案する。
+**Multiple strategies**: The LLM evaluates each strategy's `expected_effect` and `resource_estimate` and proposes an initial allocation.
 
-初期配分の制約:
-- 最小配分: 0.1（10%未満の配分は実質的に動けないため禁止）
-- 最大配分: 0.7（単一戦略への過度な集中を防ぐ。ただし戦略が1つしかない場合は 1.0）
-- 合計: 1.0
+Initial allocation constraints:
+- Minimum allocation: 0.1 (allocations below 10% are effectively non-functional and are prohibited)
+- Maximum allocation: 0.7 (to prevent excessive concentration on a single strategy; 1.0 is allowed when there is only one strategy)
+- Total: 1.0
 
-### 4.3 配分の解釈
+### 4.3 Interpreting Allocation
 
-`allocation` はタスク生成頻度の比率として機能する（3.3 タスク選択ルール参照）。`allocation: 0.5` の戦略は、ポートフォリオ全体の約50%のイテレーションでタスクが生成される。
+`allocation` functions as the ratio of task generation frequency (see §3.3 task selection rules). A strategy with `allocation: 0.5` will generate tasks in approximately 50% of portfolio iterations.
 
 ---
 
-## 5. 効果計測
+## 5. Effectiveness Measurement
 
-### 5.1 帰属問題
+### 5.1 The Attribution Problem
 
-複数の戦略が同時に走っているとき、ギャップの変化をどの戦略に帰属させるかは本質的に困難だ。「オンボーディング改善」と「サポート強化」の両方が走っているとき、チャーン率が下がったのはどちらの効果か。
+When multiple strategies are running simultaneously, attributing Gap changes to specific strategies is inherently difficult. When both "improved onboarding" and "strengthened support" are running and churn rate drops, which strategy was responsible?
 
-**Conatusのアプローチ: 完全な帰属は求めない。**
+**Conatus's approach: do not seek complete attribution.**
 
-完全な因果帰属は科学実験レベルの統制が必要であり、現実のゴール追求では不可能だ。代わりに、以下のヒューリスティクスで**帰属の手がかり**を得る。
+Complete causal attribution requires the level of control found in scientific experiments, which is impossible in real-world goal pursuit. Instead, the following heuristics are used to obtain **attribution signals**.
 
-### 5.2 効果計測の方法
+### 5.2 Effectiveness Measurement Methods
 
-#### 方法1: 時系列相関（主要手段）
+#### Method 1: Time-series Correlation (Primary)
 
-各戦略のタスク完了タイミングと、対象次元のギャップ変化を時系列で対比する。
-
-```
-戦略Aのタスク完了: t1, t3, t5
-戦略Bのタスク完了: t2, t4
-
-次元Xのギャップ変化:
-  t1→t2: -0.05（改善）  ← 直前に戦略Aのタスク完了
-  t2→t3: -0.01（微改善）← 直前に戦略Bのタスク完了
-  t3→t4: -0.08（改善）  ← 直前に戦略Aのタスク完了
-  t4→t5: +0.02（悪化）  ← 直前に戦略Bのタスク完了
-```
-
-あるタスクの完了直後にギャップが縮まれば、そのタスクの戦略に仮帰属する。厳密な因果ではないが、リバランスの判断材料としては十分だ。
-
-#### 方法2: 次元ターゲットの一致
-
-戦略が `target_dimensions` として宣言した次元のギャップ変化を、その戦略の効果として扱う。
+Compare each strategy's task completion timing against Gap changes in the target dimension over time.
 
 ```
-戦略A.target_dimensions = ["churn_rate"]
-→ churn_rate のギャップ変化は戦略Aに帰属
+Strategy A task completions: t1, t3, t5
+Strategy B task completions: t2, t4
+
+Dimension X Gap changes:
+  t1→t2: -0.05 (improvement)  ← Strategy A task completed just before
+  t2→t3: -0.01 (slight improvement) ← Strategy B task completed just before
+  t3→t4: -0.08 (improvement)  ← Strategy A task completed just before
+  t4→t5: +0.02 (worsening)    ← Strategy B task completed just before
 ```
 
-複数の戦略が同じ次元をターゲットにしている場合は、方法1の時系列相関で補完する。
+If the Gap narrows immediately after a task is completed, that task's strategy is provisionally credited. This is not strict causation, but it is sufficient as input for rebalancing decisions.
 
-#### 方法3: LLMによる定性評価（補助手段）
+#### Method 2: Dimension Target Matching
 
-時系列相関だけでは判断できない場合、LLMに以下を入力して定性的な帰属評価を求める。
+Changes in the Gap of a dimension that a strategy has declared as a `target_dimension` are attributed to that strategy.
 
-- 各戦略の仮説と実行されたタスクの内容
-- ギャップ変化の時系列データ
-- 外部環境の変化（イベントキューのログ）
+```
+Strategy A.target_dimensions = ["churn_rate"]
+→ Gap changes in churn_rate are attributed to Strategy A
+```
 
-LLMの評価は参考情報として扱い、自動リバランスの判断には直接使用しない（Phase 2 で自動化を検討）。
+When multiple strategies target the same dimension, Method 1 (time-series correlation) supplements the attribution.
 
-### 5.3 効果スコアの計算
+#### Method 3: Qualitative LLM Evaluation (Supplementary)
+
+When time-series correlation alone is insufficient, the LLM is given the following inputs and asked to perform a qualitative attribution assessment:
+
+- The hypothesis and executed tasks for each strategy
+- Time-series data of Gap changes
+- Changes in the external environment (event queue logs)
+
+LLM evaluations are treated as reference information and are not used directly for automated rebalancing decisions (automation is planned for Phase 2).
+
+### 5.3 Calculating Effectiveness Score
 
 ```
 effectiveness_score(strategy) =
   gap_delta_attributed(strategy) / sessions_consumed(strategy)
 ```
 
-- `gap_delta_attributed`: この戦略に仮帰属されたギャップ縮小量の合計（normalized_weighted_gap の変化）
-- `sessions_consumed`: この戦略のために消費されたエージェントセッション数
+- `gap_delta_attributed`: Total Gap reduction provisionally attributed to this strategy (change in normalized_weighted_gap)
+- `sessions_consumed`: Number of agent sessions consumed by this strategy
 
-効果スコアは「1セッションあたりのギャップ縮小量」を表す。高いほどリソース効率が良い。
+The effectiveness score represents "Gap reduction per session." A higher score means better resource efficiency.
 
-**注意**: 計測には最低3回のタスク完了が必要だ。それ以前は `effectiveness_score = null`（データ不足）として扱い、リバランスの判断材料にしない。
+**Note**: Measurement requires at least 3 task completions. Before that, `effectiveness_score = null` (insufficient data) and it is not used as input for rebalancing decisions.
 
 ---
 
-## 6. リバランス
+## 6. Rebalancing
 
-### 6.1 リバランスとは
+### 6.1 What Is Rebalancing
 
-効果計測の結果に基づき、戦略間のリソース配分を見直す操作だ。効果が出ている戦略に集中し、出ていない戦略を縮小または打ち切る。vision.md が述べる「投資配分の最適化」の具体設計だ。
+Rebalancing is the operation of revisiting the resource allocation among strategies based on effectiveness measurement results. It concentrates resources on strategies that are working and scales back or discontinues those that are not. This is the concrete design of the "investment allocation optimization" described in vision.md.
 
-### 6.2 リバランスの頻度
+### 6.2 Rebalancing Frequency
 
-リバランスは以下のタイミングで実行する。
+Rebalancing is performed at the following times.
 
-**定期リバランス**: `rebalance_interval` ごとに実行する。デフォルトはゴールの性質によって変わる。
+**Periodic rebalancing**: Executed every `rebalance_interval`. The default depends on the nature of the Goal.
 
-| ゴール種別 | デフォルト rebalance_interval |
-|-----------|------------------------------|
-| 短期（1ヶ月以内） | 3日 |
-| 中期（1〜6ヶ月） | 1週間 |
-| 長期（6ヶ月以上） | 2週間 |
+| Goal Type | Default rebalance_interval |
+|-----------|---------------------------|
+| Short-term (within 1 month) | 3 days |
+| Medium-term (1–6 months) | 1 week |
+| Long-term (6+ months) | 2 weeks |
 
-**イベント駆動リバランス**: 以下のいずれかが発生した場合、即座にリバランスを実行する。
-- 戦略が `terminated` された（配分の再分配が必要）
-- 停滞検知がトリガーされた（`stall-detection.md` 4 参照）
-- `effectiveness_score` が大幅に変化した（前回リバランス時から50%以上の変動）
+**Event-driven rebalancing**: Immediately executed when any of the following occur:
+- A strategy is `terminated` (reallocation of its share is needed)
+- Stall detection triggers a rebalance (see stall-detection.md §4)
+- `effectiveness_score` changes significantly (50%+ shift from the previous rebalance)
 
-### 6.3 リバランスの判断基準
+### 6.3 Rebalancing Decision Criteria
 
 ```
-リバランス実行
+Rebalancing triggered
     │
     ↓
-全 active 戦略の effectiveness_score を比較
+Compare effectiveness_score across all active strategies
     │
-    ├── 全戦略が null（データ不足）
-    │     → 配分を変更しない。データ蓄積を待つ
+    ├── All strategies null (insufficient data)
+    │     → Do not change allocation. Wait for data to accumulate
     │
-    ├── 一部のみ null
-    │     → null でない戦略間でのみ相対比較し、null 戦略の配分は維持
+    ├── Some null, some not
+    │     → Perform relative comparison only among non-null strategies; maintain allocation for null strategies
     │
-    └── 全戦略にスコアあり
+    └── All strategies have scores
           │
           ↓
-     最高スコアと最低スコアの比率を計算
+     Calculate ratio of highest to lowest score
           │
-          ├── 比率 < 2.0 → 有意な差なし。配分を変更しない
+          ├── Ratio < 2.0 → No significant difference. Do not change allocation
           │
-          └── 比率 >= 2.0 → 配分を調整する
+          └── Ratio >= 2.0 → Adjust allocation
                 │
                 ↓
-          効果が高い戦略の allocation を増やし、
-          低い戦略の allocation を減らす
-          （ただし最小配分 0.1 は維持）
+          Increase allocation for high-performing strategies,
+          decrease allocation for low-performing strategies
+          (but maintain minimum allocation of 0.1)
                 │
                 ↓
-          調整後も最低スコア戦略の allocation が 0.1 なら
-          打ち切り判断へ（§6.4）
+          If the lowest-scoring strategy's allocation is still 0.1 after adjustment,
+          proceed to termination decision (§6.4)
 ```
 
-### 6.4 打ち切り条件
+### 6.4 Termination Conditions
 
-戦略を `terminated` にする条件は以下のいずれかだ。
+A strategy is `terminated` when any of the following conditions are met:
 
-**条件1: 効果なし** --- `effectiveness_score` が3回連続のリバランスで最低、かつ `allocation` が最小値（0.1）の状態が続いている。
+**Condition 1: No effect** — `effectiveness_score` has been the lowest across 3 consecutive rebalancing cycles, and `allocation` has remained at the minimum value (0.1).
 
-**条件2: 連続停滞** --- `consecutive_stall_count` が3以上（停滞検知が3回発動した）。
+**Condition 2: Consecutive stalls** — `consecutive_stall_count` is 3 or more (stall detection has triggered 3 times).
 
-**条件3: リソース超過** --- 消費したリソースが `resource_estimate` の2倍を超えた（`stall-detection.md` 2.2 の時間超過と同様の考え方）。
+**Condition 3: Resource overrun** — Resources consumed have exceeded 2x the `resource_estimate` (similar logic to the time overrun concept in stall-detection.md §2.2).
 
-打ち切られた戦略の `allocation` は、残りの `active` 戦略に `effectiveness_score` に比例して再分配される。全戦略が打ち切られた場合は新しい戦略生成をトリガーする（2.3 参照）。
+The `allocation` of a terminated strategy is redistributed to the remaining `active` strategies in proportion to their `effectiveness_score`. If all strategies are terminated, new strategy generation is triggered (see §2.3).
 
 ---
 
-## 7. 「待つ」戦略
+## 7. The "Wait" Strategy
 
-vision.md が言及する「積極的に何もしない」判断を形式化する。
+This formalizes the "actively do nothing" decision referenced in vision.md.
 
-### 7.1 待つ戦略の定義
+### 7.1 Definition of a Wait Strategy
 
-「待つ」は怠惰ではない。明確な仮説に基づく戦略的判断だ。
+"Waiting" is not laziness. It is a strategic decision based on a clear hypothesis.
 
 ```
 WaitStrategy extends Strategy {
-  wait_reason: string               // なぜ待つのか（自然言語）
-  wait_until: DateTime              // いつまで待つか
-  measurement_plan: string          // 待機後に何を計測するか
-  fallback_strategy_id: string | null  // 待機後に効果がなかった場合の代替戦略
+  wait_reason: string               // Why we are waiting (natural language)
+  wait_until: DateTime              // How long we will wait
+  measurement_plan: string          // What will be measured after the wait
+  fallback_strategy_id: string | null  // Fallback strategy if no effect is observed after waiting
 }
 ```
 
-### 7.2 待つ戦略の生成条件
+### 7.2 Conditions for Generating a Wait Strategy
 
-LLMが戦略生成時に「待つ」を候補として提案できる条件:
+Conditions under which the LLM may propose "waiting" as a candidate strategy:
 
-- 直前の戦略のタスクが完了してから効果の発現に時間がかかる場合（例: A/Bテスト結果、キャンペーン効果、外部APIの反映待ち）
-- 外部依存がある場合（`stall-detection.md` 3.4「外部依存」に対応）
-- 全次元のギャップが小さく、過剰最適化のリスクがある場合
+- When effect from a recently completed strategy task takes time to materialize (e.g., A/B test results, campaign effects, external API propagation delays)
+- When there is an external dependency (corresponding to "external dependencies" in stall-detection.md §3.4)
+- When all dimensions have small Gaps and there is a risk of over-optimization
 
-### 7.3 待つ戦略の実行
+### 7.3 Executing a Wait Strategy
 
-待つ戦略が `active` のとき、タスク生成は行わない。代わりに以下を行う。
+When a wait strategy is `active`, no tasks are generated. Instead:
 
-1. `wait_until` を `plateau_until` として設定（`task-lifecycle.md` 2.6 参照）
-2. 停滞検知を抑制する（`stall-detection.md` 2.5 参照）
-3. `wait_until` 到達後に観測サイクルを起動し、ギャップ変化を計測する
-4. 計測結果に基づき、次のアクションを決定する
+1. Set `wait_until` as `plateau_until` (see task-lifecycle.md §2.6)
+2. Suppress stall detection (see stall-detection.md §2.5)
+3. After `wait_until` is reached, start an observation cycle to measure Gap changes
+4. Determine the next action based on measurement results
 
 ```
-wait_until 到達
+wait_until reached
     │
     ↓
-対象次元のギャップを再計測
+Re-measure Gap in target dimension
     │
-    ├── ギャップが縮小 → 「待つ」判断は正しかった。評価してリバランスへ
-    ├── ギャップ変化なし → fallback_strategy_id があれば切り替え
-    └── ギャップ悪化 → 即座にリバランスをトリガー
+    ├── Gap narrowed → "Wait" decision was correct. Evaluate and rebalance
+    ├── No Gap change → Switch to fallback_strategy_id if available
+    └── Gap worsened → Immediately trigger rebalancing
 ```
 
-### 7.4 待つ戦略のリソース配分
+### 7.4 Resource Allocation for Wait Strategies
 
-待つ戦略は `allocation` を持つが、タスクを生成しないため実質的にリソースを消費しない。待つ戦略の `allocation` 分は「予約済み」として扱い、他の戦略に自動的に再配分**しない**。
+A wait strategy has an `allocation`, but since it generates no tasks, it consumes no resources in practice. The `allocation` reserved for a wait strategy is treated as "reserved" and is **not** automatically redistributed to other strategies.
 
-理由: 待つ戦略は「効果の発現を観測するための時間枠」であり、リソースを他に回すと「待っている間に別の戦略が状態を変えてしまい、効果の帰属がさらに困難になる」リスクがある。
+Rationale: A wait strategy is "a time window for observing effect materialization." Reallocating its resources to other strategies risks having those strategies alter the state during the wait, making attribution of effects even more difficult.
 
-ただし、MVP では待つ戦略の `allocation` を0として扱い、他の `active` 戦略が全リソースを使う方式も許容する（9 参照）。
+That said, in the MVP, treating a wait strategy's `allocation` as 0 — allowing all other `active` strategies to use full resources — is also acceptable (see §9).
 
 ---
 
-## 8. 既存設計との統合
+## 8. Integration with Existing Design
 
-### 8.1 駆動スコアリングとの関係
+### 8.1 Relationship with Drive Scoring
 
-`drive-scoring.md` は「どの次元を攻めるか」を決定する。ポートフォリオ管理は「その次元をどの戦略で攻めるか」を決定する。
+`drive-scoring.md` determines "which dimension to target." Portfolio management determines "which strategy to use for that dimension."
 
 ```
-ドライブスコアリング → 優先次元の確定
+Drive Scoring → Determines priority dimension
     ↓
-ポートフォリオ管理 → 優先次元に対する戦略の選択・配分
+Portfolio Management → Selects and allocates strategies for the priority dimension
     ↓
-タスクライフサイクル → 選択された戦略からタスクを生成・実行
+Task Lifecycle → Generates and executes tasks from the selected strategy
 ```
 
-駆動スコアリングの結果は戦略の上位にある。ポートフォリオ管理が駆動スコアを変更することはない。
+Drive scoring results are upstream of strategies. Portfolio management does not modify drive scores.
 
-### 8.2 タスクライフサイクルとの関係
+### 8.2 Relationship with Task Lifecycle
 
-`task-lifecycle.md` のタスク構造に、戦略IDを追加する。
+A strategy ID field is added to the task structure in `task-lifecycle.md`.
 
 ```
-// task-lifecycle.md §2 への追加フィールド
-strategy_id: string | null          // このタスクが属する戦略のID（null = 戦略に紐づかないタスク）
+// Additional field for task-lifecycle.md §2
+strategy_id: string | null          // ID of the strategy this task belongs to (null = task not tied to a strategy)
 ```
 
-タスクの検証結果（5 の3層検証）は、戦略の `effectiveness_score` 計算にフィードバックされる。タスクが `fail` の場合、戦略の `consecutive_stall_count` が増加する可能性がある。
+Task verification results (3-layer verification from §5) feed back into the strategy's `effectiveness_score` calculation. If a task `fail`s, the strategy's `consecutive_stall_count` may increase.
 
-### 8.3 停滞検知との関係
+### 8.3 Relationship with Stall Detection
 
-`stall-detection.md` の検知結果がポートフォリオ管理に与える影響:
+The impact of `stall-detection.md` detection results on portfolio management:
 
-| 停滞段階 | ポートフォリオへの影響 |
-|---------|---------------------|
-| 第1検知 | 現在の戦略内で別のアプローチを試す（タスクレベルの変更。ポートフォリオは変更なし） |
-| 第2検知 | 戦略のピボット。現在の戦略を `terminated` にし、新しい戦略を生成 |
-| 第3検知 | 人間にエスカレーション。ポートフォリオ全体の再検討を提案 |
+| Stall Stage | Effect on Portfolio |
+|-------------|---------------------|
+| 1st detection | Try a different approach within the current strategy (task-level change; no portfolio change) |
+| 2nd detection | Strategy pivot. Terminate current strategy and generate a new one |
+| 3rd detection | Escalate to human. Propose a full portfolio review |
 
-### 8.4 ギャップ計算との関係
+### 8.4 Relationship with Gap Calculation
 
-`gap-calculation.md` 8 のギャップ履歴が、効果計測（5）の時系列相関の入力データになる。`gap_delta` の計算は `gap-calculation.md` の定義をそのまま使用する。
+The Gap history from `gap-calculation.md` §8 serves as the input data for the time-series correlation in effectiveness measurement (§5). The calculation of `gap_delta` uses the definitions from `gap-calculation.md` directly.
 
 ---
 
 ## 9. MVP vs Phase 2
 
-### MVP（Phase 1）: 逐次実行 + 手動リバランス
+### MVP (Phase 1): Sequential Execution + Manual Rebalancing
 
-MVPでは並列実行の複雑さを避け、以下に絞る。
+The MVP avoids the complexity of parallel execution and is limited to the following:
 
-| 項目 | MVP仕様 |
-|------|---------|
-| 同時 active 戦略数 | 1（逐次実行） |
-| 戦略生成 | LLMが1〜2候補を生成。最上位を自動選択 |
-| リバランス | 手動（ユーザーが `conatus strategy switch` で切り替え） |
-| 効果計測 | ギャップ履歴の記録のみ。`effectiveness_score` は表示用 |
-| 打ち切り | 停滞検知の第2検知で自動ピボット |
-| 待つ戦略 | `plateau_until` の設定のみ（専用の WaitStrategy 型は不要） |
-| 戦略のデータ保存 | ゴール状態ファイル内に `current_strategy` と `strategy_history` として保持 |
+| Item | MVP Specification |
+|------|------------------|
+| Concurrent active strategies | 1 (sequential execution) |
+| Strategy generation | LLM generates 1–2 candidates. Top candidate is auto-selected |
+| Rebalancing | Manual (user switches via `conatus strategy switch`) |
+| Effectiveness measurement | Gap history is recorded only. `effectiveness_score` is for display purposes |
+| Termination | Automatic pivot on 2nd stall detection |
+| Wait strategy | Only `plateau_until` is set (no dedicated WaitStrategy type needed) |
+| Strategy data storage | Stored as `current_strategy` and `strategy_history` within the goal state file |
 
-MVPでも戦略は明示的なエンティティとして記録される。逐次実行であっても、「何を試し、何が効かなかったか」の履歴が蓄積され、Phase 2 への移行時にデータが活用できる。
+Even in the MVP, strategies are recorded as explicit entities. Even with sequential execution, a history of "what was tried and what didn't work" accumulates, making the data available when transitioning to Phase 2.
 
-### Phase 2: 自動リバランス + 並列実行
+### Phase 2: Automatic Rebalancing + Parallel Execution
 
-| 項目 | Phase 2 仕様 |
-|------|-------------|
-| 同時 active 戦略数 | 2〜4（ゴールの規模とリソースに応じて調整） |
-| 戦略生成 | LLMが1〜3候補を生成。複数を同時に `active` にする |
-| リバランス | 自動（6 のルールに基づく定期・イベント駆動リバランス） |
-| 効果計測 | 時系列相関 + 次元ターゲット一致 + LLM定性評価 |
-| 打ち切り | 6.4 の打ち切り条件で自動判断 |
-| 待つ戦略 | WaitStrategy 型による形式化、`fallback_strategy_id` のサポート |
-| 配分の自動最適化 | `effectiveness_score` に基づく動的配分調整 |
+| Item | Phase 2 Specification |
+|------|----------------------|
+| Concurrent active strategies | 2–4 (adjusted based on Goal scale and resources) |
+| Strategy generation | LLM generates 1–3 candidates. Multiple are made `active` simultaneously |
+| Rebalancing | Automatic (periodic and event-driven rebalancing based on §6 rules) |
+| Effectiveness measurement | Time-series correlation + dimension target matching + LLM qualitative evaluation |
+| Termination | Automatic based on §6.4 termination conditions |
+| Wait strategy | Formalized as WaitStrategy type with `fallback_strategy_id` support |
+| Automatic allocation optimization | Dynamic allocation adjustment based on `effectiveness_score` |
 
-### Phase 3（将来構想）
+### Phase 3 (Future Vision)
 
-- 戦略間の依存関係モデリング（戦略Aの成功が戦略Bの前提になるケース）
-- ゴール横断の戦略ポートフォリオ（複数ゴール間のリソース配分最適化）
-- 過去のゴール・ドメインからの戦略テンプレート推薦
+- Dependency modeling between strategies (cases where Strategy A's success is a prerequisite for Strategy B)
+- Cross-goal strategy portfolio (optimizing resource allocation across multiple Goals)
+- Strategy template recommendations from past Goals and domains
 
 ---
 
 ## Phase 3 (Stage 14D)
 
-### ゴール横断リソース配分
+### Cross-Goal Resource Allocation
 
-複数のゴールが同時に active な場合、ゴール間のリソース配分を最適化する。
+When multiple Goals are simultaneously active, resource allocation across Goals is optimized.
 
-**4因子による優先度計算**:
+**Priority calculation using 4 factors**:
 
-| 因子 | 説明 | 連携コンポーネント |
-|------|------|-----------------|
-| `deadline_urgency` | 締切駆動スコア | DriveScorer |
-| `gap_severity` | 最大ギャップの深刻度（normalized_weighted_gap の最大値） | GapCalculator |
-| `dependency_weight` | 他ゴールへの依存度（何件のゴールがこのゴールを前提とするか） | GoalDependencyGraph |
-| `user_priority` | ユーザー指定優先度（1〜5の整数） | ユーザー設定 |
+| Factor | Description | Related Component |
+|--------|-------------|------------------|
+| `deadline_urgency` | Deadline-driven score | DriveScorer |
+| `gap_severity` | Severity of the largest Gap (maximum normalized_weighted_gap) | GapCalculator |
+| `dependency_weight` | Dependency on other Goals (how many Goals depend on this one) | GoalDependencyGraph |
+| `user_priority` | User-specified priority (integer 1–5) | User settings |
 
-**統合優先度**:
+**Integrated priority**:
 
 ```
 goal_priority_score =
@@ -497,117 +497,117 @@ goal_priority_score =
   w3 × dependency_weight_normalized +
   w4 × user_priority_normalized
 
-→ [0, 1] に正規化
+→ Normalized to [0, 1]
 
-デフォルトウェイト: w1=0.35, w2=0.25, w3=0.25, w4=0.15
+Default weights: w1=0.35, w2=0.25, w3=0.25, w4=0.15
 ```
 
-**依存関係によるボーナス・ペナルティ**:
+**Bonuses and penalties from dependencies**:
 
-- `synergy` 依存のゴールペア → 両ゴールの priority_score に +0.1 ボーナス（相乗効果を促進）
-- `conflict` 依存のゴールペア → 低優先ゴールの priority_score に -0.15 ペナルティ（リソース競合を抑制）
+- Goal pairs with `synergy` dependency → +0.1 bonus to both goals' priority_score (encourages synergistic effects)
+- Goal pairs with `conflict` dependency → -0.15 penalty to the lower-priority goal's priority_score (suppresses resource contention)
 
-### 優先度の動的調整
+### Dynamic Priority Adjustment
 
-**調整トリガー**:
+**Adjustment triggers**:
 
-| トリガー | 説明 |
-|---------|------|
-| `periodic` | 週1（デフォルト）の定期リバランス |
-| `goal_completed` | ゴール完了による配分解放 |
-| `goal_added` | 新ゴール追加による再調整 |
-| `priority_shift` | deadline_urgency または gap_severity が大幅に変化した（前回比30%以上） |
+| Trigger | Description |
+|---------|-------------|
+| `periodic` | Weekly rebalancing (default) |
+| `goal_completed` | Allocation released upon goal completion |
+| `goal_added` | Re-adjustment upon addition of a new goal |
+| `priority_shift` | `deadline_urgency` or `gap_severity` changed significantly (30%+ from previous) |
 
-**同時実行数の制御**:
+**Concurrency control**:
 
 ```
-active_goals.length > max_concurrent_goals (デフォルト: 5)
+active_goals.length > max_concurrent_goals (default: 5)
     │
     ↓
-priority_score が最下位のゴールを waiting 状態に移行
+Move the goal with the lowest priority_score to waiting state
     │
-    └── 上位ゴールが完了/中断されたときに待機ゴールを自動 active 化
+    └── Automatically activate waiting goals when higher-priority goals complete or are suspended
 ```
 
-**最小リソース保証**:
+**Minimum resource guarantee**:
 
-`min_goal_share`（デフォルト: 0.1）を下回る配分のゴールには、最低 10% のリソースを保証する。これにより、優先度が低くても完全に無視されることを防ぐ。
+Goals with allocations below `min_goal_share` (default: 0.1) are guaranteed a minimum of 10% of resources. This ensures that no goal is completely ignored, even when its priority is low.
 
-### 戦略テンプレート推薦
+### Strategy Template Recommendations
 
-過去のゴールで成功した戦略を汎化し、新しいゴールへの適用候補として推薦する。
+Successful strategies from past Goals are generalized and proposed as candidates for application to new Goals.
 
-**テンプレート化の条件**:
-
-```
-対象: effectiveness_score >= 0.5 かつ state = "completed" の戦略
-    │
-    ↓
-LLMによる仮説パターンの汎化
-    │ - ゴール固有のドメイン表現を抽象化
-    │ - 前提条件・適用可能条件を明示
-    │ - resource_estimate を参照値として保持
-    ↓
-StrategyTemplate として登録
-    │
-    └→ VectorIndex に埋め込みを生成・登録（domain_tags 付き）
-```
-
-**推薦の流れ**:
+**Conditions for template creation**:
 
 ```
-新しいゴールに対する戦略生成（§2.1）
-    │
-    ↓（戦略生成プロンプト構築前に）
-VectorIndex でゴール定義に類似するテンプレートを検索
-    │ フィルタ: domain_tags のオーバーラップ >= 1
+Target: strategies with effectiveness_score >= 0.5 and state = "completed"
     │
     ↓
-上位3件のテンプレートを戦略生成プロンプトに含める
-    │ LLMが「このテンプレートをこのゴールに適用できるか」を判断
+LLM generalizes hypothesis patterns
+    │ - Abstracts goal-specific domain expressions
+    │ - Makes prerequisites and applicability conditions explicit
+    │ - Retains resource_estimate as a reference value
     ↓
-適用可能と判断されたテンプレートをベースに戦略候補を生成
+Registered as StrategyTemplate
+    │
+    └→ Embedding generated and registered in VectorIndex (with domain_tags)
 ```
 
-### 戦略間依存
-
-GoalDependencyGraph を拡張し、**戦略間の依存関係**を追加で管理する。
-
-**新しい依存タイプ**:
+**Recommendation flow**:
 
 ```
-// types/dependency.ts への追加
-DependencyTypeEnum に "strategy_dependency" を追加
+Strategy generation for a new Goal (§2.1)
+    │
+    ↓ (before building the strategy generation prompt)
+Search VectorIndex for templates similar to the Goal definition
+    │ Filter: domain_tags overlap >= 1
+    │
+    ↓
+Include top 3 templates in the strategy generation prompt
+    │ LLM judges "can this template be applied to this Goal?"
+    ↓
+Generate strategy candidates based on applicable templates
+```
+
+### Inter-Strategy Dependencies
+
+GoalDependencyGraph is extended to additionally manage **inter-strategy dependencies**.
+
+**New dependency types**:
+
+```
+// Addition to types/dependency.ts
+Add "strategy_dependency" to DependencyTypeEnum
 
 StrategyDependencyEdge {
-  source_strategy_id: string      // 前提となる戦略
-  target_strategy_id: string      // 後続の戦略（sourceの完了を待つ）
-  goal_id: string                 // 同一ゴール内の依存のみ（Phase 3では）
+  source_strategy_id: string      // Prerequisite strategy
+  target_strategy_id: string      // Dependent strategy (waits for source to complete)
+  goal_id: string                 // Only intra-goal dependencies (in Phase 3)
   dependency_type: "prerequisite" | "enhances"
 }
 ```
 
-**依存タイプの意味**:
+**Meaning of dependency types**:
 
-| タイプ | 意味 | タスク生成への影響 |
-|--------|------|-----------------|
-| `prerequisite` | source 戦略が完了するまで target 戦略のタスクを生成しない | target 戦略を `suspended` にする |
-| `enhances` | source 戦略の結果が target 戦略の効果を高める（ソフト依存） | タスク生成は許可するが、source 完了後に rebalance をトリガー |
+| Type | Meaning | Effect on Task Generation |
+|------|---------|--------------------------|
+| `prerequisite` | Do not generate tasks for the target strategy until the source strategy completes | Puts target strategy in `suspended` state |
+| `enhances` | Results from the source strategy amplify the effect of the target strategy (soft dependency) | Task generation is allowed, but a rebalance is triggered after source completes |
 
-**既存設計との整合**:
+**Alignment with existing design**:
 
-`prerequisite` 依存は `portfolio-management.md` §3.2 のタスク選択ルールに組み込む。`suspended` 状態の戦略は `allocation = 0` として扱い、選択対象から除外する。
+`prerequisite` dependencies are incorporated into the task selection rules in portfolio-management.md §3.2. `suspended` strategies are treated as `allocation = 0` and excluded from selection.
 
 ---
 
-## 設計原則のまとめ
+## Summary of Design Principles
 
-| 原則 | 具体的な設計決定 |
-|------|----------------|
-| 戦略は明示的なエンティティ | 仮説・期待効果・リソース見積もりを持つデータ構造として管理する |
-| 駆動スコアリングとの分離 | 「どの次元を攻めるか」はコードが決め、「どう攻めるか」はポートフォリオが管理する |
-| 完全な因果帰属は求めない | ヒューリスティクスで「手がかり」を得て、リバランス判断に使う |
-| 最小配分の保証 | 0.1未満の配分は禁止。動けない戦略は打ち切る |
-| 「待つ」は戦略 | 明確な仮説・期限・計測計画を持つ戦略的判断として形式化する |
-| MVPは逐次、Phase 2 で並列 | 段階的にリスクを管理しながら複雑さを追加する |
-| 停滞検知との連動 | 停滞の段階がポートフォリオ操作の強度を決定する |
+| Principle | Concrete Design Decision |
+|-----------|--------------------------|
+| Strategies as explicit entities | Managed as data structures with hypotheses, expected effects, and resource estimates |
+| Separation from drive scoring | "Which dimension to target" is decided by code; "how to target it" is managed by the portfolio |
+| No complete causal attribution | Use heuristics to obtain attribution signals and use them as input for rebalancing |
+| Minimum allocation guarantee | Allocations below 0.1 are prohibited. Non-functional strategies are terminated |
+| "Waiting" is a strategy | Formalized as a strategic decision with a clear hypothesis, deadline, and measurement plan |
+| MVP is sequential; Phase 2 is parallel | Complexity is added incrementally while managing risk |
+| Integration with stall detection | The stage of stall detection determines the intensity of portfolio operations |

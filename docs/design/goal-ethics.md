@@ -1,274 +1,274 @@
-# ゴール倫理ゲート設計
+# Goal Ethics Gate Design
 
 ---
 
-## §1. なぜ倫理ゲートが必要か
+## §1. Why an Ethics Gate Is Needed
 
-Conatusのゴール交渉は「実現可能か」を評価する。しかし「実現可能か」と「やるべきか」は別の問いだ。
+Conatus's goal negotiation evaluates "is this achievable?" But "is this achievable?" and "should this be done?" are different questions.
 
-「競合他社の顧客リストを入手して営業に使いたい」というゴールは、技術的には実現可能かもしれない。しかし実現可能性評価を通過したとしても、それを実行に移してはならない。
+A goal like "obtain a competitor's customer list and use it for sales" might technically be achievable. But even if it passes the feasibility evaluation, it must never be carried out.
 
-### 既存の安全機構との違い
+### Difference from Existing Safety Mechanisms
 
-`trust-and-safety.md` が設計するのは「**Conatusがどう動くか**」の安全だ。トラストバランスが低ければ慎重に動く。確信度が低ければ確認をとる。取り消せない操作は人間の承認を経る。これらはConatusの**行動様式**の制約だ。
+`trust-and-safety.md` designs safety around **how Conatus behaves**. A low trust balance means it acts cautiously. Low confidence means it seeks confirmation. Irreversible operations require human approval. These are constraints on Conatus's **behavior**.
 
-倫理ゲートが設計するのは「**Conatusが何を目指すか**」の安全だ。ゴール自体、サブゴール、タスクの手段——これらが倫理的・法的に許容されるものかを判定する。
+The ethics gate designs safety around **what Conatus pursues**. It judges whether goals themselves, sub-goals, and the means used in tasks are ethically and legally acceptable.
 
-信頼度が高く、確信を持って、承認も得ていても、やるべきでないことはある。倫理ゲートはその判断を担う。
+Even with high trust, full confidence, and proper approvals, some things should still not be done. The ethics gate is responsible for that judgment.
 
-### 位置づけの明確化
+### Clarifying the Role
 
-倫理ゲートは、ゴール交渉の実現可能性評価（Step 4）より前に置かれる。不可能かどうかを評価する以前に、やるべきでないものを弾く。
+The ethics gate is placed before the feasibility evaluation (Step 4) of goal negotiation. It filters out what should not be done before even asking whether it is possible.
 
-これは性格設定ではなく**構造的制約**だ。「Conatusは倫理的に振る舞う傾向がある」という性質ではなく、「倫理ゲートを通過しないゴールは実行されない」という構造上の保証だ。不可逆操作ルールが「どれだけ信頼度が高くても承認なしに実行しない」という構造的保証であるのと同格、あるいはそれ以上だ。
-
----
-
-## §2. 倫理ゲートの位置づけ
-
-### GoalNegotiatorへの統合
-
-ゴール交渉の5ステップフロー（`goal-negotiation.md` §2）に、新たに Step 0 を追加する。
-
-```
-Step 0: 倫理・法的ゲート（NEW）     ← ここで弾く
-  ↓（通過した場合のみ）
-Step 1: ゴール受け取り
-  ↓
-Step 2: 次元分解プローブ
-  ↓
-Step 3: ベースライン観測
-  ↓
-Step 4: 実現可能性評価
-  ↓
-Step 5: 応答
-```
-
-拒否されたゴールは Step 1 に進まない。倫理ゲートで止まったゴールに対して、実現可能性評価もカウンター提案も行わない。
-
-### サブゴール分解後の再チェック
-
-Step 0 を通過した上位ゴールでも、サブゴールに分解されると倫理的に問題のある経路が現れることがある。
-
-```
-上位ゴール: 「売上を大きく増やしたい」 → Step 0 通過
-  ↓
-サブゴールA: 「顧客単価を上げる」    → 通過
-サブゴールB: 「競合の顧客リストを入手する」 → 拒否 ← ここで止める
-```
-
-上位ゴールが倫理的に問題なくても、分解されたサブゴールで問題が生じる。このため、`GoalNegotiator.decompose()` が生成した全サブゴールに対して、倫理チェックを再実行する。
-
-### タスクレベルの再チェック
-
-目的が適切でも、手段が問題になる場合がある。
-
-```
-サブゴール: 「ユーザーの行動データを分析する」 → 通過
-  ↓
-タスク: 「ユーザーの同意なしにデータを第三者に送信する」 → 拒否
-```
-
-`TaskLifecycle.generateTask()` 後に、タスクの実行手段をチェックする。目的が OK でも手段が NG なら、そのタスクは生成されない。
-
-### 再交渉時にも毎回
-
-ゴール再交渉（`goal-negotiation.md` §6）が発生するたびに、Step 0 のチェックを再実行する。再交渉時のゴール修正が倫理的に問題のある方向に向かうことを防ぐ。
+This is not a personality setting — it is a **structural constraint**. Not "Conatus tends to behave ethically," but "goals that do not pass the ethics gate will not be executed." This structural guarantee is on par with, or stronger than, the irreversible action rule, which guarantees "no execution without approval, no matter how high the confidence."
 
 ---
 
-## §3. 判定の3段階
+## §2. Positioning the Ethics Gate
 
-### 明確なNG（即拒否）
+### Integration into GoalNegotiator
 
-以下のカテゴリに該当するゴール・サブゴール・タスクは即座に拒否する。
-
-| カテゴリ | 例 |
-|---------|-----|
-| 違法行為 | 不正アクセス、窃盗、詐欺、著作権侵害、脱税 |
-| 他者への直接的加害 | 人を傷つける計画、嫌がらせの自動化、風評被害の拡散 |
-| プライバシー侵害 | 個人情報の不正取得・売買、同意なしの追跡、個人情報の不正利用 |
-| 欺瞞・なりすまし | 虚偽の身元での接触、フィッシング、偽情報の大量生成 |
-| セキュリティ侵害 | 不正アクセスツールの作成・使用、脆弱性の悪意ある悪用 |
-| 差別・ハラスメントの自動化 | 特定属性への組織的な攻撃、差別的選別の自動化 |
-
-**応答**: 明確な拒否 + 理由を返す。カウンター提案も、応答B（代替目標）も出さない。グレーゾーンへの分類も行わない。
+A new Step 0 is added to the 5-step goal negotiation flow (`goal-negotiation.md` §2).
 
 ```
-[倫理ゲート: 拒否]
-ゴール: 「競合他社のサーバーにアクセスして顧客リストを取得する」
-理由: このゴールは不正アクセスおよびプライバシー侵害に該当します。
-     Conatus はこのゴールの追跡を開始しません。
+Step 0: Ethics and Legal Gate (NEW)     ← filtered here
+  ↓ (only if passed)
+Step 1: Receive goal
+  ↓
+Step 2: Dimension decomposition probe
+  ↓
+Step 3: Baseline observation
+  ↓
+Step 4: Feasibility evaluation
+  ↓
+Step 5: Response
 ```
 
-**ユーザーオーバーライド: 不可**。このカテゴリに対してユーザーが「それでもやれ」と言っても、Conatus は従わない。`trust-and-safety.md` §4 で「スコアがどれだけ高くても人間の承認という最終フィルターは外せない」と定義したのと同じ論理だ——倫理ゲートにおいては、ユーザーの指示がそのフィルターを代替することはない。
+Rejected goals do not proceed to Step 1. Goals blocked by the ethics gate receive neither a feasibility evaluation nor a counter-proposal.
 
-### グレーゾーン（ユーザー確認）
+### Re-check After Sub-goal Decomposition
 
-法的には問題がないが、倫理的な判断が分かれる可能性があるものは、ユーザー確認を求める。
-
-| 状況 | 例 |
-|-----|-----|
-| 利用規約次第で判断が分かれるもの | 競合の公開価格の自動収集（スクレイピング禁止規約の可能性） |
-| 個人情報を扱うが正当な理由があり得るもの | 顧客のメール履歴をAIで分析する（プライバシーポリシー次第） |
-| 法的にOKだが社会的影響が懸念されるもの | 大規模な自動投稿（合法だが情報操作と受け取られる可能性） |
-| 文脈によって判断が異なるもの | セキュリティテスト目的での脆弱性スキャン（本番環境か許可された環境か） |
-
-**応答**: `goal-negotiation.md` の応答C（要注意フラグ）を拡張した形式で返す。
+Even if a top-level goal passes Step 0, ethically problematic paths can emerge after it is decomposed into sub-goals.
 
 ```
-[倫理ゲート: 要確認]
-ゴール: 「競合の公開価格データを自動収集して分析する」
-
-このゴールには倫理的リスクがあります:
-  - 対象サービスの利用規約がスクレイピングを禁止している場合、
-    規約違反になります
-  - 収集したデータの利用方法によっては、不公正競争と見なされる
-    可能性があります
-
-確認してから進める場合、以下をお知らせください:
-  - 対象サービスの利用規約の状況
-  - データの利用目的と範囲
-
-それでも進めますか？ [はい / いいえ / 詳細を確認]
+Top-level goal: "Significantly increase revenue" → passes Step 0
+  ↓
+Sub-goal A: "Increase revenue per customer"           → passes
+Sub-goal B: "Obtain the competitor's customer list"   → rejected ← stopped here
 ```
 
-ユーザーが承認した場合、`user_acknowledged_ethic_risk = true` として記録し、通常フロー（Step 1）に進む。承認の記録はログに永続化される（§7 参照）。
+Even if the top-level goal is ethically sound, problems can arise in the decomposed sub-goals. For this reason, the ethics check is re-run on all sub-goals generated by `GoalNegotiator.decompose()`.
 
-### 明確なOK
+### Re-check at the Task Level
 
-上記のいずれにも該当しないと判定されたゴールは、通常フローへ進む。判定結果は pass としてログに記録される。
+Even when the objective is appropriate, the means can be problematic.
+
+```
+Sub-goal: "Analyze user behavior data" → passes
+  ↓
+Task: "Send user data to a third party without consent" → rejected
+```
+
+After `TaskLifecycle.generateTask()`, the means of executing the task are checked. Even if the objective is acceptable, if the means are not, the task is not generated.
+
+### Re-check on Every Renegotiation
+
+Each time goal renegotiation occurs (`goal-negotiation.md` §6), the Step 0 check is run again. This prevents goal revisions during renegotiation from moving in an ethically problematic direction.
 
 ---
 
-## §4. 判定メカニズム
+## §3. The Three Levels of Judgment
 
-### 2層構造
+### Clear No (Immediate Rejection)
 
-判定は2層で構成する。
+Goals, sub-goals, and tasks falling into the following categories are rejected immediately.
 
-**Layer 1: カテゴリベースのブロックリスト**（高速、LLM不要）
+| Category | Examples |
+|---------|---------|
+| Illegal activity | Unauthorized access, theft, fraud, copyright infringement, tax evasion |
+| Direct harm to others | Plans to injure people, automation of harassment, spreading reputational damage |
+| Privacy violation | Unauthorized acquisition or sale of personal data, unconsented tracking, misuse of personal information |
+| Deception and impersonation | Contacting others under a false identity, phishing, mass generation of disinformation |
+| Security breach | Creating or using unauthorized access tools, malicious exploitation of vulnerabilities |
+| Automation of discrimination or harassment | Organized attacks on specific groups, automated discriminatory filtering |
 
-§3「明確なNG」の6カテゴリを、意図レベルで分類するルールベースのフィルター。キーワードマッチングではなく、ゴールの意図の分類だ。
+**Response**: Clear rejection + reason returned. No counter-proposal, no alternative goal (response B), no reclassification as gray zone.
 
-「ハッキング」という単語が含まれていても、CTFやセキュリティテストは通過する。「個人情報を取得する」というフレーズでも、正規のユーザー登録フローは通過する。分類するのは**行為の意図と文脈**であり、単語の出現ではない。
+```
+[Ethics Gate: Rejected]
+Goal: "Access the competitor's server and obtain their customer list"
+Reason: This goal constitutes unauthorized access and privacy violation.
+        Conatus will not begin pursuing this goal.
+```
 
-（MVPでは Layer 1 は未実装。Phase 2 で追加する——§9 参照。）
+**User override: Not permitted.** Even if the user says "do it anyway," Conatus will not comply. The same logic applies here as in `trust-and-safety.md` §4, where "the final filter of human approval cannot be removed regardless of how high the score is" — in the ethics gate, user instructions do not replace that filter.
 
-**Layer 2: LLMによる文脈的判定**
+### Gray Zone (User Confirmation Required)
 
-Layer 1 を通過したゴールに対して、LLM が文脈を考慮した判定を行う。
+Items that are not legally problematic but may be ethically contested require user confirmation.
 
-**LLMプロンプト設計の原則**:
+| Situation | Examples |
+|----------|---------|
+| Judgment varies depending on terms of service | Automated collection of a competitor's public prices (may be prohibited by scraping clauses) |
+| Involves personal data but may have legitimate purpose | Analyzing customer email history with AI (depends on privacy policy) |
+| Legally acceptable but with potential societal impact | Large-scale automated posting (legal, but may be perceived as information manipulation) |
+| Judgment depends on context | Vulnerability scanning for security testing purposes (production environment vs. permitted environment) |
 
-- **保守的バイアス**: 不確実なときは「グレーゾーン」寄りに判定する。「おそらく問題ない」は「pass」にならない。「明確ではないが問題があるかもしれない」は「flag」になる。
-- **意図の評価**: 手段ではなく目的を評価する。同じ「サーバーにアクセスする」でも、正規の権限があるか、悪意があるかで判定が変わる。
-- **文脈の考慮**: 正当防衛とサイバー攻撃は異なる。セキュリティ研究と実害を与える攻撃は異なる。文脈なしに行為だけを評価しない。
+**Response**: Returned in an extended form of response C (attention-flagged) from `goal-negotiation.md`.
 
-### 判定結果の構造
+```
+[Ethics Gate: Confirmation Required]
+Goal: "Automatically collect and analyze a competitor's public pricing data"
+
+This goal has ethical risks:
+  - If the target service's terms of service prohibit scraping,
+    this would be a violation
+  - Depending on how the collected data is used, it may be seen
+    as unfair competition
+
+To proceed, please clarify:
+  - The status of the target service's terms of service
+  - The intended use and scope of the data
+
+Do you want to proceed? [Yes / No / View Details]
+```
+
+If the user acknowledges, `user_acknowledged_ethic_risk = true` is recorded and the flow proceeds to Step 1. The acknowledgment record is persisted in the log (see §7).
+
+### Clear OK
+
+Goals determined to fall into neither of the above categories proceed to the normal flow. The judgment result is logged as pass.
+
+---
+
+## §4. The Judgment Mechanism
+
+### Two-Layer Structure
+
+Judgment is structured in two layers.
+
+**Layer 1: Category-based blocklist** (fast, no LLM required)
+
+A rule-based filter that classifies the 6 "Clear No" categories from §3 at the intent level. This is intent classification, not keyword matching.
+
+Even if the word "hacking" appears, CTF participation or security testing passes through. Even the phrase "obtain personal information," when it refers to a legitimate user registration flow, passes through. What is classified is **the intent and context of the action**, not the occurrence of specific words.
+
+(Layer 1 is not implemented in MVP. It will be added in Phase 2 — see §9.)
+
+**Layer 2: Context-aware judgment by LLM**
+
+For goals that pass Layer 1, the LLM performs context-sensitive judgment.
+
+**Principles of LLM prompt design**:
+
+- **Conservative bias**: When uncertain, lean toward "gray zone." "Probably fine" does not become "pass." "Unclear but might be okay" becomes "flag."
+- **Intent evaluation**: Evaluate the purpose, not the means. The same "access the server" is judged differently depending on whether it is authorized or malicious.
+- **Context consideration**: Self-defense and cyberattack are different. Security research and harmful attacks are different. Actions are not evaluated in isolation without context.
+
+### Structure of the Judgment Result
 
 ```typescript
 interface EthicsVerdict {
   verdict: "reject" | "flag" | "pass";
-  category: string;        // 該当カテゴリ（例: "privacy_violation", "unclear_legality"）
-  reasoning: string;       // 判定理由（1〜3文）
-  risks: string[];         // 特定されたリスク（flag時のみ）
-  confidence: number;      // 判定の確信度（0.0〜1.0）
+  category: string;        // Applicable category (e.g., "privacy_violation", "unclear_legality")
+  reasoning: string;       // Reasoning for the verdict (1–3 sentences)
+  risks: string[];         // Identified risks (only when flagged)
+  confidence: number;      // Confidence in the verdict (0.0–1.0)
 }
 ```
 
-確信度が低い（例: 0.6 未満）の判定結果は、自動的に「flag」として扱い、ユーザー確認を求める。不確実な場合は弾くよりも確認する方が、ユーザーの正当なゴールを誤拒否するリスクを減らせる。
+Verdicts with low confidence (e.g., below 0.6) are automatically treated as "flag," requiring user confirmation. In uncertain cases, asking for confirmation rather than outright rejection reduces the risk of incorrectly rejecting a user's legitimate goal.
 
 ---
 
-## §5. サブゴール・タスクレベルの再チェック
+## §5. Re-checks at the Sub-goal and Task Level
 
-### 分解後の全サブゴールチェック
+### Checking All Sub-goals After Decomposition
 
-`GoalNegotiator.decompose()` が上位ゴールをサブゴールに分解した直後、生成されたすべてのサブゴールに対して倫理チェックを実行する。
+Immediately after `GoalNegotiator.decompose()` decomposes a top-level goal into sub-goals, the ethics check is run on every generated sub-goal.
 
 ```
-上位ゴール（Step 0 通過済み）
+Top-level goal (passed Step 0)
   ↓ decompose()
-サブゴールA → EthicsGate.check(A) → pass
-サブゴールB → EthicsGate.check(B) → reject
-サブゴールC → EthicsGate.check(C) → pass
+Sub-goal A → EthicsGate.check(A) → pass
+Sub-goal B → EthicsGate.check(B) → reject
+Sub-goal C → EthicsGate.check(C) → pass
 
-→ サブゴールBを除いて交渉を継続
-  Bの拒否をユーザーに通知
-  上位ゴールを維持したまま、代替経路の探索を試みる
+→ Continue negotiation excluding Sub-goal B
+  Notify the user of B's rejection
+  Attempt to find an alternative path while keeping the top-level goal intact
 ```
 
-サブゴール1つが拒否されても、上位ゴール全体を拒否するとは限らない。問題のあるサブゴールを除外した上で、他のサブゴールで上位ゴールに近づける可能性を評価する。ただし、上位ゴールの達成に倫理的に問題のあるサブゴールが不可欠だと判断される場合は、上位ゴール自体を拒否する。
+If one sub-goal is rejected, the entire top-level goal is not necessarily rejected. The possibility of approaching the top-level goal through other sub-goals after excluding the problematic one is assessed. However, if the problematic sub-goal is determined to be indispensable for achieving the top-level goal, the top-level goal itself is rejected.
 
-### タスク生成後の手段チェック
+### Checking the Means After Task Generation
 
-`TaskLifecycle.generateTask()` がタスクを生成した後、そのタスクの実行手段をチェックする。
+After `TaskLifecycle.generateTask()` generates a task, the means of executing that task are checked.
 
-チェックする対象:
-- タスクの実行手段（どのツールを使って何をするか）
-- 想定される副作用（意図しない外部への影響はないか）
-- アクセスするデータとその利用範囲
+What is checked:
+- The means of executing the task (what tools are used and what they do)
+- Expected side effects (are there any unintended external impacts?)
+- The data accessed and the scope of its use
 
 ```
-サブゴール: 「ユーザーのエンゲージメントデータを分析する」（通過済み）
+Sub-goal: "Analyze user engagement data" (passed)
   ↓ generateTask()
-タスク: 「ユーザーIDと行動ログをサードパーティの分析APIに送信する」
+Task: "Send user IDs and behavior logs to a third-party analytics API"
 
 → EthicsGate.checkMeans() → flag
-  理由: ユーザーのデータを同意なしに第三者に送信することは
-        プライバシーポリシー次第で問題になります
-→ ユーザーに確認
+  Reason: Sending user data to a third party without consent
+          may be problematic depending on the privacy policy
+→ Request user confirmation
 ```
 
-### 既存の不可逆操作チェックとの関係
+### Relationship with Existing Irreversible Action Checks
 
-`trust-and-safety.md` §4 の不可逆操作ルールと倫理ゲートは、補完的だが異なる判断をする。
+The irreversible action rules in `trust-and-safety.md` §4 and the ethics gate are complementary but make different judgments.
 
-| 観点 | 倫理ゲート | 不可逆操作ルール |
-|-----|-----------|----------------|
-| 問い | やるべきか | やってよいか（承認ありで） |
-| 結果 | OK / 要確認 / 拒否 | 承認後に実行 / 拒否なし（承認前提） |
-| ユーザーオーバーライド | 明確なNGは不可 | 可能（永続ゲート設定等） |
-| 適用タイミング | ゴール・サブゴール・タスク生成時 | タスク実行直前 |
+| Aspect | Ethics gate | Irreversible action rules |
+|--------|------------|--------------------------|
+| Question | Should this be done? | Is it okay to do this (with approval)? |
+| Outcome | OK / Confirmation required / Rejected | Execute after approval / No rejection (assumes approval) |
+| User override | Not permitted for Clear No | Permitted (permanent gate settings, etc.) |
+| Timing | At goal/sub-goal/task generation | Immediately before task execution |
 
-**優先順位**: 倫理ゲートは不可逆操作ルールより上位だ。倫理的に拒否されたタスクは、承認を経ても実行しない。
+**Priority**: The ethics gate takes precedence over irreversible action rules. A task rejected by the ethics gate will not be executed even with approval.
 
 ---
 
-## §6. 安全性の優先順位（更新版）
+## §6. Safety Priority Order (Updated)
 
-`trust-and-safety.md` §7 の安全フロアに、倫理ゲートを最上位として追加する。
+The ethics gate is added as the top priority to the safety floor in `trust-and-safety.md` §7.
 
 ```
-優先度（高）
-  0. 倫理・法的ゲート
-     （ゴール・サブゴール・タスクの目的と手段を評価し、
-      明確なNGは拒否、グレーゾーンはユーザー確認）    ← NEW
-  1. 永続的なゲート
-     （ユーザーが「必ず聞いて」と設定したもの）
-  2. 取り消せない操作ルール
-     （デプロイ、削除、外部書き込み等）
-  3. 象限マトリクス
-     （トラスト × 確信度 による行動様式）
-  4. 停滞検知のフィードバック
-     （decay_factor による優先度調整）
-優先度（低）
+Priority (High)
+  0. Ethics and Legal Gate
+     (Evaluates the purpose and means of goals/sub-goals/tasks;
+      Clear No → rejected, Gray zone → user confirmation)    ← NEW
+  1. Permanent gates
+     (Things the user has set to "always ask")
+  2. Irreversible action rules
+     (Deployments, deletions, external writes, etc.)
+  3. Quadrant matrix
+     (Behavioral style based on Trust × Confidence)
+  4. Stall detection feedback
+     (Priority adjustment via decay_factor)
+Priority (Low)
 ```
 
-倫理ゲートは他のすべてのルールより上位に位置する。トラストバランスが最高値でも、確信度が 1.0 でも、ユーザーが承認していても、倫理的に拒否されたゴールは実行されない。
+The ethics gate takes precedence over all other rules. Even at the highest trust balance, confidence of 1.0, or with user approval, goals rejected as ethically unacceptable will not be executed.
 
 ---
 
-## §7. ログと透明性
+## §7. Logging and Transparency
 
-### すべての判定を記録
+### Record All Verdicts
 
-倫理ゲートのすべての判定を永続ログに記録する。pass した判定も含む。
+All ethics gate verdicts are recorded in a persistent log, including those that pass.
 
-**なぜ pass も記録するか**: 「なぜこのゴールが実行されたか」を後から確認できるようにするため。ゴールの選択の透明性は、Conatus の信頼性の基盤だ。
+**Why record passes too**: To allow retroactive verification of "why this goal was executed." The transparency of goal selection is the foundation of Conatus's trustworthiness.
 
-### ログの構造
+### Log Structure
 
 ```typescript
 interface EthicsLog {
@@ -278,25 +278,25 @@ interface EthicsLog {
   subject_id: string;
   subject_description: string;
 
-  verdict: EthicsVerdict;       // §4 の判定結果
+  verdict: EthicsVerdict;       // Verdict result from §4
 
-  // reject の場合
+  // When rejected
   rejection_delivered?: {
-    message: string;            // ユーザーに伝えた内容
+    message: string;            // Content communicated to the user
     delivered_at: string;
   };
 
-  // flag の場合
+  // When flagged
   user_confirmation?: {
-    risks_presented: string[];  // 提示したリスク
+    risks_presented: string[];  // Risks presented
     user_response: "acknowledged" | "cancelled" | "pending";
     responded_at?: string;
-    acknowledged_risks?: string[];  // ユーザーが承認したリスク
+    acknowledged_risks?: string[];  // Risks the user acknowledged
   };
 }
 ```
 
-### ログの例
+### Log Examples
 
 ```json
 {
@@ -304,18 +304,18 @@ interface EthicsLog {
   "timestamp": "2026-03-10T09:12:00Z",
   "subject_type": "subgoal",
   "subject_id": "subgoal_007",
-  "subject_description": "競合の顧客リストを取得して営業対象にする",
+  "subject_description": "Obtain the competitor's customer list and use it for sales targeting",
 
   "verdict": {
     "verdict": "reject",
     "category": "privacy_violation",
-    "reasoning": "顧客の同意なしに個人情報を第三者から取得することは、プライバシー侵害および不正な個人情報の取扱いに該当します。",
+    "reasoning": "Acquiring personal information from a third party without customer consent constitutes a privacy violation and improper handling of personal data.",
     "risks": [],
     "confidence": 0.97
   },
 
   "rejection_delivered": {
-    "message": "このサブゴールはプライバシー侵害に該当するため、Conatus は追跡を開始しません。",
+    "message": "This sub-goal constitutes a privacy violation. Conatus will not begin pursuing it.",
     "delivered_at": "2026-03-10T09:12:01Z"
   }
 }
@@ -327,125 +327,125 @@ interface EthicsLog {
   "timestamp": "2026-03-10T09:15:00Z",
   "subject_type": "goal",
   "subject_id": "goal_003",
-  "subject_description": "競合サービスの公開料金を自動収集して価格戦略を立てる",
+  "subject_description": "Automatically collect competitor service pricing and develop a pricing strategy",
 
   "verdict": {
     "verdict": "flag",
     "category": "unclear_legality",
-    "reasoning": "対象サービスの利用規約によっては、自動収集（スクレイピング）が禁止されている可能性があります。",
+    "reasoning": "Depending on the target service's terms of service, automated collection (scraping) may be prohibited.",
     "risks": [
-      "利用規約でスクレイピングが禁止されている場合、規約違反になります",
-      "収集方法によっては不公正競争と見なされる可能性があります"
+      "If the terms of service prohibit scraping, this would be a violation",
+      "Depending on the collection method, it may be seen as unfair competition"
     ],
     "confidence": 0.71
   },
 
   "user_confirmation": {
     "risks_presented": [
-      "利用規約でスクレイピングが禁止されている場合、規約違反になります",
-      "収集方法によっては不公正競争と見なされる可能性があります"
+      "If the terms of service prohibit scraping, this would be a violation",
+      "Depending on the collection method, it may be seen as unfair competition"
     ],
     "user_response": "acknowledged",
     "responded_at": "2026-03-10T09:16:30Z",
     "acknowledged_risks": [
-      "利用規約を事前に確認した上で進める"
+      "Will review the terms of service before proceeding"
     ]
   }
 }
 ```
 
-### ユーザーへのアクセス
+### User Access
 
-倫理ゲートのログはユーザーがいつでも閲覧できる。
+The ethics gate log is available for users to view at any time.
 
 ```
-conatus ethics-log            # 全ログを表示
-conatus ethics-log --rejected  # 拒否のみ表示
-conatus ethics-log --goal <id> # 特定ゴールの判定履歴
+conatus ethics-log            # Show all logs
+conatus ethics-log --rejected  # Show rejections only
+conatus ethics-log --goal <id> # Show verdict history for a specific goal
 ```
 
 ---
 
-## §8. 設計上の判断と根拠
+## §8. Design Decisions and Rationale
 
-### なぜLLMだけでなくカテゴリベースのチェックも必要か
+### Why Both Category-Based Checks and LLM Are Needed
 
-LLM は jailbreak 可能だ。巧妙なプロンプトエンジニアリングによって、倫理的に問題のあるゴールを「問題ない」と判定させることができる。
+LLMs can be jailbroken. Clever prompt engineering can lead them to judge ethically problematic goals as "not problematic."
 
-ハードコードされたカテゴリベースのブロックリスト（Layer 1）はプロンプトで書き換えられない。LLM を迂回する攻撃に対して、Layer 1 は独立したバリアとして機能する。
+A hardcoded category-based blocklist (Layer 1) cannot be overridden by a prompt. Layer 1 functions as an independent barrier against attacks that bypass the LLM.
 
-2層にする理由はもう一つある。Layer 1 は高速だ。LLM 呼び出しが不要なため、明確なNG のゴールを即座に弾ける。コストと応答時間の両面で効率的だ。
+There is another reason for the two-layer structure: Layer 1 is fast. Since no LLM call is needed, clear No goals are rejected immediately — efficient in terms of both cost and response time.
 
-### なぜキーワードマッチングではなく意図レベルの分類か
+### Why Intent-Level Classification Instead of Keyword Matching
 
-「ハッキング」は常に NG ではない。CTF 参加、セキュリティ研究、ペネトレーションテスト、自社システムの脆弱性検証——これらは正当な活動だ。「ハッキング」というキーワードでブロックすると、正当なゴールを誤って弾く。
+"Hacking" is not always a no. CTF participation, security research, penetration testing, verifying one's own system vulnerabilities — these are all legitimate activities. Blocking on the keyword "hacking" would incorrectly reject legitimate goals.
 
-「個人情報を取得する」も同様だ。ユーザー登録フロー、KYC プロセス、正規の CRM データ収集——これらは正当だ。
+"Obtain personal information" is the same. User registration flows, KYC processes, legitimate CRM data collection — these are legitimate.
 
-キーワードではなく意図と文脈を判定する。「この行為は誰かの権利や安全を侵害するものか」という問いに答える。
+We classify intent and context, not keywords. The question answered is: "Does this action violate someone's rights or safety?"
 
-### なぜユーザーオーバーライドを禁止するか
+### Why User Override Is Not Permitted
 
-`trust-and-safety.md` §4 はこう述べる。「Conatusの判断は確率的だ。信頼度0.95は『5%の確率で間違っている』を意味する。取り消せない行動において5%の誤りは許容できない。」
+`trust-and-safety.md` §4 states: "Conatus's judgment is probabilistic. A confidence of 0.95 means 'there is a 5% chance of being wrong.' A 5% error rate in irreversible actions is unacceptable."
 
-倫理ゲートの「明確なNG」にも同じ論理が適用される。ユーザーが「これはOKだ」と言っても、Conatus の倫理判断が覆るわけではない。ユーザー自身が意図的に違法・非倫理的な行動を求めている可能性があり、その場合にユーザーの指示を最終権威として扱うことはできない。
+The same logic applies to the ethics gate's "Clear No." Even if the user says "this is okay," Conatus's ethical judgment is not overridden. The user themselves may be intentionally requesting illegal or unethical behavior, and in that case their instruction cannot be treated as the final authority.
 
-Conatus はユーザーの助言者だ。しかし助言者が従うべきでない指示がある。ユーザーの自律性と Conatus の構造的制約の間で、倫理ゲートは後者を優先する。
+Conatus is the user's advisor. But there are instructions an advisor should not follow. Between user autonomy and Conatus's structural constraints, the ethics gate prioritizes the latter.
 
-**グレーゾーンはオーバーライドではない**: グレーゾーンのユーザー確認は、Conatus の判断を変えるのではなく、追加情報によってリスクを認識した上で進むというプロセスだ。ユーザーが「わかった上で進める」と言うのは、自律的な判断であり、倫理ゲートの目的を損なわない。
+**Gray zone is not an override**: User confirmation in the gray zone is not changing Conatus's judgment — it is a process of proceeding with acknowledged risk based on additional information. When the user says "I understand and want to proceed," this is an autonomous decision that does not undermine the purpose of the ethics gate.
 
-### なぜ性格設定と分離するか
+### Why It Is Separated from Personality Settings
 
-性格は「判断の傾向」であり、設定によって変えられる。「より積極的に」「より保守的に」「より創造的に」——これらは性格設定で調整する。
+Personality represents "tendencies in judgment" and can be changed through settings. "More proactive," "more conservative," "more creative" — these are adjusted via personality settings.
 
-倫理ゲートは「構造的制約」であり、性格設定で変えられてはならない。
+The ethics gate is a "structural constraint" and must not be changeable through personality settings.
 
-「寛容な性格だから倫理的なリスクに寛大になる」という事態を防ぐ。性格と倫理ゲートを同じ層に置くと、「性格設定で倫理ゲートを緩める」という脆弱性が生まれる。分離することで、どんな性格設定でも倫理ゲートは一定の厳密さで機能する。
+This prevents situations like "a lenient personality leads to lenience on ethical risks." Placing personality and the ethics gate at the same layer creates a vulnerability where "ethics gate constraints can be relaxed via personality settings." By separating them, the ethics gate functions with consistent rigor regardless of personality settings.
 
 ---
 
-## §9. MVP と Phase 2 のスコープ
+## §9. MVP and Phase 2 Scope
 
-### MVP: Layer 2（LLMによる判定）のみ
+### MVP: Layer 2 (LLM Judgment) Only
 
-**実装内容**:
-- LLM による文脈的判定（Layer 2）を実装する
-- すべての判定結果をログに記録する（pass 含む）
-- 拒否: 明確な拒否メッセージを返し、交渉を停止する
-- グレーゾーン: 応答 C（要注意フラグ）を拡張した形式でユーザー確認を求める
-- GoalNegotiator の Step 0 として統合する
-- decompose() 後のサブゴール再チェックを実装する
+**What is implemented**:
+- Context-aware judgment by LLM (Layer 2)
+- All verdict results logged (including passes)
+- Rejection: Return a clear rejection message and halt negotiation
+- Gray zone: Request user confirmation in an extended form of response C (attention-flagged)
+- Integrated as Step 0 in GoalNegotiator
+- Sub-goal re-check after decompose() implemented
 
-**未実装（Phase 2 へ）**:
-- Layer 1（カテゴリベースブロックリスト）
-- TaskLifecycle.generateTask() 後の手段チェック
-- ユーザーカスタマイズ可能な追加制約
+**Not implemented (deferred to Phase 2)**:
+- Layer 1 (category-based blocklist)
+- Means check after TaskLifecycle.generateTask()
+- User-customizable additional constraints
 
-**MVP の保守的設計**: Layer 1 がない状態では、LLM の判断が唯一の防衛線になる。このため MVP 期間中は LLM プロンプトの保守的バイアスを強く設定し、不確実なゴールは積極的に「flag」として扱う。
+**MVP's conservative design**: Without Layer 1, LLM judgment is the only line of defense. For this reason, during MVP the LLM prompt's conservative bias is set strong, and uncertain goals are aggressively treated as "flag."
 
-### Phase 2: 2層構造の完成
+### Phase 2: Completing the Two-Layer Structure
 
-**追加内容**:
-- **Layer 1 実装**: カテゴリベースのブロックリスト。意図レベルの分類ルールをコードベースで定義する
-- **TaskLifecycle 統合**: generateTask() 後の手段チェックを実装する
-- **ユーザーカスタマイズ**: 組織固有のポリシーを追加制約として設定できる機能
+**Additions**:
+- **Layer 1 implementation**: Category-based blocklist. Intent-level classification rules are defined in code
+- **TaskLifecycle integration**: Implement means check after generateTask()
+- **User customization**: Feature to configure organization-specific policies as additional constraints
 
 ```
-// Phase 2 のユーザー設定例
+// Example user configuration in Phase 2
 ethics_constraints:
-  - description: "競合他社に関するデータ収集は一切行わない"
+  - description: "Do not collect any data related to competitors"
     applies_to: "goal"
-  - description: "外部APIへの顧客データ送信は禁止"
+  - description: "Sending customer data to external APIs is prohibited"
     applies_to: "task_means"
 ```
 
-**統計と改善**: 判定ログの集計を行い、誤拒否率（正当なゴールを拒否した回数）と誤通過率（問題のあるゴールを通過させた回数）を追跡する。この統計を使って Layer 1 のルールと Layer 2 のプロンプトを改善する。
+**Statistics and improvement**: Aggregate verdict logs and track the false rejection rate (number of legitimate goals rejected) and false pass rate (number of problematic goals allowed through). Use these statistics to improve Layer 1 rules and Layer 2 prompts.
 
 ---
 
-## 関連ドキュメント
+## Related Documents
 
-- `goal-negotiation.md` — 倫理ゲートが統合される5ステップ交渉フロー（Step 0 はここに追加される）
-- `trust-and-safety.md` — トラスト・安全設計（安全フロアの優先順位を §6 で拡張）
-- `task-lifecycle.md` — タスクの生成・実行フロー（Phase 2 でタスク手段チェックを統合）
-- `execution-boundary.md` — Conatus の実行境界（委譲モデルとの整合）
+- `goal-negotiation.md` — The 5-step negotiation flow in which the ethics gate is integrated (Step 0 is added here)
+- `trust-and-safety.md` — Trust and safety design (safety floor priority order extended in §6)
+- `task-lifecycle.md` — Task generation and execution flow (task means check integrated in Phase 2)
+- `execution-boundary.md` — Conatus's execution boundary (consistent with the delegation model)

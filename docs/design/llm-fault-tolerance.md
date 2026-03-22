@@ -1,80 +1,81 @@
-# LLMフォールト・トレランス設計
+# LLM Fault Tolerance Design
 
 ---
 
-## 1. 概要
+## 1. Overview
 
-ConatusはLLMを観測・検証・タスク生成の3つの重要経路に使っている。LLMは正確な答えを返すことが多いが、確率的にハルシネーションや誤判定を起こす。1回の誤出力がシステム全体にどこまで影響するかを制限するのがこの設計の目的だ。
+Conatus relies on LLMs across three critical paths: observation, verification, and task generation. While LLMs are often accurate, they can probabilistically hallucinate or misjudge. The purpose of this design is to limit how far a single bad output can propagate through the system.
 
-対象とする2つのメカニズム:
+Two mechanisms are addressed:
 
-- **A. 影響範囲制限（Blast Radius Bound）** — LLMの1回の誤出力が与える影響量を上限で抑える
-- **B. 不変条件ガード（Invariant Guard）** — LLMを使わず機械的に矛盾を検出し、誤出力をブロックする
+- **A. Blast Radius Bound** — caps the impact of any single LLM error
+- **B. Invariant Guard** — mechanically detects contradictions without using an LLM, blocking bad outputs before they take effect
 
-**スコープ外**: マルチモデル投票・コンセンサス（コスト過多）、リトライ戦略（既実装）、スキーマバリデーション一般（別件）
-
----
-
-## 2. 現状のリスク整理
-
-実装調査（`memory/archive/llm-fault-tolerance-research.md`）で特定した高優先度のリスク:
-
-| # | ファイル・箇所 | リスク | 深刻度 |
-|---|--------------|--------|--------|
-| 1 | `task-verifier.ts` L281/381 | L2判定が即トラスト更新（二次確認なし） | 高 |
-| 2 | `task-verifier.ts` L316/348 | `dimension.current_value`をLLM出力から直接上書き（範囲チェックなし） | 高 |
-| 3 | `observation-llm.ts` L97–107 | 証拠なし（contextProvider未提供+gitdiff不在）でスコア > 0.0 の可能性 | 中 |
-| 4 | `gap-calculator.ts` | 誤観測スコアが偽サティスファイシング（ゴール完了誤検知）を引き起こす | 高 |
-| 5 | `task-verifier.ts` L641 | `completion_judger`結果がZodバリデーションなし（`JSON.parse`のみ） | 中 |
+**Out of scope**: multi-model voting/consensus (too costly), retry strategies (already implemented), general schema validation (handled elsewhere).
 
 ---
 
-## 3. A. 影響範囲制限（Blast Radius Bound）
+## 2. Risk Inventory
 
-### 3.1 トラスト変化レート制限
+High-priority risks identified in the implementation audit (`memory/archive/llm-fault-tolerance-research.md`):
 
-**目的**: LLMが短時間に連続して誤った`pass`判定を返しても、トラストが急上昇しないようにする。
-
-**現状**: `TRUST_SUCCESS_DELTA = +3` のキャップはあるが、時間窓のレート制限はない。LLMが1分間に10回誤判定した場合、`+30`まで上昇できる。
-
-**定義**:
-
-```
-トラスト上昇レート上限: +9 / 1時間（= 連続3回成功分）
-  → 1時間に4回以上の`recordSuccess`呼び出しがあった場合、4回目以降は加算をスキップしてWARNログを出力
-
-トラスト下降レート制限: なし（失敗は即座に反映する。ペナルティの迅速適用は安全側）
-```
-
-**実装箇所**: `src/traits/trust-manager.ts` の `recordSuccess()` 内
-
-**ガード発動時の挙動**:
-- 加算はスキップ（現在のトラスト値は変えない）
-- `WARN: trust rate limit triggered (domain: ${domain}, window: 1h, count: ${count})` をログ出力
-
-**優先度**: P1
+| # | File / Location | Risk | Severity |
+|---|----------------|------|----------|
+| 1 | `task-verifier.ts` L281/381 | L2 verdict triggers immediate trust update without secondary confirmation | High |
+| 2 | `task-verifier.ts` L316/348 | `dimension.current_value` is directly overwritten from LLM output with no range check | High |
+| 3 | `observation-llm.ts` L97–107 | Score > 0.0 possible even when no evidence (no contextProvider + no git diff) | Medium |
+| 4 | `gap-calculator.ts` | Bad observation score causes false satisficing (goal incorrectly marked complete) | High |
+| 5 | `task-verifier.ts` L641 | `completion_judger` result has no Zod validation (only `JSON.parse`) | Medium |
 
 ---
 
-### 3.2 `dimension_updates` 変化幅制限
+## 3. A. Blast Radius Bound
 
-**目的**: LLMの検証結果（`dimension_updates`）が `dimension.current_value` を大幅に書き換えることを防ぐ。
+### 3.1 Trust Change Rate Limiting
 
-**現状**: `task-verifier.ts` L316/L348で `dimension.current_value = update.new_value` を直接代入している。範囲チェックなし。
+**Purpose**: Prevent trust from spiking rapidly if the LLM repeatedly returns incorrect `pass` verdicts in a short window.
 
-**定義**:
+**Current state**: The `TRUST_SUCCESS_DELTA = +3` cap exists, but there is no time-windowed rate limit. If the LLM misjudges 10 times in one minute, trust can rise by `+30`.
+
+**Definition**:
 
 ```
-許容変化幅: max(±0.3絶対値, 現在値の±30%)
-  例: current_value = 0.2 の場合
-    → 許容範囲: [0.0, 0.5]（±0.3絶対値が大きい）
-  例: current_value = 0.8 の場合
-    → 許容範囲: [0.56, 1.0]（±0.24絶対値 vs ±30% = ±0.24 ← 同等; キャップ[0,1]適用）
+Max trust increase rate: +9 / 1 hour (= 3 consecutive successes)
+  → If recordSuccess() is called more than 3 times within 1 hour,
+    the 4th call onward is skipped and a WARN log is emitted.
 
-範囲外の変化を提案した場合: 上限/下限にキャップして警告ログを出力
+Trust decrease rate limit: none (failures apply immediately — fast penalty application is the safe side)
 ```
 
-**実装箇所**: `src/execution/task-verifier.ts` L316前後の `dimension_updates` 適用ループ内に `clampDimensionUpdate()` ヘルパー関数を追加
+**Implementation location**: Inside `recordSuccess()` in `src/traits/trust-manager.ts`
+
+**Behavior when guard fires**:
+- Addition is skipped (current trust value unchanged)
+- Log: `WARN: trust rate limit triggered (domain: ${domain}, window: 1h, count: ${count})`
+
+**Priority**: P1
+
+---
+
+### 3.2 `dimension_updates` Change Magnitude Limit
+
+**Purpose**: Prevent LLM verification results (`dimension_updates`) from making large rewrites to `dimension.current_value`.
+
+**Current state**: `task-verifier.ts` L316/L348 performs `dimension.current_value = update.new_value` directly with no range check.
+
+**Definition**:
+
+```
+Allowed change magnitude: max(±0.3 absolute, ±30% of current value)
+  Example: current_value = 0.2
+    → Allowed range: [0.0, 0.5] (±0.3 absolute is larger)
+  Example: current_value = 0.8
+    → Allowed range: [0.56, 1.0] (±0.24 vs ±30% = ±0.24 — equivalent; capped to [0,1])
+
+If the proposed change exceeds the range: clamp to the limit and emit a warning log
+```
+
+**Implementation location**: Add a `clampDimensionUpdate()` helper function inside the `dimension_updates` application loop near L316 in `src/execution/task-verifier.ts`
 
 ```typescript
 function clampDimensionUpdate(current: number, proposed: number): number {
@@ -89,191 +90,191 @@ function clampDimensionUpdate(current: number, proposed: number): number {
 }
 ```
 
-**ガード発動時の挙動**:
-- キャップされた値を書き込む（完全拒否はしない）
-- WARNログを出力
+**Behavior when guard fires**:
+- Writes the clamped value (does not reject outright)
+- Emits a WARN log
 
-**優先度**: P0
-
----
-
-### 3.3 観測スコア変化幅制限
-
-**目的**: LLMが1サイクルで観測スコアを大幅に変化させた場合（例: 0.1 → 0.9）、それを無確認でゴール状態に反映しない。
-
-**現状**: `observation-llm.ts` はスコアを返し、`observation-engine.ts` がそのまま適用する。前回スコアとの差に対するチェックなし。
-
-**定義**:
-
-```
-1サイクルあたりの最大スコア変化幅: ±0.4
-
-ルール:
-  - |new_score - prev_score| <= 0.4 → 通常通り適用
-  - |new_score - prev_score| > 0.4 → 「要確認フラグ」付きで適用保留
-    → 機械的ソース（DataSource）が利用可能な場合: 機械的値を優先（既存の cross-validation ロジックを流用）
-    → 機械的ソースが利用不可の場合: prev_score を維持し、confidence = 0.3 に下げてWARNログを出力
-```
-
-**実装箇所**: `src/observation/observation-engine.ts` のLLM観測適用パス（`applyObservation()` 呼び出し前）
-
-**ガード発動時の挙動**:
-- 機械的ソースがあればそちらを採用（現状の cross-validation と同じ判断）
-- 機械的ソースがなければ前回値を維持（スコアを変えない）
-- WARNログ: `WARN: observation score jump suppressed: prev=${prev}, proposed=${new}, delta=${delta}`
-
-**優先度**: P1
+**Priority**: P0
 
 ---
 
-## 4. B. 不変条件ガード（Invariant Guard）
+### 3.3 Observation Score Change Magnitude Limit
 
-### 4.1 進捗-判定整合性チェック
+**Purpose**: If the LLM shifts the observation score dramatically in a single cycle (e.g., 0.1 → 0.9), do not apply that change to goal state without confirmation.
 
-**目的**: ギャップが増大（悪化）したのにLLMが`pass`を返すという矛盾を検出する。
+**Current state**: `observation-llm.ts` returns a score, and `observation-engine.ts` applies it as-is. There is no check on the delta from the previous score.
 
-**定義**:
+**Definition**:
 
 ```
-チェック条件:
-  prev_gap = 前サイクルのギャップ正規化値
-  curr_gap = 今サイクルのギャップ正規化値（タスク実行後に再計算）
-  verdict  = completion_judger の判定
+Max score change per cycle: ±0.4
 
-矛盾条件: curr_gap > prev_gap + 0.05 AND verdict == "pass"
-  → verdictを "partial" に強制上書き
-  → WARNログ: `WARN: progress-verdict contradiction: gap increased (${prev_gap}→${curr_gap}) but verdict was pass. Overriding to partial.`
+Rules:
+  - |new_score - prev_score| <= 0.4 → apply normally
+  - |new_score - prev_score| > 0.4 → hold with a "needs confirmation" flag
+    → If a mechanical source (DataSource) is available: prefer the mechanical value (reuse existing cross-validation logic)
+    → If no mechanical source: retain prev_score, lower confidence to 0.3, and emit WARN log
 ```
 
-**実装箇所**: `src/execution/task-verifier.ts` の `handleVerdict()` 内、トラスト更新の前
+**Implementation location**: In `src/observation/observation-engine.ts`, in the LLM observation application path (before calling `applyObservation()`)
 
-**ガード発動時の挙動**:
-- `verdict` を `partial` に書き換え（`pass`による`recordSuccess`を防ぐ）
-- WARNログを出力
+**Behavior when guard fires**:
+- If mechanical source is available, use it (same decision as existing cross-validation)
+- If no mechanical source, retain previous score (do not change the score)
+- WARN log: `WARN: observation score jump suppressed: prev=${prev}, proposed=${new}, delta=${delta}`
 
-**優先度**: P0
+**Priority**: P1
 
 ---
 
-### 4.2 重複タスクガード
+## 4. B. Invariant Guard
 
-**目的**: 最近完了・失敗したタスクと意味的に同一のタスクを再生成して無限ループに陥るのを防ぐ。
+### 4.1 Progress-Verdict Consistency Check
 
-**定義**:
+**Purpose**: Detect the contradiction where the gap has grown (worsened) yet the LLM returns `pass`.
+
+**Definition**:
 
 ```
-直近N件のタスク履歴（N=10）に対して:
-  重複判定: task.description と recent_task.description の文字列類似度チェック
-    → 簡易実装: タスク名のtrigram一致率 >= 0.7、かつステータスが "completed" or "failed"
-    → 重複と判定した場合: タスク生成を拒否してWARNログ
+Check conditions:
+  prev_gap = normalized gap value from the previous cycle
+  curr_gap = normalized gap value for the current cycle (recalculated after task execution)
+  verdict  = judgment from completion_judger
 
-将来: セマンティック埋め込みを使った類似度計算（VectorIndex利用可能になったら置き換え）
+Contradiction condition: curr_gap > prev_gap + 0.05 AND verdict == "pass"
+  → Force-override verdict to "partial"
+  → WARN log: `WARN: progress-verdict contradiction: gap increased (${prev_gap}→${curr_gap}) but verdict was pass. Overriding to partial.`
 ```
 
-**実装箇所**: `src/execution/task-generation.ts` のタスク生成後、`TaskLifecycle` への返却前
+**Implementation location**: Inside `handleVerdict()` in `src/execution/task-verifier.ts`, before the trust update
 
-**ガード発動時の挙動**:
-- タスクを返さず `null` を返却（生成失敗扱い）
-- WARNログ: `WARN: duplicate task rejected: similar to recently ${status} task "${recent_task.id}"`
+**Behavior when guard fires**:
+- Rewrites `verdict` to `partial` (prevents `recordSuccess` from being triggered by a `pass`)
+- Emits WARN log
 
-**優先度**: P1
+**Priority**: P0
 
 ---
 
-### 4.3 スコア-証拠整合性チェック
+### 4.2 Duplicate Task Guard
 
-**目的**: 証拠なしで LLM が 0.0 以上のスコアを返すことへの対応。
+**Purpose**: Prevent infinite loops caused by regenerating tasks that are semantically identical to recently completed or failed ones.
 
-**現状**: `observation-llm.ts` のプロンプトに `"Score MUST be 0.0"` という指示があるが、LLMが無視することがある（リスク#3）。
-
-**定義**:
+**Definition**:
 
 ```
-証拠なし判定条件:
-  - contextProvider の結果が空（0件または空文字列）
-  - git diff が空（変更なし）
-  → この状態で LLM が score > 0.0 を返した場合:
-    → score = 0.0 に強制上書き
-    → confidence = 0.1 に設定
-    → WARNログ: `WARN: score overridden to 0.0 (no evidence available, LLM returned ${score})`
+Against the N most recent tasks (N=10):
+  Duplicate check: string similarity between task.description and recent_task.description
+    → Simple implementation: trigram match rate >= 0.7 AND status is "completed" or "failed"
+    → If flagged as duplicate: reject task generation and emit WARN log
+
+Future: replace with semantic embedding similarity (once VectorIndex is available)
 ```
 
-**実装箇所**: `src/observation/observation-llm.ts` のLLMレスポンス処理後（L157–164の範囲）
+**Implementation location**: In `src/execution/task-generation.ts`, after task generation and before returning to `TaskLifecycle`
 
-**ガード発動時の挙動**:
-- スコアを 0.0 に強制上書き
-- confidence を 0.1 に設定
-- WARNログを出力
+**Behavior when guard fires**:
+- Returns `null` instead of a task (treated as generation failure)
+- WARN log: `WARN: duplicate task rejected: similar to recently ${status} task "${recent_task.id}"`
 
-**優先度**: P0
+**Priority**: P1
 
 ---
 
-### 4.4 サティスファイシング二重確認ガード
+### 4.3 Score-Evidence Consistency Check
 
-**目的**: LLMの一時的な過大評価で「ゴール達成」が誤検知されることを防ぐ。
+**Purpose**: Handle cases where the LLM returns a score > 0.0 despite there being no evidence.
 
-**現状**: `SatisficingJudge` はギャップが閾値以下になった時点でゴール完了と判定できる。1サイクルの観測で判定が可能。
+**Current state**: The prompt in `observation-llm.ts` contains a `"Score MUST be 0.0"` instruction, but the LLM can ignore it (Risk #3).
 
-**定義**:
+**Definition**:
 
 ```
-ゴール「満足済み」宣言の条件:
-  連続2サイクルの観測で gap <= threshold を確認
-  → 1サイクル目: "satisficing_candidate" 状態に遷移（ゴール完了はしない）
-  → 2サイクル目: gap <= threshold が再確認されれば "satisfied" に遷移
-  → 2サイクル目: gap > threshold になれば "satisficing_candidate" をリセット
-
-カウンターはゴール状態（`goal.json`）に `satisficing_streak` として保存する
+No-evidence conditions:
+  - contextProvider result is empty (zero entries or empty string)
+  - git diff is empty (no changes)
+  → If the LLM returns score > 0.0 under these conditions:
+    → Force-override score to 0.0
+    → Set confidence = 0.1
+    → WARN log: `WARN: score overridden to 0.0 (no evidence available, LLM returned ${score})`
 ```
 
-**実装箇所**: `src/judgment/satisficing-judge.ts` の満足判定ロジック内
+**Implementation location**: In `src/observation/observation-llm.ts`, after processing the LLM response (around L157–164)
 
-**ガード発動時の挙動**:
-- 1サイクル目は完了宣言しない（次サイクルへ進む）
-- WARNログ不要（通常の動作）
-- 2サイクル連続でクリアしたときのみ完了
+**Behavior when guard fires**:
+- Force-sets score to 0.0
+- Sets confidence to 0.1
+- Emits WARN log
 
-**優先度**: P0
+**Priority**: P0
 
 ---
 
-### 4.5 `dimension_updates` 方向チェック
+### 4.4 Satisficing Double-Check Guard
 
-**目的**: タスクが「スコアを上げる」意図だったのに、LLMの`dimension_updates`が「下げる」値を返す矛盾を検出する。
+**Purpose**: Prevent transient LLM over-estimation from causing a false "goal achieved" detection.
 
-**定義**:
+**Current state**: `SatisficingJudge` can declare a goal complete as soon as the gap falls below the threshold. A single cycle of observation is enough to trigger this.
+
+**Definition**:
 
 ```
-チェック条件:
-  task.intended_direction が定義されている場合（"increase" or "decrease"）
-  かつ dimension_updates[dim].new_value が意図と逆方向の場合:
-    → 矛盾としてWARNログ
-    → dimension_updates を無視（current_value を変更しない）
+Conditions for declaring goal "satisfied":
+  Confirm gap <= threshold across 2 consecutive observation cycles
+  → Cycle 1: transition to "satisficing_candidate" state (do not complete the goal)
+  → Cycle 2: if gap <= threshold is confirmed again, transition to "satisfied"
+  → Cycle 2: if gap > threshold, reset "satisficing_candidate"
 
-task.intended_direction は task-generation.ts が付与する（現状未実装 → 本実装時に追加）
+The counter is stored as `satisficing_streak` in goal state (`goal.json`)
 ```
 
-**現状の課題**: `task.intended_direction` フィールドが現在のタスクスキーマに存在しない。このガードを有効にするにはスキーマ追加が必要。
+**Implementation location**: Inside the satisficing judgment logic in `src/judgment/satisficing-judge.ts`
 
-**実装箇所**:
-- `src/types/tasks.ts` に `intended_direction?: "increase" | "decrease" | "neutral"` を追加
-- `src/execution/task-generation.ts` のプロンプトに付与指示を追加
-- `src/execution/task-verifier.ts` L316前後の適用ループ内でチェック
+**Behavior when guard fires**:
+- Does not declare completion on cycle 1 (proceeds to next cycle)
+- No WARN log needed (this is normal behavior)
+- Completion is declared only after two consecutive passing cycles
 
-**ガード発動時の挙動**:
-- `dimension_updates` を無視（値を変えない）
-- WARNログ: `WARN: dimension_update direction mismatch: task intended ${intended}, but update suggests ${direction} for dim ${dim}`
-
-**優先度**: P2（スキーマ変更が必要なため後回し）
+**Priority**: P0
 
 ---
 
-### 4.6 `completion_judger` Zodバリデーション追加（補足）
+### 4.5 `dimension_updates` Direction Check
 
-**目的**: リスク#5の対処。`completion_judger` は現在 `JSON.parse` + 手動フィールドアクセスのみで、Zodスキーマがない。
+**Purpose**: Detect contradictions where a task intended to raise a score, but the LLM's `dimension_updates` proposes a value that lowers it.
 
-**定義**:
+**Definition**:
+
+```
+Check conditions:
+  If task.intended_direction is defined ("increase" or "decrease")
+  AND dimension_updates[dim].new_value is in the opposite direction:
+    → Log as contradiction with WARN
+    → Ignore dimension_updates (do not change current_value)
+
+task.intended_direction is assigned by task-generation.ts (not yet implemented → add when implementing this guard)
+```
+
+**Current limitation**: The `task.intended_direction` field does not exist in the current task schema. Enabling this guard requires a schema addition.
+
+**Implementation locations**:
+- Add `intended_direction?: "increase" | "decrease" | "neutral"` to `src/types/tasks.ts`
+- Add assignment instructions to the prompt in `src/execution/task-generation.ts`
+- Add the check inside the application loop near L316 in `src/execution/task-verifier.ts`
+
+**Behavior when guard fires**:
+- Ignores `dimension_updates` (does not change any values)
+- WARN log: `WARN: dimension_update direction mismatch: task intended ${intended}, but update suggests ${direction} for dim ${dim}`
+
+**Priority**: P2 (deferred due to schema changes required)
+
+---
+
+### 4.6 `completion_judger` Zod Validation (Addendum)
+
+**Purpose**: Address Risk #5. The `completion_judger` currently uses only `JSON.parse` with manual field access — there is no Zod schema.
+
+**Definition**:
 
 ```typescript
 const CompletionJudgerResponseSchema = z.object({
@@ -284,105 +285,105 @@ const CompletionJudgerResponseSchema = z.object({
 });
 ```
 
-**実装箇所**: `src/execution/task-verifier.ts` L613–653の `completion_judger` 関数内、`llmClient.parseJSON()` に切り替え
+**Implementation location**: Inside the `completion_judger` function at L613–653 in `src/execution/task-verifier.ts`, switching to `llmClient.parseJSON()`
 
-**ガード発動時の挙動**:
-- パース失敗時は既存の `{passed: false, confidence: 0.3}` フォールバックを維持
+**Behavior when guard fires**:
+- On parse failure, retain the existing `{passed: false, confidence: 0.3}` fallback
 
-**優先度**: P1
+**Priority**: P1
 
 ---
 
-### 4.7 検証失敗理由の次サイクル注入（LangGraph由来）
+### 4.7 Verification Failure Injection into Next Cycle (LangGraph-inspired)
 
-**目的**: タスク検証が失敗した際、その失敗理由を次のタスク生成プロンプトに明示的に注入し、同じミスの繰り返しを防ぐ。
+**Purpose**: When task verification fails, explicitly inject the failure reason into the next task generation prompt to prevent repeating the same mistake.
 
-**現状**: タスク失敗 → stall-detector が検知 → 新タスク生成。だが「なぜ失敗したか」の詳細（verification result の reasoning、criteria_met/criteria_total）がタスク生成プロンプトに渡っていない。
+**Current state**: Task fails → stall-detector catches it → new task is generated. But the details of why it failed (verification result `reasoning`, `criteria_met`/`criteria_total`) are not passed to the task generation prompt.
 
-**定義**:
+**Definition**:
 
 ```
-タスク検証失敗時（verdict = "fail" or "partial"）:
-  → verification_result の以下を保存:
-    - reasoning（失敗理由）
+On task verification failure (verdict = "fail" or "partial"):
+  → Save from verification_result:
+    - reasoning (failure reason)
     - criteria_met / criteria_total
     - verdict
-  → 次の generateTask() 呼び出し時に、プロンプトに以下を追加:
-    "前回のタスク「${prev_task.description}」は以下の理由で${verdict}と判定された:
+  → On the next generateTask() call, append to the prompt:
+    "The previous task '${prev_task.description}' was judged ${verdict} for the following reason:
      ${reasoning}
-     達成基準: ${criteria_met}/${criteria_total}
-     この失敗を踏まえて、異なるアプローチのタスクを生成すること。"
+     Criteria met: ${criteria_met}/${criteria_total}
+     Taking this failure into account, generate a task using a different approach."
 ```
 
-**実装箇所**:
-- 失敗理由の保存: `src/execution/task-verifier.ts` の `handleVerdict()` 内で `StateManager` に `last_failure_context` として書き込み
-- プロンプト注入: `src/execution/task-generation.ts` のプロンプト構築部分で `last_failure_context` を読み込んで注入
+**Implementation locations**:
+- Save failure reason: write `last_failure_context` to `StateManager` inside `handleVerdict()` in `src/execution/task-verifier.ts`
+- Prompt injection: read `last_failure_context` and inject it during prompt construction in `src/execution/task-generation.ts`
 
-**ガード発動時の挙動**: 通常動作（ガードではなく情報注入）。失敗理由がない場合はスキップ。
+**Behavior when guard fires**: Normal operation (this is information injection, not a guard). Skipped if no failure context exists.
 
-**優先度**: P1
+**Priority**: P1
 
 ---
 
-### 4.8 CoreLoopチェックポイント（AutoGen由来）
+### 4.8 CoreLoop Checkpoint (AutoGen-inspired)
 
-**目的**: CoreLoop実行中のクラッシュや中断から、最後の正常状態に復帰できるようにする。
+**Purpose**: Allow recovery to the last known-good state after a crash or interruption during CoreLoop execution.
 
-**現状**: CoreLoopはループ中にクラッシュすると途中の状態が失われる。自動アーカイブ機能（ゴール完了時に `~/.conatus/archive/<goalId>/` に移動）は存在するが、ループ途中のチェックポイントはない。
+**Current state**: If CoreLoop crashes mid-loop, intermediate state is lost. An auto-archive mechanism exists (moves goal state to `~/.conatus/archive/<goalId>/` on completion), but there are no mid-loop checkpoints.
 
-**定義**:
+**Definition**:
 
 ```
-チェックポイント保存タイミング: 各verify成功後（1サイクル完了時点）
-保存先: ~/.conatus/goals/<goalId>/checkpoint.json
-内容:
-  - cycle_number: 現在のサイクル番号
-  - last_verified_task_id: 最後に検証成功したタスクID
-  - dimension_snapshot: 全dimension.current_valueのスナップショット
-  - trust_snapshot: 現在のtrust値
-  - timestamp: ISO形式
+Checkpoint save timing: after each successful verify (at the end of each cycle)
+Save location: ~/.conatus/goals/<goalId>/checkpoint.json
+Contents:
+  - cycle_number: current cycle number
+  - last_verified_task_id: ID of the last successfully verified task
+  - dimension_snapshot: snapshot of all dimension.current_values
+  - trust_snapshot: current trust value
+  - timestamp: ISO format
 
-復帰時の動作:
-  - CoreLoop起動時に checkpoint.json の存在を確認
-  - 存在すれば dimension_snapshot と trust_snapshot から状態を復元
-  - last_verified_task_id 以降のタスクを再実行対象とする
-  - WARNログ: "Resuming from checkpoint (cycle ${cycle_number}, task ${last_verified_task_id})"
+Recovery behavior:
+  - On CoreLoop startup, check for the existence of checkpoint.json
+  - If found, restore state from dimension_snapshot and trust_snapshot
+  - Treat tasks after last_verified_task_id as pending re-execution
+  - WARN log: "Resuming from checkpoint (cycle ${cycle_number}, task ${last_verified_task_id})"
 ```
 
-**実装箇所**:
-- チェックポイント書き込み: `src/core/core-loop.ts` のverify成功後
-- チェックポイント読み込み: `src/core/core-loop.ts` のループ開始時
+**Implementation locations**:
+- Checkpoint write: after successful verify in `src/core/core-loop.ts`
+- Checkpoint read: at loop startup in `src/core/core-loop.ts`
 
-**ガード発動時の挙動**: 通常動作（ガードではなくリカバリ機構）。チェックポイントがない場合は通常のゼロスタート。
+**Behavior when guard fires**: Normal operation (this is a recovery mechanism, not a guard). If no checkpoint exists, performs a normal cold start.
 
-**優先度**: P1
+**Priority**: P1
 
 ---
 
-## 5. 実装優先度まとめ
+## 5. Implementation Priority Summary
 
-| 優先度 | ガード | ファイル |
-|--------|--------|----------|
-| P0 | 3.2 `dimension_updates` 変化幅制限 | `task-verifier.ts` |
-| P0 | 4.1 進捗-判定整合性チェック | `task-verifier.ts` |
-| P0 | 4.3 スコア-証拠整合性チェック | `observation-llm.ts` |
-| P0 | 4.4 サティスファイシング二重確認ガード | `satisficing-judge.ts` |
-| P1 | 3.1 トラスト変化レート制限 | `trust-manager.ts` |
-| P1 | 3.3 観測スコア変化幅制限 | `observation-engine.ts` |
-| P1 | 4.2 重複タスクガード | `task-generation.ts` |
-| P1 | 4.6 `completion_judger` Zodバリデーション | `task-verifier.ts` |
-| P1 | 4.7 検証失敗理由の次サイクル注入 | `task-verifier.ts`, `task-generation.ts` |
-| P1 | 4.8 CoreLoopチェックポイント | `core-loop.ts` |
-| P2 | 4.5 `dimension_updates` 方向チェック | `task-verifier.ts` + スキーマ変更 |
+| Priority | Guard | File |
+|----------|-------|------|
+| P0 | 3.2 `dimension_updates` change magnitude limit | `task-verifier.ts` |
+| P0 | 4.1 Progress-verdict consistency check | `task-verifier.ts` |
+| P0 | 4.3 Score-evidence consistency check | `observation-llm.ts` |
+| P0 | 4.4 Satisficing double-check guard | `satisficing-judge.ts` |
+| P1 | 3.1 Trust change rate limiting | `trust-manager.ts` |
+| P1 | 3.3 Observation score change magnitude limit | `observation-engine.ts` |
+| P1 | 4.2 Duplicate task guard | `task-generation.ts` |
+| P1 | 4.6 `completion_judger` Zod validation | `task-verifier.ts` |
+| P1 | 4.7 Verification failure injection into next cycle | `task-verifier.ts`, `task-generation.ts` |
+| P1 | 4.8 CoreLoop checkpoint | `core-loop.ts` |
+| P2 | 4.5 `dimension_updates` direction check | `task-verifier.ts` + schema change |
 
 ---
 
-## 6. 設計上の判断と境界
+## 6. Design Decisions and Boundaries
 
-**「キャップして通す」vs「完全拒否」**: 変化幅制限（§3.2, §3.3）はキャップして値を書き込む。完全拒否すると観測データが更新されず、システムが現状把握できなくなるリスクがある。キャップはより保守的な動作であり、逆方向の誤りを避けられる。
+**"Clamp and apply" vs "reject outright"**: The change magnitude limits (§3.2, §3.3) clamp values and write them. A full rejection would leave observation data stale, preventing the system from tracking the current state. Clamping is more conservative and avoids errors in the opposite direction.
 
-**判定矛盾の場合は保守的側に倒す**: 進捗-判定矛盾（§4.1）は`pass`→`partial`に格下げする。見落としより誤検知（false positive）を優先するのはConatusの安全設計の原則と一致する。
+**Favor the conservative side on verdict contradictions**: The progress-verdict contradiction (§4.1) downgrades `pass` to `partial`. Preferring false negatives over false positives (missed completions over incorrect completions) is consistent with Conatus's safety design principle.
 
-**サティスファイシング二重確認のサイクル数**: 2回に設定した。1回は不十分（LLMが一時的に過大評価）、3回以上は収束が遅くなる。観測コストが高いゴールでは設定可能なパラメータとして外出しすることを将来検討する。
+**Why 2 cycles for satisficing double-check**: Set to 2. One cycle is insufficient (LLM can temporarily over-estimate), and 3 or more slows convergence. For goals with high observation cost, the cycle count may be made configurable in the future.
 
-**レート制限の粒度**: トラストのレート制限は1時間窓（固定）。実運用では短すぎることがあるが、MVPでは保守的に設定する。窓サイズは将来設定可能にする。
+**Rate limit granularity**: The trust rate limit uses a fixed 1-hour window. This may be too short in production, but is kept conservative for MVP. The window size may be made configurable in the future.

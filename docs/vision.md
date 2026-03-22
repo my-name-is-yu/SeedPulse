@@ -1,170 +1,170 @@
-# Motiva — ビジョンドキュメント
+# Conatus — Vision Document
 
 ---
 
-## 1. 一言で
+## 1. In a Nutshell
 
-ユーザーのゴールを、自律的に、永続的に追い続けるAIパートナー。
+An AI partner that autonomously and persistently pursues your goals.
 
-ゴールを伝えたら、あとは Motiva が追い続ける。数日でも、数ヶ月でも、数年でも。Motiva は「指示を待つアシスタント」ではない。ユーザーの目標を自分のものとして引き受け、達成に向けて動き続ける存在だ。
-
----
-
-## 2. 解決する課題
-
-あなたには達成したいゴールがある。しかし、それを自律的に追い続けてくれるものがない。
-
-AIアシスタントは質問に答える。エージェントはタスクを処理する。自動化ツールはワークフローを回す。しかし、どれも「あなたのゴールを引き受けて、長期にわたって追い続ける」ことはしない。
-
-慢性疾患を持つ愛犬の健康を見守り続けたい。売上を2倍にしたい。新規事業を軌道に乗せたい。こうしたゴールは、一回の指示で終わるものではない。状況が変わり、新しい問題が生まれ、戦略を修正する必要がある。それを毎回人間が判断し、毎回指示を出し直すのが現状だ。
-
-欠けているのはAIの知能ではない。**あなたのゴールを自分のものとして背負い、自律的に追い続ける存在**だ。
+Tell Conatus your goal, and it will keep chasing it — for days, months, or years. Conatus is not an "assistant waiting for instructions." It takes ownership of your objectives and keeps moving toward them.
 
 ---
 
-## 3. Motiva が実現する世界
+## 2. The Problem It Solves
 
-### ゴールを伝えたら、あとは任せる
+You have goals you want to achieve. But nothing autonomously pursues them on your behalf.
 
-「一緒に幸せに暮らしたい」「売上を2倍にしたい」——ゴールを伝えるだけでいい。Motiva がそれを引き受け、何をすべきかを自ら考え、エージェントに委譲し、結果を観測し、次のアクションを決める。セッションが終わっても、日が変わっても、月が変わっても、ゴールが達成されるまで動き続ける。
+AI assistants answer questions. Agents execute tasks. Automation tools run workflows. None of them take ownership of your goals and chase them persistently over the long term.
 
-### 年単位で動き続ける
+Monitoring the health of a chronically ill dog. Doubling revenue. Getting a new business off the ground. These goals don't end with a single instruction. Situations change, new problems emerge, and strategies need to be revised. Right now, humans have to make those judgments and issue new instructions every time.
 
-Motiva は一回限りのタスク実行者ではない。慢性疾患を持つ老犬の飼い主が「この子と幸せに暮らしたい」と伝えたら、Motiva はその犬が寿命を迎えるまでの3年間、専属のパートナーとして動き続ける。毎日の健康レポート、緊急時の通知、ステージに合わせたケアの提案。ゴールが続く限り、Motiva も続く。
-
-### 自ら報告し、自ら相談する
-
-Motiva は黙って動くだけではない。毎朝のレポート、重要な変化の即座の通知、戦略変更の提案。ユーザーが状況を確認しに来る必要はない。Motiva の方から、適切なタイミングで、適切な粒度で報告する。緊急事態には即座にアラートを出す。
-
-### 正直に交渉する
-
-SaaS企業の経営者が「半年で売上10倍にしたい」と言ったとき、Motiva はこう返す。「10倍は難しいですが、2倍ならできます」。盲目的に従うのではなく、達成可能性を評価し、現実的な目標を提案する。そして合意した目標に対しては、全力で追い続ける。
-
-### 現実世界とつながる
-
-Motiva の活動はコードベースの中に閉じない。ウェアラブルセンサーのデータを読み、ビジネスメトリクスを監視し、外部APIと連携する。犬の呼吸パターン、SaaSのチャーン率、コンバージョン数——Motiva が追う指標は「テストが通ったか」ではなく「ゴールに近づいたか」だ。
-
-### 必要な知識を自ら獲得する
-
-ゴールの達成に必要な知識を Motiva は最初から持っていない。しかし、自ら調べ、学び、理解する。犬の呼吸器疾患のケアについて、SaaSのチャーン改善の手法について。ドメイン知識の獲得は、ゴール追求の一部だ。
-
-### 必要なツールを自ら調達する
-
-既存のツールで足りなければ、Motiva はエージェントにツール作成を指示する。犬の健康モニタリングコード、データ分析パイプライン、アラート通知システム。ゴール達成に必要なものは、エージェントを通じて構築させる。Motiva が担うのは「何が必要か」の判断と、構築完了の検証だ。
-
-### 人間の役割が変わる
-
-「これを実装して」「あれを調べて」から、「こういう状態にしたい」へ。タスクの指示者から、ゴールの設定者へ。一回限りの依頼者から、長期的なパートナーシップの片割れへ。
+What's missing isn't AI intelligence. It's **something that carries your goals as its own and pursues them autonomously**.
 
 ---
 
-## 4. 既存アプローチとの違い
+## 3. The World Conatus Enables
 
-| アプローチ | 何ができるか | 何が足りないか |
-|------------|-------------|---------------|
-| AIアシスタント（ChatGPT, Claude） | 質問に答え、タスクを処理する | セッションが終われば忘れる。ゴールを自律的に追い続けない |
-| AIエージェント（Claude Code, Devin, 各種自律エージェント） | 複雑なタスクを自律的に実行する | タスク単位。長期目標の追求、戦略の立案と修正はしない |
-| 自律エージェント（AutoGPT, BabyAGI） | ゴールからタスクを分解して実行する | 完了を判断できず発散する。「十分」がわからない |
-| 業務自動化（Zapier, n8n） | 定義済みワークフローを自動実行する | ゴールから逆算しない。状況に応じた戦略変更ができない |
-| プロジェクト管理AI（Linear, Asana） | タスク管理を補助する | タスクの実行はしない。ゴールの追求ではなく管理の効率化 |
-| **Motiva** | **ゴールを引き受け、自律的に、永続的に追い続ける** | **満足化による完了判断、正直なゴール交渉、年単位の持続運用** |
+### Tell It Your Goal, Then Let Go
 
-Motiva の本質的な違いは二つある。第一に、**永続的なゴール追求**。セッションやタスクではなく、ゴールを単位として動く。第二に、**満足化**。完璧を目指して発散するのではなく、「十分」を判断して現実的に前進する。この二つの組み合わせが、他のどのアプローチにもない。
+"I want to live happily with my dog." "I want to double revenue." — Just tell it your goal. Conatus takes it on, figures out what needs to be done, delegates to agents, observes the results, and decides the next action. When a session ends, when a day passes, when a month passes — it keeps moving until the goal is achieved.
+
+### Operating for Years
+
+Conatus is not a one-time task runner. If a dog owner who has a chronically ill elderly dog says, "I want to live happily with this dog," Conatus works as a dedicated partner for three years until that dog's life comes to an end. Daily health reports, urgent notifications, stage-appropriate care recommendations. As long as the goal continues, so does Conatus.
+
+### Reporting Proactively, Asking When Needed
+
+Conatus doesn't just work silently. Morning reports, instant notifications of important changes, proposals for strategy shifts. Users don't need to check in on the situation. Conatus reaches out at the right time with the right level of detail. In emergencies, it sends alerts immediately.
+
+### Negotiating Honestly
+
+When the CEO of a SaaS company says, "I want to 10x revenue in six months," Conatus responds: "10x will be difficult, but 2x is achievable." Rather than following blindly, it evaluates feasibility and proposes a realistic target. Once a target is agreed upon, it pursues it with full effort.
+
+### Connecting to the Real World
+
+Conatus's activity is not confined to codebases. It reads data from wearable sensors, monitors business metrics, and integrates with external APIs. A dog's breathing pattern, a SaaS company's churn rate, conversion numbers — the metrics Conatus tracks are not "did the tests pass?" but "are we getting closer to the goal?"
+
+### Acquiring Knowledge Autonomously
+
+Conatus doesn't start with all the knowledge needed to achieve a goal. But it researches, learns, and builds understanding. About care for dogs with respiratory disease. About techniques for reducing SaaS churn. Acquiring domain knowledge is part of pursuing the goal.
+
+### Sourcing Needed Tools Autonomously
+
+If existing tools are insufficient, Conatus instructs agents to build them. Health monitoring code for dogs, data analysis pipelines, alert notification systems. Whatever is needed to achieve the goal is built through agents. Conatus's role is to judge what is needed and to verify when the build is complete.
+
+### The Human Role Changes
+
+From "implement this" and "look into that" to "I want things to be in this state." From task instructor to goal setter. From one-time requester to one half of a long-term partnership.
 
 ---
 
-## 5. 自律パートナーとしての設計
+## 4. How Conatus Differs from Existing Approaches
 
-### 5.1 ゴールの規模感
+| Approach | What It Can Do | What It Lacks |
+|----------|---------------|---------------|
+| AI assistants (ChatGPT, Claude) | Answer questions, process tasks | Forgets when the session ends. Doesn't autonomously pursue goals |
+| AI agents (Claude Code, Devin, various autonomous agents) | Execute complex tasks autonomously | Task-scoped only. No long-term goal pursuit, strategy planning, or revision |
+| Autonomous agents (AutoGPT, BabyAGI) | Decompose goals into tasks and execute them | Can't determine completion and diverges. Doesn't know what "good enough" is |
+| Business automation (Zapier, n8n) | Auto-execute predefined workflows | Doesn't work backward from goals. Can't adjust strategy based on situation |
+| Project management AI (Linear, Asana) | Assist with task management | Doesn't execute tasks. Optimizes management, not goal pursuit |
+| **Conatus** | **Takes on goals and pursues them autonomously and persistently** | **Completion via satisficing, honest goal negotiation, multi-year sustained operation** |
 
-Motiva に与えるゴールは「愛犬と幸せに暮らしたい」「売上を2倍にしたい」のように、曖昧で、長期的で、多段階の分解を要するものだ。
+Conatus differs in two fundamental ways. First, **persistent goal pursuit**: it operates in units of goals, not sessions or tasks. Second, **satisficing**: rather than diverging in pursuit of perfection, it judges "good enough" and moves forward realistically. This combination exists in no other approach.
 
-「機能Xを実装して」はゴールではない。それはゴール達成の過程で生まれるタスクの一つにすぎない。Motiva の仕事は、曖昧な上位ゴールからそのタスクに至るまでの道筋を自ら発見し、構築し、エージェントを通じて実現することだ。
+---
 
-### 5.2 再帰的 Goal Tree
+## 5. Design as an Autonomous Partner
 
-ゴールはN層の木構造に分解される。
+### 5.1 The Scale of Goals
 
-各ノードが独自の状態・達成基準・満足化基準を持つ。上位ゴールの状態は下位ゴール群の集約から決まる。ゴール木は静的な計画ではなく、実行中に発見・変更・剪定される動的な構造だ。
+Goals given to Conatus are ambiguous, long-term, and require multi-stage decomposition — like "live happily with my dog" or "double revenue."
 
-例：愛犬と幸せに暮らす → 健康状態の継続監視 → モニタリングコード構築 → センサーデータ解析
-例：売上2x → チャーン率半減 → オンボーディング改善 → チュートリアル実装
+"Implement feature X" is not a goal. It's one task that emerges along the path to achieving a goal. Conatus's job is to discover the path from an ambiguous high-level goal down to that task, build it, and realize it through agents.
 
-> **実装状況（Stage 14完了）**: `src/goal-tree-manager.ts` に `GoalTreeManager` クラスとして実装済み。N層分解、バリデーション、剪定、再構成をサポート。`src/state-aggregator.ts` の `StateAggregator` が子ノード状態を集約し完了カスケードを制御する。`src/tree-loop-orchestrator.ts` の `TreeLoopOrchestrator` が各ノードの独立ループを並列実行する。`--tree` オプションで CLI から起動可能。
+### 5.2 Recursive Goal Tree
 
-### 5.3 Capability Registry（動的能力管理）
+Goals are decomposed into an N-level tree structure.
 
-Motiva は最初から全能力を持たない。ユーザーが権限・ツール・データソースを渡すたびに、できることが増える。
+Each node has its own state, completion criteria, and satisficing threshold. The state of a parent goal is determined by aggregating the states of its child goals. The goal tree is not a static plan — it's a dynamic structure that is discovered, modified, and pruned during execution.
 
-犬の首輪のセンサーデータ、SaaSのDB、Stripe API、IoTデバイス、ビジネスダッシュボード——Motiva はこれらを「能力」として理解し、ゴール分解に組み込む。新しい種類の能力が追加されても、アーキテクチャは変わらない。
+Example: live happily with dog → continuous health monitoring → build monitoring code → analyze sensor data
+Example: 2x revenue → halve churn rate → improve onboarding → implement tutorial
 
-さらに、Motiva は能力を自ら拡張する。必要なコードの作成をエージェントに指示し、必要なツールの構築を委譲し、ゴール達成に必要な手段を調達し続ける。Motiva が「作る」のではなく、Motiva が「作らせる」のだ。
+> **Implementation status (Stage 14 complete)**: Implemented as the `GoalTreeManager` class in `src/goal-tree-manager.ts`. Supports N-level decomposition, validation, pruning, and reconstruction. `StateAggregator` in `src/state-aggregator.ts` aggregates child node states and controls completion cascades. `TreeLoopOrchestrator` in `src/tree-loop-orchestrator.ts` runs each node's independent loop in parallel. Launchable from the CLI with the `--tree` option.
 
-### 5.4 Strategy Engine（戦略の発見と実行）
+### 5.3 Capability Registry (Dynamic Capability Management)
 
-「何をすべきか」は与えられない。Motiva が自ら発見する。
+Conatus doesn't start with all capabilities. Each time a user grants permissions, tools, or data sources, what it can do expands.
 
-仮説を生成し、優先順位をつけ、実験し、効果を計測し、続行するか撤退するかピボットするかを判断する。判断基準は「タスクが完了したか」ではなく「ゴールに近づいたか」だ。
+Sensor data from a dog's collar, a SaaS database, the Stripe API, IoT devices, business dashboards — Conatus understands these as "capabilities" and incorporates them into goal decomposition. When a new kind of capability is added, the architecture doesn't change.
 
-「待つ」という判断もある。施策を打ってから効果が出るまでに時間がかかる。いつ計測すれば有意な結果が得られるか——この時間感覚も戦略の一部だ。
+Furthermore, Conatus extends its own capabilities. It instructs agents to create needed code, delegates the building of needed tools, and keeps acquiring the means needed to achieve goals. Conatus doesn't "build" — Conatus "has things built."
 
-### 5.5 ポートフォリオ管理
+### 5.4 Strategy Engine (Discovering and Executing Strategies)
 
-複数の戦略を並列で走らせ、ポートフォリオとして管理する。効果が出ているものに集中し、出ていないものを切る。逐次実行ではなく、投資配分の最適化だ。
+"What should be done" is not given to Conatus. Conatus discovers it.
 
-> **実装状況（Stage 14完了）**: `src/cross-goal-portfolio.ts` の `CrossGoalPortfolio` が複数ゴールを横断した優先度計算・リソース配分・リバランスを実装。`src/strategy-template-registry.ts` の `StrategyTemplateRegistry` が戦略テンプレートを管理し類似状況へ適用する。`src/knowledge-transfer.ts` の `KnowledgeTransfer` がゴール間の知識・戦略転移とメタパターン抽出を担う。
+It generates hypotheses, prioritizes them, experiments, measures effectiveness, and decides whether to continue, retreat, or pivot. The criterion is not "was the task completed?" but "did we get closer to the goal?"
 
-### 5.6 時間軸とマイルストーン
+"Waiting" is also a judgment. It takes time for initiatives to show results after being launched. Knowing when to measure for meaningful results — this sense of timing is also part of strategy.
 
-ゴールには期限がある。「6ヶ月で売上2倍」なら、3ヶ月経過時点でペースを評価し、不足なら戦略を変える。有限の時間の中で最善を尽くす。
+### 5.5 Portfolio Management
 
-期限のないゴールもある。「愛犬と幸せに暮らす」には終わりがない。Motiva はこの種のゴールも扱える。終わりがないからこそ、持続可能なペースで動き続けることが重要になる。
+Multiple strategies are run in parallel and managed as a portfolio. Focus on what's working, cut what isn't. Not sequential execution, but optimization of resource allocation.
 
-### 5.7 外部世界の観測
+> **Implementation status (Stage 14 complete)**: `CrossGoalPortfolio` in `src/cross-goal-portfolio.ts` implements cross-goal priority calculation, resource allocation, and rebalancing. `StrategyTemplateRegistry` in `src/strategy-template-registry.ts` manages strategy templates and applies them to similar situations. `KnowledgeTransfer` in `src/knowledge-transfer.ts` handles cross-goal knowledge and strategy transfer and meta-pattern extraction.
 
-状態観測はコードベースに限らない。
+### 5.6 Time Horizon and Milestones
 
-ウェアラブルセンサー、DB、アナリティクス、API、IoTデバイス、ビジネスメトリクス。Motiva が追う指標は「犬の呼吸数が安定しているか」「チャーン率が下がったか」「コンバージョンが上がったか」だ。現実世界の変化を観測し、ゴールへの進捗を判断する。
+Goals have deadlines. For "2x revenue in 6 months," at the 3-month mark the pace is evaluated, and if insufficient, the strategy is changed. Make the best use of finite time.
 
-### 5.8 委譲レイヤー
+Some goals have no deadline. "Live happily with my dog" has no end. Conatus can handle this kind of goal too. Precisely because there's no end, operating at a sustainable pace becomes important.
 
-ゴールを追うために、Motiva はあらゆるエージェントを活用する。AIエージェントへの指示、API呼び出しの委譲、コード実行の依頼、外部サービス連携の設定。これらを Motiva が直接行うことはない。エージェントに実装を指示し、別のエージェントにレビューを依頼し、適切なシステムにデプロイを委譲する——これらは全て、Motiva がオーケストレートするものであり、Motiva 自身が実行するものではない。
+### 5.7 Observing the External World
 
-Motiva は常にオーケストレーターだ。ゴールを追い続けるパートナーとして、「何を、誰に、いつ委譲するか」を決め続ける。実行そのものは、常に委譲先が担う。
+State observation is not limited to codebases.
 
-### 5.9 全体像
+Wearable sensors, databases, analytics, APIs, IoT devices, business metrics. The indicators Conatus tracks are "is the dog's breathing stable?" "has churn rate decreased?" "have conversions increased?" It observes changes in the real world and judges progress toward the goal.
+
+### 5.8 Delegation Layer
+
+To pursue goals, Conatus uses every available agent. Instructions to AI agents, delegation of API calls, requests for code execution, configuration of external service integrations. Conatus never does these itself. It instructs agents to implement, asks other agents to review, and delegates deployment to appropriate systems — these are all orchestrated by Conatus, not executed by Conatus itself.
+
+Conatus is always the orchestrator. As a partner that keeps pursuing goals, it continually decides "what to delegate, to whom, and when." The execution itself is always carried out by the delegatee.
+
+### 5.9 The Big Picture
 
 ```
-ユーザー
+User
   │
-  ├── ゴール: 「愛犬と幸せに暮らしたい」「売上を2倍にしたい」
-  ├── 能力: センサーデータ, DB, API, エージェント, IoT, ...
-  └── 制約: 「獣医の判断を尊重する」「顧客データは外部に出すな」
+  ├── Goals: "I want to live happily with my dog" / "I want to double revenue"
+  ├── Capabilities: sensor data, DB, API, agents, IoT, ...
+  └── Constraints: "respect the vet's judgment" / "don't share customer data externally"
 
-Motiva（自律パートナー）
+Conatus (autonomous partner)
   │
-  ├── Goal Tree（再帰的ゴール階層）
-  │     愛犬と幸せに暮らす
-  │     ├── 健康状態の継続監視
-  │     │    ├── モニタリングコード構築
-  │     │    └── 緊急アラート設定
-  │     └── 最適なケアの提供
-  │          ├── ステージ別ケア提案
-  │          └── 獣医との連携
+  ├── Goal Tree (recursive goal hierarchy)
+  │     Live happily with dog
+  │     ├── Continuous health monitoring
+  │     │    ├── Build monitoring code
+  │     │    └── Set up emergency alerts
+  │     └── Provide optimal care
+  │          ├── Stage-appropriate care recommendations
+  │          └── Coordination with vet
   │
-  ├── Capability Registry（委譲可能な能力カタログ）
-  │     利用可能な委譲先のカタログ
-  │     - AIエージェント（Claude Code CLI, Claude API, OpenAI Codex CLI, ...）
-  │     - データ観測（センサー, DB, Analytics, ...）
-  │     - 外部アクション（通知, API連携, IoT, ...）
-  │     - ツール調達（エージェントに作成を指示）
+  ├── Capability Registry (catalog of delegatable capabilities)
+  │     Catalog of available delegation targets
+  │     - AI agents (Claude Code CLI, Claude API, OpenAI Codex CLI, ...)
+  │     - Data observation (sensors, DB, Analytics, ...)
+  │     - External actions (notifications, API integrations, IoT, ...)
+  │     - Tool acquisition (instruct agents to build)
   │
-  ├── Strategy Engine（戦略発見 + ポートフォリオ）
-  │     仮説生成 → 優先順位 → 並列委譲 → 効果計測 → リバランス
+  ├── Strategy Engine (strategy discovery + portfolio)
+  │     Hypothesis generation → prioritization → parallel delegation → effectiveness measurement → rebalancing
   │
-  ├── Delegation Layer（委譲レイヤー）
-  │     アダプター選択 → セッション起動 → コンテキスト提供 → 結果観測
+  ├── Delegation Layer
+  │     Adapter selection → session launch → context provision → result observation
   │
-  └── State（状態管理 + 外部メトリクス）
-        ゴール進捗 + 観測データ + 時間経過 + 能力カタログ
+  └── State (state management + external metrics)
+        Goal progress + observation data + time elapsed + capability catalog
 ```

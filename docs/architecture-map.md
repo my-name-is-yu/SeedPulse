@@ -1,347 +1,382 @@
-# Motiva -- アーキテクチャマップ
+# Conatus -- Architecture Map
 
 ---
 
-## 1. 一言でいうと
+## 1. In a Nutshell
 
-Motivaは**タスク発見エンジン**だ。ユーザーの長期的なゴール（「売上を2倍にしたい」「愛犬と幸せに暮らしたい」）を引き受け、現実世界を観測し、ゴールとのギャップから「次に何をすべきか」を発見し続ける。Motiva自身は何も実行しない。発見したタスクをAIエージェントに委譲し、結果を検証し、またループを回す。ゴールが達成されるまで、数日でも数年でも。
+Conatus is a **task discovery engine**. It takes on the user's long-term goals ("I want to double revenue," "I want to live happily with my dog"), observes the real world, and keeps discovering "what should be done next" from the gap with the goal. Conatus itself executes nothing. It delegates discovered tasks to AI agents, verifies the results, and runs the loop again. Until the goal is achieved — days or years, however long it takes.
 
 ---
 
-## 2. 全体アーキテクチャ図
+## 2. Overall Architecture Diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                          ユーザー                                    │
-│   ゴール: 「売上2倍」「愛犬と幸せに暮らす」                            │
-│   制約:   「顧客データは外に出すな」「獣医の判断を尊重」                 │
-│   能力付与: APIキー, センサー, DB接続, 権限                            │
+│                              User                                    │
+│   Goals: "Double revenue" / "Live happily with my dog"               │
+│   Constraints: "Don't share customer data" / "Respect vet's judgment"│
+│   Capability grants: API keys, sensors, DB access, permissions       │
 └───────────────┬─────────────────────────────┬───────────────────────┘
-                │ ゴール設定・制約・能力付与      │ レポート・承認要求
+                │ Goal setting, constraints,   │ Reports, approval requests
+                │ capability grants            │
                 ↓                               ↑
 ┌───────────────────────────────────────────────────────────────────────┐
 │                                                                       │
-│                        Motiva（タスク発見エンジン）                      │
+│                      Conatus (Task Discovery Engine)                  │
 │                                                                       │
 │  ┌──────────────────────────────────────────────────────────────┐     │
-│  │              ゴール交渉（Goal Negotiation）                    │     │
-│  │   倫理ゲート(Step 0) → ゴール受取 → 次元分解 → ベースライン観測  │     │
-│  │   → 実現可能性評価 → 受諾 / カウンター提案 / 要注意フラグ        │     │
+│  │              Goal Negotiation                                 │     │
+│  │   Ethics Gate (Step 0) → Receive goal → Dimension            │     │
+│  │   decomposition → Baseline observation                       │     │
+│  │   → Feasibility evaluation → Accept / Counter-propose /      │     │
+│  │     Cautionary flag                                           │     │
 │  └──────────────────────────┬───────────────────────────────────┘     │
-│                              ↓ 合意されたゴール                        │
+│                              ↓ Agreed-upon goal                       │
 │  ┌──────────────────────────────────────────────────────────────┐     │
-│  │              ゴールツリー（再帰的Goal Tree）                    │     │
-│  │     上位ゴール                                                 │     │
-│  │      ├── サブゴールA ── 各ノードが独自の状態ベクトルを保持       │     │
-│  │      │    ├── サブゴールA-1                                    │     │
-│  │      │    └── サブゴールA-2                                    │     │
-│  │      ├── サブゴールB                                           │     │
-│  │      └── サブゴールC                                           │     │
+│  │              Goal Tree (Recursive Goal Tree)                  │     │
+│  │     Top-level goal                                            │     │
+│  │      ├── Sub-goal A ── Each node holds its own state vector  │     │
+│  │      │    ├── Sub-goal A-1                                    │     │
+│  │      │    └── Sub-goal A-2                                    │     │
+│  │      ├── Sub-goal B                                           │     │
+│  │      └── Sub-goal C                                           │     │
 │  └──────────────────────────┬───────────────────────────────────┘     │
-│                              ↓ 各ノードでループが回る                   │
+│                              ↓ Loop runs at each node                 │
 │  ┌──────────────────────────────────────────────────────────────┐     │
-│  │                    コアループ                                  │     │
-│  │                                                                │     │
+│  │                    Core Loop                                  │     │
+│  │                                                               │     │
 │  │   ┌────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐ │     │
-│  │   │  観測  │──→│ギャップ  │──→│ 駆動     │──→│ タスク   │ │     │
-│  │   │(3層)   │    │ 計算     │    │スコアリング│   │ 生成    │ │     │
+│  │   │Observe │──→│  Gap     │──→│  Drive   │──→│  Task    │ │     │
+│  │   │(3-layer│    │Calculation│   │ Scoring  │   │Generation│ │     │
 │  │   └────────┘    └──────────┘    └──────────┘    └────┬─────┘ │     │
 │  │       ↑                                               │       │     │
 │  │       │         ┌──────────┐    ┌──────────┐          │       │     │
-│  │       └─────────│ 結果検証 │←───│ セッション│←─────────┘       │     │
-│  │                 │ (3層)    │    │   実行   │                  │     │
-│  │                 └──────────┘    └──────────┘                  │     │
+│  │       └─────────│  Result  │←───│ Session  │←─────────┘       │     │
+│  │                 │Verification│   │Execution │                  │     │
+│  │                 │ (3-layer) │    └──────────┘                  │     │
+│  │                 └──────────┘                                   │     │
 │  └──────────────────────────────────────────────────────────────┘     │
 │                                                                       │
-│  ┌─────────── ナレッジ／能力レイヤー ─────────────────────────┐     │
-│  │  KnowledgeManager（知識獲得・矛盾検知） │ CapabilityDetector  │     │
+│  ┌─────────── Knowledge / Capability Layer ───────────────────────┐   │
+│  │  KnowledgeManager (knowledge acquisition, conflict detection)  │   │
+│  │  CapabilityDetector                                            │   │
 │  └──────────────────────────────────────────────────────────────┘     │
 │                                                                       │
-│  ┌─────────── ポートフォリオ管理 ─────────────────────────────┐     │
-│  │  PortfolioManager（複数戦略並列実行・有効性測定・自動リバランス）│     │
+│  ┌─────────── Portfolio Management ───────────────────────────────┐   │
+│  │  PortfolioManager (parallel multi-strategy execution,          │   │
+│  │  effectiveness measurement, automatic rebalancing)             │   │
 │  └──────────────────────────────────────────────────────────────┘     │
 │                                                                       │
-│  ┌─────────── 横断的な仕組み ──────────────────────────────────┐     │
-│  │  信頼と安全 │ 満足化 │ 停滞検知 │ 好奇心 │ 実行境界          │     │
-│  │  CharacterConfigManager（Layer 11, 4軸パラメータ注入）        │     │
-│  │  CuriosityEngine（Layer 11, 5発動条件・好奇心ゴール自動生成） │     │
-│  │  EmbeddingClient, VectorIndex, KnowledgeGraph,              │     │
-│  │  GoalDependencyGraph（Layer 12, セマンティック埋め込み基盤）   │     │
+│  ┌─────────── Cross-Cutting Mechanisms ───────────────────────────┐   │
+│  │  Trust & Safety │ Satisficing │ Stall Detection │ Curiosity    │   │
+│  │  │ Execution Boundary                                          │   │
+│  │  CharacterConfigManager (Layer 11, 4-axis parameter injection) │   │
+│  │  CuriosityEngine (Layer 11, 5 trigger conditions,              │   │
+│  │    autonomous curiosity goal generation)                       │   │
+│  │  EmbeddingClient, VectorIndex, KnowledgeGraph,                 │   │
+│  │  GoalDependencyGraph (Layer 12, semantic embedding infra)      │   │
 │  └──────────────────────────────────────────────────────────────┘     │
 │                                                                       │
-│  ┌─────────── 外部接続・Goal Tree層 ───────────────────────────┐     │
-│  │  Layer 13: CapabilityDetector（能力自律調達）                 │     │
-│  │            DataSourceAdapter（外部世界接続）                  │     │
-│  │  Layer 14: GoalTreeManager（N層ゴール分解・集約・剪定）        │     │
-│  │            StateAggregator（子ノード状態集約・完了カスケード）  │     │
-│  │            TreeLoopOrchestrator（並列ノードループ実行）        │     │
-│  │            CrossGoalPortfolio（ゴール横断優先度・リソース配分）│     │
-│  │            StrategyTemplateRegistry（戦略テンプレート管理）   │     │
-│  │            LearningPipeline（4トリガー学習・クロスゴール共有） │     │
-│  │            KnowledgeTransfer（ゴール間知識・戦略転移）        │     │
+│  ┌─────────── External Connections / Goal Tree Layer ─────────────┐   │
+│  │  Layer 13: CapabilityDetector (autonomous capability           │   │
+│  │            acquisition)                                        │   │
+│  │            DataSourceAdapter (external world connection)       │   │
+│  │  Layer 14: GoalTreeManager (N-level goal decomposition,        │   │
+│  │            aggregation, pruning)                               │   │
+│  │            StateAggregator (child node state aggregation,      │   │
+│  │            completion cascade)                                 │   │
+│  │            TreeLoopOrchestrator (parallel node loop execution) │   │
+│  │            CrossGoalPortfolio (cross-goal priority and         │   │
+│  │            resource allocation)                                │   │
+│  │            StrategyTemplateRegistry (strategy template mgmt)  │   │
+│  │            LearningPipeline (4-trigger learning, cross-goal    │   │
+│  │            pattern sharing)                                    │   │
+│  │            KnowledgeTransfer (cross-goal knowledge and         │   │
+│  │            strategy transfer)                                  │   │
 │  └──────────────────────────────────────────────────────────────┘     │
 │                                                                       │
-│  ┌─────────── インフラ ────────────────────────────────────────┐     │
-│  │  駆動システム(4トリガー) │ コンテキスト管理 │ 状態永続化(JSON) │     │
+│  ┌─────────── Infrastructure ──────────────────────────────────────┐  │
+│  │  Drive System (4 triggers) │ Context Management │ State         │  │
+│  │  Persistence (JSON)                                             │  │
 │  └──────────────────────────────────────────────────────────────┘     │
 │                                                                       │
-│  ┌─────────── TUI層（src/tui/） ───────────────────────────────┐     │
-│  │  App │ Dashboard │ Chat │ ApprovalOverlay │ HelpOverlay │ ReportView │ IntentRecognizer│     │
+│  ┌─────────── TUI Layer (src/tui/) ───────────────────────────────┐   │
+│  │  App │ Dashboard │ Chat │ ApprovalOverlay │ HelpOverlay │       │   │
+│  │  ReportView │ IntentRecognizer                                  │   │
 │  └──────────────────────────────────────────────────────────────┘     │
 │                                                                       │
 └───────────────────────────────────┬───────────────────────────────────┘
-                                    │ タスク委譲
+                                    │ Task delegation
                                     ↓
 ┌───────────────────────────────────────────────────────────────────────┐
-│                        実行層（既存システム群）                         │
+│                        Execution Layer (Existing Systems)             │
 │                                                                       │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────────────┐ │
-│  │ CLIエージェント│ │ LLM API    │ │ カスタム    │ │ 人間               │ │
-│  │ (コード実装) │ │ (分析/要約) │ │ エージェント│ │ (承認/判断)         │ │
+│  │ CLI Agents │ │ LLM API    │ │ Custom     │ │ Humans             │ │
+│  │(code impl) │ │(analysis/  │ │ Agents     │ │ (approval/judgment)│ │
+│  │            │ │ summaries) │ │            │ │                    │ │
 │  └────────────┘ └────────────┘ └────────────┘ └────────────────────┘ │
 │                                                                       │
 │  ┌────────────────────────────────────────────────────────────────┐  │
-│  │ データソース: センサー, DB, Analytics, CRM, 外部API, IoT        │  │
+│  │ Data Sources: sensors, DB, Analytics, CRM, external APIs, IoT  │  │
 │  └────────────────────────────────────────────────────────────────┘  │
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 3. コアループ（メインの流れ）
+## 3. Core Loop (Main Flow)
 
 ```
  ┌──────────────────────────────────────────────────────────────────┐
- │                     駆動システム                                  │
- │  「今、注意を向けるべきゴールがあるか？」                          │
- │  トリガー: スケジュール / イベント / 完了 / 期限                   │
+ │                       Drive System                                │
+ │  "Is there a goal that needs attention right now?"                │
+ │  Triggers: Schedule / Event / Completion / Deadline              │
  └──────────────────────────┬───────────────────────────────────────┘
                              │ Yes
                              ↓
  ┌───────────────────────────────────────────────────────────────────┐
- │ [1] 観測（Observation）                                           │
+ │ [1] Observation                                                   │
  │                                                                   │
- │   Layer 1: 機械的観測   ── 信頼度 高 (0.85-1.0)                   │
- │     テスト結果, センサー値, DB値, API応答                          │
- │   Layer 2: 独立レビュー ── 信頼度 中 (0.50-0.84)                  │
+ │   Layer 1: Mechanical observation   ── Confidence high (0.85-1.0) │
+ │     Test results, sensor values, DB values, API responses         │
+ │   Layer 2: Independent review       ── Confidence medium (0.50-0.84)│
  │     Task Reviewer, Goal Reviewer                                  │
- │   Layer 3: 自己申告     ── 信頼度 低 (0.10-0.49)                  │
- │     実行者の報告（参考情報のみ）                                    │
+ │   Layer 3: Self-report              ── Confidence low (0.10-0.49) │
+ │     Executor's report (reference information only)                │
  │                                                                   │
- │   タイミング: タスク後 / 定期 / イベント駆動                       │
+ │   Timing: post-task / periodic / event-driven                    │
  └────────────────────────────┬──────────────────────────────────────┘
                                ↓ current_value + confidence
  ┌────────────────────────────────────────────────────────────────────┐
- │ [2] 状態ベクトル更新（State Vector Update）                        │
+ │ [2] State Vector Update                                            │
  │                                                                    │
- │   各次元: name, current_value, threshold, confidence, history      │
- │   閾値型: min(N) / max(N) / range(L,H) / present / match(V)       │
- │   集約:   最小値(AND) / 加重平均 / いずれか(OR)                    │
+ │   Each dimension: name, current_value, threshold, confidence,      │
+ │   history                                                          │
+ │   Threshold types: min(N) / max(N) / range(L,H) / present /       │
+ │   match(V)                                                         │
+ │   Aggregation: minimum (AND) / weighted average / any (OR)        │
  └────────────────────────────┬───────────────────────────────────────┘
                                ↓
  ┌────────────────────────────────────────────────────────────────────┐
- │ [3] ギャップ計算（Gap Calculation）                                │
+ │ [3] Gap Calculation                                                │
  │                                                                    │
- │   raw_gap        ── 閾値型別の差分計算（5種）                      │
+ │   raw_gap        ── Per-threshold-type difference (5 types)       │
  │       ↓                                                            │
- │   normalized_gap ── [0,1]に正規化（単位を揃える）                   │
+ │   normalized_gap ── Normalized to [0,1] (aligning units)          │
  │       ↓                                                            │
- │   normalized_weighted_gap ── 信頼度加重（不確実 → 大きめに見積もる）│
+ │   normalized_weighted_gap ── Confidence-weighted                   │
+ │                              (uncertain → estimate larger)         │
  │       ↓                                                            │
- │   gap_vector     ── N次元ベクトルとして保持                        │
+ │   gap_vector     ── Held as an N-dimensional vector               │
  └────────────────────────────┬───────────────────────────────────────┘
                                ↓ gap_vector
  ┌────────────────────────────────────────────────────────────────────┐
- │ [4] 駆動スコアリング（Drive Scoring）                              │
+ │ [4] Drive Scoring                                                  │
  │                                                                    │
- │   不満駆動: gap × decay_factor（大きいギャップ → 高優先）          │
- │   締切駆動: gap × urgency（締切が近い → 指数関数的上昇）           │
- │   機会駆動: opportunity_value × freshness_decay（半減期12h）       │
+ │   Dissatisfaction-driven: gap × decay_factor                       │
+ │     (large gap → high priority)                                    │
+ │   Deadline-driven: gap × urgency                                   │
+ │     (deadline approaching → exponential rise)                      │
+ │   Opportunity-driven: opportunity_value × freshness_decay          │
+ │     (half-life 12h)                                                │
  │                                                                    │
- │   統合: Max + 締切オーバーライド                                    │
- │   優先次元の決定: コードが決定（LLMは関与しない）                   │
+ │   Combined: Max + deadline override                                │
+ │   Priority dimension decision: determined by code (no LLM)        │
  │                                                                    │
- │   PortfolioManager: 複数戦略を並列評価し、有効性スコアで            │
- │   タスク選択をフィルタリング。停滞検知と連動して自動リバランス。    │
+ │   PortfolioManager: evaluates multiple strategies in parallel,     │
+ │   filters task selection by effectiveness score. Auto-rebalances   │
+ │   in coordination with stall detection.                            │
  └────────────────────────────┬───────────────────────────────────────┘
-                               ↓ 優先次元が確定
+                               ↓ Priority dimension confirmed
  ┌────────────────────────────────────────────────────────────────────┐
- │ [4.5] ナレッジ・能力ゲーティング（Knowledge & Capability Gating）  │
+ │ [4.5] Knowledge & Capability Gating                                │
  │                                                                    │
- │   KnowledgeManager: 知識ギャップを検知し、調査タスクを優先挿入。   │
- │   CapabilityDetector: 能力不足を検知しユーザーエスカレーション。   │
+ │   KnowledgeManager: Detects knowledge gaps and inserts research    │
+ │   tasks with priority.                                             │
+ │   CapabilityDetector: Detects capability deficiencies and          │
+ │   escalates to user.                                               │
  └────────────────────────────┬───────────────────────────────────────┘
                                ↓
  ┌────────────────────────────────────────────────────────────────────┐
- │ [5] タスク生成（Task Generation）                                  │
+ │ [5] Task Generation                                                │
  │                                                                    │
- │   LLMが「どう攻めるか」を具体化:                                   │
- │     - 作業内容 + アプローチ                                        │
- │     - 成功基準（検証可能な条件）                                    │
- │     - スコープ境界（in_scope / out_of_scope）                      │
- │     - 継承された制約                                                │
+ │   LLM concretizes "how to tackle it":                              │
+ │     - Work content + approach                                      │
+ │     - Success criteria (verifiable conditions)                     │
+ │     - Scope boundary (in_scope / out_of_scope)                    │
+ │     - Inherited constraints                                        │
  └────────────────────────────┬───────────────────────────────────────┘
-                               ↓ タスク
+                               ↓ Task
  ┌────────────────────────────────────────────────────────────────────┐
- │ [6] セッション起動 → 実行                                          │
+ │ [6] Session Launch → Execute                                       │
  │                                                                    │
- │   アダプター選択 → コンテキスト組立 → エージェント実行              │
- │   実行中: Motivaは不介入（status / timeout / heartbeat のみ監視）   │
+ │   Adapter selection → Context assembly → Agent execution           │
+ │   During execution: Conatus does not intervene                     │
+ │   (monitors only status / timeout / heartbeat)                     │
  └────────────────────────────┬───────────────────────────────────────┘
-                               ↓ 実行結果
+                               ↓ Execution result
  ┌────────────────────────────────────────────────────────────────────┐
- │ [7] 結果検証（3層）                                                │
+ │ [7] Result Verification (3 layers)                                 │
  │                                                                    │
- │   Layer 1: 機械的検証 ── テスト/ファイル/ビルド（最高信頼度）       │
- │   Layer 2: タスクレビュアー ── 独立LLMセッション（中信頼度）        │
- │   Layer 3: 実行者自己申告 ── 参考情報のみ（低信頼度）              │
+ │   Layer 1: Mechanical verification ── tests/files/build            │
+ │             (highest confidence)                                   │
+ │   Layer 2: Task reviewer ── independent LLM session                │
+ │             (medium confidence)                                    │
+ │   Layer 3: Executor self-report ── reference information only      │
+ │             (low confidence)                                       │
  │                                                                    │
- │   判定: pass / partial / fail                                      │
- │   失敗対応: keep（保持） / discard（破棄） / escalate（人間へ）     │
+ │   Verdict: pass / partial / fail                                   │
+ │   Failure handling: keep / discard / escalate (to human)          │
  └────────────────────────────┬───────────────────────────────────────┘
-                               ↓ 検証結果
+                               ↓ Verification result
                     ┌──────────────────────┐
-                    │  状態ベクトル更新      │
-                    │  ギャップ再計算        │
-                    │  → [1] 観測に戻る     │
+                    │  State vector update  │
+                    │  Gap recalculation    │
+                    │  → return to [1]      │
                     └──────────────────────┘
 ```
 
 ---
 
-## 4. データフロー図
+## 4. Data Flow Diagram
 
 ```
                     ┌─────────────┐
-                    │ 現実世界     │
-                    │ センサー/DB  │
-                    │ API/メトリクス│
+                    │ Real World  │
+                    │ Sensors/DB  │
+                    │ API/Metrics │
                     └──────┬──────┘
-                           │ 生データ
+                           │ Raw data
                            ↓
 ┌──────────────────────────────────────────────────────────────────┐
-│                       観測システム                                │
+│                       Observation System                          │
 │                                                                  │
-│  機械的観測 ─────→ current_value + confidence(高)                │
-│  独立レビュー ───→ current_value + confidence(中)                │
-│  自己申告 ───────→ 補足情報 + confidence(低)                     │
+│  Mechanical observation ─→ current_value + confidence (high)     │
+│  Independent review ────→ current_value + confidence (medium)    │
+│  Self-report ───────────→ supplemental info + confidence (low)   │
 │                                                                  │
-│  矛盾解決: 高信頼度層が優先                                      │
-│  進捗上限: 証拠なし→70%, 部分的→90%, 完全→100%                  │
+│  Conflict resolution: higher-confidence layer takes priority     │
+│  Progress cap: no evidence→70%, partial→90%, complete→100%       │
 └──────────────┬───────────────────────────────────────────────────┘
                │ current_value, confidence, observation_log
                ↓
 ┌──────────────────────────────────────────────────────────────────┐
-│                     状態ベクトル                                  │
+│                       State Vector                                │
 │                                                                  │
-│  次元[i]: current_value, threshold, confidence, history          │
+│  Dimension[i]: current_value, threshold, confidence, history     │
 │                                                                  │
 │  ┌─────────────────────────────────────────────────────┐        │
-│  │ 信頼度モデル                                         │        │
-│  │ 信頼度は自己申告しない。観測手段が機械的に決定する。   │        │
-│  │ 複数観測 → 最高信頼度を採用                           │        │
+│  │ Confidence Model                                     │        │
+│  │ Confidence is not self-declared. Determined          │        │
+│  │ mechanically by observation means.                   │        │
+│  │ Multiple observations → highest confidence adopted   │        │
 │  └─────────────────────────────────────────────────────┘        │
 └──────────────┬───────────────────────────────────────────────────┘
-               │ state_vector (全次元)
+               │ state_vector (all dimensions)
                ↓
 ┌──────────────────────────────────────────────────────────────────┐
-│                     ギャップ計算                                  │
+│                       Gap Calculation                             │
 │                                                                  │
 │  raw_gap(dim)                                                    │
-│    │  閾値型別: min→max(0,T-V), max→max(0,V-T), range, ...     │
+│    │  Per threshold type: min→max(0,T-V), max→max(0,V-T),       │
+│    │  range, ...                                                  │
 │    ↓                                                             │
-│  normalized_gap(dim)                ← 正規化 [0,1]               │
-│    │  正規化基準: 閾値型別の除算                                  │
+│  normalized_gap(dim)                ← Normalization [0,1]        │
+│    │  Normalization basis: per-threshold-type division           │
 │    ↓                                                             │
-│  normalized_weighted_gap(dim)       ← 信頼度加重                  │
-│    │  式: ng × (1 + (1-confidence) × uncertainty_weight)         │
+│  normalized_weighted_gap(dim)       ← Confidence weighting       │
+│    │  Formula: ng × (1 + (1-confidence) × uncertainty_weight)   │
 │    ↓                                                             │
 │  gap_vector [dim_1, dim_2, ..., dim_N]                           │
 │                                                                  │
-│  親ゴール集約: max / 加重平均 / 最小値(デフォルト)                │
-│  履歴: gap_history[t], gap_delta[t]                              │
+│  Parent goal aggregation: max / weighted average /               │
+│  minimum (default)                                               │
+│  History: gap_history[t], gap_delta[t]                           │
 └──────────────┬───────────────────────────────────────────────────┘
                │ gap_vector (normalized_weighted_gap)
                ↓
 ┌──────────────────────────────────────────────────────────────────┐
-│                   駆動スコアリング                                 │
+│                      Drive Scoring                                │
 │                                                                  │
 │  ┌──────────────────┐  ┌────────────────┐  ┌──────────────────┐ │
-│  │ 不満駆動          │  │ 締切駆動        │  │ 機会駆動          │ │
-│  │ gap × decay      │  │ gap × urgency  │  │ opp × freshness │ │
+│  │ Dissatisfaction- │  │ Deadline-      │  │ Opportunity-     │ │
+│  │ driven           │  │ driven         │  │ driven           │ │
+│  │ gap × decay      │  │ gap × urgency  │  │ opp × freshness  │ │
 │  │                  │  │                │  │                  │ │
-│  │ decay_floor=0.3  │  │ 指数関数上昇    │  │ 半減期=12h       │ │
-│  │ recovery=24h     │  │ horizon=168h   │  │                  │ │
+│  │ decay_floor=0.3  │  │ exponential    │  │ half-life=12h    │ │
+│  │ recovery=24h     │  │ rise           │  │                  │ │
+│  │                  │  │ horizon=168h   │  │                  │ │
 │  └────────┬─────────┘  └───────┬────────┘  └────────┬─────────┘ │
 │           └────────────────────┼──────────────────────┘           │
 │                                ↓                                  │
-│                    final_score = max(3駆動)                       │
-│                    + 締切オーバーライド                             │
+│                    final_score = max(3 drives)                    │
+│                    + deadline override                             │
 │                                ↓                                  │
-│                    優先次元の確定                                   │
+│                    Priority dimension confirmed                    │
 └──────────────────────────────────┬───────────────────────────────┘
-                                   │ 優先次元 + gap情報
+                                   │ Priority dimension + gap info
                                    ↓
 ┌──────────────────────────────────────────────────────────────────┐
-│                   タスクライフサイクル                              │
+│                      Task Lifecycle                               │
 │                                                                  │
-│  [コード] 次元選択 → [LLM] タスク具体化                           │
+│  [Code] Dimension selection → [LLM] Task concretization          │
 │       ↓                                                          │
-│  タスク: target_dims, work_description, success_criteria,        │
-│         scope_boundary, constraints                              │
+│  Task: target_dims, work_description, success_criteria,          │
+│        scope_boundary, constraints                               │
 │       ↓                                                          │
-│  実行 → 検証(3層) → pass/partial/fail                            │
+│  Execute → Verify (3-layer) → pass/partial/fail                  │
 │       ↓                                                          │
 │  keep / discard / escalate                                       │
 │       ↓                                                          │
-│  状態ベクトル更新 → 観測に戻る                                    │
+│  State vector update → return to Observation                     │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 5. ドキュメントマップ
+## 5. Document Map
 
-> **実装状況（2026-03-16時点）**: Stage 1-14 + Milestone 1-6完了 — 3105テスト通過、83テストファイル。
-> 実装済みモジュール（Stage 13追加分）: CapabilityDetector拡張、DataSourceAdapter（Layer 13）。
-> 実装済みモジュール（Stage 14追加分）: GoalTreeManager, StateAggregator, TreeLoopOrchestrator, CrossGoalPortfolio, StrategyTemplateRegistry, LearningPipeline, KnowledgeTransfer（Layer 14）。
-> 実装済みモジュール（M6追加分）: CoreLoop capability_acquiringハンドラ（検出→委譲→検証→登録フルサイクル）、DataSourceRegistry.upsert()（ホットプラグ）、能力依存トポロジカルソート + 循環検出。
-> 型定義: goal-tree.ts, cross-portfolio.ts, learning.ts 追加。goal.ts, strategy.ts 拡張。
-> 設計ドキュメント: goal-tree.md, learning-pipeline.md, knowledge-transfer.md 追加。portfolio-management.md Phase 3更新。
+> **Implementation status (as of 2026-03-16)**: Stage 1-14 + Milestone 1-6 complete — 3105 tests passing, 83 test files.
+> Implemented modules (Stage 13 additions): CapabilityDetector extension, DataSourceAdapter (Layer 13).
+> Implemented modules (Stage 14 additions): GoalTreeManager, StateAggregator, TreeLoopOrchestrator, CrossGoalPortfolio, StrategyTemplateRegistry, LearningPipeline, KnowledgeTransfer (Layer 14).
+> Implemented modules (M6 additions): CoreLoop capability_acquiring handler (detection → delegation → verification → registration full cycle), DataSourceRegistry.upsert() (hot-plug), capability dependency topological sort + cycle detection.
+> Type definitions: goal-tree.ts, cross-portfolio.ts, learning.ts added. goal.ts, strategy.ts extended.
+> Design documents: goal-tree.md, learning-pipeline.md, knowledge-transfer.md added. portfolio-management.md Phase 3 updated.
 
-### 上位ドキュメント（コンセプト・ビジョン・ランタイム）
+### Top-Level Documents (Concepts, Vision, Runtime)
 
-| ドキュメント | 説明 | 読み込み元 | 出力先 | ステータス |
+| Document | Description | Read by | Outputs to | Status |
 |---|---|---|---|---|
-| `vision.md` | ビジョン。Motivaが実現する世界の定義 | -- | 全設計ドキュメント | 設計済み |
-| `mechanism.md` | コアメカニズム。タスク発見ループの概念定義 | vision.md | 全design/ドキュメント | 設計済み |
-| `runtime.md` | ランタイム基盤。オーケストレーション・駆動・コンテキスト | mechanism.md | drive-system, session-and-context, execution-boundary | 設計済み |
+| `vision.md` | Vision. Definition of the world Conatus enables | -- | All design documents | Designed |
+| `mechanism.md` | Core mechanism. Conceptual definition of the task discovery loop | vision.md | All design/ documents | Designed |
+| `runtime.md` | Runtime infrastructure. Orchestration, drive, and context | mechanism.md | drive-system, session-and-context, execution-boundary | Designed |
 
-### 設計ドキュメント（design/）
+### Design Documents (design/)
 
-| ドキュメント | コンポーネント | 読み込み元 | 出力先 | ステータス |
+| Document | Component | Read by | Outputs to | Status |
 |---|---|---|---|---|
-| `state-vector.md` | 状態ベクトル（多次元のゴール状態表現） | mechanism.md, observation.md | gap-calculation.md, satisficing.md | 設計済み |
-| `observation.md` | 観測システム（3層観測、進捗上限ルール） | runtime.md | state-vector.md | 設計済み |
-| `gap-calculation.md` | ギャップ計算（正規化、信頼度加重） | state-vector.md | drive-scoring.md, stall-detection.md | 設計済み |
-| `drive-scoring.md` | 駆動スコアリング（3駆動力の数値化） | gap-calculation.md | task-lifecycle.md, drive-system.md | 設計済み |
-| `task-lifecycle.md` | タスクライフサイクル（生成→実行→検証→失敗対応） | drive-scoring.md, execution-boundary.md | state-vector.md (結果反映) | 設計済み |
-| `goal-negotiation.md` | ゴール交渉（6ステップ、Step 0倫理ゲート含む） | mechanism.md, goal-ethics.md | state-vector.md (初期設定) | 設計済み |
-| `goal-ethics.md` | 倫理・法的ゲート（GoalNegotiator Step 0、2層判定） | goal-negotiation.md | goal-negotiation.md, task-lifecycle.md | 設計済み |
-| `character.md` | Motivaペルソナ定義（4行動軸、LLMプロンプト仕様） | -- | goal-negotiation.md, reporting.md, stall-detection.md | 設計済み |
-| `satisficing.md` | 満足化（完了判断、プログレス上限） | state-vector.md, observation.md | curiosity.md (タスクキュー空) | 設計済み |
-| `stall-detection.md` | 停滞検知（4指標、段階的対応） | gap-calculation.md, task-lifecycle.md | drive-scoring.md (decay_factor), goal-negotiation.md (再交渉) | 設計済み |
-| `trust-and-safety.md` | 信頼と安全（2軸マトリクス、不可逆ルール、倫理ゲート優先度0） | mechanism.md | task-lifecycle.md (実行許可判定) | 設計済み |
-| `curiosity.md` | 好奇心（メタ動機、新ゴール提案） | satisficing.md, stall-detection.md | goal-negotiation.md (新ゴール) | 設計済み |
-| `session-and-context.md` | セッション/コンテキスト管理（3階層記憶） | runtime.md | task-lifecycle.md (コンテキスト組立) | 設計済み |
-| `drive-system.md` | 駆動方式（4トリガー、起動判断） | runtime.md, drive-scoring.md | コアループ起動 | 設計済み |
-| `execution-boundary.md` | 実行境界（Motivaが何をし、何を委譲するか） | mechanism.md | task-lifecycle.md | 設計済み |
-| `knowledge-acquisition.md` | 知識獲得（知識不足検知・調査タスク・DomainKnowledge保存） | observation.md, task-lifecycle.md | goal-negotiation.md | 実装済み |
-| `portfolio-management.md` | ポートフォリオ管理（PortfolioManager、複数戦略並列実行・有効性測定・自動リバランス） | drive-scoring.md, stall-detection.md | task-lifecycle.md | 実装済み |
-| `memory-lifecycle.md` | メモリライフサイクル（記憶の生成・昇格・削除・アーカイブポリシー） | session-and-context.md | knowledge-acquisition.md | 設計済み |
-| `reporting.md` | レポーティング（3種レポート生成・配信、ReportingEngine） | state-vector.md | CLIRunner | 設計済み |
+| `state-vector.md` | State vector (multi-dimensional goal state representation) | mechanism.md, observation.md | gap-calculation.md, satisficing.md | Designed |
+| `observation.md` | Observation system (3-layer observation, progress cap rules) | runtime.md | state-vector.md | Designed |
+| `gap-calculation.md` | Gap calculation (normalization, confidence weighting) | state-vector.md | drive-scoring.md, stall-detection.md | Designed |
+| `drive-scoring.md` | Drive scoring (quantification of 3 drive forces) | gap-calculation.md | task-lifecycle.md, drive-system.md | Designed |
+| `task-lifecycle.md` | Task lifecycle (generation → execution → verification → failure handling) | drive-scoring.md, execution-boundary.md | state-vector.md (result reflection) | Designed |
+| `goal-negotiation.md` | Goal negotiation (6 steps, includes Step 0 ethics gate) | mechanism.md, goal-ethics.md | state-vector.md (initial setup) | Designed |
+| `goal-ethics.md` | Ethics/legal gate (GoalNegotiator Step 0, 2-layer judgment) | goal-negotiation.md | goal-negotiation.md, task-lifecycle.md | Designed |
+| `character.md` | Conatus persona definition (4 behavioral axes, LLM prompt spec) | -- | goal-negotiation.md, reporting.md, stall-detection.md | Designed |
+| `satisficing.md` | Satisficing (completion judgment, progress cap) | state-vector.md, observation.md | curiosity.md (empty task queue) | Designed |
+| `stall-detection.md` | Stall detection (4 indicators, staged response) | gap-calculation.md, task-lifecycle.md | drive-scoring.md (decay_factor), goal-negotiation.md (renegotiation) | Designed |
+| `trust-and-safety.md` | Trust and safety (2-axis matrix, irreversible rules, ethics gate priority 0) | mechanism.md | task-lifecycle.md (execution permission judgment) | Designed |
+| `curiosity.md` | Curiosity (meta-motivation, new goal proposals) | satisficing.md, stall-detection.md | goal-negotiation.md (new goals) | Designed |
+| `session-and-context.md` | Session/context management (3-layer memory) | runtime.md | task-lifecycle.md (context assembly) | Designed |
+| `drive-system.md` | Drive method (4 triggers, startup judgment) | runtime.md, drive-scoring.md | core loop startup | Designed |
+| `execution-boundary.md` | Execution boundary (what Conatus does and what it delegates) | mechanism.md | task-lifecycle.md | Designed |
+| `knowledge-acquisition.md` | Knowledge acquisition (knowledge gap detection, research tasks, DomainKnowledge storage) | observation.md, task-lifecycle.md | goal-negotiation.md | Implemented |
+| `portfolio-management.md` | Portfolio management (PortfolioManager, parallel multi-strategy execution, effectiveness measurement, auto-rebalancing) | drive-scoring.md, stall-detection.md | task-lifecycle.md | Implemented |
+| `memory-lifecycle.md` | Memory lifecycle (generation, promotion, deletion, and archival policy for memories) | session-and-context.md | knowledge-acquisition.md | Designed |
+| `reporting.md` | Reporting (3 report types, generation and delivery, ReportingEngine) | state-vector.md | CLIRunner | Designed |
 
-### 依存関係の流れ
+### Dependency Flow
 
 ```
 mechanism.md ──→ state-vector.md ──→ gap-calculation.md ──→ drive-scoring.md
@@ -350,123 +385,83 @@ mechanism.md ──→ state-vector.md ──→ gap-calculation.md ──→ dr
                                                          task-lifecycle.md
                                                                │
                                                                ↓
-                                                   state-vector.md (更新)
-                                                         ループ完成
+                                                   state-vector.md (update)
+                                                         Loop complete
 
-横断:
-  goal-negotiation.md ── ゴール設定時 + 停滞時の再交渉
-  satisficing.md ──────── 完了判断（全ステップに関与）
-  stall-detection.md ──── gap-calculation → drive-scoring へフィードバック
-  trust-and-safety.md ── task-lifecycle の実行許可判定
-  curiosity.md ────────── satisficing完了後 + 停滞検知時に発動
-  execution-boundary.md ─ task-lifecycle の委譲モデル
-  session-and-context.md ─ 全セッションのコンテキスト管理
-  drive-system.md ──────── コアループの起動タイミング制御
+Cross-cutting:
+  goal-negotiation.md ── At goal setting + renegotiation on stall
+  satisficing.md ──────── Completion judgment (involved in all steps)
+  stall-detection.md ──── gap-calculation → drive-scoring feedback
+  trust-and-safety.md ── Execution permission judgment in task-lifecycle
+  curiosity.md ────────── After satisficing completion + on stall detection
+  execution-boundary.md ─ Delegation model in task-lifecycle
+  session-and-context.md ─ Context management for all sessions
+  drive-system.md ──────── Core loop startup timing control
 ```
 
-### P1解決済み一覧（全10件）
+### P1 Resolved Issues (all 10)
 
-| ドキュメント | 解決内容 | 解決箇所 |
+| Document | Resolution | Resolution Location |
 |---|---|---|
-| `state-vector.md` | confidence調整はgap-calculation §3のみに適用（3重問題解消） | gap-calculation.md §3 |
-| `observation.md` | observation_methodスキーマをZodスキーマとして §5に定義 | observation.md §5 |
-| `drive-scoring.md` | opportunity_valueの入力元を3変数（event_type/magnitude/freshness）で定義 | drive-scoring.md |
-| `trust-and-safety.md` | 信頼スコア数値閾値をv1デフォルトとして定義（HIGH_TRUST=+20、HIGH_CONFIDENCE=0.50） | trust-and-safety.md |
-| `runtime.md` | プロセスモデル決定（CLI for MVP、daemon/cron for Phase 2） | runtime.md §2 |
-| `session-and-context.md` | 優先度ベースのコンテキスト選択アルゴリズム（MVP: 固定top-4）を §4に定義 | session-and-context.md §4 |
-| `drive-system.md` | ファイルキュー方式（`~/.motiva/events/`）でのイベント受信をMVP設計として確定 | drive-system.md |
-| `stall-detection.md` | 停滞タイプ→原因分類マッピングを §3.6に定義 | stall-detection.md §3.6 |
-| `task-lifecycle.md` | estimated_durationをDuration型として §2.7に定義、revert失敗処理も定義済み | task-lifecycle.md §2.7 |
-| `curiosity.md` | クロスゴール類似度 = dimension_name完全一致として §4.3に定義 | curiosity.md §4.3 |
+| `state-vector.md` | Confidence adjustment applied only in gap-calculation §3 (3x-application problem resolved) | gap-calculation.md §3 |
+| `observation.md` | observation_method schema defined as Zod schema in §5 | observation.md §5 |
+| `drive-scoring.md` | opportunity_value input source defined with 3 variables (event_type/magnitude/freshness) | drive-scoring.md |
+| `trust-and-safety.md` | Trust score numeric thresholds defined as v1 defaults (HIGH_TRUST=+20, HIGH_CONFIDENCE=0.50) | trust-and-safety.md |
+| `runtime.md` | Process model decided (CLI for MVP, daemon/cron for Phase 2) | runtime.md §2 |
+| `session-and-context.md` | Priority-based context selection algorithm (MVP: fixed top-4) defined in §4 | session-and-context.md §4 |
+| `drive-system.md` | File-queue method (`~/.conatus/events/`) for event reception confirmed as MVP design | drive-system.md |
+| `stall-detection.md` | Stall type → cause classification mapping defined in §3.6 | stall-detection.md §3.6 |
+| `task-lifecycle.md` | estimated_duration defined as Duration type in §2.7; revert failure handling also defined | task-lifecycle.md §2.7 |
+| `curiosity.md` | Cross-goal similarity = dimension_name exact match defined in §4.3 | curiosity.md §4.3 |
 
 ---
 
-## 6. 横断的な仕組み（コアループの外）
+## 6. Cross-Cutting Mechanisms (Outside the Core Loop)
 
-コアループの各ステップに介入する仕組みが6つある。
+There are 6 mechanisms that intervene in each step of the core loop.
 
 ```
-コアループのステップ:
-  観測 → 状態更新 → ギャップ計算 → 駆動スコア → タスク生成 → 実行 → 検証
-   [A]                  [B]          [C]          [D]       [E]    [F]
+Core loop steps:
+  Observe → State update → Gap calculation → Drive score → Task generation → Execute → Verify
+   [A]                        [B]               [C]             [D]          [E]       [F]
 
-介入ポイント:
-  [A] 観測         ← 信頼と安全（確信度の源泉）
-  [B] ギャップ計算  ← 停滞検知（gap_historyから停滞を判定）
-  [C] 駆動スコア   ← 停滞検知（decay_factorで停滞次元を一時抑制）
-  [D] タスク生成   ← 実行境界（委譲モデルの決定）
-                   ← 信頼と安全（自律度の決定 → 人間確認が必要か）
-  [E] 実行         ← 信頼と安全（不可逆アクション → 必ず人間承認）
-  [F] 検証         ← 満足化（全次元が閾値超え + 高信頼度 → 完了）
+Intervention points:
+  [A] Observation      ← Trust & Safety (source of confidence)
+  [B] Gap calculation  ← Stall detection (judge stall from gap_history)
+  [C] Drive score      ← Stall detection (temporarily suppress stalled dimensions with decay_factor)
+  [D] Task generation  ← Execution boundary (delegation model decision)
+                       ← Trust & Safety (autonomy level decision → is human confirmation needed?)
+  [E] Execution        ← Trust & Safety (irreversible actions → always require human approval)
+  [F] Verification     ← Satisficing (all dimensions exceed threshold + high confidence → complete)
 
-ループの外:
-  ゴール交渉 ── ループ開始前（ゴール設定時）+ 停滞時の再交渉
-  好奇心     ── ループ完了後（全ゴール達成時）+ 停滞検知時
-  駆動システム ── ループ起動タイミングの制御（4トリガー）
+Outside the loop:
+  Goal negotiation ── Before loop start (at goal setting) + renegotiation on stall
+  Curiosity        ── After loop completion (when all goals achieved) + on stall detection
+  Drive system     ── Control of loop startup timing (4 triggers)
 ```
 
-### 各仕組みの要約
+### Summary of Each Mechanism
 
-**信頼と安全（trust-and-safety）**
-2軸マトリクス（確信度 x トラストバランス）で自律度を決定。不可逆アクションは常に人間承認が必要。トラストはドメイン別に管理され、失敗ペナルティ > 成功報酬（非対称）。
+**Trust & Safety (trust-and-safety)**
+Determines autonomy level with a 2-axis matrix (confidence × trust balance). Irreversible actions always require human approval. Trust is managed per domain; failure penalty > success reward (asymmetric).
 
-**満足化（satisficing）**
-「完璧」ではなく「十分」で止まる。全次元が閾値を超え、かつ高信頼度の証拠がある場合のみ完了。プログレス上限ルール（証拠なし→最大70%）で早計な完了を防ぐ。
+**Satisficing (satisficing)**
+Stop at "good enough," not "perfect." Completion only when all dimensions exceed thresholds and there is high-confidence evidence. Progress cap rule (no evidence → max 70%) prevents premature completion.
 
-**停滞検知（stall-detection）**
-4指標（次元停滞/時間超過/連続失敗/全体停滞）で検知。段階的対応（1回目: アプローチ変更 → 2回目: 戦略ピボット → 3回目: 人間エスカレーション）。停滞中の次元はdecay_factorで駆動スコアを一時抑制。
+**Stall Detection (stall-detection)**
+Detects by 4 indicators (dimension stall / time overrun / consecutive failures / overall stall). Staged response (1st: change approach → 2nd: strategy pivot → 3rd: human escalation). Stalled dimensions have their drive score temporarily suppressed with decay_factor.
 
-**好奇心（curiosity）**
-ゴールレベルのメタ動機。タスクキュー空/予測外の観測/繰り返し失敗/定期探索で発動。新ゴール提案と既存ゴール再定義の2機能。ユーザーゴールより常に低優先。未承認は12時間で自動失効。
+**Curiosity (curiosity)**
+Goal-level meta-motivation. Triggered by empty task queue / unexpected observation / repeated failures / periodic exploration. Two functions: new goal proposal and existing goal redefinition. Always lower priority than user goals. Unaccepted proposals automatically expire after 12 hours.
 
-**ゴール交渉（goal-negotiation）**
-6ステップ（倫理・法的ゲート（Step 0）→受取→次元分解→ベースライン観測→実現可能性評価→応答）。ハイブリッド評価（定量+定性）。3種の応答（受諾/カウンター提案/要注意フラグ）。停滞検知や前提変化で再交渉が発生。
+**Goal Negotiation (goal-negotiation)**
+6 steps (ethics/legal gate (Step 0) → receive → dimension decomposition → baseline observation → feasibility evaluation → response). Hybrid evaluation (quantitative + qualitative). 3 response types (accept / counter-propose / cautionary flag). Renegotiation occurs on stall detection or premise changes.
 
-**実行境界（execution-boundary）**
-「Motivaは考える。エージェントが動く。」Motivaが直接行うのはLLM呼び出し（思考用）と状態ファイルの読み書きだけ。それ以外のすべて（コード実装、データ収集、通知送信等）はエージェントに委譲。
+**Execution Boundary (execution-boundary)**
+"Conatus thinks. Agents act." Conatus directly performs only LLM calls (for thinking) and reading/writing state files. Everything else (code implementation, data collection, notification delivery, etc.) is delegated to agents.
 
-**知識獲得（knowledge-acquisition）**
-KnowledgeManagerがタスク実行前後に知識ギャップを検知する。不足があれば調査タスクを優先的に生成し、取得結果をDomainKnowledgeとして保存。矛盾する知識エントリを自動検出して人間にエスカレーション。CapabilityDetectorは能力レジストリを管理し、必要能力が未登録の場合はユーザーへの能力付与要求を発行する。
+**Knowledge Acquisition (knowledge-acquisition)**
+KnowledgeManager detects knowledge gaps before and after task execution. If deficiencies exist, research tasks are generated with priority, and results are saved as DomainKnowledge. Conflicting knowledge entries are automatically detected and escalated to humans. CapabilityDetector manages the capability registry and issues capability grant requests to users when a required capability is unregistered.
 
-**ポートフォリオ管理（portfolio-management）**
-PortfolioManagerが複数の戦略（StrategyManager管理下）を並列評価する。戦略ごとに有効性スコアを測定し、低効率な戦略を自動リバランス（差し替え・停止・優先度調整）。WaitStrategyは外部イベント待機中に無駄なループを抑制する。タスク選択は決定論的コードが担う（LLM非関与）。
-
-**TUI層（src/tui/）**
-ターミナルUIとしてDashboard・Chat・ApprovalOverlayを提供する。承認要求をオーバーレイ表示し、ユーザーがインライン承認/拒否できる。IntentRecognizerがチャット入力を解析し、コマンドとフリーテキストを判別。ReportViewはMarkdownレンダリングでレポートを表示。use-loopフックでCoreLoopとUIを疎結合に接続。
-
-**キャラクター設定（character-config）**
-CharacterConfigManagerが4軸パラメータ（caution_level/stall_flexibility/communication_directness/proactivity_level）を管理する。各パラメータはStallDetector（停滞検知のエスカレーション閾値）・GoalNegotiator（カウンター提案のトーン）・ReportingEngine（レポートの口調・詳細度）に注入される横断的設定。キャラクターはゴール実行の振る舞いを変えるが、意思決定ロジック自体は変えない。
-
-**好奇心エンジン（curiosity-engine）**
-CuriosityEngineはCoreLoopのオプショナル依存として実装される。5つの発動条件（タスクキュー空/予測外の観測/繰り返し失敗/定期探索/外部シグナル）で好奇心ゴールを自動生成し、GoalNegotiatorに提案として渡す。ユーザーゴールより常に低優先とし、未承認は12時間で自動失効。既存ゴールとのクロスゴール類似度チェック（dimension_name完全一致）で重複提案を防止する。
-
-**再帰的Goal Tree（goal-tree）**
-GoalTreeManagerがゴールをN層の木構造に分解する。各ノードが独自の状態ベクトル・達成基準・満足化基準を持ち、StateAggregatorが子ノード状態を集約して親ノードへカスケードする。ゴール木は静的な計画ではなく、実行中に発見・追加・削除・再構成される。TreeLoopOrchestratorが各ノードの独立ループを並列実行し、完了コールバックで親ノードの集約を更新する。CLIからは`--tree`オプションで起動可能。
-
-**ゴール横断ポートフォリオ（cross-goal-portfolio）**
-CrossGoalPortfolioが複数ゴールを横断した優先度計算とリソース配分を担う。各ゴールの駆動スコア・依存関係・リソース消費を考慮して配分を決定し、効果の低いゴールを自動リバランスする。StrategyTemplateRegistryが過去に有効だった戦略パターンをテンプレートとして登録・検索し、類似状況のゴールへ推薦・適用する。
-
-**学習パイプライン Phase 2（learning-pipeline）**
-LearningPipelineが4種トリガー（milestone到達時・停滞検知時・定期レビュー・goal_completed時）で経験ログを分析しフィードバックを生成する。VectorIndexを利用した意味的類似度マッチングで、あるゴールで有効だった戦略パターンをクロスゴールで共有する。KnowledgeTransferがゴール間の知識・戦略転移を検出・適用・評価し、複数ゴールを横断するメタパターンを抽出する。
-
----
-
-## 7. 用語集
-
-| 用語 | 定義 |
-|------|------|
-| **タスク発見エンジン** | Motivaの本質。ゴールと現実のギャップから「次に何をすべきか」を発見し続ける仕組み |
-| **状態ベクトル** | ゴールの現在地を多次元で表現するデータ構造。各次元が current_value / threshold / confidence を持つ |
-| **ギャップ** | ゴール状態と現在値の差分。raw_gap → normalized_gap → normalized_weighted_gap のパイプラインで計算 |
-| **駆動スコア** | 「どの次元を今攻めるか」を決める数値。不満駆動・締切駆動・機会駆動の3種 |
-| **3層観測** | 機械的観測（高信頼）/ 独立レビュー（中信頼）/ 自己申告（低信頼）の3層で現実を把握する仕組み |
-| **満足化（satisficing）** | 完璧ではなく「十分」で止まる判断戦略。全次元が閾値を超えたら完了 |
-| **停滞検知** | ループが無意味に回り続けることを検出するサーキットブレーカー |
-| **ゴール交渉** | ユーザーのゴールに対して実現可能性を評価し、必要なら代替案を提案するプロセス |
-| **好奇心** | 3駆動力の上位にあるメタ動機。ゴール自体の生成・更新を担う |
-| **トラストバランス** | Motivaの実績に基づく信頼の蓄積値。ドメイン別に管理、非対称（失敗 > 成功） |
-| **確信度（confidence）** | 観測手段によって機械的に決まる信頼度。自己申告では上げられない |
-| **ゴールツリー** | ゴールをN層に再帰的に分解した木構造。各ノードが独自の状態ベクトルを持つ |
-| **セッション** | ステートレスな実行単位。1タスク1セッション。前の文脈を引き継がない |
-| **Capability Registry** | Motivaが委譲できる能力のカタログ。エージェント・データソース・アクション・人間 |
-| **進捗上限ルール** | 証拠の量が達成度の上限を制約するルール。自己申告のみ→最大70% |
+**Portfolio Management (portfolio-management)**
+PortfolioManager evaluates multiple strategies (managed by StrategyManager) in parallel. Measures effectiveness scores per strategy and automatically rebalances (replaces, stops, or adjusts priority of) low-efficiency strategies. WaitStrategy suppresses unnecessary loops while waiting for external events. Task selection is handled by deterministic code (no LLM involvement).

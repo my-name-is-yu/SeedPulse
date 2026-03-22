@@ -1,205 +1,205 @@
-# 状態ベクトル設計
+# State Vector Design
 
-> mechanism.md が「何を観測しギャップを認識するか」を定義する。本ドキュメントはその観測結果とゴール状態を格納するデータ構造 **状態ベクトル** の具体的な設計を定義する。
-
----
-
-## 1. 状態ベクトルとは何か
-
-状態ベクトルは「あるゴールに対して、今どこにいるか」を多次元で表現するデータ構造だ。
-
-1本の数値で進捗を表すのではなく、ゴールを構成する複数の側面（次元）それぞれについて、現在値・目標閾値・信頼度・観測メタ情報を保持する。ゴールツリーの各ノード（ゴール・サブゴール）が独自の状態ベクトルを持ち、上位ノードの状態ベクトルは下位ノードから集約される。
+> `mechanism.md` defines "what is observed and how gaps are recognized." This document defines the concrete design of the **state vector** — the data structure that stores observation results and goal state.
 
 ---
 
-## 2. 次元の定義
+## 1. What Is a State Vector?
 
-状態ベクトルは1つ以上の **次元（Dimension）** で構成される。各次元は以下のフィールドを持つ。
+A state vector is a data structure that represents "where we currently are with respect to a given goal" across multiple dimensions.
 
-| フィールド | 型 | 説明 |
-|---|---|---|
-| `name` | 文字列 | 次元の識別名（例: `daily_steps`, `conversion_rate`） |
-| `label` | 文字列 | 人間が読む表示名（例: `1日の歩数`, `コンバージョン率`） |
-| `current_value` | 数値 or カテゴリ値 | 直近の観測値 |
-| `threshold` | 閾値定義（後述） | 「十分」と判断される条件 |
-| `confidence` | 0.0〜1.0 | 現在値の信頼度（観測手段によって決まる。後述） |
-| `observation_method` | 観測手段定義（`observation.md` §5 参照） | この次元をどう観測するか。type / source / schedule / endpoint / confidence_tier の構造化スキーマで定義する |
-| `last_updated` | ISO 8601タイムスタンプ | 最後に値が更新された日時 |
-| `history` | 値の履歴リスト | 停滞検知・傾向分析のために過去値を保持。各エントリは `source_observation_id` で対応するObservationLogエントリを参照する（詳細は `observation.md` §8 参照） |
-
-### 閾値定義（Threshold）
-
-閾値は単一の数値とは限らない。次元の意味論によって閾値の形が異なる。
-
-| 閾値の形 | 意味 | 例 |
-|---|---|---|
-| `min(N)` | N以上で達成 | 1日の歩数 ≥ 8000 |
-| `max(N)` | N以下で達成 | エラー率 ≤ 0.01 |
-| `range(low, high)` | 範囲内で達成 | 体温 36.0〜37.0℃ |
-| `present` | 存在していれば達成 | 設定ファイルの存在 |
-| `match(value)` | 特定の値と一致で達成 | ステータス = "approved" |
-
-閾値は Advisor がゴール設定時に定義し、ゴール全体で合意された「満足化の条件」を表す。
+Rather than representing progress as a single number, it holds the current value, target threshold, confidence, and observation metadata for each dimension (aspect) that makes up a goal. Each node in the goal tree (goal or subgoal) has its own state vector, and the state vector of a parent node is aggregated from its child nodes.
 
 ---
 
-## 3. 信頼度モデル
+## 2. Dimension Definition
 
-**信頼度は自己申告しない。観測手段が信頼度を決める。**
+A state vector consists of one or more **dimensions**. Each dimension has the following fields.
 
-これは設計上の根本的な判断だ。「自分がどれくらい達成できているかを自分で評価する」構造は、楽観バイアスを避けられない。信頼度は、その次元をどの手段で観測したかによって機械的に決まる。
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Identifying name for the dimension (e.g., `daily_steps`, `conversion_rate`) |
+| `label` | string | Human-readable display name (e.g., `Daily Steps`, `Conversion Rate`) |
+| `current_value` | numeric or categorical value | The most recent observed value |
+| `threshold` | threshold definition (see below) | The condition for judging "sufficient" |
+| `confidence` | 0.0–1.0 | Confidence in the current value (determined by observation method; see below) |
+| `observation_method` | observation method definition (see `observation.md` §5) | How this dimension is observed. Defined as a structured schema with type / source / schedule / endpoint / confidence_tier |
+| `last_updated` | ISO 8601 timestamp | The datetime the value was last updated |
+| `history` | list of historical values | Past values kept for stall detection and trend analysis. Each entry references the corresponding ObservationLog entry via `source_observation_id` (see `observation.md` §8 for details) |
 
-### 観測手段と対応する信頼度
+### Threshold Definition
 
-| 観測手段 | 信頼度レベル | 数値範囲 | 説明 |
-|---|---|---|---|
-| **機械的観測** | 高 | 0.85〜1.0 | テスト結果、ファイル存在確認、ビルド成否、センサー数値、APIメトリクス、DBクエリ結果。改ざんや解釈の余地がない種類の証拠。 |
-| **独立レビューセッション** | 中 | 0.50〜0.84 | 実行者とは別のLLMセッションが、実行者のコンテキストを持たずに成果を評価する。タスクレビュー（成功基準の達成確認）またはゴールレビュー（ゴール視点からの欠落発見）。 |
-| **実行者の自己申告** | 低 | 0.10〜0.49 | 実行者が「何をした・できた・できなかった」を報告する。補足情報としてのみ扱い、信頼度が低い扱いとなる。 |
+A threshold is not necessarily a single number. The shape of a threshold differs depending on the semantics of the dimension.
 
-### 信頼度の合成
+| Threshold form | Meaning | Example |
+|----------------|---------|---------|
+| `min(N)` | Achieved when ≥ N | Daily steps ≥ 8000 |
+| `max(N)` | Achieved when ≤ N | Error rate ≤ 0.01 |
+| `range(low, high)` | Achieved when within the range | Body temperature 36.0–37.0°C |
+| `present` | Achieved when the target exists | Presence of a configuration file |
+| `match(value)` | Achieved when matching a specific value | Status = "approved" |
 
-1つの次元に対して複数の観測手段が使われた場合、**最も高い信頼度の観測手段の値を採用する**。低い信頼度の観測が高い信頼度の観測を上書きすることはない。
-
-ただし、観測手段間で矛盾が生じた場合（例: 機械的観測は「成功」、独立レビューは「不十分」）は、**高信頼度の観測が優先される**。機械的観測はLLM判断によって覆されない。
-
----
-
-## 4. ゴールツリーにおける状態ベクトルの構成
-
-各ゴール・サブゴールのノードが独自の状態ベクトルを持つ。上位ノードの状態ベクトルは、子ノードの状態ベクトルから集約される。
-
-```
-ゴール（上位）
-  状態ベクトル ← 子ノードから集約
-    ├── サブゴールA
-    │     状態ベクトル ← 固有の次元を直接観測
-    │       次元 A-1: current=85, threshold=min(80), confidence=0.95
-    │       次元 A-2: current=0.02, threshold=max(0.05), confidence=0.70
-    └── サブゴールB
-          状態ベクトル ← 固有の次元を直接観測
-            次元 B-1: current=6, threshold=min(8), confidence=0.90
-```
-
-### 集約ルール
-
-上位ノードの状態ベクトルは、子ノードの状態を集約して構築される。集約の方式は次元の意味論によって異なる。
-
-| 集約方式 | 用途 | 計算方法 |
-|---|---|---|
-| **最小値集約** | すべての子が達成しないと上位が達成できない（AND条件） | 達成度 = min(子ノードの達成度) |
-| **加重平均集約** | 子の重みに応じて上位達成度を決める（重要度が異なるとき） | 達成度 = Σ(子の達成度 × 重み) / Σ重み |
-| **いずれか集約** | どれか一つが達成すれば上位が達成できる（OR条件） | 達成度 = max(子ノードの達成度) |
-
-どの集約方式を使うかは、Advisor がサブゴールを定義するときに指定する。指定がない場合のデフォルトは **最小値集約**（最も保守的な判断）。
-
-上位ノードの信頼度は、子ノードの信頼度の加重平均とする。ただし、いずれかの子ノードの信頼度が低い場合、上位ノードの信頼度もその影響を受ける。
+Thresholds are defined by the Advisor at goal setup and represent the satisficing conditions agreed upon for the goal.
 
 ---
 
-## 5. 状態ベクトルのライフサイクル
+## 3. Confidence Model
 
-### 作成
+**Confidence is not self-reported. The observation method determines confidence.**
 
-状態ベクトルは Advisor がゴール・サブゴールを定義したタイミングで作成される。この時点では `current_value` は未設定（`null`）で、`confidence` は 0.0 だ。
+This is a fundamental design decision. A structure in which "how well you are doing is evaluated by yourself" cannot avoid optimism bias. Confidence is determined mechanically by the method used to observe the dimension.
 
-作成時に Advisor が定義するもの:
-- 次元のリスト（name, label）
-- 各次元の閾値
-- 各次元の観測手段
+### Observation Methods and Corresponding Confidence
 
-### 初期観測
+| Observation method | Confidence level | Numeric range | Description |
+|-------------------|-----------------|---------------|-------------|
+| **Mechanical observation** | High | 0.85–1.0 | Test results, file existence checks, build success/failure, sensor readings, API metrics, DB query results. Evidence that cannot be falsified or misinterpreted. |
+| **Independent review session** | Medium | 0.50–0.84 | An LLM session separate from the executor evaluates deliverables without the executor's context. Either a task review (confirming success criteria) or a goal review (identifying gaps from the goal perspective). |
+| **Executor's self-report** | Low | 0.10–0.49 | The executor reports "what was done, what was achieved, and what wasn't." Treated as supplementary information only, with low confidence. |
 
-ゴール・サブゴール定義直後に最初の観測サイクルが走り、各次元の `current_value` と `confidence` が初めて設定される。この時点で初期ギャップが確定し、最初のタスク発見ループが回る。
+### Confidence Synthesis
 
-### 更新
+When multiple observation methods are used for a single dimension, **the value from the observation method with the highest confidence is adopted**. A lower-confidence observation never overrides a higher-confidence one.
 
-以下のタイミングで状態ベクトルの値が更新される:
-
-- **タスク完了後**: 実行セッション完了 → 観測サイクル → 値更新
-- **定期観測**: ゴールの性質に応じたハートビートで再観測 → 値更新
-- **イベント駆動**: 外部トリガー（センサー閾値超過、外部通知）→ 即時再観測 → 値更新
-
-更新のたびに旧値が `history` に追記される。`current_value` は上書きではなくローテーションで管理する。
-
-### 履歴保持
-
-`history` は停滞検知のために存在する。過去N回の観測値と対応するタイムスタンプ・信頼度を保持する。各エントリは `source_observation_id`（UUID）で対応するObservationLogエントリを参照し、「この状態変化がどの観測から生じたか」を遡れるようにする。結合キーは `goal_id + dimension_name + timestamp` だ（詳細は `observation.md` §8 参照）。
-
-停滞検知はこの履歴を参照する。判断基準:
-- 直近N回の観測で `current_value` が閾値方向に変化していない
-- 信頼度が継続して低い（未確認状態が続いている）
-- 変化量が目標変化量の X% 未満で連続している
-
-保持する履歴の深さはゴールの性質による。短期ゴールは直近10〜20観測、長期ゴールは直近50〜100観測が目安だ。
-
-### 廃棄
-
-サブゴールが完了判定を受けた、またはキャンセルされた場合、そのノードの状態ベクトルはアーカイブされる。削除ではなく保持し、経験ログとして将来の学習に使える状態にしておく。
+However, when there is a contradiction between observation methods (e.g., mechanical observation says "success," independent review says "insufficient"), **the higher-confidence observation takes precedence**. Mechanical observation is not overridden by LLM judgment.
 
 ---
 
-## 6. 達成度の計算
+## 4. State Vectors in the Goal Tree
 
-> **注意**: ギャップの計算式（raw_gap）の定義と除算ガード条件は `gap-calculation.md` が唯一の権威ある情報源だ。本セクションは達成度（achievement）の表現方法を記述し、ギャップ計算の詳細は `gap-calculation.md` に委譲する。
-
-個々の次元の達成度は、正規化ギャップから導出される 0.0〜1.0 の値だ。
-
-### 基本関係
+Each goal and subgoal node has its own state vector. The state vector of a parent node is aggregated from the state vectors of its child nodes.
 
 ```
-// 数値型（min/max/range）: raw_gap の正規化値からの変換
-達成度 = 1.0 - normalized_gap
-
-// 二値型（present/match）: raw_gap そのものからの変換
-達成度 = 1.0 - raw_gap   // raw_gap は 0 または 1 のみ
+Goal (parent)
+  State vector ← aggregated from child nodes
+    ├── Subgoal A
+    │     State vector ← directly observed on its own dimensions
+    │       Dimension A-1: current=85, threshold=min(80), confidence=0.95
+    │       Dimension A-2: current=0.02, threshold=max(0.05), confidence=0.70
+    └── Subgoal B
+          State vector ← directly observed on its own dimensions
+            Dimension B-1: current=6, threshold=min(8), confidence=0.90
 ```
 
-`normalized_gap` はギャップを 0.0〜1.0 に正規化した値（詳細は `gap-calculation.md` の正規化ステップを参照）。raw_gap = 0 なら達成度 = 1.0、最大ギャップなら達成度 = 0.0 になる。
+### Aggregation Rules
 
-### null値（初回観測前）
+The parent node's state vector is built by aggregating the states of child nodes. The aggregation method differs based on the semantics of the dimensions.
 
-`current_value = null` のとき、達成度 = 0.0 とする（`gap-calculation.md` のガード条件と一致）。
+| Aggregation method | Use case | Calculation |
+|-------------------|----------|-------------|
+| **Minimum aggregation** | Parent cannot be achieved unless all children are achieved (AND condition) | Achievement = min(child node achievements) |
+| **Weighted average aggregation** | Parent achievement is weighted by each child's importance | Achievement = Σ(child achievement × weight) / Σweights |
+| **Any aggregation** | Parent is achieved if any single child is achieved (OR condition) | Achievement = max(child node achievements) |
 
-### 各閾値型の達成度の性質
+Which aggregation method to use is specified by the Advisor when defining subgoals. If unspecified, the default is **minimum aggregation** (the most conservative judgment).
 
-| 閾値型 | 達成度の変化 | 達成度 = 1.0 の条件 |
-|--------|------------|-------------------|
-| `min(N)` | current が増えると上昇 | current ≥ N |
-| `max(N)` | current が減ると上昇 | current ≤ N |
-| `range(low, high)` | 範囲に近づくと上昇、範囲内で 1.0 | low ≤ current ≤ high |
-| `present` | 存在しない: 0.0、存在する: 1.0 | 対象が存在する |
-| `match(value)` | 不一致: 0.0、一致: 1.0 | current = value |
-
-### 信頼度による調整
-
-信頼度が低い次元の達成度は、そのまま扱わない。信頼度で補正をかける。
-
-```
-有効達成度 = 達成度 × confidence + (1 - confidence) × 保守的見積もり
-保守的見積もり = 0.0  // 未確認は「未達成」として扱う
-```
-
-つまり、信頼度が低い次元は達成度が高く見えていても、有効達成度は低く計算される。これが「よくわからないことを大丈夫と見なさない」という設計の数値的な表現だ。
-
-> **注意**: 有効達成度は次元の状態を人間が把握するための参考値であり、駆動スコアリングのパイプラインには入力されない。スコアリングへの信頼度反映は `gap-calculation.md` §3 が唯一の適用箇所である。駆動スコアリングへの入力としては、`gap-calculation.md` で定義された `normalized_weighted_gap` が使用される。両者は補完的な視点であり、達成度 ≈ 1 - normalized_gap の関係にある。
+The parent node's confidence is the weighted average of child node confidences. However, if any child node has low confidence, the parent node's confidence is affected accordingly.
 
 ---
 
-## 7. 状態ベクトルの例
+## 5. State Vector Lifecycle
 
-### 例1: 健康モニタリングゴール
+### Creation
 
-ゴール: 「日常的な健康状態を維持する」
+A state vector is created when the Advisor defines a goal or subgoal. At this point, `current_value` is unset (`null`) and `confidence` is 0.0.
+
+What the Advisor defines at creation time:
+- The list of dimensions (name, label)
+- The threshold for each dimension
+- The observation method for each dimension
+
+### Initial Observation
+
+Immediately after the goal or subgoal is defined, the first observation cycle runs and each dimension's `current_value` and `confidence` are set for the first time. At this point the initial gap is established and the first task discovery loop runs.
+
+### Updates
+
+State vector values are updated at the following times:
+
+- **After task completion**: Execution session completes → observation cycle → value updated
+- **Scheduled observation**: Re-observation on a heartbeat appropriate to the goal's nature → value updated
+- **Event-driven**: External trigger (sensor threshold exceeded, external notification) → immediate re-observation → value updated
+
+Each update appends the old value to `history`. `current_value` is managed as a rotation rather than an overwrite.
+
+### History Retention
+
+`history` exists for stall detection. It retains past N observation values along with corresponding timestamps and confidence levels. Each entry references the corresponding ObservationLog entry via `source_observation_id` (UUID), enabling traceability of "which observation produced this state change." The join key is `goal_id + dimension_name + timestamp` (see `observation.md` §8 for details).
+
+Stall detection refers to this history. Judgment criteria:
+- `current_value` has not changed in the threshold direction across the last N observations
+- Confidence has remained consistently low (the dimension remains unverified)
+- The rate of change has continuously been less than X% of the target rate of change
+
+The depth of history to retain depends on the nature of the goal. For short-term goals, the last 10–20 observations; for long-term goals, the last 50–100 observations is a guideline.
+
+### Retirement
+
+When a subgoal is judged complete or cancelled, the state vector for that node is archived. Rather than deleted, it is preserved and kept available for future learning as an experience log.
+
+---
+
+## 6. Achievement Calculation
+
+> **Note**: The definition of the gap calculation formula (`raw_gap`) and division guard conditions are authoritatively defined in `gap-calculation.md`. This section describes how achievement is expressed; the details of gap calculation are delegated to `gap-calculation.md`.
+
+The achievement of an individual dimension is a value from 0.0 to 1.0, derived from the normalized gap.
+
+### Basic Relationship
 
 ```
-状態ベクトル:
-  次元[0]:
+// Numeric types (min/max/range): conversion from normalized raw_gap
+achievement = 1.0 - normalized_gap
+
+// Binary types (present/match): conversion from raw_gap itself
+achievement = 1.0 - raw_gap   // raw_gap is either 0 or 1
+```
+
+`normalized_gap` is the gap normalized to the range 0.0–1.0 (see the normalization step in `gap-calculation.md`). When raw_gap = 0, achievement = 1.0; at maximum gap, achievement = 0.0.
+
+### Null Values (Before First Observation)
+
+When `current_value = null`, achievement = 0.0 (consistent with the guard condition in `gap-calculation.md`).
+
+### Achievement Characteristics Per Threshold Type
+
+| Threshold type | How achievement changes | Condition for achievement = 1.0 |
+|----------------|------------------------|--------------------------------|
+| `min(N)` | Rises as current increases | current ≥ N |
+| `max(N)` | Rises as current decreases | current ≤ N |
+| `range(low, high)` | Rises as current approaches the range; 1.0 within the range | low ≤ current ≤ high |
+| `present` | Not present: 0.0, present: 1.0 | Target exists |
+| `match(value)` | Mismatch: 0.0, match: 1.0 | current = value |
+
+### Adjustment by Confidence
+
+The achievement of a low-confidence dimension is not used as-is. A correction is applied using confidence.
+
+```
+effective_achievement = achievement × confidence + (1 - confidence) × conservative_estimate
+conservative_estimate = 0.0  // unverified is treated as "not achieved"
+```
+
+This means that even if a low-confidence dimension appears to have high achievement, its effective achievement is calculated as low. This is the numerical expression of the design philosophy: "don't treat the unknown as fine."
+
+> **Note**: Effective achievement is a reference value for humans to understand the state of a dimension; it is not fed into the drive scoring pipeline. Confidence is reflected in scoring exclusively at `gap-calculation.md` §3 — that is the only point of application. The input to drive scoring is `normalized_weighted_gap` as defined in `gap-calculation.md`. The two are complementary perspectives, with the relationship achievement ≈ 1 - normalized_gap.
+
+---
+
+## 7. State Vector Examples
+
+### Example 1: Health Monitoring Goal
+
+Goal: "Maintain everyday health"
+
+```
+State vector:
+  Dimension[0]:
     name: daily_steps
-    label: 1日の歩数
+    label: Daily Steps
     current_value: 6200
     threshold: min(8000)
-    confidence: 0.95  ← ウェアラブルセンサーによる機械的観測
+    confidence: 0.95  ← mechanical observation via wearable sensor
     observation_method: { type: "api_query", source: "fitbit_api", schedule: "0 23 * * *", endpoint: "https://api.fitbit.com/1/user/-/activities/date/today.json", confidence_tier: "mechanical" }
     last_updated: 2026-03-10T23:00:00Z
     history:
@@ -207,173 +207,173 @@
       - value: 5800, timestamp: 2026-03-08T23:00:00Z, confidence: 0.95, source_observation_id: "obs_c3d4e5f6"
       ...
 
-  次元[1]:
+  Dimension[1]:
     name: sleep_hours
-    label: 睡眠時間
+    label: Sleep Hours
     current_value: 6.5
     threshold: range(7.0, 9.0)
-    confidence: 0.90  ← 睡眠トラッカーによる機械的観測
+    confidence: 0.90  ← mechanical observation via sleep tracker
     observation_method: { type: "api_query", source: "sleep_tracker_api", schedule: "0 7 * * *", endpoint: "https://api.sleeptracker.example/v1/sleep/today", confidence_tier: "mechanical" }
     last_updated: 2026-03-10T07:00:00Z
     history: [...]
 
-  次元[2]:
+  Dimension[2]:
     name: subjective_condition
-    label: 主観的体調
-    current_value: "良い"
-    threshold: match("良い") or match("非常に良い")
-    confidence: 0.20  ← ユーザーの自己申告
+    label: Subjective Wellbeing
+    current_value: "Good"
+    threshold: match("Good") or match("Very Good")
+    confidence: 0.20  ← user self-report
     observation_method: { type: "manual", source: "user_input", schedule: "30 8 * * *", endpoint: null, confidence_tier: "self_report" }
     last_updated: 2026-03-10T08:30:00Z
     history: [...]
 ```
 
-この例では、歩数と睡眠時間は機械的観測で高信頼度、主観的体調は自己申告で低信頼度。ギャップ認識では、歩数（目標8000歩に対して6200歩）が優先的に対処されるべきギャップとして浮かび上がる。
+In this example, step count and sleep hours are mechanically observed with high confidence; subjective wellbeing is self-reported with low confidence. In gap recognition, the step count gap (6,200 steps against a target of 8,000) surfaces as the gap that should be prioritized.
 
-### 例2: ビジネスメトリクスゴール
+### Example 2: Business Metrics Goal
 
-ゴール: 「新サービスの月次売上を軌道に乗せる」
+Goal: "Get the new service's monthly revenue on track"
 
 ```
-状態ベクトル:
-  次元[0]:
+State vector:
+  Dimension[0]:
     name: monthly_revenue
-    label: 月次売上
+    label: Monthly Revenue
     current_value: 420000
     threshold: min(1000000)
-    confidence: 0.98  ← 会計システムDBクエリによる機械的観測
+    confidence: 0.98  ← mechanical observation via accounting system DB query
     observation_method: { type: "mechanical", source: "accounting_db", schedule: "0 0 * * *", endpoint: "db://accounting/monthly_revenue", confidence_tier: "mechanical" }
     last_updated: 2026-03-10T00:00:00Z
     history: [...]
 
-  次元[1]:
+  Dimension[1]:
     name: active_customers
-    label: アクティブ顧客数
+    label: Active Customers
     current_value: 34
     threshold: min(100)
-    confidence: 0.95  ← CRMシステムAPIによる機械的観測
+    confidence: 0.95  ← mechanical observation via CRM system API
     observation_method: { type: "api_query", source: "crm_api", schedule: "0 0 * * *", endpoint: "https://crm.example/api/customers/active", confidence_tier: "mechanical" }
     last_updated: 2026-03-10T00:00:00Z
     history: [...]
 
-  次元[2]:
+  Dimension[2]:
     name: churn_rate
-    label: 解約率
+    label: Churn Rate
     current_value: 0.08
     threshold: max(0.05)
-    confidence: 0.95  ← CRMシステムAPIによる機械的観測
+    confidence: 0.95  ← mechanical observation via CRM system API
     observation_method: { type: "api_query", source: "crm_api", schedule: "0 0 * * 1", endpoint: "https://crm.example/api/metrics/churn", confidence_tier: "mechanical" }
     last_updated: 2026-03-10T00:00:00Z
     history: [...]
 
-  次元[3]:
+  Dimension[3]:
     name: product_quality_signal
-    label: 製品品質シグナル
-    current_value: "改善の余地あり"
-    threshold: match("問題なし")
-    confidence: 0.65  ← 独立レビューセッションによる評価
+    label: Product Quality Signal
+    current_value: "Room for improvement"
+    threshold: match("No issues")
+    confidence: 0.65  ← evaluation by independent review session
     observation_method: { type: "llm_review", source: "goal_reviewer_session", schedule: "0 9 1,15 * *", endpoint: null, confidence_tier: "independent_review" }
     last_updated: 2026-03-03T00:00:00Z
     history: [...]
 ```
 
-この例では、売上・顧客数・解約率は機械的観測で高信頼度。製品品質シグナルは独立レビューセッションで中信頼度。解約率が閾値（5%）を超えているため、このギャップが次のタスク発見で高優先度になる。
+In this example, revenue, customer count, and churn rate are mechanically observed with high confidence. Product quality signal is evaluated by an independent review session with medium confidence. Because the churn rate exceeds the threshold (5%), this gap becomes high priority in the next task discovery cycle.
 
 ---
 
-## 8. マイルストーンのデータモデル
+## 8. Milestone Data Model
 
-> ゴール交渉時にカウンター提案として提示されるマイルストーン（`mechanism.md` §3参照）は、ゴールツリー内の中間ノードとして正式に位置づけられる。マイルストーンは「期限付きの中間到達点」であり、ゴールツリーの構造的な一部として追跡・評価される。
+> Milestones presented as counter-proposals during goal negotiation (see `mechanism.md` §3) are formally positioned as intermediate nodes in the goal tree. A milestone is an "intermediate waypoint with a deadline" and is tracked and evaluated as a structural part of the goal tree.
 
-### マイルストーンのゴールツリー上の位置づけ
+### Milestones in the Goal Tree
 
-マイルストーンはゴールツリーの中間ノードとして表現される。上位ゴールとリーフレベルのサブゴールの間に位置し、時間軸に沿った達成の区切りを示す。
+Milestones are represented as intermediate nodes in the goal tree. They sit between the top-level goal and leaf-level subgoals, marking achievement checkpoints along the time axis.
 
 ```
-上位ゴール（例: 売上2倍）
-  ├── マイルストーン M1（3ヶ月: 売上1.3倍）  ← 中間ノード
-  │     ├── サブゴール: 既存顧客単価向上
-  │     └── サブゴール: 新規チャネル開拓
-  ├── マイルストーン M2（6ヶ月: 売上1.7倍）  ← 中間ノード
-  │     ├── サブゴール: クロスセル施策
-  │     └── サブゴール: チャーン率改善
-  └── 最終ゴール達成（12ヶ月: 売上2.0倍）
+Top-level goal (e.g., 2x Revenue)
+  ├── Milestone M1 (3 months: 1.3x revenue)  ← intermediate node
+  │     ├── Subgoal: Increase revenue per existing customer
+  │     └── Subgoal: Develop new channels
+  ├── Milestone M2 (6 months: 1.7x revenue)  ← intermediate node
+  │     ├── Subgoal: Cross-sell initiatives
+  │     └── Subgoal: Improve churn rate
+  └── Final goal achieved (12 months: 2.0x revenue)
 ```
 
-マイルストーンは通常のサブゴールと同じデータ構造を持つが、以下の追加フィールドを持つ。
+Milestones have the same data structure as regular subgoals, plus the following additional fields.
 
-| フィールド | 型 | 説明 |
-|-----------|---|------|
-| `type` | `"milestone"` | ノード種別をマイルストーンとして識別する |
-| `target_date` | ISO 8601タイムスタンプ | マイルストーンの期限 |
-| `origin` | `"negotiation"` \| `"decomposition"` \| `"manual"` | 生成元（交渉提案 / ゴール分解 / ユーザー設定） |
-| `pace_snapshot` | ペース評価記録 | 期限到達時のペース評価結果（後述） |
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | `"milestone"` | Identifies the node type as a milestone |
+| `target_date` | ISO 8601 timestamp | The milestone deadline |
+| `origin` | `"negotiation"` \| `"decomposition"` \| `"manual"` | Source of creation (negotiation proposal / goal decomposition / user-defined) |
+| `pace_snapshot` | pace evaluation record | Result of the pace evaluation when the deadline is reached (see below) |
 
-マイルストーンは独自の状態ベクトルを持ち、§4の集約ルールに従って子ノードの状態を集約する。集約方式のデフォルトは、通常のサブゴールと同じく最小値集約だ。
+Milestones have their own state vector and aggregate child node states according to the aggregation rules in §4. The default aggregation method is minimum aggregation, same as for regular subgoals.
 
-### 自動追跡メカニズム
+### Automatic Tracking Mechanism
 
-マイルストーンの期限が到達したとき、Conatusは自動的に以下の評価を実行する。
+When a milestone's deadline is reached, Conatus automatically runs the following evaluation.
 
 ```
 on_milestone_target_date(milestone):
-    1. 強制観測: milestone配下の全次元を即時観測する
-    2. 達成度計算: 集約された達成度を算出する
-    3. ペース評価: 予定 vs 実績の乖離を計算する（下記参照）
-    4. 記録: pace_snapshot に結果を保存する
-    5. 判断分岐:
-       - 達成度 >= 満足化閾値 → マイルストーン完了、次のマイルストーンに遷移
-       - 達成度 < 満足化閾値 → リスケジュール判断へ（下記参照）
+    1. Force observation: Immediately observe all dimensions under the milestone
+    2. Achievement calculation: Compute the aggregated achievement
+    3. Pace evaluation: Calculate the deviation between planned and actual (see below)
+    4. Record: Save results to pace_snapshot
+    5. Decision branch:
+       - Achievement >= satisficing threshold → Mark milestone complete, transition to next milestone
+       - Achievement < satisficing threshold → Trigger rescheduling decision (see below)
 ```
 
-期限到達前でも、定期的なループの中でマイルストーンの進捗は通常のサブゴールと同様に観測・追跡される。期限到達時に行われるのは強制的な全次元観測と正式な達成度判定だ。
+Even before the deadline, milestone progress is observed and tracked in regular loops the same way as for ordinary subgoals. What happens at the deadline is a forced observation of all dimensions and a formal achievement determination.
 
-### ペース評価とリスケジュール判断
+### Pace Evaluation and Rescheduling
 
-マイルストーンの特有の機能は、時間軸に沿ったペースの評価だ。これは締切駆動（`drive-scoring.md` §2）のスコア計算とは独立した、進捗の健全性を評価するメカニズムだ。
+The distinctive feature of milestones is the evaluation of pace along the time axis. This is a mechanism for evaluating the health of progress, independent from the deadline-driven score calculation in `drive-scoring.md` §2.
 
 ```
 pace_evaluation(milestone):
     if total_time == 0:
-        pace_ratio = 1.0  // 期間が定義されていない場合は「予定通り」として扱う
+        pace_ratio = 1.0  // treat as "on track" if duration is undefined
         status = "on_track"
         return
-    elapsed_ratio = elapsed_time / total_time  // 経過時間の割合
-    achievement_ratio = current_achievement / target_achievement  // 達成度の割合
+    elapsed_ratio = elapsed_time / total_time  // fraction of time elapsed
+    achievement_ratio = current_achievement / target_achievement  // fraction of achievement
     pace_ratio = achievement_ratio / elapsed_ratio
 
-    if pace_ratio >= 1.0:  // 予定通りまたは前倒し
+    if pace_ratio >= 1.0:  // on track or ahead of schedule
         status = "on_track"
-    elif pace_ratio >= 0.7:  // やや遅延だが回復可能
+    elif pace_ratio >= 0.7:  // slightly behind but recoverable
         status = "at_risk"
-    else:  // 大幅遅延
+    else:  // significantly behind
         status = "behind"
 ```
 
-| ペース状態 | 対応 |
-|-----------|------|
-| `on_track` | 現在の戦略を継続する |
-| `at_risk` | 駆動スコアリングでの締切駆動が自然に上昇するため、追加の介入はしない。ユーザーに状況を報告する |
-| `behind` | リスケジュール判断をトリガーする。選択肢は3つ: (1) マイルストーンの期限を延長、(2) マイルストーンの目標値を下方修正、(3) ゴール再交渉をトリガー（`goal-negotiation.md` §6 参照） |
+| Pace status | Response |
+|------------|---------|
+| `on_track` | Continue with the current strategy |
+| `at_risk` | The deadline-driven score in drive scoring naturally rises, so no additional intervention. Report the situation to the user |
+| `behind` | Trigger a rescheduling decision. Three options: (1) extend the milestone deadline, (2) revise the milestone target value downward, (3) trigger goal re-negotiation (see `goal-negotiation.md` §6) |
 
-リスケジュール判断はConatusが自律的に判断するのではなく、ユーザーに提案して承認を得る。マイルストーンはゴール交渉で合意されたものであり、一方的な変更は信頼を損なう。
+Rescheduling decisions are proposed to the user and require approval, rather than being made autonomously by Conatus. Milestones were agreed upon in goal negotiation, and unilateral changes would damage trust.
 
 ---
 
-## 9. 設計上の判断と根拠
+## 9. Design Decisions and Rationale
 
-**なぜ信頼度を自己申告にしないのか**
+**Why not self-reported confidence?**
 
-実行者が自分の仕事を評価すると、楽観バイアスが構造的に生じる。人間でもLLMでも同じだ。信頼度を観測手段から機械的に決定することで、このバイアスを設計レベルで排除する。
+When executors evaluate their own work, optimism bias arises structurally — the same is true for humans and LLMs alike. By mechanically determining confidence from the observation method, this bias is eliminated at the design level.
 
-**なぜ達成度100%に証拠を必要とするのか**
+**Why does 100% achievement require evidence?**
 
-「たくさんタスクをこなした」と「ゴールを達成した」は別物だ。行動量を進捗と混同することを防ぐため、高い達成度は高信頼度の証拠によってのみ支持される。
+"Did a lot of tasks" and "achieved the goal" are different things. To prevent conflating volume of activity with progress, high achievement is supported only by high-confidence evidence.
 
-**なぜ履歴を保持するのか**
+**Why retain history?**
 
-現在値だけでは「改善しているのか、悪化しているのか、止まっているのか」がわからない。停滞検知は傾向の判断であり、傾向を判断するには時系列データが必要だ。履歴は停滞検知のインフラだ。
+The current value alone does not tell you whether things are improving, worsening, or stagnant. Stall detection is a judgment about trends, and judging trends requires time-series data. History is the infrastructure for stall detection.
 
-**なぜデフォルト集約が最小値集約なのか**
+**Why is the default aggregation minimum aggregation?**
 
-上位ゴールの達成は通常、すべての構成要素の達成を必要とする（AND条件）。加重平均を使うと、弱い次元が強い次元に隠れる。最も保守的な判断から始めることで、「何かが欠けているのに完了とみなす」誤りを防ぐ。
+Achieving a parent goal normally requires achieving all of its constituent elements (AND condition). Using a weighted average allows a weak dimension to be hidden by strong ones. Starting from the most conservative judgment prevents the error of "treating something as complete when a part of it is missing."

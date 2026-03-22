@@ -1,374 +1,374 @@
-# Motiva --- ランタイムインフラストラクチャ
+# Conatus --- Runtime Infrastructure
 
-> タスク発見エンジン（mechanism.md）を「動かす」ための基盤設計。
-> mechanism.md が「Motivaは何を考えるか」を定義するのに対し、本ドキュメントは「Motivaはどう走るか」を定義する。
-
----
-
-## 1. オーケストレーション --- 発見したタスクをどう実行させるか
-
-タスク発見エンジンのアウトプットは「次にやるべきこと」だ。そのタスクを実際に実行し、結果を回収し、次のループに渡す。これがオーケストレーション層の責務だ。
-
-タスク発見エンジンは WHAT を決める。オーケストレーション層は HOW を扱う。この分離は意図的だ。「何をすべきか」の判断と「どう実行するか」の制御が混ざると、どちらも中途半端になる。
-
-### セッション管理
-
-セッションは実行の最小単位だ。一つのタスクに一つのセッション。セッションはステートレスで、起動時に必要な情報を受け取り、終了時に結果を返す。それだけだ。
-
-セッションのライフサイクルはMotivaが完全に制御する。
-
-- **起動**: タスクのスコープ、成功基準、制約を渡してセッションを開始する。セッションはゴール全体を知る必要がない。自分のタスクだけを知ればいい。
-- **監視**: セッションの進行を追跡する。タイムアウト、異常終了、リソース枯渇を検知する。
-- **終了**: 成功基準を満たした、タイムアウトした、停滞が検知された。いずれかの条件でセッションを終了させる。
-
-セッションが終わっても、Motivaの状態は失われない。すべての状態は永続ファイルに書き出される。セッションは使い捨ての作業空間であり、Motivaの記憶はセッションの外にある。
-
-実行手段はアダプターを通じて抽象化される。各種AIエージェント（Claude Code CLI、Claude API、OpenAI Codex CLI等）、APIコール、人間への依頼。タスクの性質に応じて最適な実行手段を選ぶ。オーケストレーション層はアダプターの種類に依存しない。
-
-### 結果検証
-
-Motivaは実行者の自己申告を信用しない。これは猜疑心ではなく、構造的な設計判断だ。
-
-実行と検証を同一のセッションで行うと、自己評価バイアスが避けられない。「自分がやった仕事を自分で評価する」構造は、人間でもAIでも楽観に傾く。だから、実行と検証は構造的に分離する。
-
-検証は3つの層で行われる。
-
-**機械的検証**: テスト結果、ファイルの存在、ビルドの成否、APIレスポンスのステータスコード。嘘をつけない種類の証拠だ。これが最も信頼できる。
-
-**独立レビューセッション**: 実行とは別のセッション（別のコンテキスト）で、成果物を評価する。実行時の文脈を共有しないからこそ、バイアスのない判断ができる。タスクの成功基準に対して成果が合致しているかを見るタスクレベルの検証と、ゴール全体の視点から見落としや矛盾を発見するゴールレベルの検証がある。
-
-**実行者の自己申告**: 何をしたか、何ができたか、何ができなかったかの報告。参考情報としてのみ扱う。自己申告だけで完了判断はしない。
-
-この3層の検証を組み合わせることで、各観測に信頼度が付与される。信頼度はmechanism.mdのギャップ認識に直接入力される。信頼度が低い観測に基づく「完了」は、追加の検証タスクを生成する。
-
-### 失敗対応
-
-タスクは失敗する。検証で不合格になることもある。問題は失敗そのものではなく、失敗にどう対処するかだ。
-
-**keep（保持）**: 部分的な成果がゴールに向かう方向に進んでいる場合。成果を保持し、残りの部分を新しいタスクとして生成する。たとえば、10個のうち7個が完了したなら、7個の成果は残して残り3個を次のタスクにする。
-
-**discard（破棄）**: 方向自体が間違っている場合。成果を破棄し、別のアプローチでタスクを再生成する。同じ壁に繰り返しぶつかることを避けるため、失敗したアプローチの情報は次のタスク生成に渡す。
-
-**escalate（エスカレーション）**: 同種の失敗が繰り返される場合。Motivaの自律的な対処では解決できない問題と判断し、人間に介入を求める。「何度やってもダメ」は能力の限界か、前提の間違いを示唆している。
-
-判断基準はシンプルだ。成果がゴール方向に進んでいればkeep。方向が間違っていればdiscard。繰り返し失敗したらescalate。
-
-### スコープ制御
-
-各セッションには、厳密にスコープされたタスクを渡す。「全部やってくれ」は渡さない。
-
-スコープを絞る理由は3つある。
-
-第一に、コンテキストの汚染を防ぐ。複数のタスクを一つのセッションに詰め込むと、タスク間の干渉でどちらも品質が下がる。
-
-第二に、検証が容易になる。「このタスクは完了したか」という問いが明確であればあるほど、検証の精度が上がる。曖昧なスコープは曖昧な検証しかできない。
-
-第三に、失敗の影響範囲を限定する。一つのセッションが失敗しても、他のタスクには影響しない。爆発半径を小さく保つ。
-
-なお、`knowledge_acquisition` カテゴリのタスクは通常のタスクよりさらにスコープが厳しく制限される。情報収集のみを行う読み取り専用の実行単位であり、状態の変更・ファイルへの書き込み・外部サービスへの副作用のある操作は許可されない。
-
-### ポートフォリオオーケストレーション
-
-複数のゴールを同時に追跡する場合、タスク発見とタスク実行の間に `PortfolioManager` が介在する。
-
-`DriveScorer` が各ゴールの次元ごとに駆動スコア（不満・締切・機会）を算出し、そのスコアを `PortfolioManager` が受け取る。`PortfolioManager` はゴール間のリソース配分と優先順位を決定し、実行するゴールと戦略の組み合わせを `TaskLifecycle` に渡す。これにより、単一ゴールのループと同じコアループのコードパスを通りながら、複数ゴールの並列管理が実現される。
-
-`PortfolioManager` はまた、ゴール間の自動リバランシングも担う。あるゴールのドライブスコアが急上昇した場合（例：締切が迫った、障害が発生した）、他のゴールへのリソース配分を動的に調整する。
+> The foundational design for "running" the task discovery engine (mechanism.md).
+> While mechanism.md defines "what Conatus thinks about," this document defines "how Conatus runs."
 
 ---
 
-## 2. プロセスモデル --- どう起動し、どう動き続けるか
+## 1. Orchestration --- How to Execute Discovered Tasks
 
-Motivaのオーケストレーションループ自体は純粋な関数だ。「観測 → ギャップ → スコアリング → タスク発見 → 実行 → 検証」を一巡する処理単位。この関数を「誰がいつ呼ぶか」がプロセスモデルの問いだ。
+The output of the task discovery engine is "what should be done next." Executing those tasks, collecting results, and passing them to the next loop — this is the responsibility of the orchestration layer.
 
-起動方式はフェーズによって変わるが、コアループは変わらない。CLI、デーモン、cronはすべてこのコアループの呼び出しラッパーに過ぎない。
+The task discovery engine decides WHAT. The orchestration layer handles HOW. This separation is intentional. Mixing "what should be done" with "how to control execution" leaves both incomplete.
+
+### Session Management
+
+A session is the smallest unit of execution. One task, one session. Sessions are stateless: they receive the information they need at startup and return results at completion. That's it.
+
+Conatus has full control over the session lifecycle.
+
+- **Launch**: Start the session by passing the task's scope, success criteria, and constraints. The session doesn't need to know the overall goal. It only needs to know its own task.
+- **Monitoring**: Track the session's progress. Detect timeouts, abnormal terminations, and resource exhaustion.
+- **Termination**: Success criteria met, timeout reached, or stall detected. Terminate the session under whichever condition applies.
+
+When a session ends, Conatus's state is not lost. All state is written to persistent files. Sessions are disposable workspaces; Conatus's memory lives outside sessions.
+
+Execution means are abstracted through adapters. Various AI agents (Claude Code CLI, Claude API, OpenAI Codex CLI, etc.), API calls, human requests. The most suitable execution means is chosen based on the nature of the task. The orchestration layer does not depend on the type of adapter.
+
+### Result Verification
+
+Conatus does not trust an executor's self-report. This is not suspicion — it is a structural design decision.
+
+Performing execution and verification in the same session makes self-evaluation bias unavoidable. The structure of "evaluating your own work" tends toward optimism in humans and AI alike. That's why execution and verification are structurally separated.
+
+Verification is performed in three layers.
+
+**Mechanical verification**: Test results, file existence, build success, API response status codes. Evidence that cannot lie. This is the most trustworthy.
+
+**Independent review session**: A separate session (different context) from execution evaluates the deliverable. Precisely because it doesn't share the execution context, it can render an unbiased judgment. Task-level verification checks whether the deliverable meets the task's success criteria; goal-level verification looks for oversights and inconsistencies from the perspective of the overall goal.
+
+**Executor self-report**: A report of what was done, what could be done, and what couldn't. Treated as reference information only. Completion is never judged solely on self-report.
+
+By combining these three layers of verification, each observation is assigned a confidence level. Confidence is fed directly into gap recognition in mechanism.md. "Completion" based on low-confidence observations generates additional verification tasks.
+
+### Failure Handling
+
+Tasks fail. Verification can result in rejection. The problem is not failure itself, but how to deal with it.
+
+**keep**: When partial results are moving in the direction of the goal. Retain the results and generate the remaining portion as a new task. For example, if 7 out of 10 are complete, retain those 7 and make the remaining 3 the next task.
+
+**discard**: When the direction itself is wrong. Discard the results and regenerate the task with a different approach. To avoid hitting the same wall repeatedly, information about the failed approach is passed to the next task generation.
+
+**escalate**: When the same kind of failure repeats. Determined to be a problem that cannot be resolved through Conatus's autonomous handling, and human intervention is requested. "No matter how many times we try, it doesn't work" suggests either a capability limit or a flawed premise.
+
+The judgment criteria are simple: if results are heading in the goal direction, keep. If the direction is wrong, discard. If failure repeats, escalate.
+
+### Scope Control
+
+Each session receives a strictly scoped task. "Do everything" is never passed.
+
+There are three reasons to narrow scope.
+
+First, to prevent context pollution. Packing multiple tasks into one session causes interference between tasks, degrading the quality of both.
+
+Second, verification becomes easier. The clearer the question "was this task completed?", the more accurate the verification. Vague scope only allows for vague verification.
+
+Third, the blast radius of failure is limited. If one session fails, other tasks are unaffected. Keep the blast radius small.
+
+Note that tasks of category `knowledge_acquisition` are scoped even more strictly than regular tasks. They are read-only execution units that only gather information, and are not permitted to modify state, write to files, or perform operations with side effects on external services.
+
+### Portfolio Orchestration
+
+When tracking multiple goals simultaneously, `PortfolioManager` sits between task discovery and task execution.
+
+`DriveScorer` calculates drive scores (dissatisfaction, deadline, opportunity) per dimension for each goal, and those scores are received by `PortfolioManager`. `PortfolioManager` determines resource allocation and prioritization across goals and passes the combination of goals and strategies to execute to `TaskLifecycle`. This allows parallel management of multiple goals while passing through the same core loop code path as a single-goal loop.
+
+`PortfolioManager` also handles automatic rebalancing across goals. If a goal's drive score spikes sharply (e.g., a deadline is imminent, an obstacle has occurred), it dynamically adjusts resource allocation to other goals.
+
+---
+
+## 2. Process Model --- How to Start and Keep Running
+
+Conatus's orchestration loop itself is a pure function. A single processing unit that cycles through "observe → gap → scoring → task discovery → execute → verify." The question of the process model is "who calls this function and when."
+
+The startup method changes by phase, but the core loop does not. CLI, daemon, and cron are all merely thin wrappers that call this core loop.
 
 ```
-CLIラッパー  ─┐
-TUIラッパー  ─┤→  コアループ（observe→gap→score→task→execute→verify）
-デーモン     ─┤
-cronラッパー ─┘
+CLI wrapper   ─┐
+TUI wrapper   ─┤→  Core loop (observe→gap→score→task→execute→verify)
+Daemon        ─┤
+cron wrapper  ─┘
 ```
 
-### MVP（Phase 1）: CLIモード
+### MVP (Phase 1): CLI Mode
 
-**`motiva run`** が1回のコアループを実行して結果を報告し、終了する。
+**`conatus run`** executes one core loop, reports the results, and exits.
 
-- ユーザーが手動で実行する（または外部cronで定期実行する）
-- 起動 → 1ループ完了 → 結果をターミナルに表示 → 終了
-- 状態は永続ファイルに書き出されるため、次回の`motiva run`で継続できる
-- インフラ不要。依存関係はコアループのみ
+- User runs manually (or external cron runs periodically)
+- Start → 1 loop completes → display results in terminal → exit
+- State is written to persistent files, so the next `conatus run` can continue
+- No infrastructure needed. Only dependency is the core loop
 
 ```
-$ motiva run
-観測中... [犬の健康管理]
-ギャップ検出: 食事記録が3日未更新
-タスク実行: 記録を更新してください
-完了。次回確認推奨: 1日後
+$ conatus run
+Observing... [dog health management]
+Gap detected: meal log not updated for 3 days
+Task executed: please update the log
+Done. Recommended next check: 1 day from now
 ```
 
-MVP では「スケジューリング」はユーザー（またはシステムcron）の責任だ。Motivaはスケジュール管理をしない。呼ばれたら動く。それだけだ。
+In MVP, "scheduling" is the user's (or system cron's) responsibility. Conatus doesn't manage schedules. It runs when called. That's it.
 
-### Phase 1b: TUIモード
+### Phase 1b: TUI Mode
 
-**`motiva tui`** でInkベースのターミナルUIを起動し、ダッシュボードを見ながらコアループを対話的に制御する。
+**`conatus tui`** launches an Ink-based terminal UI, allowing interactive control of the core loop while viewing a dashboard.
 
-- エントリーポイントは `src/tui/entry.ts`（`startTUI()`）
-- `entry.ts` → `App`（`app.tsx`）→ `useLoop` hook（`use-loop.ts`）→ `CoreLoop` の順で依存が連なる
-- ループの起動・停止・設定変更はすべて `useLoop` hook が内部で管理し、Reactのコンポーネントライフサイクルと連動する
-- コアループ自体は変更不要。TUIはCLIと同じ `CoreLoop` インスタンスを使う
-- ユーザーが画面上の承認オーバーレイ（`ApprovalOverlay`）でタスクを承認/拒否する。承認の可否は Promise を通じて `TaskLifecycle` の `approvalFn` に返される（CLI版の readline 読み取りと同じインターフェース）
+- Entry point is `src/tui/entry.ts` (`startTUI()`)
+- Dependencies chain: `entry.ts` → `App` (`app.tsx`) → `useLoop` hook (`use-loop.ts`) → `CoreLoop`
+- Loop startup, stop, and configuration changes are all managed internally by the `useLoop` hook, tied to the React component lifecycle
+- The core loop itself requires no changes. TUI uses the same `CoreLoop` instance as the CLI
+- Users approve/reject tasks via the approval overlay (`ApprovalOverlay`) on screen. Approval decisions are returned to `TaskLifecycle`'s `approvalFn` via a Promise (same interface as the CLI version's readline reading)
 
 ```
 src/tui/
-├── entry.ts              — 依存DI配線 + Ink render（startTUI()エントリーポイント）
-├── app.tsx               — ルートコンポーネント、ビュー切り替え
-├── use-loop.ts           — LoopState管理、CoreLoop起動/停止（カスタムhook）
-├── dashboard.tsx         — ゴール・次元の進捗表示
-├── chat.tsx              — チャットインターフェース
-├── approval-overlay.tsx  — タスク承認UI（CoreLoop→TaskLifecycle→approvalFn経由）
-├── help-overlay.tsx      — ヘルプ表示
-├── report-view.tsx       — レポート表示
-├── actions.ts            — TUIアクション定義（コマンド解析・実行）
-├── intent-recognizer.ts  — ユーザー入力の意図判定
-├── markdown-renderer.ts  — Markdownレンダリング
-└── types/                — TUI専用型定義
+├── entry.ts              — DI wiring + Ink render (startTUI() entry point)
+├── app.tsx               — Root component, view switching
+├── use-loop.ts           — LoopState management, CoreLoop start/stop (custom hook)
+├── dashboard.tsx         — Goal and dimension progress display
+├── chat.tsx              — Chat interface
+├── approval-overlay.tsx  — Task approval UI (via CoreLoop→TaskLifecycle→approvalFn)
+├── help-overlay.tsx      — Help display
+├── report-view.tsx       — Report display
+├── actions.ts            — TUI action definitions (command parsing and execution)
+├── intent-recognizer.ts  — User input intent recognition
+├── markdown-renderer.ts  — Markdown rendering
+└── types/                — TUI-specific type definitions
 ```
 
 ```
-motiva tui
+conatus tui
   ↓
-entry.ts（依存DI配線 + Ink render）
+entry.ts (DI wiring + Ink render)
   ↓
-App（app.tsx）
-  ├── useLoop（use-loop.ts）: LoopState管理、CoreLoop起動/停止
-  ├── Dashboard（dashboard.tsx）: ゴール・次元の進捗表示
-  ├── Chat（chat.tsx）: チャットインターフェース（IntentRecognizer経由）
-  ├── ApprovalOverlay（approval-overlay.tsx）: タスク承認UI
-  ├── HelpOverlay（help-overlay.tsx）: ヘルプ表示
-  └── ReportView（report-view.tsx）: レポート表示
+App (app.tsx)
+  ├── useLoop (use-loop.ts): LoopState management, CoreLoop start/stop
+  ├── Dashboard (dashboard.tsx): Goal and dimension progress display
+  ├── Chat (chat.tsx): Chat interface (via IntentRecognizer)
+  ├── ApprovalOverlay (approval-overlay.tsx): Task approval UI
+  ├── HelpOverlay (help-overlay.tsx): Help display
+  └── ReportView (report-view.tsx): Report display
 ```
 
-TUIはCLIモードの代替ではなく補完だ。ループの実行単位は同一で、「どう見て・どう操作するか」のみが異なる。
+TUI is not a replacement for CLI mode but a complement to it. The loop execution unit is identical; only "how to view and operate" differs.
 
-### Phase 2a: 内蔵スケジューラー（デーモンモード）
+### Phase 2a: Built-in Scheduler (Daemon Mode)
 
-**`motiva start`** でデーモンを起動し、設定された間隔でコアループを自動実行する。**`motiva stop`** で停止。
+**`conatus start`** launches a daemon that automatically executes the core loop at configured intervals. **`conatus stop`** stops it.
 
-- デーモンは内部的にコアループを繰り返し呼び出すだけのラッパー
-- コアループ自体は変更不要。デーモン化のコストは小さい
-- ゴールごとに駆動間隔を設定できる（drive-system.mdのスケジューリング設計を参照）
-- プロセス管理（PIDファイル、ログ）はデーモン層が担う
+- The daemon is internally just a wrapper that repeatedly calls the core loop
+- The core loop itself requires no changes. The cost of daemonization is small
+- Execution interval can be configured per goal (see drive-system.md scheduling design)
+- Process management (PID file, logs) is handled by the daemon layer
 
-### Phase 2b: cronエントリー生成
+### Phase 2b: cron Entry Generation
 
-**`motiva cron`** がユーザーのシェルに追加できるcrontabエントリーを出力する。
+**`conatus cron`** outputs a crontab entry the user can add to their shell.
 
 ```
-$ motiva cron
-# Motivaを毎時実行するcrontabエントリー:
-0 * * * * /usr/local/bin/motiva run >> ~/.motiva/logs/cron.log 2>&1
+$ conatus cron
+# crontab entry for running Conatus hourly:
+0 * * * * /usr/local/bin/conatus run >> ~/.conatus/logs/cron.log 2>&1
 ```
 
-Phase 2bはPhase 2aの代替であり、「デーモンを常駐させたくない」ユーザー向けの選択肢だ。どちらを使っても、実行されるのは同じコアループだ。
+Phase 2b is an alternative to Phase 2a, an option for users who "don't want to keep a daemon running." Whichever is used, the same core loop is executed.
 
-### 設計原則
+### Design Principles
 
-- コアループは純粋な関数として実装する。グローバルステートに依存しない
-- CLIが最初に実装される。デーモン/cronはその後に追加される薄いラッパー
-- 「いつ動かすか」の決定権をユーザーに残す（MVP）か、Motivaに委譲する（Phase 2）かはユーザーが選ぶ
+- The core loop is implemented as a pure function. No dependency on global state
+- CLI is implemented first. Daemon/cron are thin wrappers added afterward
+- Whether the decision of "when to run" stays with the user (MVP) or is delegated to Conatus (Phase 2) is the user's choice
 
 ---
 
-## 3. 駆動方式 --- いつ・どのタイミングで動くか
+## 3. Drive Method --- When and at What Timing to Run
 
-タスク発見ループはいつ回すべきか。常に回し続けるのは無駄だし、固定間隔で回すだけでは足りない。
+When should the task discovery loop be executed? Running it continuously is wasteful, and running it only on a fixed schedule is insufficient.
 
-### 駆動判断
+### Drive Decision
 
-Motivaの駆動方式の核心は一つの問いに集約される。**「今、注意を向けるべきゴールがあるか」**。
+The core of Conatus's drive method boils down to one question: **"Is there a goal that needs attention right now?"**
 
-各潜在的な起動タイミングで、Motivaはこの問いに答える。答えがYesなら、タスク発見ループを回す。Noなら、何もしない。この判断自体は軽量でなければならない。ゴールの状態を一通り確認し、注意が必要かどうかだけを見る。深い分析はループの中で行う。
+At each potential activation timing, Conatus answers this question. If the answer is yes, it runs the task discovery loop. If no, it does nothing. This judgment itself must be lightweight. Check the state of each goal and see only whether attention is needed. Deep analysis happens inside the loop.
 
-「何もしない」は正常な状態だ。すべてのゴールが順調に進んでいるとき、または意図的に待っているとき、Motivaは静かにしている。無駄なループを回さないこと自体が、リソースの賢い使い方だ。
+"Do nothing" is a normal state. When all goals are progressing well, or when intentionally waiting, Conatus stays quiet. Not running unnecessary loops is itself a smart use of resources.
 
-### ゴール駆動のスケジューリング
+### Goal-Driven Scheduling
 
-駆動タイミングはゴールの性質に従う。固定のハートビートではない。
+Execution timing follows the nature of the goal. Not a fixed heartbeat.
 
-**緊急応答型のゴール**: イベント駆動が主、定期確認が補助。状態の変化を検知したら即座にループを回す。定期確認は「見落とし」を防ぐためのセーフティネットとして低頻度で走る。
+**Emergency-response goals**: Event-driven is primary, periodic checking is supplementary. Run the loop immediately upon detecting a state change. Periodic checking runs at low frequency as a safety net to prevent "misses."
 
-**期限付きゴール**: 期限との距離が駆動頻度を決める。期限が遠いうちは低頻度の定期確認で十分だ。期限が近づくにつれ確認頻度が上がる。これはmechanism.mdの締切駆動スコアと連動する。スコアが高いゴールほど、頻繁に注意を向ける。
+**Deadline-bound goals**: The distance to the deadline determines execution frequency. While the deadline is far, low-frequency periodic checking is sufficient. As the deadline approaches, the check frequency increases. This is tied to the deadline-driven score in mechanism.md. Goals with higher scores receive attention more frequently.
 
-**継続型のゴール**: 定期的な低頻度チェックが基本。異常を検知したときだけ頻度を上げる。普段は静かに見守り、問題が起きたら即座に反応する。
+**Continuous goals**: Low-frequency periodic checks are the baseline. Frequency is raised only when an anomaly is detected. Quietly monitoring normally, reacting immediately when a problem occurs.
 
-一つのMotivaインスタンスが複数のゴールを持つ場合、各ゴールが独自の駆動リズムを持つ。最も頻繁に駆動するゴールがMotivaの起動頻度を決めるが、起動のたびにすべてのゴールを確認するわけではない。注意が必要なゴールだけにループを回す。
+When a single Conatus instance has multiple goals, each goal has its own drive rhythm. The most frequently driven goal determines how often Conatus activates, but not every goal is checked at every activation. Only goals that need attention have the loop run for them.
 
-### アクティブと待機
+### Active and Waiting
 
-Motivaは常にアクティブではない。「待つ」ことが正しい判断である場面を認識する。
+Conatus is not always active. It recognizes situations where "waiting" is the correct judgment.
 
-施策を打った直後。効果が現れるまでには時間がかかる。即座に計測しても意味がない。「N日後に計測する」と決めて、その間は別のゴールに注意を向けるか、静かに待つ。
+Immediately after launching an initiative. It takes time for effects to appear. Measuring immediately is meaningless. Decide to "measure N days later" and in the meantime attend to other goals or wait quietly.
 
-外部依存がある場合。他者の承認待ち、外部サービスの応答待ち、市場の反応待ち。Motivaが制御できないタイミングがある。待つべきときに待てることは、無駄な行動をしないことと同義だ。
+When there are external dependencies. Waiting for others' approval, waiting for external service responses, waiting for market reactions. There are timings that Conatus cannot control. Being able to wait when it's time to wait is equivalent to not taking unnecessary actions.
 
-ただし「待つ」は「忘れる」ではない。待機中のゴールも定期的に状態を確認する。待っている間に状況が変わった可能性があるからだ。
+However, "waiting" is not "forgetting." Goals that are waiting also have their state confirmed periodically. Because the situation may have changed while waiting.
 
-### 起動トリガーの種類
+### Types of Activation Triggers
 
-Motivaを起動するトリガーは4種類ある。
+There are 4 types of triggers that activate Conatus.
 
-**スケジュール起動**: ゴールの性質に基づく定期チェック。最も基本的な駆動方式だ。
+**Scheduled activation**: Periodic checks based on the nature of the goal. The most fundamental drive method.
 
-**イベント起動**: 外部からの変化通知。データソースの値が閾値を超えた、ユーザーからメッセージが来た、外部サービスから通知が来た。変化が起きたときに待つ理由はない。
+**Event activation**: Change notifications from outside. A data source value exceeded a threshold, a message came from the user, a notification came from an external service. There's no reason to wait when a change occurs.
 
-**完了起動**: タスクが完了した。結果を回収し、状態を更新し、次のタスクを発見する。タスク完了は自然なループの起点だ。
+**Completion activation**: A task completed. Collect the result, update state, discover the next task. Task completion is a natural starting point for the loop.
 
-**期限起動**: 期限が近づいた。定期チェックとは別に、期限の接近自体がトリガーになる。期限まで残り1週間を切ったら、通常の定期チェックとは別に追加のチェックが走る。
+**Deadline activation**: A deadline is approaching. Separately from periodic checks, the approach of a deadline itself becomes a trigger. When less than one week remains until a deadline, an additional check runs separately from the regular periodic check.
 
-これらのトリガーは排他的ではない。複数のトリガーが同時に発火することもある。Motivaは「なぜ起動したか」を記録し、最も緊急度の高いゴールから処理する。
+These triggers are not exclusive. Multiple triggers can fire simultaneously. Conatus records "why it was activated" and processes the most urgent goal first.
 
 ---
 
-## 4. コンテキスト管理 --- 長期ゴールを有限のコンテキストで扱う
+## 4. Context Management --- Handling Long-Term Goals with a Finite Context
 
-LLMのコンテキストウィンドウは有限だ。Motivaが追うゴールは数ヶ月から数年にわたる。この矛盾をどう解決するか。
+An LLM's context window is finite. The goals Conatus pursues span months to years. How is this contradiction resolved?
 
-答えは単純だ。**ほとんどの情報はコンテキストウィンドウの外に置く。**
+The answer is simple. **Most information lives outside the context window.**
 
-### セッション境界の制御
+### Controlling Session Boundaries
 
-Motivaはセッションの開始と終了を制御する側だ。これが、コンテキスト問題を解決する鍵になる。
+Conatus controls the start and end of sessions. This is the key to solving the context problem.
 
-ゴールツリーのノード境界が、自然なセッション境界になる。一つのサブゴール、一つのタスクが、一つのセッションに対応する。セッションが終わったら、結果を回収してコンテキストをリセットする。次のセッションは白紙の状態から始まる。
+The node boundaries of the goal tree become natural session boundaries. One sub-goal, one task corresponds to one session. When a session ends, the results are collected and the context is reset. The next session starts from a blank slate.
 
-「前のセッションの続き」という概念は存在しない。各セッションは独立した実行単位だ。必要な情報は、セッション開始時に明示的に渡される。前回のセッションの記憶に依存しない。
+The concept of "continuing from the previous session" doesn't exist. Each session is an independent execution unit. The information needed is explicitly passed at session start. It doesn't depend on memory from the previous session.
 
-### コンテキスト組み立て
+### Context Assembly
 
-> コンテキスト選択の具体的なアルゴリズム（優先度ベースの包含ルール、セッション種別ごとの除外ルール、MVPの固定top-4方式）は `design/session-and-context.md` §4 を参照。本節では概要のみ記述する。
+> For the specific algorithm for context selection (priority-based inclusion rules, exclusion rules per session type, MVP's fixed top-4 method), see `design/session-and-context.md` §4. This section describes only the overview.
 
-セッションを起動するとき、Motivaはそのセッションに必要な情報だけを組み立てて渡す。
+When launching a session, Conatus assembles and passes only the information that session needs.
 
-タスク実行セッションに渡すもの:
-- タスクの定義と成功基準
-- 関連する制約
-- 前回の試行結果（リトライの場合）
-- タスクに必要な最小限のコンテキスト
+What is passed to task execution sessions:
+- Task definition and success criteria
+- Relevant constraints
+- Previous attempt results (in case of retry)
+- Minimum context needed for the task
 
-渡さないもの:
-- ゴール全体の履歴
-- 無関係なゴールの情報
-- Motivaが知っているすべての情報
+What is not passed:
+- The entire goal history
+- Information about unrelated goals
+- Everything Conatus knows
 
-検証セッションに渡すもの:
-- タスクの成功基準
-- 成果物へのアクセス手段
-- 検証に必要な基準情報
+What is passed to verification sessions:
+- The task's success criteria
+- Means to access the deliverable
+- Reference criteria needed for verification
 
-渡さないもの:
-- 実行セッションのコンテキスト（バイアスを避けるため）
-- 実行者の自己申告（独立した判断を確保するため）
+What is not passed:
+- The execution session's context (to avoid bias)
+- The executor's self-report (to ensure independent judgment)
 
-観測セッションに渡すもの:
-- ゴール定義と成功基準
-- 観測対象の情報源
-- 前回の観測結果（変化の検出のため）
+What is passed to observation sessions:
+- Goal definition and success criteria
+- Information sources to observe
+- Previous observation results (for change detection)
 
-この「必要最小限のコンテキスト組み立て」が、有限のコンテキストウィンドウで長期ゴールを扱う方法だ。全部を覚えている必要はない。今この瞬間に必要なことだけを知っていればいい。
+This "minimum necessary context assembly" is how long-term goals are handled with a finite context window. There's no need to remember everything. Only what's needed in this moment needs to be known.
 
-### セッション間の状態引き渡し
+### State Handoff Between Sessions
 
-セッションはステートレスだ。では、セッション間の一貫性はどう保つのか。
+Sessions are stateless. Then how is consistency maintained across sessions?
 
-永続ファイルだ。すべての状態は永続ファイルに書き出される。
+Persistent files. All state is written to persistent files.
 
-セッションが終了すると、Motivaは結果を抽出し、状態ファイルを更新する。次のセッションが始まるとき、Motivaは状態ファイルから関連する情報を読み出し、新しいセッションのコンテキストを組み立てる。
+When a session ends, Conatus extracts the results and updates the state file. When the next session begins, Conatus reads the relevant information from the state file and assembles the context for the new session.
 
-セッションAの結果がセッションBに影響する場合、その影響は状態ファイルを経由して伝わる。セッションAが直接セッションBに何かを渡すことはない。すべての情報の流れは、永続ファイルを中継点とする。
+When session A's results affect session B, that effect is conveyed through the state file. Session A never directly passes anything to session B. All information flows through persistent files as the relay point.
 
-この設計には透明性という副次的な利点がある。状態ファイルは人間が読める。gitで管理できる。Motivaが何を知っていて、何に基づいて判断しているかが、いつでも確認できる。
+This design has the side benefit of transparency. State files are human-readable. They can be managed with git. What Conatus knows and what it bases its decisions on can be confirmed at any time.
 
-### マルチゴールのコンテキスト分離
+### Context Isolation for Multiple Goals
 
-Motivaが複数のゴールを同時に追っているとき、各ゴールのコンテキストは完全に分離される。
+When Conatus is pursuing multiple goals simultaneously, the context for each goal is completely isolated.
 
-ゴールAの実行セッションに、ゴールBの情報は含まれない。ゴールAの失敗がゴールBの判断に影響することもない（状態ファイルのレベルで分離されているため）。
+Session A's execution session contains no information about goal B. Session A's failure doesn't affect goal B's judgment either (because they are isolated at the state file level).
 
-これは単なる整理整頓ではない。コンテキスト汚染の防止だ。あるゴールの文脈で得た情報が、無関係なゴールの判断をバイアスすることを構造的に防ぐ。
+This is not mere housekeeping. It's prevention of context pollution. It structurally prevents information obtained in one goal's context from biasing judgments about an unrelated goal.
 
-ただし、ゴール間に依存関係がある場合は例外だ。ゴールAの成果がゴールBの前提条件になっている場合、その依存関係はMotivaが明示的に管理し、必要な情報だけをゴールBのコンテキストに含める。
+However, when there are dependencies between goals, exceptions apply. When goal A's results are a prerequisite for goal B, that dependency is explicitly managed by Conatus, and only the necessary information is included in goal B's context.
 
-### 記憶の階層
+### Memory Hierarchy
 
-Motivaの情報は3つの階層に分かれる。
+Conatus's information is divided into three layers.
 
-**作業記憶**: 現在のセッションのコンテキストウィンドウ。容量は限られているが、処理速度は速い。今この瞬間のタスクに必要な情報だけがここにある。
+**Working Memory**: The context window of the current session. Capacity is limited but processing speed is fast. Only information needed for the task at this moment is here.
 
-**ゴール状態**: 永続ファイルに保存されたゴールツリー、状態ベクトル、進捗記録。セッションを跨いで一貫性を保つ。必要に応じてセッションの作業記憶にロードされる。これがMotivaの「中期記憶」だ。
+**Goal State**: The goal tree, state vectors, and progress records saved in persistent files. Maintains consistency across sessions. Loaded into the session's working memory as needed. This is Conatus's "medium-term memory."
 
-**経験ログ**: 状態 → 行動 → 結果の記録。学習の基盤となるデータだ。直近の生ログは Short-term Memory として `~/.motiva/memory/short-term/` に保持され、保持期間を超えると LLM による要約を経て Long-term Memory（`~/.motiva/memory/long-term/`）にパターン・教訓として圧縮される。Long-term の教訓はゴールを横断して参照可能であり、`session-and-context.md` §4 の優先度6として Working Memory に選択的に注入される。したがって、「個々のセッションでは参照されない」は生ログ（Short-term の生 JSON）に対してのみ正確であり、圧縮後の教訓はセッションのコンテキストに入る。詳細は `design/memory-lifecycle.md` を参照。
+**Experience Log**: Records of state → action → result. The data that serves as the foundation for learning. Recent raw logs are kept as Short-term Memory in `~/.conatus/memory/short-term/`, and when they exceed the retention period, they are compressed into patterns and lessons in Long-term Memory (`~/.conatus/memory/long-term/`) via LLM summarization. Long-term lessons can be referenced across goals and are selectively injected into Working Memory as priority 6 in `session-and-context.md` §4. Therefore, "not referenced in individual sessions" applies only to raw logs (Short-term raw JSON); compressed lessons do enter session context. See `design/memory-lifecycle.md` for details.
 
-この階層の要点は、ほとんどの情報がコンテキストウィンドウの外にあるということだ。コンテキストウィンドウは「今必要なもの」だけを保持する窓であり、Motivaの知識全体を格納する場所ではない。
+The key point of this hierarchy is that most information lives outside the context window. The context window is a window that holds only "what's needed right now" — it is not the place to store all of Conatus's knowledge.
 
-### 記憶ライフサイクル
+### Memory Lifecycle
 
-`design/memory-lifecycle.md` は、3層記憶モデルの具体的な実装を定義する。
+`design/memory-lifecycle.md` defines the specific implementation of the 3-layer memory model.
 
 ```
-~/.motiva/memory/
+~/.conatus/memory/
 ├── short-term/
 │   └── goals/<goal_id>/
-│       ├── experience-log.json   # 経験ログ（生JSON）
-│       ├── observations.json     # 観測履歴
-│       ├── strategies.json       # 戦略履歴
-│       └── tasks.json            # タスク履歴
+│       ├── experience-log.json   # Experience log (raw JSON)
+│       ├── observations.json     # Observation history
+│       ├── strategies.json       # Strategy history
+│       └── tasks.json            # Task history
 ├── long-term/
 │   ├── lessons/
-│   │   ├── by-goal/<goal_id>.json       # ゴール別教訓
-│   │   ├── by-dimension/<name>.json     # 次元別教訓
-│   │   └── global.json                  # ゴール横断教訓
-│   └── statistics/<goal_id>.json        # ゴール別統計
-└── archive/<goal_id>/            # 完了・キャンセルゴールのアーカイブ
+│   │   ├── by-goal/<goal_id>.json       # Per-goal lessons
+│   │   ├── by-dimension/<name>.json     # Per-dimension lessons
+│   │   └── global.json                  # Cross-goal lessons
+│   └── statistics/<goal_id>.json        # Per-goal statistics
+└── archive/<goal_id>/            # Archive for completed/cancelled goals
 ```
 
-Short-term の生データは設定可能な保持ループ数（デフォルト: ゴール種別により50〜200ループ）を超えると、LLM 要約によって Long-term の教訓エントリに圧縮される。Long-term の教訓はゴール完了後も無期限に保持され、将来の戦略選択やタスク生成の品質向上に使われる。同一の失敗を繰り返さないために、失敗パターンの保持は成功パターンより優先される。
+Short-term raw data is compressed into Long-term lesson entries via LLM summarization when it exceeds a configurable retention loop count (default: 50–200 loops depending on goal type). Long-term lessons are retained indefinitely after goal completion and are used to improve the quality of future strategy selection and task generation. Retention of failure patterns takes priority over success patterns, so as not to repeat the same mistakes.
 
 ---
 
-## 全体像
+## Overview
 
-4つの領域は独立ではなく、相互に連携する。
+The four areas are not independent — they work together.
 
 ```
-プロセスモデル（CLI / TUI / デーモン / cron）
-  コアループの起動ラッパー
+Process Model (CLI / TUI / Daemon / cron)
+  Core loop startup wrapper
     │
-    │ 起動
+    │ Launch
     ↓
-駆動方式
-  「今、注意を向けるべきゴールがあるか」
+Drive Method
+  "Is there a goal that needs attention right now?"
     │
     │ Yes
     ↓
-タスク発見エンジン（mechanism.md）
-  観測 → ギャップ認識 → 戦略選択 → タスク具体化
+Task Discovery Engine (mechanism.md)
+  Observe → Gap recognition → Strategy selection → Task concretization
     │
-    │ タスクが決まった
+    │ Task determined
     ↓
-オーケストレーション
-  セッション起動 → 実行 → 検証 → 結果回収
+Orchestration
+  Session launch → Execute → Verify → Collect results
     │
-    │ 結果が出た
+    │ Results obtained
     ↓
-コンテキスト管理
-  結果を状態ファイルに書き出し → 次のセッション用にコンテキスト組み立て
+Context Management
+  Write results to state file → Assemble context for next session
     │
-    │ 状態が更新された
+    │ State updated
     ↓
-駆動方式に戻る
+Return to Drive Method
 ```
 
-プロセスモデルが「どう起動されるか」を定め、駆動方式が「いつ動くか」を決め、タスク発見エンジンが「何をするか」を決め、オーケストレーションが「どう実行するか」を制御し、コンテキスト管理が「何を覚えておくか」を整理する。
+The process model defines "how it's started," the drive method decides "when it runs," the task discovery engine decides "what to do," orchestration controls "how to execute," and context management organizes "what to remember."
 
-このインフラストラクチャは、Motivaが自ら構築する。既存のツールでは不十分だからこそ、Motiva自身がこの基盤を持つ必要がある。タスク発見エンジンという頭脳が、長期にわたって、複数のゴールに対して、安定して動き続けるために。
+This infrastructure is built by Conatus itself. Precisely because existing tools are insufficient, Conatus itself needs this foundation. So that the task discovery engine — its brain — can operate stably over the long term, for multiple goals.

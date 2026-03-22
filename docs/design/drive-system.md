@@ -1,98 +1,98 @@
-# 駆動システム
+# Drive System
 
-> Conatusがいつ、なぜ動くかの判断構造。スケジューリングとトリガーの設計。
-
----
-
-## 1. 核心的な問い
-
-Conatusの駆動システムは一つの問いに集約される。
-
-**「今、注意を向けるべきゴールがあるか」**
-
-この問いは、すべての潜在的な起動タイミングで評価される。答えがYesならタスク発見ループを回す。Noなら何もしない。
-
-この判断自体は軽量でなければならない。各ゴールの状態を確認し、注意が必要かどうかだけを見る。深い分析はループの中で行う。判断のコストが高いと、頻繁なチェックが現実的でなくなる。
+> The decision structure for when and why Conatus acts. Design of scheduling and triggers.
 
 ---
 
-## 2. 4つのトリガー種別
+## 1. The Central Question
 
-Conatusを起動するトリガーは4種類ある。それぞれ異なるタイミング、異なる緊急度を持つ。
+The Conatus drive system reduces to a single question.
 
-### スケジュール起動（Scheduled）
+**"Is there a goal that deserves attention right now?"**
 
-ゴールの性質に基づく定期チェック。最も基本的な駆動方式だ。
+This question is evaluated at every potential activation moment. If the answer is Yes, the task discovery loop runs. If No, nothing happens.
 
-間隔はゴールの種別によって異なる。固定値ではなく、ゴールの状態とフェーズに応じて動的に調整される。
-
-| ゴール種別 | 基本間隔 | 調整条件 |
-|-----------|---------|---------|
-| ヘルスモニタリング | 30分〜1時間 | 異常検知時は短縮 |
-| ビジネス指標 | 数時間〜1日 | 施策直後は短縮、安定期は延長 |
-| 長期プロジェクト | 1日〜1週間 | 期限接近で短縮 |
-
-スケジュール起動は「見落とし防止のセーフティネット」という位置づけでもある。他のトリガーが機能している間は低頻度で十分だ。
-
-### イベント起動（Event-Driven）
-
-外部からの変化通知に反応する。変化が起きたときに待つ理由はない。即座に起動する。
-
-- センサーアラート（閾値超過、異常値）
-- 指標の急変（ベースラインからの逸脱）
-- ユーザーからのメッセージ・指示
-- 外部システムからの通知（webhook、API callback）
-
-イベント起動は「何かが変わった」という事実への反応だ。スケジュール起動と異なり、時刻ベースではなく状態変化ベースで発火する。
-
-イベントをどう受け取るかは、プロセスモデルのフェーズによって異なる（詳細は「3. イベント受信機構」を参照）。
-
-### 完了起動（Completion-Driven）
-
-タスクが完了した直後の再評価。アクティブな作業フェーズにおける最も頻繁なトリガーだ。
-
-タスクが完了すると、Conatusは自動的に以下のシーケンスを実行する。
-
-```
-タスク完了通知
-    │
-    ↓ 観測
-状態の再評価（成果物の確認、指標の再計測）
-    │
-    ↓ ギャップ再計算
-次のタスクの発見または完了判定
-    │
-    ↓ アクション
-次タスクの実行 or 待機状態へ移行
-```
-
-完了起動は「自然なループの起点」だ。タスクが終わったとき、次のアクションを考えるのは当然の流れだ。
-
-### 期限起動（Deadline-Driven）
-
-期限の接近そのものがトリガーになる。スケジュール起動の補完として機能する。
-
-期限起動の特徴は段階的な強化だ。突然の頻度急増ではなく、期限との距離に応じて徐々にチェック頻度が上がる。
-
-```
-期限まで1ヶ月以上   → スケジュール起動のみ
-期限まで1ヶ月       → チェック頻度を1.5倍
-期限まで2週間       → チェック頻度を2倍、進捗アラート
-期限まで1週間       → チェック頻度を3倍、リスク評価追加
-期限まで2日         → 毎日チェック、ブロッカー優先排除
-```
-
-この段階的な強化はdrive-scoring.mdの締切駆動スコアと連動する。スコアが高いゴールほど、より頻繁にチェックが走る。
+This judgment itself must be lightweight. It checks the state of each goal and determines only whether attention is needed. Deep analysis happens within the loop. If the judgment is expensive, frequent checks become impractical.
 
 ---
 
-## 3. イベント受信機構 --- 外部トリガーをどう受け取るか
+## 2. Four Trigger Types
 
-イベント起動には「受信する仕組み」が必要だ。Conatusがイベントを受け取れなければ、イベント起動は機能しない。受信機構はプロセスモデルのフェーズに応じて段階的に設計する。
+There are four types of triggers that activate Conatus. Each has a different timing and a different level of urgency.
 
-### イベントフォーマット
+### Scheduled
 
-フェーズによらず、イベントは統一フォーマットで表現する。
+Periodic checks based on the nature of the goal. This is the most fundamental drive mode.
+
+The interval varies by goal type — not a fixed value, but dynamically adjusted based on goal state and phase.
+
+| Goal type | Base interval | Adjustment condition |
+|-----------|--------------|----------------------|
+| Health monitoring | 30 min – 1 hour | Shortened when an anomaly is detected |
+| Business metrics | Several hours – 1 day | Shortened right after a measure is taken, extended during stable periods |
+| Long-term projects | 1 day – 1 week | Shortened as the deadline approaches |
+
+Scheduled triggers also serve as a "safety net against blind spots." While other triggers are functioning, low frequency is sufficient.
+
+### Event-Driven
+
+Reacts to change notifications from external sources. When something changes, there is no reason to wait. It activates immediately.
+
+- Sensor alerts (threshold exceeded, anomalous values)
+- Sudden metric changes (deviation from baseline)
+- Messages or instructions from the user
+- Notifications from external systems (webhooks, API callbacks)
+
+Event-driven triggering is a reaction to the fact that "something changed." Unlike scheduled triggering, it fires based on state changes rather than clock time.
+
+How events are received varies by phase of the process model (see "3. Event Reception Mechanism" for details).
+
+### Completion-Driven
+
+Re-evaluation immediately after a task completes. This is the most frequent trigger during active work phases.
+
+When a task completes, Conatus automatically executes the following sequence.
+
+```
+Task completion notification
+    │
+    ↓ Observation
+Re-evaluate state (confirm deliverables, re-measure metrics)
+    │
+    ↓ Gap recalculation
+Discover next task or make completion judgment
+    │
+    ↓ Action
+Execute next task or transition to waiting state
+```
+
+Completion-driven triggering is the "natural starting point of the loop." When a task finishes, thinking about the next action is the natural flow.
+
+### Deadline-Driven
+
+The approach of a deadline itself becomes a trigger. It functions as a complement to scheduled triggering.
+
+The characteristic of deadline-driven triggering is gradual escalation. Rather than a sudden spike in frequency, the check frequency rises gradually in proportion to proximity to the deadline.
+
+```
+More than 1 month to deadline   → Scheduled trigger only
+1 month to deadline             → Increase check frequency by 1.5×
+2 weeks to deadline             → Increase check frequency by 2×, add progress alert
+1 week to deadline              → Increase check frequency by 3×, add risk assessment
+2 days to deadline              → Daily check, prioritize blocker removal
+```
+
+This gradual escalation operates in concert with the Deadline Drive score in `drive-scoring.md`. Goals with higher scores are checked more frequently.
+
+---
+
+## 3. Event Reception Mechanism — How to Receive External Triggers
+
+Event-driven triggering requires a mechanism to receive events. If Conatus cannot receive events, event-driven triggering does not function. The reception mechanism is designed in stages according to the phase of the process model.
+
+### Event Format
+
+Regardless of phase, events are expressed in a unified format.
 
 ```json
 {
@@ -107,45 +107,45 @@ Conatusを起動するトリガーは4種類ある。それぞれ異なるタイ
 }
 ```
 
-- `type`: `"external"` (外部イベント) または `"internal"` (Conatus内部トリガー)
-- `source`: イベントの発生元（システム名、センサー名など）
-- `timestamp`: ISO 8601形式のUTC時刻
-- `data`: イベント固有のペイロード（スキーマはsourceに依存）
+- `type`: `"external"` (external event) or `"internal"` (Conatus internal trigger)
+- `source`: Origin of the event (system name, sensor name, etc.)
+- `timestamp`: UTC time in ISO 8601 format
+- `data`: Event-specific payload (schema depends on source)
 
-### MVP（Phase 1）: ファイルベースのイベントキュー
+### MVP (Phase 1): File-Based Event Queue
 
-**`~/.conatus/events/`** ディレクトリをイベントキューとして使う。外部システムはこのディレクトリにJSONファイルを書き込む。`conatus run`の実行時にConatusがこのディレクトリを確認し、イベントを処理してアーカイブする。
+The **`~/.conatus/events/`** directory is used as an event queue. External systems write JSON files to this directory. When `conatus run` is executed, Conatus reads this directory, processes the events, and archives them.
 
 ```
 ~/.conatus/
 ├── events/
-│   ├── 20260310-090000-github-build-failed.json   ← 未処理イベント
+│   ├── 20260310-090000-github-build-failed.json   ← Unprocessed event
 │   └── 20260310-085500-sensor-alert.json
 └── events/archive/
-    └── 20260309-120000-build-success.json          ← 処理済みイベント
+    └── 20260309-120000-build-success.json          ← Processed event
 ```
 
-処理フロー:
-1. `conatus run` 起動時に `~/.conatus/events/` を読み込む
-2. ファイル名のタイムスタンプ順に処理
-3. 各イベントを対応するゴールのトリガーとして評価
-4. 処理済みイベントを `archive/` に移動
+Processing flow:
+1. On `conatus run` launch, read `~/.conatus/events/`
+2. Process in timestamp order of filename
+3. Evaluate each event as a trigger for the corresponding goal
+4. Move processed events to `archive/`
 
-インフラ不要。外部システムはファイル書き込みだけできればよい。シェルスクリプト、webhookサーバー、cronジョブなど何でも使える。
+No infrastructure required. External systems only need to be able to write files. Shell scripts, webhook servers, cron jobs — anything works.
 
-> **観測サイクルとの連携**: このイベントキューへの書き込みは、`observation.md` §3 で定義するイベント駆動観測（Event-driven）のトリガーとして機能する。イベントを受信したConatusは、対応するゴールの観測サイクルを即座に起動し、状態ベクトルを再評価する。
+> **Integration with the observation cycle**: Writes to this event queue function as triggers for event-driven observation (Event-driven) defined in `observation.md` §3. Upon receiving an event, Conatus immediately launches the observation cycle for the corresponding goal and re-evaluates the state vector.
 
-**ポーリングフォールバック**: プッシュ通知を持たない外部データソース（APIやウェブページなど）は、観測ステップ中にConatusが設定済みのURL/APIを直接確認する。イベント駆動ではなく、観測ステップへの組み込みとして実装する。
+**Polling fallback**: External data sources without push notification (APIs, web pages, etc.) are checked directly by Conatus at the configured URL/API during the observation step. This is implemented as an integration into the observation step, not as event-driven.
 
-### Phase 2（デーモンモード）: インメモリキュー + ファイルウォッチャー
+### Phase 2 (Daemon Mode): In-Memory Queue + File Watcher
 
-デーモンが常駐する場合、よりリアルタイムなイベント処理が可能になる。
+When the daemon is running persistently, more real-time event processing becomes possible.
 
-**インメモリキュー**: デーモンはメモリ上にイベントキューを保持し、イベントが到着したら即座にトリガー評価を実行する。
+**In-memory queue**: The daemon maintains an event queue in memory and executes trigger evaluation immediately when an event arrives.
 
-**ファイルウォッチャー**: `~/.conatus/events/` ディレクトリをウォッチし、新しいファイルが書き込まれた瞬間に処理を開始する。MVPのポーリング方式より反応が速い。MVPとのファイル形式の互換性は保つ。
+**File watcher**: Watches the `~/.conatus/events/` directory and begins processing the instant a new file is written. Faster response than the MVP polling approach. Maintains file format compatibility with the MVP.
 
-**ローカルHTTPエンドポイント**: デーモンがローカルポート（デフォルト: `127.0.0.1:41700`）でHTTPリクエストを受け付ける。外部システムがwebhookをこのエンドポイントに送れるようになる。
+**Local HTTP endpoint**: The daemon accepts HTTP requests on a local port (default: `127.0.0.1:41700`). External systems can then send webhooks to this endpoint.
 
 ```
 POST http://127.0.0.1:41700/events
@@ -154,110 +154,110 @@ Content-Type: application/json
 { "type": "external", "source": "zapier", ... }
 ```
 
-このエンドポイントはローカルホストのみにバインドする。外部ネットワークには公開しない。
+This endpoint binds to localhost only. It is not exposed to external networks.
 
 ---
 
-## 4. アクティブと待機
+## 4. Active and Waiting
 
-Conatusには2つの動作状態がある。
+Conatus has two operating states.
 
-### アクティブ状態（Active）
+### Active State
 
-タスクが実行中、またはタスク発見ループが評価中の状態。Conatusは何かをしている。
+A task is executing, or the task discovery loop is evaluating. Conatus is doing something.
 
-アクティブ状態から待機状態への移行:
-- タスクが完了し、次のタスクが不要と判断された
-- 外部依存の待機が必要になった
-- すべてのゴールが満足状態に達した
+Transitions from active to waiting:
+- A task completed and the next task was judged unnecessary
+- Waiting on an external dependency became necessary
+- All goals have reached a satisfied state
 
-### 待機状態（Waiting）
+### Waiting State
 
-即時のアクションが不要な状態。Conatusは監視しているが、行動していない。
+No immediate action is needed. Conatus is monitoring but not acting.
 
-待機には3つのパターンがある。
+There are three patterns of waiting.
 
-**効果待ち**: 施策を実行した直後。変化が現れるまでには時間がかかる。計測のタイミングを決めて待つ。その間は別のゴールに注意を向けるか、静かに待機する。
+**Waiting for effect**: Immediately after a measure was taken. Changes take time to materialize. Conatus decides when to measure and waits. In the meantime, it either turns attention to other goals or waits quietly.
 
-**外部依存待ち**: 他者の承認、外部サービスの応答、市場の反応。Conatusが制御できないタイミングがある。待つべきときに待つことは、無駄な行動をしないことと同義だ。
+**Waiting on external dependency**: Someone else's approval, a response from an external service, a market reaction. There are timings that Conatus cannot control. Knowing when to wait is the same as not taking unnecessary action.
 
-**全ゴール充足**: すべてのゴールが達成基準を満たしている。定期的な監視チェックだけを実施し、状態の変化を検知したら再起動する。
+**All goals satisfied**: All goals have met their completion criteria. Only periodic monitoring checks are conducted; the system re-activates when it detects a state change.
 
-待機状態は「忘れた」ではない。待機中のゴールも定期確認の対象だ。状況は変わる。変化を見逃さないための最低限の監視は継続する。
-
----
-
-## 5. 軽量起動チェック
-
-フルのタスク発見ループを回す前に、低コストな事前チェックを挟む。
-
-```
-起動チェックシーケンス:
-
-1. イベントキューに未処理イベントがあるか？ → Yes → 起動
-2. 期限切れのスケジュールチェックがあるか？ → Yes → 起動
-3. 完了通知を受け取っているか？          → Yes → 起動
-4. いずれもNoの場合:
-   - すべてのゴールが満足または待機状態か？ → Yes → 休眠継続
-   - そうでなければ                      → 起動
-```
-
-このチェックはLLM呼び出しを伴わない。状態ファイルの読み取りと簡単な条件評価だけで完了する。何も変わっていないときに高コストな評価を走らせることを避ける。
+Waiting is not "forgotten." Goals in waiting are still subject to periodic checks. Situations change. The minimum monitoring to avoid missing changes continues.
 
 ---
 
-## 6. マルチゴールのスケジューリング
+## 5. Lightweight Activation Check
 
-Conatusが複数のゴールを追うとき、各ゴールは独自の駆動リズムを持つ。
-
-### 独立スケジューリング
-
-- ゴールAのスケジュールとゴールBのスケジュールは独立している
-- あるゴールのイベント起動が、別のゴールの評価をトリガーしない
-- 各ゴールのトリガー履歴は独立して記録される
-
-### 優先順位付き処理
-
-複数のゴールが同時に注意を要する場合、drive-scoring.mdのスコアに基づいて処理順を決定する。
+A low-cost pre-check is inserted before running the full task discovery loop.
 
 ```
-全起動済みゴールをスコア順にソート
+Activation check sequence:
+
+1. Are there unprocessed events in the event queue?  → Yes → Activate
+2. Are there overdue scheduled checks?               → Yes → Activate
+3. Has a completion notification been received?      → Yes → Activate
+4. If all are No:
+   - Are all goals in a satisfied or waiting state?  → Yes → Continue sleeping
+   - Otherwise                                       → Activate
+```
+
+This check involves no LLM calls. It completes with only a read of state files and simple condition evaluation. This avoids running expensive evaluations when nothing has changed.
+
+---
+
+## 6. Multi-Goal Scheduling
+
+When Conatus is pursuing multiple goals, each goal has its own drive rhythm.
+
+### Independent Scheduling
+
+- Goal A's schedule and Goal B's schedule are independent
+- An event-driven trigger for one goal does not trigger evaluation of another goal
+- Each goal's trigger history is recorded independently
+
+### Priority-Based Processing
+
+When multiple goals simultaneously require attention, the processing order is determined based on the scores from `drive-scoring.md`.
+
+```
+Sort all activated goals by score
   │
   ↓
-最高スコアのゴールからタスク発見ループを実行
+Run task discovery loop starting from the highest-scoring goal
   │
   ↓
-並列実行が可能かを確認
-  ├── 可能 → 複数ゴールのセッションを並列起動
-  └── 不可 → スコア順に直列処理
+Check whether parallel execution is possible
+  ├── Possible → Launch sessions for multiple goals in parallel
+  └── Not possible → Process sequentially in score order
 ```
 
-### リソース競合の解消
+### Resolving Resource Contention
 
-複数のエージェントセッションを同時に走らせることがリソース上できない場合、直列化する。直列化の順序はdrive scoreの高い順だ。後回しになったゴールの評価はキューに積まれ、実行中セッションの完了後に処理される。
-
----
-
-## 7. トリガーの重複処理
-
-複数のトリガーが同時に発火することがある。
-
-- 期限起動 + スケジュール起動が同時に発火した
-- タスク完了通知 + センサーアラートが同時に来た
-
-重複したトリガーは単一の評価サイクルに統合される。同じゴールに対して複数のトリガーが発火しても、タスク発見ループは一度だけ回す。重複実行は無駄であり、場合によっては競合状態を生む。
-
-Conatusは「なぜ今回の起動が発生したか」を記録する。複数トリガーが合流した場合、それらすべてをコンテキストとして保持し、タスク発見ループに渡す。「期限が近づいている上にセンサーアラートも来た」という複合状況は、単独トリガーより高い優先度で扱われる可能性がある。
+If it is not possible to run multiple agent sessions simultaneously due to resource constraints, serialize them. The serialization order is highest drive score first. Goals that are deferred are queued and processed after the currently executing session completes.
 
 ---
 
-## 設計原則のまとめ
+## 7. Handling Duplicate Triggers
 
-| 原則 | 内容 |
-|------|------|
-| 中心的な問い | 「今、注意を向けるべきゴールがあるか」に集約 |
-| 軽量な起動判断 | LLM不要の事前チェックで無駄な評価を排除 |
-| ゴール固有のリズム | 各ゴールが独自のスケジュール・トリガーを持つ |
-| 待機は正常状態 | 「何もしない」は失敗ではなく、正しい判断 |
-| 段階的な強化 | 期限駆動は突然の急増ではなく、漸進的な頻度増加 |
-| 優先度付き直列化 | リソース競合時はdrive scoreで処理順を決定 |
+Multiple triggers may fire simultaneously.
+
+- A deadline trigger + a scheduled trigger fire at the same time
+- A task completion notification + a sensor alert arrive simultaneously
+
+Duplicate triggers are merged into a single evaluation cycle. Even if multiple triggers fire for the same goal, the task discovery loop runs only once. Duplicate execution is wasteful and can in some cases create race conditions.
+
+Conatus records "why this activation occurred." When multiple triggers converge, all of them are retained as context and passed to the task discovery loop. A compound situation — "the deadline is approaching AND a sensor alert came in" — may be treated with higher priority than a single trigger.
+
+---
+
+## Summary of Design Principles
+
+| Principle | Content |
+|-----------|---------|
+| Central question | Reduced to "Is there a goal that deserves attention right now?" |
+| Lightweight activation judgment | Eliminates wasteful evaluation with LLM-free pre-checks |
+| Goal-specific rhythm | Each goal has its own schedule and triggers |
+| Waiting is normal | "Doing nothing" is not a failure — it is the correct judgment |
+| Gradual escalation | Deadline-driven triggering increases frequency progressively, not suddenly |
+| Priority-based serialization | Drive score determines processing order when resources contend |

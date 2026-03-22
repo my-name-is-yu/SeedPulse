@@ -1,59 +1,59 @@
-# プラグインアーキテクチャ設計
+# Plugin Architecture Design
 
-> Conatusのプラグインは「ユーザーが使うツール」ではなく「Conatusが自律的に選択・活用するツール」だ。
-> 本ドキュメントは、外部サービス連携・通知・データ観測をプラグインとして拡張するための
-> 仕組みと、Conatusがそれらをどのように自律的に選択・信頼評価するかを定義する。
+> Conatus plugins are not "tools users call" — they are "tools Conatus autonomously selects and uses."
+> This document defines the mechanism for extending external service integrations, notifications, and data observation as plugins,
+> and how Conatus autonomously selects them and evaluates their trustworthiness.
 
-> 関連: `data-source.md`, `trust-and-safety.md`, `task-lifecycle.md`, `knowledge-acquisition.md`, `execution-boundary.md`
+> Related: `data-source.md`, `trust-and-safety.md`, `task-lifecycle.md`, `knowledge-acquisition.md`, `execution-boundary.md`
 
 ---
 
-## §1 概要と動機
+## §1 Overview and Motivation
 
 ### Conatus vs Claude Code / OpenClaw
 
-Claude CodeやOpenClawにおけるプラグインは「ユーザーが明示的に呼び出すツール」だ。ユーザーがコマンドを実行し、ツールが応答する。主体はユーザーにある。
+In Claude Code and OpenClaw, plugins are "tools the user explicitly calls." The user runs a command and the tool responds. The user is the active agent.
 
-Conatusにおけるプラグインは異なる。Conatusのコアループ（観測 → ギャップ → スコア → タスク → 実行 → 検証）はユーザーの指示なしに自律的に動く。したがって、プラグインも**Conatusが自律的に選択し、コアループの中に統合して使いこなす**ものでなければならない。「このプラグインを呼んでください」というユーザー指示を必要としないことが、Conatusのプラグイン設計の出発点だ。
+Conatus plugins are different. Conatus's core loop (observe → gap → score → task → execute → verify) runs autonomously without user instructions. Therefore, plugins must also be things **Conatus autonomously selects and integrates into the core loop**. Not requiring user instructions like "please call this plugin" is the starting point of Conatus's plugin design.
 
 ```
 Claude Code / OpenClaw:
-  ユーザー → 「Jiraを検索して」 → Jiraプラグイン → 結果をユーザーに返す
+  User → "Search Jira" → Jira plugin → returns result to user
 
 Conatus:
-  コアループ → 「この次元の観測に最適なソースはどれか？」
-             → プラグインマニフェストを参照
-             → 信頼スコアに基づいてjira-sourceを選択
-             → 観測結果をギャップ計算に渡す（ユーザー介入なし）
+  Core loop → "Which source is optimal for observing this dimension?"
+             → Reference plugin manifests
+             → Select jira-source based on trust score
+             → Pass observation result to gap calculation (no user intervention)
 ```
 
-### 「コアは薄く、拡張はプラグインで」の原則
+### "Thin core, extend with plugins" principle
 
-Conatusのコアに含めるべきものは最小限だ。以下の基準で判断する。
+What belongs in Conatus's core should be minimal. Use the following criteria:
 
-| 判断基準 | 帰属先 | 例 |
-|---------|--------|----|
-| コアループ（観測/ギャップ/スコア/タスク/実行/検証）に必須 | コア | GapCalculator, DriveScorer |
-| 外部サービスへの依存ゼロ、汎用性が高い | コア同梱可 | FileDataSourceAdapter, FileExistenceDataSourceAdapter |
-| 特定の外部サービス・SaaSに依存 | プラグイン | JiraAdapter, SlackNotifier, LinearDataSource |
-| 将来の拡張が予見されるが現時点では不要 | プラグイン候補 | Webhookアダプター, カスタムLLMバックエンド |
+| Criterion | Location | Example |
+|-----------|----------|----|
+| Essential to the core loop (observe/gap/score/task/execute/verify) | Core | GapCalculator, DriveScorer |
+| Zero external dependencies, highly generic | Can be bundled with core | FileDataSourceAdapter, FileExistenceDataSourceAdapter |
+| Depends on specific external services or SaaS | Plugin | JiraAdapter, SlackNotifier, LinearDataSource |
+| Future expansion expected but not currently needed | Plugin candidate | Webhook adapter, custom LLM backend |
 
-この原則により、Conatusのコアは小さく保たれ、サービス固有のロジックはプラグインに委譲される。
+This principle keeps the Conatus core small and delegates service-specific logic to plugins.
 
 ---
 
-## §2 プラグイン種別
+## §2 Plugin Types
 
-Conatusは3種類のプラグインをサポートする。それぞれ既存のインターフェースまたは新規インターフェースに対応する。
+Conatus supports three types of plugins. Each corresponds to an existing or new interface.
 
-### 2.1 adapterプラグイン（IAdapter実装）
+### 2.1 adapter plugins (IAdapter implementation)
 
-**役割**: タスクの実行先。Conatusがタスクを委譲するエージェント・システムを追加する。
+**Role**: Task execution targets. Adds agents and systems that Conatus delegates tasks to.
 
-**対応インターフェース**: `src/adapter-layer.ts` の `IAdapter`
+**Corresponding interface**: `IAdapter` in `src/adapter-layer.ts`
 
 ```typescript
-// 既存インターフェース（変更なし）
+// Existing interface (unchanged)
 interface IAdapter {
   execute(task: AgentTask): Promise<AgentResult>;
   readonly adapterType: string;
@@ -63,21 +63,21 @@ interface IAdapter {
 }
 ```
 
-**ライフサイクル**:
-1. プラグインロード時に `AdapterRegistry` へ自動登録
-2. タスク生成時に `AdapterRegistry` から能力マッチングで選択
-3. `TaskLifecycle.execute()` から呼び出される
+**Lifecycle**:
+1. Automatically registered into `AdapterRegistry` when plugin loads
+2. Selected by capability matching from `AdapterRegistry` at task generation time
+3. Called from `TaskLifecycle.execute()`
 
-**プラグイン例**: GitHub Issue Adapter, Jira Adapter, Linear Adapter, Slack App Adapter, カスタムCLIエージェント
+**Plugin examples**: GitHub Issue Adapter, Jira Adapter, Linear Adapter, Slack App Adapter, custom CLI agents
 
-### 2.2 data_sourceプラグイン（IDataSourceAdapter実装）
+### 2.2 data_source plugins (IDataSourceAdapter implementation)
 
-**役割**: 観測データの取得源。ObservationEngineが状態ベクトルを観測するために使う。
+**Role**: Sources for observation data. Used by ObservationEngine to observe the state vector.
 
-**対応インターフェース**: `src/data-source-adapter.ts` の `IDataSourceAdapter`
+**Corresponding interface**: `IDataSourceAdapter` in `src/data-source-adapter.ts`
 
 ```typescript
-// 既存インターフェース（変更なし）
+// Existing interface (unchanged)
 interface IDataSourceAdapter {
   readonly sourceId: string;
   readonly sourceType: DataSourceType;
@@ -90,19 +90,19 @@ interface IDataSourceAdapter {
 }
 ```
 
-**ライフサイクル**:
-1. プラグインロード時に `DataSourceRegistry` へ自動登録
-2. `ObservationEngine.findDataSourceForDimension()` が次元名と能力のマッチングで選択
-3. 観測ループの Layer 1（機械的観測）で呼び出される
-4. 結果は `confidence_tier: "mechanical"` として扱われる（最高信頼度）
+**Lifecycle**:
+1. Automatically registered into `DataSourceRegistry` when plugin loads
+2. `ObservationEngine.findDataSourceForDimension()` selects based on dimension name and capability matching
+3. Called in Layer 1 (mechanical observation) of the observation loop
+4. Results are treated as `confidence_tier: "mechanical"` (highest trust)
 
-**プラグイン例**: Jira Data Source, GitHub Data Source, Datadog Metrics, PostgreSQL Data Source, Slack Channel Monitor
+**Plugin examples**: Jira Data Source, GitHub Data Source, Datadog Metrics, PostgreSQL Data Source, Slack Channel Monitor
 
-### 2.3 notifierプラグイン（INotifier実装・新規）
+### 2.3 notifier plugins (INotifier implementation — new)
 
-**役割**: イベント通知の送信先。Conatusが特定のイベントを検知した際に通知を送る。
+**Role**: Notification destinations. Sends notifications when Conatus detects specific events.
 
-**対応インターフェース**: 新規定義（`src/types/plugin.ts` に追加）
+**Corresponding interface**: New definition (added to `src/types/plugin.ts`)
 
 ```typescript
 interface INotifier {
@@ -112,38 +112,38 @@ interface INotifier {
 }
 
 type NotificationEventType =
-  | "goal_progress"      // ゴールの進捗更新
-  | "goal_complete"      // ゴール達成
-  | "task_blocked"       // タスクがブロックされた
-  | "approval_needed"    // 人間の承認が必要
-  | "stall_detected"     // 停滞が検知された
-  | "trust_change";      // 信頼スコアが大きく変化した
+  | "goal_progress"      // goal progress updated
+  | "goal_complete"      // goal achieved
+  | "task_blocked"       // task was blocked
+  | "approval_needed"    // human approval needed
+  | "stall_detected"     // stall detected
+  | "trust_change";      // trust score changed significantly
 
 interface NotificationEvent {
   type: NotificationEventType;
   goal_id: string;
   timestamp: string;        // ISO 8601
-  summary: string;          // 人間が読む1行サマリー
-  details: Record<string, unknown>;  // イベント種別固有のデータ
+  summary: string;          // one-line summary for human reading
+  details: Record<string, unknown>;  // event-type-specific data
   severity: "info" | "warning" | "critical";
 }
 ```
 
-**ライフサイクル**:
-1. プラグインロード時に `NotifierRegistry`（新規）へ自動登録
-2. `NotificationDispatcher` が `notifier.supports(eventType)` で適切なNotifierを選択
-3. 複数のNotifierが同一イベントを受け取ることがある（例: Slackと Email の同時通知）
-4. Do Not Disturb・レート制限は NotificationDispatcher 側で一元管理（プラグイン側は持たない）
+**Lifecycle**:
+1. Automatically registered into `NotifierRegistry` (new) when plugin loads
+2. `NotificationDispatcher` selects the appropriate Notifier with `notifier.supports(eventType)`
+3. Multiple Notifiers may receive the same event (e.g., simultaneous Slack and email notifications)
+4. Do Not Disturb and rate limiting are managed centrally in NotificationDispatcher (plugins do not own this logic)
 
-**プラグイン例**: Slack Notifier, Email Notifier, Discord Notifier, PagerDuty Notifier, LINE Notify
+**Plugin examples**: Slack Notifier, Email Notifier, Discord Notifier, PagerDuty Notifier, LINE Notify
 
 ---
 
-## §3 能力記述スキーマ（Plugin Manifest）
+## §3 Capability Declaration Schema (Plugin Manifest)
 
-各プラグインはマニフェストファイル（`plugin.yaml` または `plugin.json`）を同梱する。マニフェストは「このプラグインは何ができるか」をConatusの自律選択エンジンに伝えるための能力宣言だ。
+Each plugin includes a manifest file (`plugin.yaml` or `plugin.json`). The manifest is a capability declaration that tells Conatus's autonomous selection engine "what this plugin can do."
 
-### 3.1 マニフェストの例
+### 3.1 Manifest example
 
 ```yaml
 # ~/.conatus/plugins/jira-source/plugin.yaml
@@ -160,16 +160,16 @@ dimensions:
   - velocity
   - completion_ratio
   - cycle_time
-description: "Jira projectのissue状態とスプリント進捗を観測する"
+description: "Observes issue status and sprint progress in a Jira project"
 config_schema:
   project_key:
     type: string
     required: true
-    description: "Jiraプロジェクトキー（例: PROJ）"
+    description: "Jira project key (e.g., PROJ)"
   base_url:
     type: string
     required: true
-    description: "JiraインスタンスのベースURL"
+    description: "Base URL of the Jira instance"
   auth_type:
     type: string
     enum: ["api_token", "oauth2"]
@@ -193,23 +193,23 @@ supported_events:
   - approval_needed
   - stall_detected
   - task_blocked
-description: "ConatusのイベントをSlackチャンネルに通知する"
+description: "Sends Conatus events to a Slack channel"
 config_schema:
   channel:
     type: string
     required: true
-    description: "通知先Slackチャンネル（例: #conatus-alerts）"
+    description: "Target Slack channel (e.g., #conatus-alerts)"
   mention_on_critical:
     type: boolean
     default: true
-    description: "criticalイベントでメンションを付けるか"
+    description: "Whether to add a mention for critical events"
 dependencies:
   - "@slack/web-api@^6.0.0"
 entry_point: "dist/index.js"
 min_conatus_version: "1.0.0"
 ```
 
-### 3.2 マニフェストのZodスキーマ定義
+### 3.2 Manifest Zod schema definition
 
 ```typescript
 // src/types/plugin.ts
@@ -225,32 +225,32 @@ const ConfigFieldSchema = z.object({
 });
 
 export const PluginManifestSchema = z.object({
-  name: z.string().regex(/^[a-z0-9-]+$/, "プラグイン名は小文字英数字とハイフンのみ"),
+  name: z.string().regex(/^[a-z0-9-]+$/, "Plugin name must contain only lowercase alphanumerics and hyphens"),
   version: z.string().regex(/^\d+\.\d+\.\d+$/),
   type: z.enum(["adapter", "data_source", "notifier"]),
 
-  // 能力宣言（CapabilityDetectorが参照する）
+  // Capability declarations (referenced by CapabilityDetector)
   capabilities: z.array(z.string()).min(1),
 
-  // data_sourceのみ: 観測可能な次元名リスト
+  // data_source only: list of observable dimension names
   dimensions: z.array(z.string()).optional(),
 
-  // notifierのみ: サポートするイベント種別
+  // notifier only: supported event types
   supported_events: z.array(z.string()).optional(),
 
   description: z.string(),
   config_schema: z.record(ConfigFieldSchema).default({}),
 
-  // npm依存パッケージ
+  // npm package dependencies
   dependencies: z.array(z.string()).default([]),
 
-  // プラグインのエントリポイント（plugin directoryからの相対パス）
+  // Plugin entry point (relative path from plugin directory)
   entry_point: z.string().default("dist/index.js"),
 
-  // 必要なConatusのバージョン（semver range）
+  // Required Conatus version (semver range)
   min_conatus_version: z.string().optional(),
 
-  // 宣言するリソースアクセス（セキュリティ審査用）
+  // Declared resource access (for security review)
   permissions: z.object({
     network: z.boolean().default(false),
     file_read: z.boolean().default(false),
@@ -261,14 +261,14 @@ export const PluginManifestSchema = z.object({
 
 export type PluginManifest = z.infer<typeof PluginManifestSchema>;
 
-// プラグインの実行時状態
+// Plugin runtime state
 export const PluginStateSchema = z.object({
   name: z.string(),
   manifest: PluginManifestSchema,
   status: z.enum(["loaded", "error", "disabled"]),
   error_message: z.string().optional(),
   loaded_at: z.string(),               // ISO 8601
-  // 信頼スコア（trust-and-safety.md §2 と同じ非対称設計）
+  // Trust score (asymmetric design as in trust-and-safety.md §2)
   trust_score: z.number().int().min(-100).max(100).default(0),
   usage_count: z.number().int().default(0),
   success_count: z.number().int().default(0),
@@ -280,21 +280,21 @@ export type PluginState = z.infer<typeof PluginStateSchema>;
 
 ---
 
-## §4 プラグインローダー
+## §4 Plugin Loader
 
-`PluginLoader`（`src/plugin-loader.ts`）はプラグインの発見・読み込み・登録・検証を担う。
+`PluginLoader` (`src/plugin-loader.ts`) is responsible for plugin discovery, loading, registration, and validation.
 
-### 4.1 ディスカバリー（Discovery）
+### 4.1 Discovery
 
-プラグインは `~/.conatus/plugins/` 以下のサブディレクトリとして配置する。
+Plugins are placed as subdirectories under `~/.conatus/plugins/`.
 
 ```
 ~/.conatus/plugins/
 ├── jira-source/
-│   ├── plugin.yaml        # マニフェスト（必須）
+│   ├── plugin.yaml        # manifest (required)
 │   ├── dist/
-│   │   └── index.js       # エントリポイント
-│   └── config.json        # ユーザー設定（optional）
+│   │   └── index.js       # entry point
+│   └── config.json        # user config (optional)
 ├── slack-notifier/
 │   ├── plugin.yaml
 │   ├── dist/
@@ -306,9 +306,9 @@ export type PluginState = z.infer<typeof PluginStateSchema>;
         └── index.js
 ```
 
-ディスカバリーは起動時に1回実行される。`~/.conatus/plugins/` 内の各サブディレクトリを走査し、`plugin.yaml` または `plugin.json` が存在するものをプラグイン候補とみなす。
+Discovery runs once at startup. Each subdirectory under `~/.conatus/plugins/` is scanned, and those containing `plugin.yaml` or `plugin.json` are treated as plugin candidates.
 
-### 4.2 読み込み（Loading）
+### 4.2 Loading
 
 ```typescript
 class PluginLoader {
@@ -317,8 +317,8 @@ class PluginLoader {
     const results = await Promise.allSettled(
       pluginDirs.map((dir) => this.loadOne(dir))
     );
-    // 失敗したプラグインはエラーログを出力してスキップ
-    // Conatus本体のクラッシュは引き起こさない
+    // Failed plugins emit an error log and are skipped
+    // They do not crash the Conatus process
     return results.map((r, i) =>
       r.status === "fulfilled"
         ? r.value
@@ -327,17 +327,17 @@ class PluginLoader {
   }
 
   private async loadOne(pluginDir: string): Promise<PluginState> {
-    // 1. マニフェスト読み込み・スキーマ検証
+    // 1. Load manifest and validate against schema
     const manifest = await this.loadManifest(pluginDir);
 
-    // 2. エントリポイントを dynamic import
+    // 2. Dynamic import of entry point
     const entryPath = path.join(pluginDir, manifest.entry_point);
     const module = await import(entryPath);
 
-    // 3. インターフェース準拠チェック
+    // 3. Interface compliance check
     this.validateInterface(manifest.type, module.default);
 
-    // 4. 対応するRegistryへ登録
+    // 4. Register with the appropriate Registry
     await this.registerPlugin(manifest, module.default, pluginDir);
 
     return this.buildSuccessState(manifest);
@@ -345,23 +345,23 @@ class PluginLoader {
 }
 ```
 
-### 4.3 登録（Registration）
+### 4.3 Registration
 
-プラグイン種別に応じて対応するRegistryへ自動登録する。
+Automatically registers with the appropriate Registry based on plugin type.
 
-| プラグイン種別 | 登録先 | 登録メソッド |
-|--------------|--------|------------|
+| Plugin type | Registry | Registration method |
+|------------|---------|-------------------|
 | `adapter` | `AdapterRegistry` | `registry.register(adapter)` |
 | `data_source` | `DataSourceRegistry` | `registry.register(adapter)` |
-| `notifier` | `NotifierRegistry`（新規） | `registry.register(name, notifier)` |
+| `notifier` | `NotifierRegistry` (new) | `registry.register(name, notifier)` |
 
-### 4.4 検証（Validation）
+### 4.4 Validation
 
-プラグインロード時に2種類の検証を行う。
+Two types of validation are performed when loading a plugin.
 
-**マニフェスト検証**: ZodスキーマでPluginManifestを検証する。必須フィールドの欠落・型不一致・バージョン形式エラーを検出する。
+**Manifest validation**: Validates PluginManifest against the Zod schema. Detects missing required fields, type mismatches, and version format errors.
 
-**インターフェース準拠チェック**: `module.default` が必要なメソッドを持つかを確認する。
+**Interface compliance check**: Confirms that `module.default` has the required methods.
 
 ```typescript
 function validateInterface(type: PluginType, impl: unknown): void {
@@ -372,41 +372,41 @@ function validateInterface(type: PluginType, impl: unknown): void {
   };
   for (const method of requiredMethods[type]) {
     if (!(method in (impl as object))) {
-      throw new Error(`プラグインに必須メソッド "${method}" がありません`);
+      throw new Error(`Plugin is missing required method "${method}"`);
     }
   }
 }
 ```
 
-### 4.5 エラーハンドリング
+### 4.5 Error handling
 
-プラグインのロード失敗はConatus本体をクラッシュさせない。
+Plugin load failures do not crash the Conatus process.
 
 ```
-プラグインロード失敗のケース:
-  - plugin.yamlが存在しない / 解析エラー → スキップ、警告ログ
-  - entry_point ファイルが存在しない → スキップ、警告ログ
-  - マニフェスト検証エラー → スキップ、エラーログ（内容付き）
-  - インターフェース準拠違反 → スキップ、エラーログ（欠落メソッド名付き）
-  - dynamic import エラー（構文エラー等） → スキップ、エラーログ
+Plugin load failure cases:
+  - plugin.yaml not found or parse error → skip, warning log
+  - entry_point file not found → skip, warning log
+  - Manifest validation error → skip, error log (with details)
+  - Interface compliance violation → skip, error log (with missing method names)
+  - dynamic import error (syntax error, etc.) → skip, error log
 
-Conatus起動時の動作:
-  - 失敗したプラグインの一覧を起動ログに出力
-  - 成功したプラグインのみ有効化して起動を続行
-  - `conatus plugin list` で各プラグインの状態を確認可能
+Conatus startup behavior:
+  - Output list of failed plugins in startup log
+  - Enable only successfully loaded plugins and continue startup
+  - Use `conatus plugin list` to check the status of each plugin
 ```
 
 ---
 
-## §5 Conatusによるプラグイン自律選択（3フェーズ）
+## §5 Conatus Autonomous Plugin Selection (3 Phases)
 
-Conatusがプラグインを自律的に活用する能力は、3つのフェーズで段階的に強化される。
+Conatus's ability to autonomously use plugins is strengthened incrementally across three phases.
 
-### Phase 1 — 手動設定（M9で実装）
+### Phase 1 — Manual configuration (implemented in M9)
 
-ゴール定義の中でプラグインを明示的に指定する。Conatusはその指定に従うだけで、自律的な選択は行わない。
+Plugins are explicitly specified within the goal definition. Conatus simply follows the specification and performs no autonomous selection.
 
-**ゴール定義での指定例**:
+**Example specification in goal definition**:
 
 ```json
 {
@@ -422,55 +422,55 @@ Conatusがプラグインを自律的に活用する能力は、3つのフェー
 }
 ```
 
-**動作**:
-- `plugin_config.data_sources` に指定されたプラグインを `DataSourceRegistry` 経由で観測に使用
-- `plugin_config.adapters` に指定されたプラグインをタスク実行先として使用
-- `plugin_config.notifiers` に指定されたプラグインに通知を送る
+**Behavior**:
+- Plugins specified in `plugin_config.data_sources` are used for observation via `DataSourceRegistry`
+- Plugins specified in `plugin_config.adapters` are used as task execution targets
+- Plugins specified in `plugin_config.notifiers` receive notifications
 
-Phase 1の自律性はゼロだ。「どのプラグインを使うか」はすべてユーザーが決める。ただし「プラグインをいつ呼ぶか」はConatusがコアループの中で判断する。
+Phase 1 has zero autonomy. "Which plugins to use" is entirely determined by the user. However, "when to call plugins" is decided by Conatus within the core loop.
 
-### Phase 2 — 能力自動マッチング（M10で実装）
+### Phase 2 — Capability auto-matching (implemented in M10)
 
-ゴール定義にプラグインが指定されていない場合、`CapabilityDetector` がプラグインマニフェストを参照して自動的に候補を選択する。
+When no plugins are specified in a goal definition, `CapabilityDetector` automatically selects candidates by referencing plugin manifests.
 
-**マッチングロジック**:
+**Matching logic**:
 
 ```
-1. ゴールの次元名リストを取得
-   例: ["open_count", "velocity", "cycle_time"]
+1. Get the list of dimension names from the goal
+   Example: ["open_count", "velocity", "cycle_time"]
 
-2. DataSourceRegistryに登録済みのプラグインマニフェストを走査
-   - マニフェストの dimensions[] と次元名を照合
-   - マッチした次元の割合でスコアを計算（例: 3/3 = 1.0）
+2. Scan plugin manifests registered in DataSourceRegistry
+   - Match manifest's dimensions[] against dimension names
+   - Calculate score by the proportion of matched dimensions (e.g., 3/3 = 1.0)
 
-3. スコア閾値（0.5）以上のプラグインを候補として選定
+3. Select plugins with score >= threshold (0.5) as candidates
 
-4. LLMによる適合性確認（オプション）:
-   プロンプト: "ゴール「{goal description}」の次元「{dim}」を
-               観測するのにプラグイン「{plugin name}: {plugin description}」
-               は適切か？理由とともに yes/no で答えてください"
+4. LLM suitability confirmation (optional):
+   Prompt: "Is the plugin '{plugin name}: {plugin description}'
+            appropriate for observing the dimension '{dim}'
+            of the goal '{goal description}'? Answer yes/no with reasoning."
 
-5. 候補プラグインをユーザーに提案（自動実行するが通知する）
-   または trust_score が Phase 3 の基準を満たす場合は自動選択
+5. Suggest candidate plugins to user (run automatically but with notification)
+   Or auto-select if trust_score meets the Phase 3 criteria
 ```
 
-`ObservationEngine.findDataSourceForDimension()` は Phase 2 でプラグインの能力マッチングを加味するように拡張される。
+`ObservationEngine.findDataSourceForDimension()` is extended in Phase 2 to account for plugin capability matching.
 
 ```typescript
-// 拡張後のfindDataSourceForDimension（概念）
+// Extended findDataSourceForDimension (conceptual)
 async findDataSourceForDimension(dimensionName: string): Promise<IDataSourceAdapter | null> {
-  // 既存: 明示的に設定されたデータソースを先に検索
+  // Existing: search explicitly configured data sources first
   const explicit = this.registry.findByDimension(dimensionName);
   if (explicit) return explicit;
 
-  // Phase 2拡張: プラグインマニフェストの dimensions[] で検索
+  // Phase 2 extension: search by plugin manifest's dimensions[]
   const pluginMatch = this.pluginRegistry.findByDimension(dimensionName);
   if (pluginMatch) {
-    // 信頼スコアが十分高い場合のみ自動選択
+    // Auto-select only if trust score is high enough
     if (pluginMatch.trust_score >= PLUGIN_AUTO_SELECT_THRESHOLD) {
       return pluginMatch.adapter;
     }
-    // 閾値未満の場合はユーザーに提案してから使用
+    // Below threshold: notify user first, then use
     await this.notifyPluginSuggestion(pluginMatch, dimensionName);
     return pluginMatch.adapter;
   }
@@ -479,69 +479,69 @@ async findDataSourceForDimension(dimensionName: string): Promise<IDataSourceAdap
 }
 ```
 
-### Phase 3 — 信頼ベース学習選択（M11で実装）
+### Phase 3 — Trust-based learning selection (implemented in M11)
 
-プラグインの使用履歴に基づく信頼スコアを用いて、より賢い自律選択を行う。
+Use trust scores based on plugin usage history to make smarter autonomous selections.
 
-**信頼スコア設計**
+**Trust score design**
 
-`trust-and-safety.md` §2 のTrustManagerと同じ非対称設計を採用する。
+Adopts the same asymmetric design as TrustManager in `trust-and-safety.md` §2.
 
 ```
-初期値: 0（低トラスト側）
-成功時: +Δs = +3（成功報酬は小さく）
-失敗時: -Δf = -10（失敗ペナルティは大きく）
-範囲: [-100, +100]
-自動選択閾値: +20以上（7回連続成功で到達）
+Initial value: 0 (low-trust side)
+On success: +Δs = +3 (small success reward)
+On failure: -Δf = -10 (large failure penalty)
+Range: [-100, +100]
+Auto-selection threshold: +20 or above (reached after 7 consecutive successes)
 ```
 
-非対称性の理由: 信頼性の低いプラグインが観測データを汚染すると、ギャップ計算の精度が下がり、誤ったタスクが生成される。観測品質の毀損は連鎖的な影響を持つため、失敗ペナルティを重くする。
+Rationale for asymmetry: If an unreliable plugin contaminates observation data, gap calculation accuracy drops and incorrect tasks are generated. Damage to observation quality has cascading effects, so failure penalties are heavy.
 
-**ゴール種別ごとの信頼管理**
+**Per-goal-domain trust management**
 
-プラグインの信頼スコアはゴールドメインごとに管理する。「コードレビュー系ゴール」でうまく動いた実績が「マーケティング系ゴール」の信頼に転用されることを防ぐ。
+Plugin trust scores are managed per goal domain. This prevents a track record in "code review goals" from carrying over to trust in "marketing goals."
 
 ```
 plugin: jira-source
   trust_by_domain:
-    software_development: +24   # 8回成功、0回失敗
-    project_management: +12     # 4回成功、0回失敗
-    marketing: 0                # 使用実績なし
+    software_development: +24   # 8 successes, 0 failures
+    project_management: +12     # 4 successes, 0 failures
+    marketing: 0                # no usage history
 ```
 
-**クロスゴール知識共有**
+**Cross-goal knowledge sharing**
 
-`KnowledgeManager` との統合により、プラグインの有効性を学習・共有する。
-
-```
-ゴールAでjira-sourceが "open_count" 次元の観測に成功
-  → KnowledgeManagerが記録: "jira-sourceはopen_count観測に有効（ゴールA実績）"
-  → ゴールBで同じ次元を観測する際、jira-sourceを優先候補として推薦
-```
-
-**優先選択のアルゴリズム**
-
-同じ次元を観測できる複数のプラグインが候補の場合、以下の優先順位で選択する。
+Integration with `KnowledgeManager` allows plugin effectiveness to be learned and shared.
 
 ```
-1. 明示設定（goal_config.plugin_config）が最優先
-2. 同一ドメインの trust_score が最も高いプラグイン
-3. KnowledgeManager に類似ゴールでの有効性記録があるプラグイン
-4. trust_score = 0 の新規プラグイン（同点の場合はマニフェストの優先度順）
+jira-source successfully observes the "open_count" dimension in goal A
+  → KnowledgeManager records: "jira-source is effective for open_count observation (goal A track record)"
+  → When goal B observes the same dimension, jira-source is recommended as a priority candidate
 ```
 
-**新規プラグインの扱い**
+**Priority selection algorithm**
 
-新たに追加されたプラグインは trust_score = 0 からスタートする。Phase 3 の自動選択閾値（+20）には達していないため、初回は必ずユーザーに通知してから使用する。実績が積み上がり自動選択閾値を超えると、通知なしに自律選択される。
+When multiple plugins can observe the same dimension, select using the following priority order:
+
+```
+1. Explicit configuration (goal_config.plugin_config) takes top priority
+2. Plugin with the highest trust_score in the same domain
+3. Plugin with an effectiveness record in similar goals in KnowledgeManager
+4. New plugins with trust_score = 0 (tie-broken by manifest priority order)
+```
+
+**Handling new plugins**
+
+Newly added plugins start at trust_score = 0. Since they have not reached the Phase 3 auto-selection threshold (+20), the user is always notified before first use. Once track record accumulates and the threshold is exceeded, autonomous selection occurs without notification.
 
 ---
 
-## §6 INotifierインターフェースとNotifierRegistry
+## §6 INotifier Interface and NotifierRegistry
 
-### 6.1 インターフェース定義
+### 6.1 Interface definition
 
 ```typescript
-// src/types/plugin.ts に追加
+// Added to src/types/plugin.ts
 
 interface INotifier {
   name: string;
@@ -553,21 +553,21 @@ interface NotificationEvent {
   type: NotificationEventType;
   goal_id: string;
   timestamp: string;           // ISO 8601
-  summary: string;             // 人間が読む1行サマリー（Notifierが整形に使う）
+  summary: string;             // one-line summary for human reading (used by Notifier for formatting)
   details: Record<string, unknown>;
   severity: "info" | "warning" | "critical";
 }
 
 type NotificationEventType =
-  | "goal_progress"      // ゴールの進捗が更新された
-  | "goal_complete"      // ゴールが達成された
-  | "task_blocked"       // タスクがブロックされた（エスカレーション）
-  | "approval_needed"    // trust-and-safety.md §4 の承認要求
-  | "stall_detected"     // stall-detection.md の停滞検知
-  | "trust_change";      // プラグインまたはConatus本体の信頼スコアが大きく変化
+  | "goal_progress"      // goal progress updated
+  | "goal_complete"      // goal achieved
+  | "task_blocked"       // task was blocked (escalation)
+  | "approval_needed"    // approval request from trust-and-safety.md §4
+  | "stall_detected"     // stall detection from stall-detection.md
+  | "trust_change";      // trust score of plugin or Conatus itself changed significantly
 ```
 
-### 6.2 NotifierRegistry（新規）
+### 6.2 NotifierRegistry (new)
 
 ```typescript
 // src/notifier-registry.ts
@@ -587,184 +587,184 @@ class NotifierRegistry {
 }
 ```
 
-### 6.3 NotificationDispatcherとの統合
+### 6.3 Integration with NotificationDispatcher
 
-`NotificationDispatcher`（既存モジュール）は NotifierRegistry を使ってプラグインへのルーティングを行う。
+`NotificationDispatcher` (existing module) uses NotifierRegistry for routing to plugins.
 
-**重要**: Do Not Disturb・レート制限・重複抑制のロジックは `NotificationDispatcher` 側で一元管理する。Notifierプラグインはこれらのロジックを持たない。プラグインは「送信する」だけを担い、「送るべきか」の判断はDispatcher側が行う。
+**Important**: Do Not Disturb, rate limiting, and deduplication logic are managed centrally in `NotificationDispatcher`. Notifier plugins do not own this logic. Plugins are responsible only for "sending" — the decision of "whether to send" is made on the Dispatcher side.
 
 ```
 NotificationDispatcher.dispatch(event)
   ↓
-  DoNotDisturbチェック（コア側）
+  Do Not Disturb check (core side)
   ↓
-  レート制限チェック（コア側）
+  Rate limit check (core side)
   ↓
   NotifierRegistry.findForEvent(event.type)
   ↓
-  各INotifier.notify(event) を並列呼び出し
-  （いずれかが失敗しても他のNotifierへの通知は続行）
+  Call each INotifier.notify(event) in parallel
+  (if one fails, notification to other Notifiers continues)
 ```
 
 ---
 
-## §7 セキュリティと制約
+## §7 Security and Constraints
 
-### 7.1 実行モデル（MVP）
+### 7.1 Execution model (MVP)
 
-MVPではプラグインはConatus本体と同一プロセスで動作する。サンドボックスは設けない。この決定の根拠と制約は以下だ。
+In MVP, plugins run in the same process as Conatus. No sandbox is applied. The rationale and constraints for this decision are as follows:
 
-| 事項 | 内容 |
-|------|------|
-| 実行モデル | 同一プロセス（Node.js dynamic import） |
-| サンドボックス | なし（MVP） |
-| 信頼前提 | ユーザーが手動でインストールしたプラグインのみ対象 |
-| 将来 | Phase 2でVM isolateまたはWorker Threadsを検討 |
+| Item | Details |
+|------|---------|
+| Execution model | Same process (Node.js dynamic import) |
+| Sandbox | None (MVP) |
+| Trust assumption | Only targets plugins manually installed by the user |
+| Future | VM isolate or Worker Threads considered in Phase 2 |
 
-同一プロセス実行の制約として、悪意あるプラグインはConatusの内部状態に直接アクセスできる。これを許容できるのは「ユーザーが自ら `~/.conatus/plugins/` に配置した」という明示的な信頼行為があるためだ。
+The constraint of same-process execution is that a malicious plugin could directly access Conatus's internal state. This is acceptable because the user explicitly placed the plugin in `~/.conatus/plugins/` — an act of explicit trust.
 
-### 7.2 EthicsGateとの連携
+### 7.2 Integration with EthicsGate
 
-プラグインが生成するタスクも `EthicsGate` の審査対象だ。プラグイン由来のタスクが倫理ゲートを通過しない場合、タスクは拒否され、プラグインの信頼スコアを -10 する。
+Tasks generated by plugins are also subject to `EthicsGate` review. If a plugin-originated task does not pass the ethics gate, the task is rejected and the plugin's trust score is decremented by -10.
 
 ```
-プラグインadapterが生成したタスク
+Task generated by plugin adapter
   ↓
-EthicsGate.check(task)  // goal-ethics.md参照
+EthicsGate.check(task)  // see goal-ethics.md
   ↓
-  拒否 → タスク廃棄 + プラグインのtrust_score -= 10
-  承認 → TaskLifecycleに渡す
+  Rejected → discard task + plugin trust_score -= 10
+  Approved → pass to TaskLifecycle
 ```
 
-### 7.3 秘密情報の管理
+### 7.3 Secret management
 
-プラグインの認証情報（APIキー等）はマニフェストに含めない。専用の設定ファイルに分離する。
+Plugin authentication credentials (API keys, etc.) are not included in the manifest. They are separated into a dedicated config file.
 
 ```
-~/.conatus/plugins/<plugin-name>/config.json   # ユーザー設定（APIキー等を含む）
+~/.conatus/plugins/<plugin-name>/config.json   # user config (may contain API keys, etc.)
 ```
 
-このファイルのパーミッションは `600`（オーナーのみ読み書き可）を推奨する。プラグインは起動時にこのファイルを読み込み、メモリ上でのみ保持する。
+The recommended permission for this file is `600` (owner read/write only). Plugins read this file at startup and retain it in memory only.
 
-**マニフェストの `config_schema`** はどのフィールドが必要かを宣言するだけで、値は持たない。
+**The manifest's `config_schema`** only declares which fields are required — it does not hold values.
 
-### 7.4 権限宣言
+### 7.4 Permission declaration
 
-マニフェストの `permissions` フィールドでプラグインが要求するリソースアクセスを事前宣言する。
+The manifest's `permissions` field pre-declares the resource access the plugin requires.
 
 ```yaml
 permissions:
-  network: true      # 外部ネットワークアクセスが必要（Jira APIへのHTTP等）
-  file_read: false   # ローカルファイル読み取り不要
-  file_write: false  # ローカルファイル書き込み不要
-  shell: false       # シェルコマンド実行不要
+  network: true      # needs external network access (HTTP to Jira API, etc.)
+  file_read: false   # no local file reading needed
+  file_write: false  # no local file writing needed
+  shell: false       # no shell command execution needed
 ```
 
-MVPでは権限宣言は**情報提供目的**であり、実行時の強制はしない。将来フェーズで権限エンフォースメントを追加する際の前提情報として機能する。`shell: true` を宣言するプラグインは `conatus plugin install` 時に明示的な警告を表示する。
+In MVP, permission declarations are **informational only** and are not enforced at runtime. They serve as prerequisite information for adding permission enforcement in future phases. Plugins declaring `shell: true` display an explicit warning during `conatus plugin install`.
 
 ---
 
-## §8 既存モジュールとの接続
+## §8 Connection to Existing Modules
 
-各既存モジュールがプラグインアーキテクチャとどのように接続するかを整理する。
+Clarifying how each existing module connects to the plugin architecture.
 
-| モジュール | 変更内容 | 接続方法 |
-|-----------|---------|---------|
-| `CoreLoop` | 変更なし | 登録済みアダプター・データソースを通じて間接的に使用 |
-| `ObservationEngine` | `findDataSourceForDimension()` にプラグインマッチングを追加 | `DataSourceRegistry` 経由（Phase 2で拡張） |
-| `TaskLifecycle` | 変更なし | `AdapterRegistry` 経由（プラグインは自動登録済み） |
-| `NotificationDispatcher` | `NotifierRegistry` からのルーティングを追加 | `NotifierRegistry.findForEvent()` を呼び出す |
-| `CapabilityDetector` | `detectGoalCapabilityGap()` でプラグインマニフェストを参照 | `PluginLoader` からマニフェスト一覧を受け取る（Phase 2） |
-| `TrustManager` | プラグイン用の trust_score 追跡を追加 | `PluginState.trust_score` を更新（Phase 3） |
-| `KnowledgeManager` | プラグイン有効性の記録・共有 | `onPluginSuccess/Failure()` フックを受け取る（Phase 3） |
+| Module | Changes | Connection method |
+|--------|---------|------------------|
+| `CoreLoop` | No change | Used indirectly via registered adapters and data sources |
+| `ObservationEngine` | Add plugin matching to `findDataSourceForDimension()` | Via `DataSourceRegistry` (extended in Phase 2) |
+| `TaskLifecycle` | No change | Via `AdapterRegistry` (plugins auto-registered) |
+| `NotificationDispatcher` | Add routing from `NotifierRegistry` | Calls `NotifierRegistry.findForEvent()` |
+| `CapabilityDetector` | Reference plugin manifests in `detectGoalCapabilityGap()` | Receives manifest list from `PluginLoader` (Phase 2) |
+| `TrustManager` | Add plugin trust_score tracking | Updates `PluginState.trust_score` (Phase 3) |
+| `KnowledgeManager` | Record and share plugin effectiveness | Receives `onPluginSuccess/Failure()` hooks (Phase 3) |
 
-### CoreLoopからの全体像
+### Full picture from CoreLoop
 
 ```
-CoreLoop（変更なし）
+CoreLoop (unchanged)
     │
     ├── ObservationEngine
-    │     └── DataSourceRegistry（プラグインdata_sourceを含む）
-    │           → jira-source（プラグイン）
-    │           → github-datasource（プラグイン）
-    │           → FileDataSourceAdapter（コア同梱）
+    │     └── DataSourceRegistry (includes plugin data_sources)
+    │           → jira-source (plugin)
+    │           → github-datasource (plugin)
+    │           → FileDataSourceAdapter (bundled with core)
     │
     ├── TaskLifecycle
-    │     └── AdapterRegistry（プラグインadapterを含む）
-    │           → linear-adapter（プラグイン）
-    │           → ClaudeCodeCLIAdapter（コア同梱）
+    │     └── AdapterRegistry (includes plugin adapters)
+    │           → linear-adapter (plugin)
+    │           → ClaudeCodeCLIAdapter (bundled with core)
     │
     └── NotificationDispatcher
-          └── NotifierRegistry（プラグインnotifierを含む）
-                → slack-notifier（プラグイン）
-                → email-notifier（プラグイン）
+          └── NotifierRegistry (includes plugin notifiers)
+                → slack-notifier (plugin)
+                → email-notifier (plugin)
 ```
 
 ---
 
-## §9 実装ロードマップ
+## §9 Implementation Roadmap
 
-### M9: プラグイン基盤（Phase 1）
+### M9: Plugin infrastructure (Phase 1)
 
-**スコープ**:
-- `PluginManifest` Zodスキーマ（`src/types/plugin.ts`）
-- `INotifier` インターフェース・`NotificationEvent` 型
-- `NotifierRegistry`（`src/notifier-registry.ts`）
-- `PluginLoader`（`src/plugin-loader.ts`）— ディスカバリー・ロード・検証・登録
-- `NotificationDispatcher` への `NotifierRegistry` 統合
+**Scope**:
+- `PluginManifest` Zod schema (`src/types/plugin.ts`)
+- `INotifier` interface and `NotificationEvent` type
+- `NotifierRegistry` (`src/notifier-registry.ts`)
+- `PluginLoader` (`src/plugin-loader.ts`) — discovery, loading, validation, registration
+- `NotifierRegistry` integration into `NotificationDispatcher`
 - CLI: `conatus plugin list`, `conatus plugin install <path>`, `conatus plugin remove <name>`
-- Phase 1のゴール定義での `plugin_config` フィールドサポート
+- Phase 1 `plugin_config` field support in goal definitions
 
-**完了基準**:
-- `~/.conatus/plugins/` に配置されたプラグインが起動時に自動検出・登録される
-- ロード失敗プラグインがConatusのクラッシュを引き起こさない
-- Slack Notifier参照実装が動作する（E2Eテスト）
+**Completion criteria**:
+- Plugins placed in `~/.conatus/plugins/` are auto-detected and registered at startup
+- Failed plugin loads do not crash Conatus
+- Slack Notifier reference implementation works (E2E test)
 
-### M10: 能力自動マッチング（Phase 2）
+### M10: Capability auto-matching (Phase 2)
 
-**スコープ**:
-- `CapabilityDetector.detectGoalCapabilityGap()` のプラグインマニフェスト参照拡張
-- `ObservationEngine.findDataSourceForDimension()` のプラグインマッチング拡張
-- LLMによる適合性確認プロンプト
-- ユーザーへのプラグイン提案通知フォーマット
+**Scope**:
+- Extend `CapabilityDetector.detectGoalCapabilityGap()` to reference plugin manifests
+- Extend `ObservationEngine.findDataSourceForDimension()` with plugin matching
+- LLM suitability confirmation prompt
+- Plugin suggestion notification format for users
 
-**完了基準**:
-- プラグインが未指定のゴールで次元名マッチングによりプラグインが自動候補化される
-- LLM適合性確認の結果がログに記録される
+**Completion criteria**:
+- Plugins are automatically proposed as candidates via dimension name matching for goals without explicit plugin configuration
+- LLM suitability confirmation results are recorded in the log
 
-### M11: 信頼ベース学習選択（Phase 3）
+### M11: Trust-based learning selection (Phase 3)
 
-**スコープ**:
-- `TrustManager` のプラグイン用 `trust_score` 追跡
-- ゴールドメインごとの `trust_by_domain` 管理
-- `KnowledgeManager` とのプラグイン有効性共有統合
-- 優先選択アルゴリズムの実装
-- `conatus plugin list` での信頼スコア表示
+**Scope**:
+- `TrustManager` plugin `trust_score` tracking
+- `trust_by_domain` management per goal domain
+- Integration with `KnowledgeManager` for plugin effectiveness sharing
+- Priority selection algorithm implementation
+- Trust score display in `conatus plugin list`
 
-**完了基準**:
-- プラグインの成功/失敗に応じて trust_score が非対称更新される
-- 高信頼プラグインが同一次元の低信頼プラグインより優先選択される
-- クロスゴール学習でプラグイン推薦が機能する
+**Completion criteria**:
+- Plugin trust_score is asymmetrically updated based on success/failure
+- High-trust plugins are preferred over low-trust plugins for the same dimension
+- Cross-goal learning plugin recommendation works
 
-### 将来フェーズ
+### Future phases
 
-| フェーズ | 内容 |
-|---------|------|
-| プラグインマーケットプレイス | `conatus plugin search <keyword>` でコミュニティプラグインを検索・インストール |
-| バージョン管理 | `min_conatus_version` / `max_conatus_version` の強制、破壊的変更の移行支援 |
-| Worker Thread隔離 | 同一プロセスから分離し、クラッシュ耐性を向上 |
-| プラグイン署名 | コード署名による改ざん検知 |
+| Phase | Details |
+|-------|---------|
+| Plugin marketplace | Search and install community plugins with `conatus plugin search <keyword>` |
+| Version management | Enforce `min_conatus_version` / `max_conatus_version`, migration support for breaking changes |
+| Worker Thread isolation | Isolate from the same process to improve crash resilience |
+| Plugin signing | Tamper detection via code signing |
 
 ---
 
-## 設計原則のまとめ
+## Design Principles Summary
 
-| 原則 | 具体的な設計決定 |
-|------|----------------|
-| Conatusが主体 | プラグインは「呼ばれる」のではなく「Conatusが選択して使う」 |
-| 段階的な自律化 | Phase 1（手動）→ Phase 2（能力マッチング）→ Phase 3（信頼学習） |
-| 既存インターフェースを活かす | IAdapter・IDataSourceAdapterは変更せず、登録経路を追加するだけ |
-| 失敗はConatusを止めない | プラグインロード失敗・実行失敗はエラーログで記録してスキップ |
-| 信頼は非対称 | 失敗ペナルティ > 成功報酬（TrustManagerと同じ設計思想） |
-| 秘密情報の分離 | マニフェストに認証情報を含めない。`config.json` に分離 |
-| コアは薄く | 外部サービス依存はすべてプラグイン。コアは汎用ロジックのみ |
+| Principle | Concrete design decision |
+|-----------|------------------------|
+| Conatus is the active agent | Plugins are not "called" — they are selected and used by Conatus |
+| Incremental autonomy | Phase 1 (manual) → Phase 2 (capability matching) → Phase 3 (trust learning) |
+| Leverage existing interfaces | IAdapter and IDataSourceAdapter are not changed — only the registration path is added |
+| Failures do not stop Conatus | Plugin load failures and execution failures are logged and skipped |
+| Trust is asymmetric | Failure penalty > success reward (same design philosophy as TrustManager) |
+| Separate secrets | Authentication credentials are not included in manifests — separated to `config.json` |
+| Keep the core thin | All external service dependencies belong in plugins. Core contains only generic logic |

@@ -1,209 +1,209 @@
-# レポーティング設計
+# Reporting Design
 
-> Conatusはユーザーに「聞かれる前に報告する」。適切なタイミングで、適切な粒度で、ゴール追求の状況を伝える。
-> この文書はレポーティングの種類、トリガー、内容、配信チャネル、粒度制御を定義する。
-
----
-
-## 1. レポーティングの位置づけ
-
-Conatusはユーザーのゴールを自律的に追い続ける。しかし自律的であることは、黙って動くことではない。vision.md が定義するとおり、「Conatusの方から、適切なタイミングで、適切な粒度で報告する」ことが、自律パートナーとしての本質的な振る舞いだ。
-
-レポーティングはConatusの中核機能であり、オプションではない。ユーザーがConatusを信頼できるかどうかは、透明性にかかっている（`trust-and-safety.md` 8 参照）。信頼は透明性によって支えられ、レポーティングは透明性の実装だ。
-
-### レポーティングと実行境界
-
-レポーティングの生成（内容の判断・構成）はConatusが直接行う。これはConatusの思考プロセスの一部であり、ゴール状態の分析・要約のためのLLM呼び出しに該当する。
-
-レポートの配信（ファイル書き出し、通知送信）は委譲だ（`execution-boundary.md` 3 参照）。Conatusは「何を報告するか」を決め、「どう届けるか」は既存のシステムに委ねる。
+> Conatus reports to the user proactively — without being asked. It delivers the status of goal pursuit at the right time and at the right level of detail.
+> This document defines the types of reports, triggers, content, delivery channels, and verbosity control.
 
 ---
 
-## 2. レポートの3種類
+## 1. The Role of Reporting
 
-レポーティングは3つのカテゴリに分類される。それぞれ異なるトリガー、異なる粒度、異なる緊急度を持つ。
+Conatus autonomously pursues user goals. But being autonomous does not mean operating in silence. As defined in vision.md, "Conatus reports proactively, at the right time, at the right level of detail" — this is the essential behavior of an autonomous partner.
 
-### 2.1 定期レポート（Periodic Report）
+Reporting is a core function of Conatus, not an optional one. Whether the user can trust Conatus depends on transparency (see trust-and-safety.md §8). Trust is built on transparency, and reporting is the implementation of transparency.
 
-**目的**: ゴール追求の全体像を定期的に伝える。ユーザーがConatusの活動を俯瞰するための基盤情報だ。
+### Reporting and the Execution Boundary
 
-**内容**:
+Generating reports (deciding on content and structure) is done directly by Conatus. This is part of Conatus's reasoning process and corresponds to LLM calls for analyzing and summarizing goal state.
 
-| セクション | 含まれる情報 |
-|-----------|-------------|
-| ゴールサマリー | 各ゴールの現在の全体進捗率と前回レポートからの変化量 |
-| 次元別進捗 | 各次元の現在値・閾値・ギャップ・観測信頼度 |
-| 実行サマリー | 期間中に実行されたタスク数、成功/失敗/保留の内訳 |
-| 戦略評価 | 現在の戦略の効果（ギャップ縮小率）、戦略の継続/変更の判断理由 |
-| リスクと懸念 | 停滞傾向のある次元、信頼度が低い観測、期限リスク |
-| 次のアクション | 次の期間でConatusが取り組む予定のタスク群 |
-
-**レポート頻度のデフォルト**:
-
-| レポート種別 | デフォルト頻度 | 調整条件 |
-|------------|-------------|---------|
-| 日次サマリー | 毎日（ユーザー指定の時刻、デフォルト: 09:00） | アクティブなゴールがあるとき |
-| 週次レポート | 毎週月曜（デフォルト: 09:00） | 常時（全ゴール充足中も含む） |
-
-日次サマリーは簡潔さを優先する。週次レポートは詳細な分析と戦略の振り返りを含む。
-
-**生成方法**: レポートの構成にはLLMを使う。観測データ・ギャップ計算結果・タスク実行ログを入力とし、ユーザーにとって読みやすいナラティブを生成する。数値データ自体はコードで集計し、LLMはそれを解釈・要約する役割だ。
-
-### 2.2 即時通知（Immediate Notification）
-
-**目的**: 重要な状態変化をリアルタイムで伝える。ユーザーが知るべきことを遅延なく届ける。
-
-即時通知はレポートではなくアラートだ。簡潔で、アクション指向で、必要最小限の情報を含む。
-
-**即時通知の種類と内容**:
-
-| 通知種別 | トリガー条件 | 含まれる情報 |
-|---------|------------|-------------|
-| 緊急アラート | センサー閾値超過、外部システム障害、ヘルス指標の急変 | 何が起きたか、影響範囲、推奨アクション |
-| 承認要求 | 不可逆アクションの実行前（`trust-and-safety.md` 4 参照） | アクション内容、トラスト/確信度、Conatusの評価、承認ボタン |
-| 停滞エスカレーション | 停滞検知の第3段階（`stall-detection.md` 4 参照） | 停滞の状況、試行済み戦略一覧、可能なオプション |
-| ゴール完了通知 | ゴールの全次元が閾値を超え、完了判断が確定したとき | 達成した状態のサマリー、観測証拠、次に推奨すること |
-| 能力不足エスカレーション | 必要な能力（権限、ツール、データソース）が不足 | 必要なもの、代替案、影響範囲 |
-
-### 2.3 戦略変更通知（Strategy Change Report）
-
-**目的**: Conatusが戦略を変更する際に、その判断根拠をユーザーに伝える。
-
-戦略変更は自律的に行われるが、「なぜ変えたか」の説明はユーザーの信頼に直結する。黙ってピボットしない。
-
-**内容**:
-
-| セクション | 含まれる情報 |
-|-----------|-------------|
-| 変更前の戦略 | 何をしていたか、どの期間実施したか |
-| 変更の理由 | なぜ変えるのか（停滞、効果不足、新情報、機会発見） |
-| 変更後の戦略 | 何をするか、期待される効果 |
-| リスク評価 | 新戦略のリスクと不確実性 |
-| ユーザーへの影響 | 追加の承認やリソースが必要か |
+Delivering reports (writing to files, sending notifications) is delegated (see execution-boundary.md §3). Conatus decides "what to report," and "how to deliver it" is left to existing systems.
 
 ---
 
-## 3. トリガー条件
+## 2. Three Types of Reports
 
-各レポートがいつ生成されるかの判断は、3つのトリガーモデルで構成される。
+Reporting is divided into three categories. Each has different triggers, different granularity, and different urgency.
 
-### 3.1 時刻ベーストリガー（定期レポート用）
+### 2.1 Periodic Report
 
-定期レポートはユーザーが設定した時刻に生成される。`drive-system.md` のスケジュール起動と同じタイミングモデルだ。
+**Purpose**: Regularly convey the overall picture of goal pursuit. This is the foundational information for users to get a bird's-eye view of Conatus's activity.
+
+**Content**:
+
+| Section | Information Included |
+|---------|----------------------|
+| Goal summary | Current overall progress rate for each goal and the change since the last report |
+| Dimension-level progress | Current value, threshold, Gap, and observation confidence for each dimension |
+| Execution summary | Number of tasks executed during the period, breakdown by success/failure/pending |
+| Strategy evaluation | Effectiveness of the current strategy (Gap reduction rate), rationale for continuing or changing strategy |
+| Risks and concerns | Dimensions trending toward stall, low-confidence observations, deadline risks |
+| Next actions | Tasks Conatus plans to work on in the next period |
+
+**Default report frequency**:
+
+| Report Type | Default Frequency | Adjustment Condition |
+|-------------|-------------------|----------------------|
+| Daily summary | Daily (at user-specified time, default: 09:00) | When there are active goals |
+| Weekly report | Every Monday (default: 09:00) | Always (including when all goals are satisfied) |
+
+The daily summary prioritizes brevity. The weekly report includes detailed analysis and strategy retrospective.
+
+**Generation method**: LLM is used to compose the report. Observation data, Gap calculation results, and task execution logs are used as input to generate a narrative that is easy for the user to read. Numeric data itself is aggregated by code; the LLM's role is to interpret and summarize it.
+
+### 2.2 Immediate Notification
+
+**Purpose**: Convey important state changes in real time. Deliver what the user needs to know without delay.
+
+Immediate notifications are alerts, not reports. They are concise, action-oriented, and contain only the minimum necessary information.
+
+**Types and content of immediate notifications**:
+
+| Notification Type | Trigger Condition | Information Included |
+|-------------------|-------------------|----------------------|
+| Urgent alert | Sensor threshold exceeded, external system failure, sudden change in health metric | What happened, scope of impact, recommended action |
+| Approval request | Before executing an irreversible action (see trust-and-safety.md §4) | Action content, trust/confidence levels, Conatus's assessment, approval button |
+| Stall escalation | Stage 3 of stall detection (see stall-detection.md §4) | Description of the stall, list of strategies attempted, available options |
+| Goal completion notification | When all dimensions of a goal exceed their thresholds and completion is confirmed | Summary of the achieved state, observation evidence, recommended next steps |
+| Capability deficit escalation | Required capability (permission, tool, data source) is missing | What is needed, alternatives, scope of impact |
+
+### 2.3 Strategy Change Report
+
+**Purpose**: When Conatus changes strategy, convey the rationale for that decision to the user.
+
+Strategy changes happen autonomously, but "explaining why" is directly tied to user trust. Conatus does not pivot silently.
+
+**Content**:
+
+| Section | Information Included |
+|---------|----------------------|
+| Previous strategy | What was being done, over what period |
+| Reason for change | Why it is being changed (stall, insufficient effect, new information, discovered opportunity) |
+| New strategy | What will be done, expected effect |
+| Risk assessment | Risks and uncertainties of the new strategy |
+| Impact on user | Whether additional approvals or resources are needed |
+
+---
+
+## 3. Trigger Conditions
+
+The decision of when each report is generated is composed of three trigger models.
+
+### 3.1 Time-Based Trigger (for Periodic Reports)
+
+Periodic reports are generated at the time configured by the user. This uses the same timing model as the scheduled activation in `drive-system.md`.
 
 ```
 reporting_schedule: {
   daily_summary: {
     enabled: true,
-    time: "09:00",           // ローカル時刻
+    time: "09:00",           // Local time
     timezone: "Asia/Tokyo",
-    skip_if_no_activity: true  // 活動がなければスキップ
+    skip_if_no_activity: true  // Skip if there was no activity
   },
   weekly_report: {
     enabled: true,
     day: "monday",
     time: "09:00",
     timezone: "Asia/Tokyo",
-    skip_if_no_activity: false  // 活動がなくても生成する
+    skip_if_no_activity: false  // Generate even if there was no activity
   }
 }
 ```
 
-`skip_if_no_activity` フラグにより、全ゴールが待機中で変化がないときの日次サマリーを抑制できる。週次レポートは活動の有無に関わらず生成する。「何もなかった」という報告自体が意味を持つからだ。
+The `skip_if_no_activity` flag allows suppression of the daily summary when all goals are waiting and nothing has changed. The weekly report is generated regardless of activity. "Nothing happened" is itself a meaningful report.
 
-### 3.2 閾値ベーストリガー（即時通知用）
+### 3.2 Threshold-Based Trigger (for Immediate Notifications)
 
-状態の変化が閾値を超えたときに発火する。閾値は通知種別ごとに定義される。
+Fires when a state change exceeds a threshold. Thresholds are defined per notification type.
 
 ```
 notification_thresholds: {
   health_alert: {
-    metric_change_rate: 0.20,  // 前回観測から20%以上の急変
-    absolute_threshold: null   // ゴール定義時に次元ごとに設定
+    metric_change_rate: 0.20,  // 20%+ sudden change from previous observation
+    absolute_threshold: null   // Set per dimension when the goal is defined
   },
   stall_escalation: {
-    stage: 3                   // stall-detection.md 4の第3検知
+    stage: 3                   // 3rd detection in stall-detection.md §4
   },
   goal_completion: {
     all_dimensions_above_threshold: true,
-    confidence_minimum: 0.50   // 全次元の信頼度が0.50以上
+    confidence_minimum: 0.50   // All dimensions have confidence >= 0.50
   }
 }
 ```
 
-### 3.3 イベントベーストリガー（戦略変更通知用）
+### 3.3 Event-Based Trigger (for Strategy Change Reports)
 
-Conatusの内部判断がトリガーとなる。外部からの入力ではなく、コアループ内の戦略選択ステップ（`mechanism.md` 2.3）で戦略変更が決定されたときに発火する。
+Triggered by Conatus's internal decisions. Not by external input, but fired when a strategy change is determined in the strategy selection step of the core loop (`mechanism.md §2.3`).
 
 ```
 strategy_change_trigger: {
-  pivot: true,           // 戦略のピボット時
-  new_hypothesis: true,  // 新しい仮説の追加時
-  strategy_retirement: true,  // 戦略の撤退時
-  resource_reallocation: true  // リソース配分の大幅変更時
+  pivot: true,           // On strategy pivot
+  new_hypothesis: true,  // When a new hypothesis is added
+  strategy_retirement: true,  // When a strategy is retired
+  resource_reallocation: true  // When resource allocation changes significantly
 }
 ```
 
 ---
 
-## 4. コアループとの統合
+## 4. Integration with the Core Loop
 
-レポーティング判断はコアループ（`mechanism.md` 2）の各ステップと以下のように統合される。
+Reporting decisions are integrated with each step of the core loop (`mechanism.md §2`) as follows.
 
 ```
-観測
+Observation
   │
-  ├─ [即時通知判定] 観測結果に急変があるか？
-  │     → Yes: 緊急アラートを生成
-  │
-  ↓
-ギャップ認識
-  │
-  ├─ [完了通知判定] 全次元が閾値を超えたか？
-  │     → Yes: ゴール完了通知を生成
+  ├─ [Immediate notification check] Does the observation result show a sudden change?
+  │     → Yes: Generate urgent alert
   │
   ↓
-戦略選択
+Gap recognition
   │
-  ├─ [戦略変更通知判定] 戦略のピボットが発生したか？
-  │     → Yes: 戦略変更通知を生成
-  │
-  ↓
-タスク具体化
-  │
-  ├─ [承認要求判定] 生成タスクに不可逆アクションが含まれるか？
-  │     → Yes: 承認要求通知を生成
+  ├─ [Completion notification check] Have all dimensions exceeded their thresholds?
+  │     → Yes: Generate goal completion notification
   │
   ↓
-(ループ継続)
+Strategy selection
   │
-  ├─ [定期レポート判定] スケジュールされた報告時刻か？
-  │     → Yes: 定期レポートを生成
+  ├─ [Strategy change notification check] Did a strategy pivot occur?
+  │     → Yes: Generate strategy change report
+  │
+  ↓
+Task materialization
+  │
+  ├─ [Approval request check] Does the generated task contain an irreversible action?
+  │     → Yes: Generate approval request notification
+  │
+  ↓
+(Loop continues)
+  │
+  ├─ [Periodic report check] Is this a scheduled reporting time?
+  │     → Yes: Generate periodic report
 ```
 
-レポーティング判断はループに対して**副作用**として動作する。ループ本体の処理フローを変更しない。レポートの生成はループの各ステップの完了後に非同期で実行される。
+Reporting decisions operate as **side effects** relative to the loop. They do not alter the main processing flow of the loop. Report generation is executed asynchronously after each loop step completes.
 
-### 停滞検知との連携
+### Integration with Stall Detection
 
-停滞検知（`stall-detection.md`）の段階化とレポーティングは以下のように連動する。
+Stall detection (`stall-detection.md`) stages and reporting are integrated as follows:
 
-| 停滞段階 | レポーティング動作 |
-|---------|-----------------|
-| 第1検知 | レポートなし（Conatusが自律対応） |
-| 第2検知 | 次回の定期レポートに停滞状況を含める |
-| 第3検知 | 即時通知（エスカレーション）を生成 |
+| Stall Stage | Reporting Behavior |
+|-------------|-------------------|
+| 1st detection | No report (Conatus handles autonomously) |
+| 2nd detection | Include stall status in the next periodic report |
+| 3rd detection | Generate immediate notification (escalation) |
 
-第1検知・第2検知でユーザーに通知しないのは、一時的な停滞のたびに通知が届くことを防ぐためだ（`stall-detection.md` §6 と同じ設計判断）。
+The reason for not notifying the user at the 1st and 2nd detections is to prevent notifications from arriving every time there is a temporary stall (same design decision as stall-detection.md §6).
 
 ---
 
-## 5. 配信チャネル
+## 5. Delivery Channels
 
-### 5.1 MVP（Phase 1）: ファイル出力 + CLIログ
+### 5.1 MVP (Phase 1): File Output + CLI Log
 
-MVPではインフラ依存のない配信手段を使う。
+The MVP uses delivery methods with no infrastructure dependencies.
 
-**レポートファイル**:
+**Report files**:
 
 ```
 ~/.conatus/
@@ -220,50 +220,50 @@ MVPではインフラ依存のない配信手段を使う。
     └── ...
 ```
 
-- レポートはMarkdown形式で出力する。人間が読めて、gitで管理できる
-- ファイル名はタイムスタンプベース。定期レポートは日付/週番号、即時通知はタイムスタンプ+種別
-- アーカイブは月次で `archive/` に移動する
+- Reports are output in Markdown format. Human-readable and manageable with git
+- File names are timestamp-based. Periodic reports use date/week number; immediate notifications use timestamp + type
+- Archives are moved to `archive/` monthly
 
-**CLIログ**:
+**CLI log**:
 
-`conatus run` 実行時に、未読のレポート・未処理の通知をコンソールに表示する。
+When running `conatus run`, unread reports and unprocessed notifications are displayed in the console.
 
 ```
 $ conatus run
 
-[レポート] 日次サマリー (2026-03-10)
-  ゴール「売上2x」: 進捗 42% → 45% (+3%)
-  ゴール「愛犬の健康」: 進捗 88% (安定)
-  詳細: ~/.conatus/reports/daily/2026-03-10.md
+[Report] Daily Summary (2026-03-10)
+  Goal "Revenue 2x": Progress 42% → 45% (+3%)
+  Goal "Dog health": Progress 88% (stable)
+  Details: ~/.conatus/reports/daily/2026-03-10.md
 
-[通知] 戦略変更 (2026-03-10 14:30)
-  ゴール「売上2x」: 「UI改善」→「サポート強化」にピボット
-  詳細: ~/.conatus/reports/notifications/20260310-143022-strategy-change.md
+[Notification] Strategy Change (2026-03-10 14:30)
+  Goal "Revenue 2x": Pivoted from "UI improvements" → "Support enhancement"
+  Details: ~/.conatus/reports/notifications/20260310-143022-strategy-change.md
 ```
 
-### 5.2 Phase 2: 外部通知チャネル
+### 5.2 Phase 2: External Notification Channels
 
-Phase 2ではプッシュ通知を追加する。ユーザーがConatusを確認しに来なくても、情報が届く。
+Phase 2 adds push notifications. Information reaches the user without them having to check in on Conatus.
 
-| チャネル | 用途 | 設定 |
-|---------|------|------|
-| Slack | 全種類のレポート・通知 | Webhook URL |
-| メール | 定期レポート、緊急アラート | SMTP設定 or メールAPI |
-| Webhook | 外部システム連携 | カスタムURL |
+| Channel | Purpose | Configuration |
+|---------|---------|---------------|
+| Slack | All report and notification types | Webhook URL |
+| Email | Periodic reports, urgent alerts | SMTP settings or email API |
+| Webhook | External system integration | Custom URL |
 
-**チャネル設定スキーマ**:
+**Channel configuration schema**:
 
 ```
 delivery_channels: [
   {
-    type: "file",          // MVP: 常に有効
+    type: "file",          // MVP: always enabled
     path: "~/.conatus/reports/"
   },
   {
     type: "slack",         // Phase 2
     webhook_url: "https://hooks.slack.com/...",
     report_types: ["daily_summary", "immediate_notification"],
-    format: "compact"      // Slack用の短縮フォーマット
+    format: "compact"      // Compact format for Slack
   },
   {
     type: "email",         // Phase 2
@@ -274,225 +274,225 @@ delivery_channels: [
 ]
 ```
 
-ファイル出力チャネルはPhase 2でも常に有効だ。外部チャネルに加えて、ローカルファイルにも必ず出力する。ファイルが唯一の永続記録であり、外部チャネルの障害時のフォールバックでもある。
+The file output channel remains always enabled in Phase 2. Local files are always written in addition to external channels. Files are the only persistent record and also serve as a fallback when external channels fail.
 
 ---
 
-## 6. 粒度制御
+## 6. Verbosity Control
 
-ユーザーはレポーティングの頻度と詳細度を制御できる。
+Users can control the frequency and level of detail of reporting.
 
-### 6.1 詳細度レベル
+### 6.1 Verbosity Levels
 
-レポートの詳細度は3段階で設定する。
+Report verbosity is set at three levels.
 
-| レベル | 名称 | 内容 |
-|-------|------|------|
-| 1 | `minimal` | ゴールの進捗率と変化量のみ。1行サマリー |
-| 2 | `standard` | 次元別進捗、実行サマリー、次のアクション（デフォルト） |
-| 3 | `detailed` | 全情報。戦略評価、リスク分析、観測データの詳細、学習ログ |
+| Level | Name | Content |
+|-------|------|---------|
+| 1 | `minimal` | Goal progress rate and change only. One-line summary |
+| 2 | `standard` | Dimension-level progress, execution summary, next actions (default) |
+| 3 | `detailed` | All information. Strategy evaluation, risk analysis, observation data details, learning log |
 
 ```
 reporting_verbosity: {
-  daily_summary: "standard",   // 日次は標準
-  weekly_report: "detailed",   // 週次は詳細
-  notifications: "standard"    // 通知は標準
+  daily_summary: "standard",   // Standard for daily
+  weekly_report: "detailed",   // Detailed for weekly
+  notifications: "standard"    // Standard for notifications
 }
 ```
 
-### 6.2 通知頻度の制御
+### 6.2 Notification Frequency Control
 
-ユーザーが通知過多を感じないよう、頻度の制御メカニズムを設ける。
+A frequency control mechanism is in place to prevent notification fatigue.
 
-**クールダウン**: 同一種別の即時通知は最低間隔を空ける。
+**Cooldown**: Immediate notifications of the same type have a minimum interval between them.
 
 ```
 notification_cooldown: {
-  urgent_alert: "0m",           // 緊急アラートはクールダウンなし
-  approval_request: "0m",       // 承認要求もクールダウンなし
-  stall_escalation: "60m",      // 停滞エスカレーションは60分間隔
-  strategy_change: "30m",       // 戦略変更は30分間隔
-  goal_completion: "0m"         // 完了通知はクールダウンなし
+  urgent_alert: "0m",           // No cooldown for urgent alerts
+  approval_request: "0m",       // No cooldown for approval requests
+  stall_escalation: "60m",      // 60-minute interval for stall escalations
+  strategy_change: "30m",       // 30-minute interval for strategy changes
+  goal_completion: "0m"         // No cooldown for completion notifications
 }
 ```
 
-**バッチング**: クールダウン中に発生した同一種別の通知はバッチにまとめ、クールダウン解除時に一括で配信する。
+**Batching**: Notifications of the same type that occur during a cooldown period are batched together and delivered all at once when the cooldown expires.
 
-**Do Not Disturb**: ユーザーが指定した時間帯は通知を抑制する。ただし緊急アラートと承認要求は例外とする。
+**Do Not Disturb**: Notifications are suppressed during time windows specified by the user. Urgent alerts and approval requests are exceptions.
 
 ```
 do_not_disturb: {
   enabled: true,
-  hours: ["22:00", "07:00"],   // この時間帯は通知を抑制
+  hours: ["22:00", "07:00"],   // Suppress notifications during this period
   exceptions: ["urgent_alert", "approval_request"]
 }
 ```
 
-### 6.3 ゴール別のレポーティング設定
+### 6.3 Per-Goal Reporting Configuration
 
-ゴールごとにレポーティングの設定を上書きできる。
+Reporting settings can be overridden on a per-goal basis.
 
 ```
 goal_reporting_override: {
   goal_id: "goal_health_01",
-  daily_summary: "detailed",      // 健康ゴールは日次も詳細に
+  daily_summary: "detailed",      // Also detailed for daily on health goals
   notification_cooldown: {
-    urgent_alert: "0m"            // ヘルスアラートは即時
+    urgent_alert: "0m"            // Health alerts are immediate
   }
 }
 ```
 
-これにより、ヘルスモニタリングのような高頻度・高緊急度のゴールと、長期プロジェクトのような低頻度のゴールを、同じシステムで適切に扱える。
+This allows the same system to appropriately handle high-frequency, high-urgency goals like health monitoring alongside low-frequency long-term project goals.
 
 ---
 
-## 7. LLMの関与範囲
+## 7. LLM Involvement
 
-レポート生成におけるLLMとコードの役割分担を明確にする。
+The division of responsibilities between LLM and code in report generation is made explicit.
 
-### コードで処理する部分（決定論的）
+### Handled by Code (Deterministic)
 
-| 処理 | 内容 |
-|------|------|
-| データ集計 | 次元の現在値・閾値・ギャップ、タスクの成功/失敗数、期間中の変化量 |
-| トリガー評価 | 閾値の超過判定、スケジュール判定、クールダウン判定 |
-| レポート構造の組み立て | セクションの選択、データのテンプレートへの埋め込み |
-| 配信制御 | チャネル選択、フォーマット変換、ファイル出力 |
+| Process | Content |
+|---------|---------|
+| Data aggregation | Current values, thresholds, and Gaps for each dimension; task success/failure counts; changes over the period |
+| Trigger evaluation | Threshold breach determination, schedule determination, cooldown determination |
+| Report structure assembly | Section selection, embedding data into templates |
+| Delivery control | Channel selection, format conversion, file output |
 
-### LLMで処理する部分（解釈・生成）
+### Handled by LLM (Interpretation and Generation)
 
-| 処理 | 内容 |
-|------|------|
-| ナラティブ生成 | 数値データを人間にとって読みやすい文章に変換する |
-| 戦略評価の言語化 | 「なぜこの戦略が効いているか/効いていないか」の説明 |
-| リスク分析 | 観測データのパターンからリスクを読み取り、言語化する |
-| 推奨アクションの提案 | 次にユーザーが取るべきアクション（あれば）の提案 |
-| 戦略変更の根拠説明 | ピボットの判断理由を人間にわかりやすく説明する |
+| Process | Content |
+|---------|---------|
+| Narrative generation | Converting numeric data into human-readable prose |
+| Strategy evaluation in prose | Explaining "why this strategy is / is not working" |
+| Risk analysis | Reading patterns from observation data and articulating risks |
+| Recommended action proposals | Proposing next actions for the user to take (if any) |
+| Rationale for strategy changes | Explaining the reasoning behind a pivot in terms the user can understand |
 
-### 分離の原則
+### Separation Principle
 
-**数値は常にコードが出す。解釈は常にLLMが出す。**
+**Numbers always come from code. Interpretation always comes from LLM.**
 
-LLMに数値の計算を任せない。LLMが「進捗45%」と言ったとき、その数値はコードが計算した値でなければならない。LLMの役割は「45%が何を意味するか」「前回の42%からの+3%がどのくらいの速度か」を解釈し、説明することだ。
+Do not have the LLM calculate numbers. When the LLM says "progress 45%," that number must be a value calculated by code. The LLM's role is to interpret "what 45% means" and "how fast +3% from the previous 42% is," and to explain it.
 
 ---
 
-## 8. レポートフォーマット
+## 8. Report Formats
 
-### 8.1 日次サマリーのフォーマット
+### 8.1 Daily Summary Format
 
 ```markdown
-# 日次サマリー — 2026-03-10
+# Daily Summary — 2026-03-10
 
-## ゴール: 売上2x
-- 全体進捗: 42% → 45% (+3%) [信頼度: 0.78]
-- 注力次元: チャーン率改善 (ギャップ: 35%)
-- 今日の実行: タスク3件完了、1件失敗
-- 明日の予定: オンボーディングフロー改修（エージェントに委譲）
+## Goal: Revenue 2x
+- Overall progress: 42% → 45% (+3%) [Confidence: 0.78]
+- Focus dimension: Churn rate improvement (Gap: 35%)
+- Today's execution: 3 tasks completed, 1 failed
+- Tomorrow's plan: Onboarding flow redesign (delegated to agent)
 
-## ゴール: 愛犬の健康
-- 全体進捗: 88% (変化なし) [信頼度: 0.92]
-- 状態: 安定。次回の定期観測は3/12。
-- 注意点: なし
+## Goal: Dog health
+- Overall progress: 88% (no change) [Confidence: 0.92]
+- Status: Stable. Next scheduled observation: 3/12.
+- Notes: None
 
 ---
-生成: 2026-03-10T09:00:00+09:00
-次回レポート: 2026-03-11T09:00:00+09:00
+Generated: 2026-03-10T09:00:00+09:00
+Next report: 2026-03-11T09:00:00+09:00
 ```
 
-### 8.2 即時通知のフォーマット
+### 8.2 Immediate Notification Format
 
 ```markdown
-# [緊急アラート] 愛犬の健康 — 呼吸数異常
+# [Urgent Alert] Dog health — Abnormal respiration rate
 
-発生: 2026-03-10 14:30:22 JST
-ゴール: 愛犬の健康
-次元: 呼吸数
-観測値: 42回/分 (正常範囲: 15-30回/分)
-信頼度: 0.95 (センサー直接計測)
+Occurred: 2026-03-10 14:30:22 JST
+Goal: Dog health
+Dimension: Respiration rate
+Observed value: 42 breaths/min (normal range: 15–30 breaths/min)
+Confidence: 0.95 (direct sensor measurement)
 
-## Conatusの評価
-前回観測 (12:00) の28回/分から急上昇。
-過去のパターンでは、この水準は獣医への相談が推奨される。
+## Conatus's Assessment
+Sharp rise from 28 breaths/min at the previous observation (12:00).
+Based on past patterns, this level warrants consulting a veterinarian.
 
-## 推奨アクション
-1. 犬の様子を直接確認する
-2. 必要に応じて獣医に連絡する
-3. 30分後に再計測を予定
+## Recommended Actions
+1. Check on the dog directly
+2. Contact a veterinarian if necessary
+3. Re-measurement scheduled in 30 minutes
 
 ---
-通知ID: notif_x7y8z9
+Notification ID: notif_x7y8z9
 ```
 
-### 8.3 戦略変更通知のフォーマット
+### 8.3 Strategy Change Report Format
 
 ```markdown
-# [戦略変更] 売上2x — ピボット
+# [Strategy Change] Revenue 2x — Pivot
 
-発生: 2026-03-10 14:30:22 JST
-ゴール: 売上2x
+Occurred: 2026-03-10 14:30:22 JST
+Goal: Revenue 2x
 
-## 変更前の戦略
-「オンボーディングUI改善」(実施期間: 2026-02-20 〜 2026-03-10)
-効果: チャーン率 -2% (目標: -10%)
+## Previous Strategy
+"Onboarding UI improvements" (Period: 2026-02-20 – 2026-03-10)
+Effect: Churn rate -2% (Target: -10%)
 
-## 変更の理由
-3週間の実施でチャーン率の改善が目標の20%にとどまっている。
-UI改善単独では目標達成が困難と判断。
+## Reason for Change
+After 3 weeks, churn rate improvement has stalled at 20% of the target.
+Determined that UI improvements alone are insufficient to achieve the goal.
 
-## 変更後の戦略
-「サポートチャンネル強化」に切り替え。
-期待効果: チャーン率 -5%〜-8% (業界ベンチマーク参考)
+## New Strategy
+Switching to "Strengthen support channels."
+Expected effect: Churn rate -5% to -8% (based on industry benchmarks)
 
-## ユーザーへの影響
-追加のリソース不要。既存のサポートシステムを活用。
+## Impact on User
+No additional resources required. Leverages existing support systems.
 
 ---
-通知ID: notif_a1b2c3
+Notification ID: notif_a1b2c3
 ```
 
 ---
 
 ## 9. MVP vs Phase 2
 
-### MVP（Phase 1）
+### MVP (Phase 1)
 
-| 項目 | MVP仕様 |
-|------|---------|
-| レポート種類 | 日次サマリー、週次レポート、即時通知（全種）、戦略変更通知 |
-| 配信チャネル | ファイル出力（Markdown）+ CLIログ |
-| トリガー | 時刻ベース（`conatus run` 実行時に評価）、閾値ベース、イベントベース |
-| 粒度制御 | 詳細度レベル（3段階）、通知クールダウン |
-| LLM関与 | ナラティブ生成、戦略評価の言語化 |
-| レポート保存 | `~/.conatus/reports/` にMarkdownファイルとして保存 |
-| 未読管理 | ファイルベース（`conatus run` 時に未読レポートを表示） |
+| Item | MVP Specification |
+|------|------------------|
+| Report types | Daily summary, weekly report, immediate notifications (all types), strategy change reports |
+| Delivery channels | File output (Markdown) + CLI log |
+| Triggers | Time-based (evaluated when `conatus run` is executed), threshold-based, event-based |
+| Verbosity control | Verbosity levels (3 tiers), notification cooldown |
+| LLM involvement | Narrative generation, strategy evaluation in prose |
+| Report storage | Saved as Markdown files in `~/.conatus/reports/` |
+| Unread management | File-based (unread reports displayed when `conatus run` is executed) |
 
-MVPの制約: レポートの配信はプル型（`conatus run` 実行時）のみ。リアルタイムのプッシュ通知はない。緊急アラートも次回の `conatus run` 実行時に表示される。これはMVPのプロセスモデル（CLI起動）の制約であり、レポーティング設計自体の制約ではない。
+MVP constraint: Report delivery is pull-only (only when `conatus run` is executed). There are no real-time push notifications. Even urgent alerts are displayed the next time `conatus run` is executed. This is a constraint of the MVP process model (CLI-based), not of the reporting design itself.
 
 ### Phase 2
 
-| 項目 | Phase 2追加仕様 |
-|------|----------------|
-| 配信チャネル | Slack、メール、Webhook（プッシュ型） |
-| リアルタイム通知 | デーモンモードによる即時配信 |
-| Do Not Disturb | 時間帯ベースの通知抑制 |
-| チャネル別フォーマット | Slack用コンパクト形式、メール用HTML形式 |
-| 通知のインタラクティブ性 | Slackボタンによる承認応答 |
-| レポートのカスタムテンプレート | ユーザー定義のレポートテンプレート |
-| ゴール別レポーティング設定 | ゴールごとの頻度・詳細度の上書き |
+| Item | Phase 2 Additions |
+|------|------------------|
+| Delivery channels | Slack, email, Webhook (push-based) |
+| Real-time notifications | Immediate delivery via daemon mode |
+| Do Not Disturb | Time-based notification suppression |
+| Channel-specific formats | Compact format for Slack, HTML format for email |
+| Interactive notifications | Approval responses via Slack buttons |
+| Custom report templates | User-defined report templates |
+| Per-goal reporting settings | Override frequency and verbosity per goal |
 
-Phase 2の優先順位: Slack連携 > メール > Webhook > カスタムテンプレート。最も多くのユーザーが日常的に使うチャネルから対応する。
+Phase 2 priorities: Slack integration > Email > Webhook > Custom templates. Starting with the channel that most users interact with daily.
 
 ---
 
-## 10. 設計上の判断と境界
+## 10. Design Decisions and Boundaries
 
-**レポートの過多 vs. 過少**: レポートが多すぎるとユーザーは無視し始める。少なすぎるとConatusが何をしているかわからなくなる。デフォルト設定は「日次サマリー + 緊急時の即時通知」という保守的な構成にし、ユーザーが必要に応じて増減する設計にした。
+**Too many vs. too few reports**: Too many reports and users start ignoring them. Too few and users lose sight of what Conatus is doing. The default configuration uses a conservative setup — "daily summary + immediate notifications for urgent events" — with users able to increase or decrease as needed.
 
-**LLMコストの管理**: すべてのレポートにLLMを使うと、コストが無視できなくなる。日次サマリーの `minimal` レベルはテンプレート埋め込みのみ（LLM不要）で生成可能とし、`standard` 以上でLLMを使う。週次レポートは常にLLMを使う（頻度が低いためコストが許容範囲内）。
+**Managing LLM costs**: Using LLM for every report would make costs non-negligible. The `minimal` level of the daily summary can be generated using only template embedding (no LLM required); LLM is used for `standard` and above. The weekly report always uses LLM (acceptable cost due to low frequency).
 
-**レポートの永続性**: レポートはConatusの行動ログの一部でもある。「いつ、何を報告したか」は、Conatusの透明性と監査可能性の基盤だ。したがって、レポートファイルは削除ではなくアーカイブする。
+**Report persistence**: Reports are also part of Conatus's activity log. "When and what was reported" is the foundation of Conatus's transparency and auditability. Therefore, report files are archived rather than deleted.
 
-**定期レポートと観測サイクルの関係**: 定期レポートの生成は、観測サイクル（`observation.md` 3）とは独立している。レポートは最新の観測結果を使って生成するが、レポート生成のために追加の観測は行わない。レポートは「今わかっていること」のスナップショットであり、「新しく調べたこと」ではない。
+**Relationship between periodic reports and observation cycles**: Periodic report generation is independent of the observation cycle (`observation.md §3`). Reports are generated using the latest observation results, but no additional observations are performed specifically for report generation. A report is a snapshot of "what is currently known," not "what was newly investigated."
 
-**承認要求はレポーティングか**: 承認要求（`trust-and-safety.md` 4）は即時通知の一種として位置づける。フォーマットは `trust-and-safety.md` で定義済みのものを使い、配信チャネルのみ本設計に従う。
+**Are approval requests reporting**: Approval requests (trust-and-safety.md §4) are positioned as a type of immediate notification. The format is as defined in `trust-and-safety.md`, and only the delivery channel follows this design.

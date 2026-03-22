@@ -1,289 +1,289 @@
-# 満足化設計 --- 「十分」の判断
+# Satisficing Design — Judging "Good Enough"
 
-> Conatusは完璧を追わない。「十分」を判断して止まる。
-> この文書は「いつ、何をもって十分とするか」の判断ロジックを定義する。
-
----
-
-## 1. コア原則
-
-満足化（satisficing）とは、「最善」を追い求めるのではなく、「十分に良い」状態で止まる判断戦略だ。
-
-### なぜ完璧を追わないのか
-
-完璧を目指すシステムは発散する。「もっとテストを」「もっとリファクタリングを」「もっとドキュメントを」——終わりのない改善サイクルにはまり込む。AutoGPTが示したように、目標なく動き続けるエージェントは有害だ。
-
-Conatusはこの問題を構造的に解決する。**閾値を超えたら止まる**。それがルールだ。
-
-### 満足化が機能する条件
-
-満足化が機能するのは、「十分」の定義が事前に決まっている場合だ。曖昧な定義では満足化できない——どこまで達成すれば「十分」かわからないからだ。
-
-Conatusでは、ゴール設定時にアドバイザーがユーザーと協議して閾値を設定する。この閾値が「十分の定義」になる。
+> Conatus does not chase perfection. It judges "good enough" and stops.
+> This document defines the logic for determining "when and what constitutes good enough."
 
 ---
 
-## 2. 完了判断フロー
+## 1. Core Principle
 
-### ゴールレベルの完了判断
+Satisficing is a decision strategy of stopping at a state that is "good enough" rather than pursuing the "best possible" outcome.
+
+### Why Not Chase Perfection
+
+Systems that aim for perfection diverge. "More tests." "More refactoring." "More documentation." — they get stuck in an endless improvement cycle. As AutoGPT demonstrated, agents that keep running without a goal are harmful.
+
+Conatus solves this problem structurally. **Stop when the threshold is exceeded.** That is the rule.
+
+### When Satisficing Works
+
+Satisficing works when the definition of "good enough" is established in advance. Without a clear definition, satisficing cannot work — because there is no way to know when "enough" has been reached.
+
+In Conatus, when a goal is set, the advisor consults with the user to set thresholds. These thresholds become the definition of "good enough."
+
+---
+
+## 2. Completion Decision Flow
+
+### Goal-Level Completion Decision
 
 ```
-各次元の現在値を確認
+Check the current value of each dimension
     │
     ↓
-全次元が閾値を超えているか？
-    ├─ No  → ギャップが残る次元へ注意を向ける（ループ継続）
-    └─ Yes → 完了候補
+Have all dimensions exceeded their thresholds?
+    ├─ No  → Direct attention to dimensions still with a Gap (continue loop)
+    └─ Yes → Completion candidate
                 │
                 ↓
-           各次元の観測信頼度は十分か？
-                ├─ 全次元で高信頼度 → 完了
-                └─ 低信頼度の次元あり → 検証タスクを生成
-                                              │
-                                              ↓
-                                        検証タスク完了
-                                              │
-                                              ↓
-                                        再判断（先頭に戻る）
+           Is the observation confidence sufficient for each dimension?
+                ├─ All dimensions high confidence → Complete
+                └─ Some dimensions low confidence → Generate verification tasks
+                                                          │
+                                                          ↓
+                                                    Verification tasks complete
+                                                          │
+                                                          ↓
+                                                    Re-evaluate (return to top)
 ```
 
-「閾値を超えた」だけでは完了にならない。観測の信頼度が低い場合、証拠が弱いまま完了を宣言することになる。信頼度が低い状態での完了判断は**禁止**する。
+Exceeding a threshold alone does not constitute completion. If observation confidence is low, declaring completion means declaring it on weak evidence. Completion decisions with low confidence are **prohibited**.
 
-### 信頼度のしきい値
+### Confidence Thresholds
 
-| 信頼度 | 完了判断への影響 |
-|--------|----------------|
-| 高（機械的検証が主） | そのまま完了判断に使用可 |
-| 中（独立レビューが主） | 完了判断に使用可（ただし記録に残す） |
-| 低（自己申告・推定が主） | 完了判断に使用不可。検証タスクを先に実行 |
+| Confidence | Effect on Completion Decision |
+|------------|-------------------------------|
+| High (primarily mechanical verification) | Can be used for completion decision as-is |
+| Medium (primarily independent review) | Can be used for completion decision (but recorded) |
+| Low (primarily self-reported or estimated) | Cannot be used for completion decision. Execute verification tasks first |
 
-### プログレス上限ルール（完了の早計を防ぐ）
+### Progress Ceiling Rule (Preventing Premature Completion)
 
-証拠が弱いまま完了と判断することを防ぐため、信頼度に基づいた進捗上限を設ける。
+To prevent completing based on weak evidence, a progress ceiling is applied based on confidence level.
 
 ```
 reported_progress = min(actual_evidence_score, ceiling(confidence_level))
 
 confidence_level | ceiling
-high             | 1.00（上限なし）
+high             | 1.00 (no ceiling)
 medium           | 0.85
 low              | 0.60
 ```
 
-例: 自己申告のみでの評価が「95%完了」を示していても、信頼度が低ければ進捗は最大60%として扱う。残り40%の証拠が揃うまで、完了にはならない。
+Example: Even if self-reported evaluation shows "95% complete," if confidence is low, progress is treated as a maximum of 60%. Until the evidence for the remaining 40% is gathered, completion does not occur.
 
 ---
 
-## 3. タスクレベルの満足化
+## 3. Task-Level Satisficing
 
-満足化はゴールレベルだけの話ではない。個々のタスク（イテレーション）でも「今回はここまで」という判断が必要だ。
+Satisficing is not just a goal-level concern. Individual tasks (iterations) also require the judgment of "this is as far as we go this time."
 
-### 一度に全ギャップを攻めない
+### Do Not Attack All Gaps at Once
 
-複数のギャップが存在していても、Conatusは**管理可能な部分集合**を選んで攻める。
+Even when multiple Gaps exist, Conatus selects a **manageable subset** to address.
 
-理由は3つある。
+There are three reasons.
 
-**コンテキストの集中**: 多くのギャップを同時に攻めると、実行者（LLM含む）の注意が分散し、どの次元も中途半端になる。
+**Context focus**: Attacking many Gaps simultaneously scatters the attention of the executor (including LLMs), leaving every dimension half-finished.
 
-**検証の明確さ**: タスクのスコープが小さいほど、「完了したかどうか」の判断が明確になる。
+**Verification clarity**: The smaller the task scope, the clearer the judgment of "is it done or not?"
 
-**失敗の局所化**: 一つのタスクが失敗しても、他の次元への影響を最小化できる。
+**Failure localization**: If one task fails, the impact on other dimensions is minimized.
 
-### イテレーション単位の制約
+### Per-Iteration Constraints
 
 ```
 iteration_constraints {
-  max_dimensions: number        // 1イテレーションで攻める最大次元数
-  uncertainty_threshold: number // これ以下の信頼度の次元は行動前に観測
-  divergence_filter: string     // ゴールと意味的距離が遠すぎるタスクを除外
+  max_dimensions: number        // Maximum number of dimensions to target in one iteration
+  uncertainty_threshold: number // Dimensions with confidence below this are observed before action
+  divergence_filter: string     // Exclude tasks that are semantically too distant from the goal
 }
 ```
 
-**リソース制約**: `max_dimensions` を超える次元は次のイテレーションに回す。一度にN次元（デフォルト: 2〜3）以上を同時対象にしない。
+**Resource constraint**: Dimensions exceeding `max_dimensions` are deferred to the next iteration. Do not simultaneously target more than N dimensions (default: 2–3).
 
-**不確実性制約**: 信頼度が `uncertainty_threshold` 以下の次元には、まず観測タスクを生成する。「よくわからない次元」に対して行動タスクを生成しない。観測が先、行動が後。
+**Uncertainty constraint**: For dimensions whose confidence is at or below `uncertainty_threshold`, generate observation tasks first. Do not generate action tasks for "poorly understood dimensions." Observation first, action second.
 
-**発散防止フィルタ**: 生成されたタスクをゴールとの意味的距離でフィルタリングする。「面白いが本質的でない」タスクがドライブスコアの隙をついて生成されることを防ぐ。
+**Divergence prevention filter**: Filter generated tasks by semantic distance from the goal. This prevents "interesting but inessential" tasks from sneaking through gaps in the drive score.
 
 ---
 
-## 4. 多次元閾値設計
+## 4. Multi-Dimensional Threshold Design
 
-### 単一指標の危険性
+### The Danger of a Single Metric
 
-単一の進捗指標は危険だ。
+A single progress metric is dangerous.
 
-例: 「進捗: 90%」という単一閾値を使うとする。20個のファイルを書いただけで「90%」に到達してしまうかもしれない。指標の数値は高くても、本質的なゴール達成とは無関係な可能性がある。
+Example: Suppose a single threshold of "progress: 90%" is used. Writing 20 files might bring it to "90%." The metric may be high while having nothing to do with actually achieving the goal.
 
-### 多次元での閾値設定
+### Setting Thresholds Across Multiple Dimensions
 
-Conatusは複数の次元を**それぞれ独立に**閾値で管理する。
+Conatus manages multiple dimensions **each with independent thresholds**.
 
 ```
 example_goal_thresholds {
-  feature_completeness: 0.80   // 機能の充足度
-  test_coverage: 0.90          // テストカバレッジ
-  stability: 0.95              // 安定性（クラッシュ・重大バグなし）
-  documentation: 0.70          // ドキュメントの充足度
+  feature_completeness: 0.80   // Degree of feature completion
+  test_coverage: 0.90          // Test coverage
+  stability: 0.95              // Stability (no crashes or critical bugs)
+  documentation: 0.70          // Degree of documentation completion
 }
 ```
 
-完了条件: **全次元が独立にそれぞれの閾値を超えること**。
+Completion condition: **All dimensions independently exceed their respective thresholds.**
 
-一つの次元が1.0に達しても、他の次元が閾値に達していなければ完了にならない。これにより、「ある側面を過度に最適化して完了を宣言する」という抜け道をふさぐ。
+Even if one dimension reaches 1.0, if another dimension has not reached its threshold, completion does not occur. This closes the loophole of "over-optimizing one aspect and declaring completion."
 
-### 次元間の補完は機能しない
+### No Compensation Between Dimensions
 
-`test_coverage: 1.0` があっても `stability: 0.5` を補完しない。各次元はそれぞれの基準で評価される。妥協や補完による完了判断はしない。
-
----
-
-## 5. 閾値の交渉と調整
-
-### 初期閾値の設定
-
-ゴール設定時に、アドバイザーがユーザーと協議して閾値を設定する（mechanism.md §3「ゴール交渉」に対応）。
-
-アドバイザーは現実可能性を評価する。「この閾値は現実的か」「リソースと時間に対して適切か」。非現実的な閾値であれば、その理由とともに調整を提案する。
-
-### ユーザーによる調整
-
-ユーザーはいつでも閾値を変更できる。ただし、変更の影響はConatusが明示する。
-
-```
-閾値を引き下げる（緩める）場合:
-  → 現在の状態がすでに閾値を超えているか確認
-  → 超えていれば「この変更で完了条件が満たされる」と通知
-
-閾値を引き上げる（厳しくする）場合:
-  → 新しい閾値に達するための追加作業量を試算して提示
-```
-
-### Conatusによる調整提案
-
-Conatusは観測から「この閾値は非現実的だ」「逆に低すぎる」と判断した場合、ユーザーに調整を提案できる。
-
-提案するのみで、自律的に変更はしない。閾値の変更は常にユーザーの承認を必要とする。
-
-提案が生成される条件:
-- 同じ次元で3回以上タスクが失敗し、閾値に近づく気配がない
-- 他の次元が全て閾値超えなのに一つだけ大幅に低く、ゴール全体のボトルネックになっている
-- 当初の想定より大幅に少ないリソースで閾値を超えた（閾値が低すぎた可能性）
+`test_coverage: 1.0` does not compensate for `stability: 0.5`. Each dimension is evaluated against its own criteria. No completion decision is made through compromise or compensation.
 
 ---
 
-## 6. 早計な完了の防止
+## 5. Threshold Negotiation and Adjustment
 
-満足化は「適切なタイミングで止まる」ことであり、「早すぎるタイミングで止まる」ことではない。
+### Setting Initial Thresholds
 
-### 早計完了の主な原因
+When a goal is set, the advisor consults with the user to set thresholds (corresponding to mechanism.md §3 "Goal Negotiation").
 
-**信頼度の過大評価**: 自己申告や推定を過度に信用してしまう。対処: プログレス上限ルール（§2参照）。
+The advisor assesses feasibility. "Is this threshold realistic?" "Is it appropriate given the resources and time?" If a threshold is unrealistic, it proposes an adjustment along with the reasoning.
 
-**楽観バイアス**: 実行者（LLM含む）は自分の成果を楽観的に評価する傾向がある。対処: 実行と検証の分離、独立レビューセッション（task-lifecycle.md §5参照）。
+### User Adjustments
 
-**部分充足の誤認**: 一部の次元が閾値を超えたことで、全体が完了したと誤認する。対処: 多次元閾値の独立評価（§4参照）。
-
-### 完了宣言のゲーティング
+The user can change thresholds at any time. However, Conatus makes the impact of the change explicit.
 
 ```
-完了宣言の前に必ず確認する項目:
+Lowering a threshold (relaxing):
+  → Check whether the current state already exceeds the threshold
+  → If so, notify: "This change will satisfy the completion condition"
 
-□ 全次元の現在値が閾値を超えているか
-□ 各次元の観測信頼度が「高」または「中」か
-□ 機械的検証（Layer 1）が完了しているか
-□ 独立レビューセッション（Layer 2）が完了しているか
-□ 過去48時間以内の観測に基づいているか（古い観測での完了を防ぐ）
+Raising a threshold (tightening):
+  → Estimate and present the additional work needed to reach the new threshold
 ```
 
-一つでも満たせない項目があれば、完了は保留する。保留された場合は、不足している確認を実施するタスクを生成する。
+### Conatus's Adjustment Proposals
+
+If Conatus judges from observation that "this threshold is unrealistic" or "it's actually too low," it can propose an adjustment to the user.
+
+It only proposes — it does not change thresholds autonomously. Threshold changes always require user approval.
+
+Conditions that trigger a proposal:
+- The same dimension has failed 3 or more times with no sign of approaching the threshold
+- All other dimensions have exceeded their thresholds while one is significantly below, creating a bottleneck for the entire goal
+- The threshold was exceeded with significantly fewer resources than originally estimated (suggesting the threshold was too low)
 
 ---
 
-## 7. サブゴールの完了と上位ゴールへの伝播
+## 6. Preventing Premature Completion
 
-ゴールツリー（mechanism.md §3「ゴール分解」）において、サブゴールの完了は上位ゴールの状態に伝播する。
+Satisficing means "stopping at the right time," not "stopping too early."
 
-### 伝播のルール
+### Main Causes of Premature Completion
+
+**Overestimating confidence**: Placing excessive trust in self-reported or estimated data. Remedy: Progress ceiling rule (see §2).
+
+**Optimism bias**: Executors (including LLMs) tend to assess their own results optimistically. Remedy: Separation of execution and verification, independent review sessions (see task-lifecycle.md §5).
+
+**Partial satisfaction misidentification**: Mistaking the fact that some dimensions have exceeded their thresholds for overall completion. Remedy: Independent evaluation with multi-dimensional thresholds (see §4).
+
+### Completion Declaration Gating
 
 ```
-サブゴールが完了
+Items to verify before declaring completion:
+
+□ Current values of all dimensions exceed their thresholds
+□ Observation confidence for each dimension is "high" or "medium"
+□ Mechanical verification (Layer 1) is complete
+□ Independent review session (Layer 2) is complete
+□ Based on observations within the past 48 hours (prevents completion based on stale data)
+```
+
+If any single item is not met, completion is deferred. When deferred, tasks are generated to complete the missing verification.
+
+---
+
+## 7. Subgoal Completion and Propagation to Parent Goals
+
+In a goal tree (mechanism.md §3 "Goal Decomposition"), subgoal completion propagates to the parent goal's state.
+
+### Propagation Rules
+
+```
+Subgoal completes
     │
     ↓
-上位ゴールの該当次元を更新
+Update the corresponding dimension in the parent goal
     │
     ↓
-上位ゴールの全次元が閾値を超えたか確認
-    ├─ No  → 上位ゴールのループ継続
-    └─ Yes → 上位ゴールの完了判断フローへ
+Check whether all dimensions in the parent goal exceed their thresholds
+    ├─ No  → Continue the parent goal's loop
+    └─ Yes → Proceed to the parent goal's completion decision flow
 ```
 
-サブゴールの完了が上位ゴールを自動的に完了させるわけではない。上位ゴールには独自の次元と閾値があり、それらが独立に評価される。
+A subgoal's completion does not automatically complete the parent goal. The parent goal has its own dimensions and thresholds, which are evaluated independently.
 
-### 次元マッピングルール
+### Dimension Mapping Rules
 
-サブゴールの次元が上位ゴールのどの次元に伝播するかは、ゴール分解時（上位ゴールをサブゴールに分割するタイミング）に明示的に定義する。
+Which dimension in the parent goal a subgoal dimension propagates to is explicitly defined when goal decomposition occurs (when the parent goal is decomposed into subgoals).
 
-**マッピング方式1: 直接マッピング（名前一致）**
+**Mapping method 1: Direct mapping (name matching)**
 
-サブゴールの次元名が上位ゴールの次元名と一致する場合、直接伝播する。
-
-```
-サブゴール次元 revenue_increase → 上位ゴール次元 revenue_increase（名前一致）
-```
-
-**マッピング方式2: 集約マッピング（複数→1次元）**
-
-複数のサブゴール次元を集約して、上位ゴールの1次元に反映する。
+When a subgoal's dimension name matches a parent goal's dimension name, it propagates directly.
 
 ```
-サブゴールA次元 feature_a_completion
-サブゴールB次元 feature_b_completion
-           ↓ 集約
-上位ゴール次元 product_readiness
+Subgoal dimension revenue_increase → Parent goal dimension revenue_increase (name match)
 ```
 
-集約方法は以下から選択する:
+**Mapping method 2: Aggregation mapping (multiple → 1 dimension)**
 
-| `aggregation` 値 | 意味 |
-|-----------------|------|
-| `min` | サブゴール次元の最小値を上位次元に反映（最も遅れているものに合わせる） |
-| `avg` | 平均値を反映 |
-| `max` | 最大値を反映 |
-| `all_required` | 全サブゴール次元が閾値を超えて初めて上位次元が完了扱いになる |
+Multiple subgoal dimensions are aggregated and reflected into one parent goal dimension.
 
-**マッピングのデータ構造**
+```
+Subgoal A dimension feature_a_completion
+Subgoal B dimension feature_b_completion
+           ↓ aggregated
+Parent goal dimension product_readiness
+```
 
-マッピングはゴールツリー構造内に以下の形式で保持する:
+Aggregation method is selected from the following:
+
+| `aggregation` value | Meaning |
+|--------------------|---------|
+| `min` | Reflect the minimum value of subgoal dimensions in the parent dimension (aligns with the most delayed) |
+| `avg` | Reflect the average value |
+| `max` | Reflect the maximum value |
+| `all_required` | Parent dimension is treated as complete only when all subgoal dimensions exceed their thresholds |
+
+**Mapping data structure**
+
+Mappings are stored within the goal tree structure in the following format:
 
 ```
 dimension_mapping: {
-  parent_dimension: string,       // 上位ゴールの次元名
+  parent_dimension: string,       // Dimension name in the parent goal
   aggregation: "min" | "avg" | "max" | "all_required"
 }
 ```
 
-各サブゴール次元にこのフィールドを付与することで、伝播先と集約方法を一意に定める。
+By attaching this field to each subgoal dimension, the propagation target and aggregation method are uniquely determined.
 
-**MVP実装 vs Phase 2**
+**MVP implementation vs Phase 2**
 
-| 段階 | 対応範囲 |
-|------|---------|
-| **MVP** | 名前一致による直接マッピングのみ。`dimension_mapping` が未定義のサブゴールは、完了ステータス（バイナリ: 0 or 1）が上位ゴールの1次元として伝播する。 |
-| **Phase 2** | 集約マッピング全種対応、および意味的類似度による自動マッピング提案。 |
+| Phase | Scope |
+|-------|-------|
+| **MVP** | Direct mapping by name matching only. Subgoals without a defined `dimension_mapping` propagate their completion status (binary: 0 or 1) as one dimension of the parent goal. |
+| **Phase 2** | Full support for all aggregation mapping types, and automatic mapping suggestions based on semantic similarity. |
 
-MVPでは、明示的なマッピング定義がない場合、サブゴール全体の完了（`goal_status: completed`）が上位ゴールの1次元として伝播する。上位ゴールは「このサブゴールが完了したか」という事実のみを受け取る。
+In the MVP, when there is no explicit mapping definition, the overall completion of the subgoal (`goal_status: completed`) propagates as one dimension of the parent goal. The parent goal receives only the fact "whether this subgoal is complete."
 
 ---
 
-## 設計原則のまとめ
+## Summary of Design Principles
 
-| 問題 | Conatusの解決策 |
-|------|--------------|
-| 完璧主義による発散 | 閾値を超えたら止まる（完了≠完璧） |
-| 証拠不足での早計完了 | 信頼度に基づくプログレス上限ルール |
-| 一次元指標での抜け道 | 複数次元を独立に評価 |
-| 一度に全ギャップを攻める | イテレーション単位の次元数制約 |
-| 不確かな次元への性急な行動 | 信頼度が低い次元は観測タスクを先行 |
-| 非現実的な閾値 | アドバイザーによる交渉、動的調整提案 |
+| Problem | Conatus's Solution |
+|---------|-------------------|
+| Divergence from perfectionism | Stop when the threshold is exceeded (completion ≠ perfection) |
+| Premature completion on insufficient evidence | Progress ceiling rule based on confidence level |
+| Loopholes from single-metric indicators | Independently evaluate multiple dimensions |
+| Attacking all Gaps at once | Per-iteration dimension count constraint |
+| Hasty action on uncertain dimensions | Generate observation tasks first for low-confidence dimensions |
+| Unrealistic thresholds | Negotiation by advisor, dynamic adjustment proposals |

@@ -1,263 +1,263 @@
-# セッションとコンテキスト管理
+# Session and Context Management
 
-> Conatusが長期ゴールを追求するために、有限のコンテキストウィンドウをどう扱うか。
-
----
-
-## 1. 核心的な問題
-
-LLMのコンテキストウィンドウは有限だ。数十万トークンに達しても、それはあくまで「今このセッション」の話だ。Conatusが追うゴールは数ヶ月、場合によっては数年にわたる。
-
-この矛盾をどう解消するか。
-
-答えはセッション境界の制御にある。Conatusは「いつセッションを始め、いつ終わらせるか」を完全に制御する側に立つ。コンテキストの消費を受動的に受け入れるのではなく、能動的に管理する。
+> How Conatus manages finite context windows while pursuing long-term goals.
 
 ---
 
-## 2. セッションはステートレスな実行単位
+## 1. The Core Problem
 
-セッションは「前の文脈を引き継がない」独立した実行単位だ。
+An LLM's context window is finite. Even if it reaches hundreds of thousands of tokens, that only covers "this session, right now." The goals Conatus pursues can span months or even years.
 
-各セッションはタスク実行、観測、またはレビューという単一の目的のために起動される。起動時にConatusCから必要な情報だけを受け取り、終了時に結果を返す。前のセッションで何が起きたかを覚えていない。覚える必要がない。
+How do we resolve this contradiction?
 
-この設計の根拠は単純だ。「前の文脈を知っている」ことは、ときに邪魔になる。実行セッションが失敗の記憶を持っていれば、次の試行に余計なバイアスがかかる。観測セッションが実行の苦労を知っていれば、甘い評価をする可能性がある。無知は、独立した判断の前提条件だ。
-
-セッション間の連続性は、Conatusの永続状態ファイルが担う。セッション自体は何も覚えない。ファイルがすべてを覚える。
+The answer lies in controlling session boundaries. Conatus takes the active role of deciding when to start a session and when to end it. Rather than passively consuming context, it manages context deliberately.
 
 ---
 
-## 3. セッション境界の決定
+## 2. Sessions Are Stateless Execution Units
 
-Conatusはセッションの開始と終了のタイミングを、以下の原則に基づいて制御する。
+A session is an independent execution unit that does not carry over the context of previous sessions.
 
-### 自然な境界
+Each session is launched for a single purpose: task execution, observation, or review. It receives only the information it needs from Conatus at startup, and returns results when it finishes. It has no memory of what happened in previous sessions — and it doesn't need to.
 
-**ゴールツリーのノード境界**: ゴールは階層的に分解される。1つのサブゴール、1つのタスクが、1つのセッションに対応するのが基本形だ。ノードが終わればセッションも終わる。
+The rationale for this design is straightforward. Knowing "what came before" can sometimes be a liability. If an execution session carries memories of past failures, those memories introduce bias into the next attempt. If an observation session knows the struggles of the execution session, it may evaluate results too generously. Ignorance is a prerequisite for independent judgment.
 
-**タスク完了**: タスクが完了した時点でセッションを終了させる。「ついでにもう一つ」はやらない。1セッション1タスクの原則を守る。
-
-### 強制的な境界
-
-**コンテキスト上限への接近**: セッションのコンテキスト使用量が限界に近づいたら、完了を待たずにセッションを終了させる。状態を保存し、新しいセッションを起動して続きを渡す。コンテキスト枯渇による品質劣化を防ぐための予防的終了だ。
-
-**停滞の検知**: 同じアプローチで進展がなければ、セッションを終了して別のアプローチで再起動する。同じセッション内でアプローチを変えるより、クリーンな状態から始めた方が良い結果が出ることが多い。
+Continuity across sessions is maintained by Conatus's persistent state files. The sessions themselves remember nothing. The files remember everything.
 
 ---
 
-## 4. コンテキスト選択アルゴリズム
+## 3. Determining Session Boundaries
 
-「最小限のコンテキスト」を渡すとはいえ、何をどの順に含めるかの判断基準が必要だ。コンテキスト選択は優先度ベースで行う。
+Conatus controls when sessions begin and end according to the following principles.
 
-### コンテキストバジェット
+### Natural Boundaries
 
-各セッション種別にはトークンの上限（コンテキストバジェット）を設ける。
+**Goal tree node boundaries**: Goals are decomposed hierarchically. The basic pattern is one subgoal or one task per session. When a node ends, the session ends.
 
-- デフォルト: モデルのコンテキストウィンドウの50%
-- 設定ファイルで変更可能（`config.yaml`の`context_budget_ratio`）
-- バジェットを超えた場合、優先度の低い項目から除外する
+**Task completion**: End the session when a task is complete. There is no "while I'm at it, one more thing." The one-session-one-task principle is enforced.
 
-### 優先度付き包含ルール
+### Forced Boundaries
 
-以下の優先度順に情報を追加し、バジェットが尽きた時点で停止する。
+**Approaching context limits**: When a session's context usage nears its ceiling, Conatus terminates the session before completion. It saves state and launches a new session to carry on. This is a preemptive termination to prevent quality degradation from context exhaustion.
 
-| 優先度 | 内容 | 条件 |
-|--------|------|------|
-| 1 | タスク定義と成功基準 | 常に含める（省略不可） |
-| 2 | 対象次元の現在状態（状態ベクトルから） | 常に含める |
-| 3 | 対象次元の直近観測サマリー | 常に含める |
-| 4 | ゴール定義内の関連制約 | 常に含める |
-| 5 | 直前セッションの結果サマリー | リトライ・継続の場合のみ |
-| 6 | 経験ログの関連抜粋 | 類似の過去経験がある場合のみ |
-
-優先度1〜4は「常に含める」だが、それでもバジェットを超える場合は要約して圧縮する。優先度5〜6はバジェットに余裕がある場合のみ追加する。
-
-### MVP簡略化
-
-MVPでは以下の簡略ルールを適用する。
-
-- 優先度1〜4を固定で含める。優先度5〜6は含めない
-- バジェット管理は簡易的に行う（文字数ベースの概算でよい）
-- 動的選択ロジックは不要。セッション種別ごとのテンプレートで十分
-
-### 除外ルール（セッション種別ごと）
-
-優先度のルールに加え、セッション種別ごとに強制除外する情報がある。バジェットに余裕があっても含めない。
-
-| セッション種別 | 強制除外する情報 |
-|--------------|---------------|
-| 観測セッション | 実行セッションの詳細（実行経緯、試行内容） |
-| タスクレビューセッション | 実行者の自己申告、タスク生成の背景 |
-| ゴールレビューセッション | 個々のタスクの実行詳細、実行履歴全体 |
-
-除外ルールの目的はバイアス防止だ。観測者は実行の苦労を知らない方がよい。レビュアーは実行者の言い訳を聞かない方がよい。
+**Stall detection**: If there is no progress on the same approach, Conatus terminates the session and restarts it with a different approach. Starting from a clean state often produces better results than switching approaches mid-session.
 
 ---
 
-## 5. セッション種別ごとのコンテキスト組み立て
+## 4. Context Selection Algorithm
 
-セッションを起動するとき、Conatusはそのセッションの種別に応じた最小限のコンテキストを組み立てて渡す。「最小限」は節約ではなく、焦点の確保だ。余分な情報はノイズになり、判断を歪める。
+Even when passing "minimal context," there must be a clear basis for deciding what to include and in what order. Context selection is priority-based.
 
-（具体的な包含・除外ルールはセクション4の選択アルゴリズムに従う。以下は各セッション種別の詳細を示す。）
+### Context Budget
 
-### タスク実行セッション
+Each session type has a token limit (context budget).
 
-渡す情報:
-- ゴール定義（全体ではなく、このタスクに関連する範囲）
-- タスクの定義と成功基準
-- 制約（このタスクに適用されるもの）
-- 関連する現在状態（タスクの前提条件に関わる部分）
-- リトライの場合は前回の試行結果
+- Default: 50% of the model's context window
+- Configurable via `context_budget_ratio` in `config.yaml`
+- If the budget is exceeded, lower-priority items are excluded
 
-渡さない情報:
-- ゴール全体の履歴と経緯
-- 他のゴールに関する情報
-- なぜこのタスクが生成されたかという戦略的背景
+### Priority-Based Inclusion Rules
 
-実行者はタスクを遂行するために必要なことだけを知っていればいい。なぜそのタスクが存在するかを知る必要はない。
+Information is added in the following priority order, stopping when the budget runs out.
 
-### 観測セッション
+| Priority | Content | Condition |
+|----------|---------|-----------|
+| 1 | Task definition and success criteria | Always include (cannot be omitted) |
+| 2 | Current state of target dimensions (from state vector) | Always include |
+| 3 | Recent observation summary for target dimensions | Always include |
+| 4 | Relevant constraints from the goal definition | Always include |
+| 5 | Result summary from the immediately preceding session | Only for retries or continuations |
+| 6 | Relevant excerpts from experience logs | Only if similar past experience exists |
 
-渡す情報:
-- ゴール定義と次元定義（何を、どういう基準で観測するか）
-- 観測手段（データソース、確認方法）
-- 前回の観測結果（変化の検出のため）
+Priorities 1–4 are "always include," but if they still exceed the budget, they are summarized and compressed. Priorities 5–6 are added only when budget remains.
 
-渡さない情報:
-- 直前のタスクの詳細
-- 実行セッションでの試行の内容
+### MVP Simplification
 
-観測は現状をフラットに見ることが目的だ。実行の経緯を知ると、観測にバイアスがかかる。
+The following simplified rules apply for MVP:
 
-### タスクレビューセッション
+- Priorities 1–4 are always included. Priorities 5–6 are not included.
+- Budget management is approximate (character-count estimation is sufficient).
+- Dynamic selection logic is not required. Per-session-type templates are enough.
 
-渡す情報:
-- タスクの定義と成功基準
-- タスクの成果物（アクセス手段または内容）
+### Exclusion Rules (Per Session Type)
 
-渡さない情報:
-- ゴールレベルの文脈（なぜこのタスクが存在するか）
-- タスクがどう生成されたか
-- 実行セッションの自己申告
+In addition to priority rules, certain information is forcibly excluded for each session type — even when budget permits.
 
-タスクレビューは成果物が成功基準を満たしているかを独立して判断する。判断の対象は成果物だけだ。
+| Session Type | Forcibly Excluded Information |
+|-------------|-------------------------------|
+| Observation session | Execution session details (execution history, attempt contents) |
+| Task review session | Executor's self-report, background of task generation |
+| Goal review session | Individual task execution details, entire execution history |
 
-### ゴールレビューセッション
-
-渡す情報:
-- ゴール定義（全体）
-- 完全な状態ベクトルと最近の変化
-- 達成閾値
-
-渡さない情報:
-- 個々のタスクの実行詳細
-- 実行履歴の全体
-
-ゴールレビューはゴール全体の視点から現状を評価する。個々のタスクの詳細は不要だ。木を見て森を見ないことを避けるために、意図的に詳細を渡さない。
+The purpose of exclusion rules is bias prevention. Observers are better off not knowing the difficulties of execution. Reviewers are better off not hearing the executor's justifications.
 
 ---
 
-## 6. 状態の引き渡し
+## 5. Context Assembly Per Session Type
 
-セッションはステートレスだが、ゴールの追求は継続する。この一貫性は永続ファイルを経由して維持される。
+When launching a session, Conatus assembles and passes the minimum context appropriate for that session type. "Minimum" is not about frugality — it is about maintaining focus. Extraneous information becomes noise and distorts judgment.
+
+(Specific inclusion and exclusion rules follow the selection algorithm in Section 4. The details of each session type are described below.)
+
+### Task Execution Session
+
+Information passed:
+- Goal definition (scoped to what is relevant to this task, not the whole goal)
+- Task definition and success criteria
+- Constraints (those applicable to this task)
+- Relevant current state (the parts related to the task's preconditions)
+- For retries: results of the previous attempt
+
+Information not passed:
+- The full history and background of the goal
+- Information about other goals
+- The strategic rationale for why this task was generated
+
+The executor only needs to know what is necessary to complete the task. It does not need to know why the task exists.
+
+### Observation Session
+
+Information passed:
+- Goal definition and dimension definitions (what to observe, and by what criteria)
+- Observation methods (data sources, verification approaches)
+- Previous observation results (for detecting changes)
+
+Information not passed:
+- Details of the immediately preceding task
+- Contents of the execution session's attempts
+
+The purpose of observation is to view the current state plainly. Knowing the history of execution biases the observation.
+
+### Task Review Session
+
+Information passed:
+- Task definition and success criteria
+- Task deliverables (access means or content)
+
+Information not passed:
+- Goal-level context (why this task exists)
+- How the task was generated
+- The execution session's self-report
+
+Task review independently judges whether the deliverables satisfy the success criteria. The only subject of judgment is the deliverables.
+
+### Goal Review Session
+
+Information passed:
+- Full goal definition
+- Complete state vector and recent changes
+- Achievement thresholds
+
+Information not passed:
+- Individual task execution details
+- The full execution history
+
+Goal review evaluates the current state from the perspective of the goal as a whole. Individual task details are unnecessary. Detailed information is intentionally withheld to avoid missing the forest for the trees.
+
+---
+
+## 6. State Handoff
+
+Sessions are stateless, but the pursuit of goals continues. This continuity is maintained through persistent files.
 
 ```
-セッションA終了
+Session A ends
     │
-    ↓ 結果を抽出
-状態ファイル更新（ゴール状態、タスク結果、観測記録）
+    ↓ Extract results
+State file updated (goal state, task results, observation records)
     │
-    ↓ 必要な情報を読み出し
-セッションB開始（新しいコンテキスト、必要な情報のみ）
+    ↓ Read out the necessary information
+Session B begins (new context, only the required information)
 ```
 
-セッションAがセッションBに直接何かを渡すことはない。すべての情報の流れは状態ファイルを経由する。この設計には透明性という副次的な効果がある。状態ファイルは人間が読める形式で保持され、Conatusが何を知っていて何に基づいて判断しているかを、いつでも外部から確認できる。
+Session A never passes anything directly to Session B. All information flows through the state file. This design has a secondary benefit of transparency. State files are maintained in a human-readable format, making it possible to verify at any time what Conatus knows and what basis it is using for its decisions.
 
 ---
 
-## 7. マルチゴールのコンテキスト分離
+## 7. Context Isolation Across Multiple Goals
 
-Conatusが複数のゴールを同時に管理するとき、各ゴールのコンテキストは完全に分離される。
+When Conatus manages multiple goals simultaneously, the context of each goal is fully isolated.
 
-- ゴールAのセッションにゴールBの情報は含まれない
-- ゴールAの失敗がゴールBの判断に影響しない
-- 各ゴールは独立した状態ファイルを持つ
+- Information about Goal B is not included in Goal A's sessions
+- A failure in Goal A does not affect decisions for Goal B
+- Each goal has its own independent state file
 
-これはコンテキスト汚染の防止だ。無関係なゴールの情報が混入すると、判断がブレる。構造的に分離することで、各ゴールに対してクリーンな判断が維持される。
+This prevents context contamination. When information from an unrelated goal bleeds in, judgment becomes inconsistent. Structural isolation ensures clean, independent judgment for each goal.
 
-ゴール間に依存関係がある場合のみ、明示的に管理される。ゴールAの成果がゴールBの前提条件になっている場合、ConatusはゴールAの結果を取り出し、ゴールBのセッションに渡すべき情報として明示的に含める。暗黙的な情報共有はしない。
-
----
-
-## 8. 記憶の3階層
-
-Conatusの情報は3つの階層に分かれる。それぞれの役割と、セッションからのアクセス方法が異なる。
-
-### 作業記憶（Working Memory）
-
-- **実体**: 現在のセッションのコンテキストウィンドウ
-- **寿命**: セッション終了とともに消える
-- **内容**: 今このタスクに必要な情報のみ
-- **アクセス**: セッション開始時にConatusが組み立てて渡す
-
-コンテキストウィンドウはメモ帳だ。今の作業に必要なことを書いておく場所であり、長期記憶の置き場ではない。
-
-### ゴール状態（Goal State）
-
-- **実体**: ゴールツリー、状態ベクトル、戦略記録などの永続ファイル
-- **寿命**: ゴールが存在する限り継続
-- **内容**: ゴールの進捗、現在の方針、観測の蓄積
-- **アクセス**: セッション開始時に必要な部分だけを選択的にロード
-
-ゴール状態はConatusの「実務記憶」だ。今のゴールを達成するために必要なことを覚えている。セッションをまたいで一貫性を保つ核心部分だ。
-
-### 経験ログ（Experience Log）
-
-- **実体**: 状態→行動→結果の記録ファイル
-- **寿命**: Conatusインスタンスの存在する限り継続
-- **内容**: 過去の試行、その結果、学んだパターン
-- **アクセス**: 通常のセッションには直接ロードしない。戦略選択や停滞検知のタイミングで要約として参照する
-
-経験ログはConatusの「長期学習基盤」だ。個々のセッションで参照されることは少ないが、タスク生成の品質を時間とともに向上させる。「このアプローチは以前も失敗した」「こういう状況ではこの戦略が有効だった」という知識がここに蓄積される。
+When dependencies exist between goals, they are managed explicitly. If the outcome of Goal A is a precondition for Goal B, Conatus extracts the result of Goal A and explicitly includes it as information to be passed to Goal B's sessions. There is no implicit information sharing.
 
 ---
 
-## 9. ゴール間依存関係の管理
+## 8. Three Tiers of Memory
 
-> §7では各ゴールのコンテキストは完全に分離されると述べた。しかし、現実には複数のゴール間に依存関係が存在する。本セクションはその依存関係の種類、定義方法、管理データ構造、およびスケジューリングへの影響を定義する。
+Conatus's information is divided into three tiers. Each has a different role and a different way of being accessed from sessions.
 
-### 依存関係の種類
+### Working Memory
 
-ゴール間の依存関係は4つの種類に分類される。
+- **Physical form**: The current session's context window
+- **Lifespan**: Disappears when the session ends
+- **Contents**: Only what is needed for the current task
+- **Access**: Conatus assembles and passes it at session startup
 
-| 種類 | 意味 | 例 |
-|------|------|-----|
-| **前提条件（prerequisite）** | ゴールAの達成がゴールBの着手条件 | 「インフラ構築」→「サービスローンチ」 |
-| **リソース競合（resource_conflict）** | 同一リソース（時間、API、実行環境等）を共有 | 同一DBへの書き込みを伴う2つのゴール |
-| **相互強化（synergy）** | 一方の進捗が他方にも正の効果を与える | 「顧客満足度向上」⇔「解約率低減」 |
-| **相互矛盾（conflict）** | 一方の進捗が他方に負の効果を与える | 「コスト削減」⇔「品質向上」（一部の次元で） |
+The context window is a notepad. It is where you write what you need for the current task, not a place for long-term memory.
 
-各種類は独立して存在するのではなく、2つのゴール間に複数の種類が同時に存在しうる。たとえば、「コスト削減」と「品質向上」は一部の次元で相互矛盾しながら、「顧客維持」という上位ゴールに対しては相互強化の関係にある。
+### Goal State
 
-### 依存関係の定義方法
+- **Physical form**: Persistent files such as the goal tree, state vector, and strategy records
+- **Lifespan**: Persists as long as the goal exists
+- **Contents**: Goal progress, current strategy, accumulated observations
+- **Access**: Selectively loaded — only the necessary parts — at session startup
 
-依存関係は2つの方法で定義される。
+Goal state is Conatus's "working memory" in the operational sense. It remembers what is needed to achieve the current goal. It is the core element that maintains continuity across sessions.
 
-**方法1: ゴール登録時のユーザー明示**
+### Experience Log
 
-ユーザーが新しいゴールを登録するとき、既存ゴールとの関係を明示的に宣言できる。
+- **Physical form**: Records of state → action → result
+- **Lifespan**: Persists as long as the Conatus instance exists
+- **Contents**: Past attempts, their outcomes, and learned patterns
+- **Access**: Not directly loaded into ordinary sessions. Referenced as summaries at the time of strategy selection or stall detection
+
+The experience log is Conatus's "long-term learning foundation." It is rarely referenced in individual sessions, but it improves the quality of task generation over time. Knowledge such as "this approach has failed before" and "in situations like this, that strategy was effective" accumulates here.
+
+---
+
+## 9. Managing Inter-Goal Dependencies
+
+> §7 stated that context is fully isolated for each goal. However, in practice, dependencies exist between multiple goals. This section defines the types of dependencies, how they are defined, the data structures used to manage them, and their effect on scheduling.
+
+### Types of Dependencies
+
+Inter-goal dependencies are classified into four types.
+
+| Type | Meaning | Example |
+|------|---------|---------|
+| **prerequisite** | Goal A must be achieved before Goal B can begin | "Infrastructure Setup" → "Service Launch" |
+| **resource_conflict** | Both goals share a resource (time, API, execution environment, etc.) | Two goals that both write to the same database |
+| **synergy** | Progress in one goal has a positive effect on the other | "Improve Customer Satisfaction" ⇔ "Reduce Churn Rate" |
+| **conflict** | Progress in one goal has a negative effect on the other | "Reduce Costs" ⇔ "Improve Quality" (on some dimensions) |
+
+These types are not mutually exclusive — two goals can have multiple types of relationships simultaneously. For example, "Reduce Costs" and "Improve Quality" may conflict on some dimensions, while both having a synergistic relationship with a higher-level goal of "Retain Customers."
+
+### How Dependencies Are Defined
+
+Dependencies can be defined in two ways.
+
+**Method 1: Explicit declaration by the user at goal registration**
+
+When registering a new goal, the user can explicitly declare its relationship to existing goals.
 
 ```
 goal_dependency:
   from: goal_infrastructure
   to: goal_service_launch
   type: prerequisite
-  description: "インフラが稼働していないとサービスを開始できない"
-  condition: "goal_infrastructure.achievement >= 0.9"  // 前提条件の具体的閾値
+  description: "The service cannot launch without the infrastructure running"
+  condition: "goal_infrastructure.achievement >= 0.9"  // specific threshold for the prerequisite
 ```
 
-**方法2: LLMによる自動検出**
+**Method 2: Automatic detection by LLM**
 
-ゴール登録時に、Conatusが既存ゴール群と新規ゴールの関係をLLMに分析させる。
+At goal registration time, Conatus has the LLM analyze the relationship between the new goal and existing goals.
 
 ```
 auto_detect_dependencies(new_goal, existing_goals):
@@ -266,21 +266,21 @@ auto_detect_dependencies(new_goal, existing_goals):
         if analysis.has_dependency:
             proposed_dependency = {
                 type: analysis.dependency_type,
-                detection_confidence: analysis.detection_confidence,  // 観測信頼度（state-vector.md §3）とは別の、依存関係検出の確信度
+                detection_confidence: analysis.detection_confidence,  // confidence in dependency detection, separate from observation confidence (state-vector.md §3)
                 reasoning: analysis.reasoning
             }
-            // 依存関係検出の確信度が高ければ自動登録、低ければユーザーに確認
+            // Auto-register if confidence is high; ask the user if low
             if proposed_dependency.detection_confidence >= 0.8:
                 register_dependency(proposed_dependency)
             else:
-                propose_to_user(proposed_dependency)  // ユーザーに承認を求める
+                propose_to_user(proposed_dependency)  // Ask the user for approval
 ```
 
-自動検出はゴール登録時に一度実行するほか、ゴールレビュー時にも既存の依存関係を再評価する。状況の変化により新たな依存関係が生じたり、既存の依存関係が解消されたりすることがある。
+Automatic detection runs once at goal registration, and also re-evaluates existing dependencies during goal reviews. New dependencies may emerge, or existing ones may be resolved, as circumstances change.
 
-### 管理データ構造（依存グラフ）
+### Management Data Structure (Dependency Graph)
 
-ゴール間の依存関係は有向グラフとして管理される。
+Inter-goal dependencies are managed as a directed graph.
 
 ```
 dependency_graph:
@@ -301,52 +301,52 @@ dependency_graph:
       to: "goal_quality_improvement"
       type: conflict
       affected_dimensions: ["material_cost", "inspection_frequency"]
-      mitigation: "コスト削減は品質に直接影響しない領域に限定する"
+      mitigation: "Cost reduction is limited to areas that do not directly affect quality"
       status: active
 ```
 
-**循環依存の防止**: 前提条件（prerequisite）型の依存関係は循環を許さない。ゴール登録時にDAG検証を行い、循環が検出された場合はユーザーに警告する。相互強化（synergy）と相互矛盾（conflict）は双方向であり、循環の概念は適用されない。
+**Preventing circular dependencies**: Prerequisite-type dependencies do not allow cycles. DAG validation is performed at goal registration, and the user is warned if a cycle is detected. Synergy and conflict dependencies are bidirectional, so the concept of cycles does not apply to them.
 
-**ステータス管理**: 各エッジは `active`（有効）、`satisfied`（前提条件充足済み）、`invalidated`（状況変化により無効）のステータスを持つ。ステータスはゴールの状態変化に応じて自動更新される。
+**Status management**: Each edge has a status of `active` (in effect), `satisfied` (prerequisite has been met), or `invalidated` (invalidated by changed circumstances). Statuses are automatically updated in response to changes in goal state.
 
-### スケジューリングへの影響
+### Effect on Scheduling
 
-依存関係はタスク発見ループのスケジューリングに以下の影響を与える。
+Dependencies affect the scheduling of the task discovery loop as follows.
 
-**前提条件**: 前提条件が未充足のゴールに対してはタスク生成を抑制する。ただし、観測は継続する（前提条件の充足状況を追跡するため）。
+**Prerequisites**: Task generation is suppressed for goals whose prerequisites are not yet satisfied. However, observation continues (to track whether the prerequisite is being satisfied).
 
 ```
 before_task_generation(goal):
     for each dep in prerequisites(goal):
         if dep.status != "satisfied":
             skip_task_generation(goal)
-            // 代わりに前提条件ゴールの優先度にボーナスを与える
+            // Instead, give a bonus to the drive score of the prerequisite goal
             boost_drive_score(dep.from_goal, prerequisite_boost)
             return
 ```
 
-**リソース競合**: 同一リソースを使用するゴールのタスクを同時に実行しない。一方のタスク完了を待ってから他方を実行する。
+**Resource conflicts**: Tasks from goals that share a resource are not executed simultaneously. One task must complete before the other begins.
 
-**相互強化**: 相互強化関係にあるゴールの一方が進捗したとき、他方の状態ベクトルを即時再観測する。進捗が波及している可能性があるためだ。
+**Synergy**: When one goal in a synergistic pair makes progress, the other goal's state vector is immediately re-observed. This is because progress may have propagated.
 
-**相互矛盾**: 矛盾する次元への同時介入を避ける。影響を受ける次元（`affected_dimensions`）が重なるタスクを同時にスケジュールしない。矛盾が深刻な場合は、ユーザーに優先順位の判断を求める。
+**Conflicts**: Simultaneous intervention on conflicting dimensions is avoided. Tasks whose `affected_dimensions` overlap are not scheduled at the same time. When conflicts are severe, the user is asked to decide on priorities.
 
-### §7との関係
+### Relationship to §7
 
-§7の「マルチゴールのコンテキスト分離」の原則は維持される。依存関係の管理は、セッションレベルのコンテキスト混入ではなく、Conatusのスケジューリングレイヤーで行われる。セッションは依然としてステートレスで独立だ。依存関係が影響するのは「いつ、どのゴールのループを回すか」の判断であり、「セッション内に何を含めるか」ではない。
+The "context isolation across multiple goals" principle from §7 is maintained. Dependency management is handled at Conatus's scheduling layer, not through context mixing at the session level. Sessions remain stateless and independent. Dependencies affect "when and for which goal to run the loop" — not "what to include inside a session."
 
-唯一の例外は §7 で述べた明示的な情報引き渡しだ。前提条件が充足されたとき、前提条件ゴールの結果を依存先ゴールのセッションに含める。これは依存グラフのエッジ情報に基づく構造的な引き渡しであり、暗黙的な情報共有ではない。
+The only exception is the explicit information handoff described in §7. When a prerequisite is satisfied, the result of the prerequisite goal is included in the dependent goal's sessions. This is a structured handoff based on the dependency graph's edge information, not implicit information sharing.
 
 ---
 
-## 設計原則のまとめ
+## Summary of Design Principles
 
-| 原則 | 内容 |
-|------|------|
-| セッションはステートレス | 前の文脈を引き継がない。独立した実行単位 |
-| 優先度ベースの選択 | コンテキストはバジェット内で優先度順に組み立てる |
-| 最小コンテキスト | 各セッションには目的遂行に必要な情報だけを渡す |
-| ファイルが記憶を担う | セッション間の連続性は永続ファイルが保証する |
-| ゴール間の完全分離 | 複数ゴールのコンテキストは構造的に隔離される |
-| 境界はConatusが制御 | セッションの開始・終了は受動的ではなく能動的に管理 |
-| 依存関係はスケジューリング層で管理 | セッション内のコンテキスト分離を維持しつつ、ゴール間の依存を制御する |
+| Principle | Description |
+|-----------|-------------|
+| Sessions are stateless | No carryover of previous context. Each session is an independent execution unit |
+| Priority-based selection | Context is assembled in priority order within the budget |
+| Minimum context | Each session receives only the information needed to fulfill its purpose |
+| Files carry memory | Continuity across sessions is guaranteed by persistent files |
+| Full isolation between goals | Context for multiple goals is structurally segregated |
+| Conatus controls boundaries | Session start and end are managed actively, not passively |
+| Dependencies managed at scheduling layer | Inter-goal dependencies are controlled while maintaining session-level context isolation |

@@ -1,333 +1,333 @@
-# Conatus --- 実行境界の定義
+# Conatus --- Defining the Execution Boundary
 
 ---
 
-## 1. 基本原則
+## 1. Core Principle
 
-**Conatusは自ら実行しない。Conatusは常にエージェントに委譲する。**
+**Conatus does not execute on its own. Conatus always delegates to agents.**
 
-「Conatusがコードを書いた」「Conatusがデータを収集した」「Conatusがシステムを構築した」——これらの表現は正確ではない。正確には「Conatusがエージェントにコードの実装を指示した」「Conatusがエージェントにデータ収集を依頼した」「Conatusがエージェントにシステム構築を委譲した」だ。
+"Conatus wrote the code," "Conatus collected the data," "Conatus built the system" — none of these are accurate. The precise statements are: "Conatus instructed an agent to implement the code," "Conatus asked an agent to collect the data," "Conatus delegated system construction to an agent."
 
-Conatusは頭脳であり、体ではない。判断する存在であり、動く存在ではない。
-
----
-
-## 2. Conatusが担う責任
-
-Conatusが自ら行うのは、**自身の思考プロセスのためのLLM呼び出し**だけだ。
-
-| Conatusが直接行うこと | 目的 |
-|---------------------|------|
-| ゴール分解のLLM呼び出し | 曖昧なゴールをサブゴールのツリーに変換する |
-| 観測結果の分析LLM呼び出し | エージェントから受け取った結果を解釈し、ギャップを認識する |
-| 戦略選択のLLM呼び出し | どのギャップをどのアプローチで攻めるかを決定する |
-| タスク具体化のLLM呼び出し | 戦略を実行可能な単一タスクに変換し、成功基準を定義する |
-| 完了判断のLLM呼び出し | 満足化基準に照らして、ゴールが「十分」な状態かを評価する |
-| 状態の読み書き | ゴールツリー、観測ログ、学習データをファイルに保存・読み込みする |
-
-これ以外のすべての処理は、エージェントへの委譲だ。
+Conatus is the brain, not the body. It decides; it does not act.
 
 ---
 
-## 3. Conatusが委譲する責任
+## 2. What Conatus Is Responsible For
 
-実行に関わるあらゆることは、Conatusの担当外だ。
+The only thing Conatus does directly is **LLM calls for its own thinking process**.
 
-| 委譲カテゴリ | 具体例 | 委譲先の例 |
-|------------|--------|-----------|
-| コード実装 | 機能開発、スクリプト作成、テスト実装 | コード実装エージェント（例: Claude Code, OpenAI Codex CLI） |
-| データ収集 | API呼び出し、センサーデータ取得、スクレイピング | 専用エージェント、ツール |
-| データ分析 | 統計処理、パターン認識、レポート生成 | データ分析エージェント |
-| ファイル操作 | 読み書き、変換、移動 | 汎用エージェント |
-| 外部サービス連携 | API連携、Webhook設定、認証フロー | 専用エージェント |
-| システム構築 | モニタリング基盤、アラート設定、パイプライン | コード実装エージェント |
-| 通信・通知 | レポート送信、アラート発火、承認要求 | メッセージングシステム |
-| 人間への確認 | 不可逆なアクションの承認依頼 | 人間（直接） |
+| What Conatus does directly | Purpose |
+|---------------------------|---------|
+| LLM calls for goal decomposition | Convert ambiguous goals into a tree of sub-goals |
+| LLM calls for observation analysis | Interpret results received from agents and recognize gaps |
+| LLM calls for strategy selection | Decide which gap to address and with what approach |
+| LLM calls for task concretization | Convert a strategy into a single executable task and define success criteria |
+| LLM calls for completion judgment | Evaluate whether a goal is "good enough" against satisficing criteria |
+| State read/write | Save and load goal trees, observation logs, and learning data to files |
 
-「Conatusには体がない」と考えると分かりやすい。Conatusは観察し、考え、指示する。手を動かすのは常に別の存在だ。
+Everything else is delegated to agents.
 
 ---
 
-## 4. 委譲モデル
+## 3. What Conatus Delegates
 
-Conatusのエージェントへの委譲は、4つのステップで構成される。
+Anything related to execution is outside Conatus's scope.
+
+| Delegation category | Examples | Delegate targets |
+|--------------------|---------|-----------------|
+| Code implementation | Feature development, scripting, test implementation | Code implementation agents (e.g., Claude Code, OpenAI Codex CLI) |
+| Data collection | API calls, sensor data acquisition, scraping | Specialized agents, tools |
+| Data analysis | Statistical processing, pattern recognition, report generation | Data analysis agents |
+| File operations | Read/write, conversion, moving | General-purpose agents |
+| External service integration | API integration, webhook setup, auth flows | Specialized agents |
+| System construction | Monitoring infrastructure, alert configuration, pipelines | Code implementation agents |
+| Communication and notifications | Sending reports, firing alerts, approval requests | Messaging systems |
+| Human confirmation | Approval requests for irreversible actions | Humans (directly) |
+
+Think of it this way: "Conatus has no body." Conatus observes, thinks, and instructs. It is always another entity that moves its hands.
+
+---
+
+## 4. The Delegation Model
+
+Conatus's delegation to agents consists of four steps.
 
 ```
-1. アダプター選択
+1. Adapter selection
    ↓
-   タスクの性質を評価し、最適なエージェントを選ぶ
-   （コードならコード実装エージェント、データ分析なら専用エージェント、等）
+   Evaluate the nature of the task and choose the most suitable agent
+   (code agent for code, specialized agent for data analysis, etc.)
 
-2. セッション起動
+2. Session launch
    ↓
-   選択したアダプターを通じてエージェントセッションを起動する
+   Start an agent session through the selected adapter
 
-3. コンテキスト提供
+3. Context provision
    ↓
-   エージェントに必要な情報を渡す
-   - タスクの内容と成功基準
-   - 関連するゴールとその状態
-   - 使用可能なツールとデータソース
-   - 制約（「顧客データは外部に出すな」等）
+   Pass the necessary information to the agent:
+   - Task content and success criteria
+   - Relevant goals and their current state
+   - Available tools and data sources
+   - Constraints (e.g., "do not send customer data externally")
 
-4. 結果の観測
+4. Result observation
    ↓
-   エージェントの実行結果を受け取る
-   - 成功基準の達成確認
-   - 副作用や想定外の結果の確認
-   - 次のループへのフィードバック
+   Receive the agent's execution results:
+   - Confirm whether success criteria were met
+   - Check for side effects or unexpected outcomes
+   - Provide feedback for the next loop
 ```
 
-この4ステップを経ることで、Conatusは「何を頼むか」を制御しながら、「どう実行するか」をエージェントに委ねる。
+Through these four steps, Conatus controls "what to ask for" while leaving "how to execute it" to the agent.
 
 ---
 
-## 5. Capability Registry（能力カタログ）
+## 5. Capability Registry
 
-Conatusは「エージェントが何をできるか」を知っているが、「自分でそれをやること」はしない。
+Conatus knows "what agents can do," but it does not do those things itself.
 
-Capability Registryは、Conatusが委譲できる能力のカタログだ。
+The Capability Registry is a catalog of capabilities Conatus can delegate to.
 
 ```
 Capability Registry
-├── エージェント能力
-│     ├── コード実装エージェント（Claude Code CLI, OpenAI Codex CLI等） — コード実装、ファイル操作、テスト実行
-│     ├── LLMプロバイダ（Claude API, OpenAI API等） — テキスト生成、分析、要約
-│     └── カスタムエージェント — ドメイン固有のタスク
+├── Agent capabilities
+│     ├── Code implementation agents (Claude Code CLI, OpenAI Codex CLI, etc.) — code implementation, file operations, test execution
+│     ├── LLM providers (Claude API, OpenAI API, etc.) — text generation, analysis, summarization
+│     └── Custom agents — domain-specific tasks
 │
-├── データソース能力
-│     ├── センサーデータ（IoT、ウェアラブル）
-│     ├── ビジネスデータ（DB、Analytics、CRM）
-│     └── 外部API（Stripe、Slack等）
+├── Data source capabilities
+│     ├── Sensor data (IoT, wearables)
+│     ├── Business data (DB, Analytics, CRM)
+│     └── External APIs (Stripe, Slack, etc.)
 │
-├── アクション能力
-│     ├── 通知送信（Push、メール、Slack）
-│     ├── API実行（外部サービスへの書き込み）
-│     └── スケジュール制御（cron、タイマー）
+├── Action capabilities
+│     ├── Notification delivery (Push, email, Slack)
+│     ├── API execution (writes to external services)
+│     └── Schedule control (cron, timers)
 │
-└── 人間能力
-      └── 判断・承認（不可逆なアクション、エスカレーション）
+└── Human capabilities
+      └── Judgment and approval (irreversible actions, escalations)
 ```
 
-能力カタログは動的に変化する。ユーザーがAPIキーを渡せばデータソースが増え、権限を付与すればアクションが増える。Conatusはカタログの現在の状態を参照してタスクを設計する。
+The capability catalog changes dynamically. When a user provides an API key, data sources expand; when permissions are granted, available actions expand. Conatus consults the catalog's current state when designing tasks.
 
-ただし、Conatusは能力カタログを「使う」のではなく「参照する」。実際に能力を行使するのは、委譲先のエージェントやシステムだ。
+However, Conatus does not "use" the capability catalog — it "references" it. The actual exercise of a capability is performed by the delegated agent or system.
 
 ---
 
-## 5.1 能力不足の検知
+## 5.1 Detecting Capability Gaps
 
-Conatusは以下のいずれかのシグナルが発生したとき、「現在の能力では対応できない」と判断する。
+Conatus determines it "cannot handle this with the current capabilities" when any of the following signals occur.
 
-**シグナル1: タスク生成時に必要な能力がレジストリにない**
+**Signal 1: A required capability is missing from the registry at task generation time**
 
-タスクを生成する段階で、LLMが必要と判断したツール・権限・データソースがCapability Registryに登録されていない場合。タスクを委譲する前に検知できるため、最もコストが低い。
-
-```
-例:
-  タスク生成 → 「Stripe APIで決済データを取得する」
-  Capability Registry を参照 → Stripe API 未登録
-  → タスク実行の前に能力不足を検知
-```
-
-**シグナル2: タスク実行が能力不足で繰り返し失敗する**
-
-タスクを委譲したが、エージェントが「権限がない」「ツールが存在しない」「APIキーがない」等の理由で実行できず、同種のタスクが連続して失敗する場合。`task-lifecycle.md` §2.8 の `consecutive_failure_count` がエスカレーション閾値（デフォルト: 3回）に達したとき、失敗原因を分析して能力不足を確認する。
+When generating a task, if a tool, permission, or data source that the LLM has determined is necessary is not registered in the Capability Registry. This is the lowest-cost signal, since it is detected before the task is even delegated.
 
 ```
-例:
-  タスク「本番DBのクエリ分析」を実行
-  エージェント: 「本番環境への読み取り権限がない」
-  同種タスクで3回連続失敗 → 能力不足として確定
+Example:
+  Task generation → "Fetch payment data via Stripe API"
+  Check Capability Registry → Stripe API not registered
+  → Capability gap detected before task execution
 ```
 
-**シグナル3: 停滞検知で原因が「能力の限界」と診断された場合**
+**Signal 2: Task execution repeatedly fails due to a capability gap**
 
-`stall-detection.md` §3.3 の「能力の限界」に該当すると診断されたとき。停滞検知はタスク単体の失敗だけでなく、次元レベルのギャップが縮まらない状況からも能力不足を発見できる。
-
-```
-例:
-  次元「健康データ監視」のギャップが5ループ縮まらない
-  原因分類 → 「センサーデータの読み取り能力がない」
-  → 能力不足として確定
-```
-
----
-
-## 5.2 動的調達フロー
-
-能力不足が確定したとき、Conatusは以下のフローで能力を調達する。
+The task was delegated, but the agent cannot execute it due to "no permission," "tool does not exist," "no API key," etc., and the same type of task fails consecutively. When `consecutive_failure_count` in `task-lifecycle.md` §2.8 reaches the escalation threshold (default: 3), the failure cause is analyzed and the capability gap is confirmed.
 
 ```
-1. 能力不足の確定
-   ↓ どの能力が欠けているかを特定する
-   ↓ 欠けている能力の種別を分類する（ツール/権限/データソース/知識）
-
-2. 調達方法の選択
-   ↓ 能力の種別に応じて調達方法を選ぶ（§5.3 参照）
-   ↓ MVPでは人間へのエスカレーションを優先する
-
-3. 調達タスクの生成
-   ↓ 通常のタスクと同じ構造で生成する（`task-lifecycle.md` §2 参照）
-   ↓ タスクカテゴリを「能力調達タスク」として明示する
-   ↓ 成功基準に「新しい能力がレジストリに登録されること」を含める
-
-4. 調達タスクの実行
-   ↓ 通常のタスクと同様に委譲する
-   ↓ エージェントへの委譲 or 人間への確認要求（§5.3 参照）
-
-5. 新能力の検証
-   ↓ 取得した能力が期待通りに機能するかを確認する（§5.4 参照）
-
-6. Capability Registryへの登録
-   ↓ 検証が通った能力をカタログに追加する
-   ↓ 登録後、停止していたタスクを再開する
+Example:
+  Execute task "Analyze queries on the production DB"
+  Agent: "No read permission for the production environment"
+  Same type of task fails 3 times in a row → Confirmed as capability gap
 ```
 
-調達フローは通常のタスクライフサイクルと並走する。調達タスクが完了するまでの間、能力不足が原因で止まっているタスクは待機状態に入る。他のゴール・タスクには影響しない。
+**Signal 3: Stall detection diagnoses the cause as "capability ceiling"**
 
----
-
-## 5.3 調達方法の種類
-
-欠けている能力の種別に応じて、以下の3種類の調達方法から選択する。
-
-### エージェントへのツール/コード作成の委譲
-
-**適用ケース**: 能力不足がツールやコードの「未作成」に起因する場合。既存のエージェントの能力の範囲内で、新しいツールや統合コードを作成できると判断できる場合。
+When diagnosed as "capability ceiling" under `stall-detection.md` §3.3. Stall detection can identify capability gaps not only from individual task failures, but also from situations where the gap in a given dimension is not shrinking.
 
 ```
-例:
-  欠けている能力: 「犬の首輪センサーからデータを読み取る機能」
-  調達方法: コード実装エージェントに「センサーデータ読み取りスクリプトの実装」を委譲
-  成功基準: スクリプトが正常に動作し、サンプルデータを返すこと
-```
-
-委譲先はコード実装エージェント（Claude Code CLI, OpenAI Codex CLI等）を基本とする。タスクの内容は「何を作るか」「成功基準は何か」「既存コードのどこに統合するか」を明示する。
-
-### ユーザーへの権限/APIキーの要求
-
-**適用ケース**: 能力不足が認証情報・権限・外部サービスへのアクセスに起因する場合。Conatusには要求できるが、自律的に取得できない種類の能力。
-
-```
-例:
-  欠けている能力: 「本番データベースへの読み取り権限」
-  調達方法: ユーザーに権限付与を要求
-  エスカレーション内容:
-    - 何が必要か: 本番DBへの読み取り専用権限
-    - なぜ必要か: チャーン分析タスクを実行するため
-    - 代替案: 匿名化されたDBダンプの提供
-    - 権限なしの場合の影響: 当該次元のギャップを縮められない
-```
-
-要求は具体的に行う。「権限が必要」ではなく「この権限がこの理由で必要、代替案はこれ」という形式で伝える。
-
-### 外部サービス連携の提案
-
-**適用ケース**: 必要な能力が外部SaaS・APIサービスとして存在し、連携設定によって取得できる場合。
-
-```
-例:
-  欠けている能力: 「Slackへの通知送信機能」
-  調達方法: Slack Webhook の設定をユーザーに提案
-  提案内容:
-    - 連携するサービス: Slack
-    - 取得できる能力: #conatus-alerts チャンネルへの通知送信
-    - 設定手順: Incoming Webhook URLの発行と提供
+Example:
+  The gap in the "health data monitoring" dimension does not shrink over 5 loops
+  Root cause → "No capability to read sensor data"
+  → Confirmed as capability gap
 ```
 
 ---
 
-## 5.4 新能力の検証
+## 5.2 Dynamic Acquisition Flow
 
-Capability Registryに登録する前に、取得した能力が期待通りに機能するかを検証する。検証は通常のタスク検証（`task-lifecycle.md` §5）と同じ3層構造で行う。
+Once a capability gap is confirmed, Conatus acquires the capability through the following flow.
 
-**検証セッションが確認すること**:
+```
+1. Confirm the capability gap
+   ↓ Identify which capability is missing
+   ↓ Classify the type of missing capability (tool / permission / data source / knowledge)
 
-| 確認項目 | 検証方法 |
-|---------|---------|
-| 基本動作 | サンプル入力を与えて、期待した出力が返るか |
-| エラーハンドリング | 不正な入力・ネットワーク障害等に対して適切に失敗するか |
-| 制約との整合性 | ゴールから継承された制約を違反しないか（例: 顧客データを外部に出さない） |
-| スコープ境界 | 意図した操作のみを行い、副作用を起こさないか |
+2. Select an acquisition method
+   ↓ Choose an acquisition method based on the type (see §5.3)
+   ↓ In MVP, prioritize escalation to humans
 
-**検証失敗時の対応**:
-- ツール/コード作成の場合: エージェントに修正を再委譲する
-- 権限/APIキーの場合: ユーザーに「提供された認証情報が機能しない」と報告し、再確認を依頼する
-- 検証が3回失敗した場合: 調達フローを中断し、ユーザーにエスカレーションする
+3. Generate an acquisition task
+   ↓ Generate using the same structure as a normal task (see task-lifecycle.md §2)
+   ↓ Explicitly label the task category as "capability acquisition task"
+   ↓ Include "new capability registered in the registry" in the success criteria
 
----
+4. Execute the acquisition task
+   ↓ Delegate just like a normal task
+   ↓ Delegate to an agent or request human confirmation (see §5.3)
 
-## 5.5 MVP と Phase 2 のスコープ
+5. Verify the new capability
+   ↓ Confirm that the acquired capability functions as expected (see §5.4)
 
-### MVP（ユーザーエスカレーション中心）
+6. Register in the Capability Registry
+   ↓ Add the verified capability to the catalog
+   ↓ After registration, resume the tasks that were waiting
+```
 
-MVPでは、能力の自律調達は行わない。能力不足を検知したら、すべて人間へのエスカレーションで対応する。
-
-**MVPの動作**:
-1. 能力不足を検知する
-2. 不足している能力・代替案・影響を明示してユーザーに通知する
-3. ユーザーが能力を提供したら（APIキー、権限、ツール）、レジストリに登録する
-4. 停止していたタスクを再開する
-
-エージェントへの調達タスクの委譲は行わない。コードの自動生成も行わない。人間が能力の提供者であり続ける。
-
-### Phase 2（自律調達）
-
-Phase 2では、能力の種別に応じて自律調達を導入する。
-
-**段階的な自律化**:
-
-| 能力の種別 | Phase 2 での対応 |
-|-----------|----------------|
-| ツール/コード | エージェントに作成を委譲し、検証後に自動登録 |
-| 権限/APIキー | 引き続きユーザーへのエスカレーション（変更なし） |
-| 外部サービス連携 | 設定手順のガイドを自動生成し、ユーザー承認後に連携を完了 |
-
-自律調達が成功した能力は、他のゴールでも再利用可能な形でレジストリに登録する。一度調達した能力を再調達しないために、登録時に「どのゴールのために調達したか」のコンテキストを記録する。
+The acquisition flow runs concurrently with the normal task lifecycle. Tasks blocked by the capability gap enter a waiting state until the acquisition task completes. Other goals and tasks are not affected.
 
 ---
 
-## 6. 「Conatusが〇〇した」の正確な意味
+## 5.3 Types of Acquisition Methods
 
-表現の対応表を明示する。
+Choose from the following three acquisition methods based on the type of missing capability.
 
-| 省略表現（不正確） | 正確な意味 |
-|------------------|-----------|
-| Conatusがコードを書いた | Conatusがコード実装エージェントにコード実装を指示し、結果を確認した |
-| Conatusがデータを収集した | Conatusがエージェントにデータ収集タスクを委譲し、結果を受け取った |
-| Conatusがシステムを構築した | Conatusが複数のエージェントに構築タスクを順次委譲し、統合を確認した |
-| ConatusがAPIを叩いた | Conatusがエージェントにそのアクションを指示し、応答を観測した |
-| Conatusが通知を送った | Conatusが通知システムにメッセージ送信を委譲した |
-| Conatusがツールを作った | Conatusがコード実装エージェントにツール作成を指示し、動作を検証した |
-| Conatusが調査した | Conatusがエージェントに調査タスクを委譲し、結果を分析した |
+### Delegating Tool/Code Creation to an Agent
 
-省略表現は会話の文脈では便利だが、設計を議論するときは正確な表現を使う。
+**Applicable case**: The capability gap is caused by a tool or code that has not yet been created. It is possible to create a new tool or integration code within the capabilities of an existing agent.
+
+```
+Example:
+  Missing capability: "Functionality to read data from a dog collar sensor"
+  Acquisition method: Delegate "implement a sensor data reading script" to a code implementation agent
+  Success criteria: The script runs correctly and returns sample data
+```
+
+The default delegate target is a code implementation agent (Claude Code CLI, OpenAI Codex CLI, etc.). The task content should explicitly state "what to build," "what the success criteria are," and "where to integrate it in the existing codebase."
+
+### Requesting Permissions/API Keys from the User
+
+**Applicable case**: The capability gap is caused by missing credentials, permissions, or access to an external service. This is a type of capability that Conatus can request but cannot acquire autonomously.
+
+```
+Example:
+  Missing capability: "Read permission for the production database"
+  Acquisition method: Request permission grant from the user
+  Escalation content:
+    - What is needed: Read-only access to the production DB
+    - Why it is needed: To execute the churn analysis task
+    - Alternative: Provide an anonymized DB dump
+    - Impact without permission: Cannot close the gap in this dimension
+```
+
+Requests should be specific. Not just "we need permission," but "we need this specific permission for this reason, and the alternative is this."
+
+### Proposing External Service Integration
+
+**Applicable case**: The required capability exists as an external SaaS or API service and can be acquired through integration configuration.
+
+```
+Example:
+  Missing capability: "Ability to send notifications to Slack"
+  Acquisition method: Propose Slack Webhook configuration to the user
+  Proposal content:
+    - Service to integrate: Slack
+    - Capability gained: Send notifications to the #conatus-alerts channel
+    - Setup steps: Generate and provide an Incoming Webhook URL
+```
 
 ---
 
-## 7. 不可逆アクションの扱い
+## 5.4 Verifying New Capabilities
 
-委譲する際に特別な扱いが必要なのが、不可逆アクションだ。
+Before registering a capability in the Capability Registry, verify that the acquired capability functions as expected. Verification uses the same three-layer structure as normal task verification (`task-lifecycle.md` §5).
 
-**不可逆アクションの例:**
-- 本番データの削除・上書き
-- 外部サービスへの課金が発生するAPI呼び出し
-- 顧客への大量メール送信
-- 既存インフラの変更・破壊
+**What the verification session checks**:
 
-このカテゴリのアクションは、信頼度やゴール達成確信度に関わらず、**必ず人間の承認を経る**。Conatusが「十分確実だ」と判断しても、人間に確認せずに委譲してはならない。
+| Check item | Verification method |
+|-----------|-------------------|
+| Basic operation | Give a sample input and confirm the expected output is returned |
+| Error handling | Verify it fails gracefully on invalid input, network failures, etc. |
+| Constraint conformance | Confirm it does not violate constraints inherited from the goal (e.g., don't send customer data externally) |
+| Scope boundary | Confirm it only performs the intended operations and causes no side effects |
 
-承認フローも委譲の一形態だ。「このアクションを実行してよいか」という問いを人間に渡し、「はい」という応答を受け取ってから、エージェントへの委譲を行う。
+**When verification fails**:
+- For tool/code creation: Re-delegate the fix to an agent
+- For permissions/API keys: Report "the credentials provided do not work" to the user and request re-confirmation
+- If verification fails 3 times: Abort the acquisition flow and escalate to the user
 
 ---
 
-## 8. まとめ
+## 5.5 MVP and Phase 2 Scope
 
-Conatusの実行境界を一言で表すと：
+### MVP (Human Escalation Focused)
 
-> **Conatusは考える。エージェントが動く。**
+In MVP, no autonomous capability acquisition is performed. When a capability gap is detected, it is always handled by escalating to a human.
 
-Conatusの価値は、ゴールと現実のギャップから「次に何をすべきか」を発見し続けることにある。その発見の結果を実行に移すのは、常にエージェントや人間や既存システムだ。
+**MVP behavior**:
+1. Detect the capability gap
+2. Notify the user, explicitly stating the missing capability, alternatives, and impact
+3. When the user provides the capability (API key, permission, tool), register it in the registry
+4. Resume the tasks that were waiting
 
-この分離が、Conatusをスケーラブルにする。どんなに複雑なゴールでも、Conatusは「何をすべきか」を決め続ける。「それをどう実行するか」は、その時点で最適なエージェントが担う。
+No acquisition tasks are delegated to agents. No automatic code generation is performed. Humans remain the providers of capabilities.
+
+### Phase 2 (Autonomous Acquisition)
+
+In Phase 2, autonomous acquisition is introduced based on capability type.
+
+**Phased autonomy**:
+
+| Capability type | Phase 2 behavior |
+|----------------|-----------------|
+| Tool/code | Delegate creation to an agent; auto-register after verification |
+| Permission/API key | Continue escalating to the user (no change) |
+| External service integration | Auto-generate setup guides; complete integration after user approval |
+
+Autonomously acquired capabilities are registered in the registry in a form reusable for other goals. To avoid re-acquiring a capability that has already been obtained, the context of "which goal this was acquired for" is recorded at registration time.
+
+---
+
+## 6. What "Conatus Did X" Actually Means
+
+An explicit mapping of expressions:
+
+| Shorthand (imprecise) | Precise meaning |
+|----------------------|----------------|
+| Conatus wrote the code | Conatus instructed a code implementation agent to implement the code and confirmed the result |
+| Conatus collected the data | Conatus delegated a data collection task to an agent and received the result |
+| Conatus built the system | Conatus sequentially delegated construction tasks to multiple agents and verified the integration |
+| Conatus called the API | Conatus instructed an agent to perform that action and observed the response |
+| Conatus sent the notification | Conatus delegated message delivery to the notification system |
+| Conatus built the tool | Conatus instructed a code implementation agent to create the tool and verified its operation |
+| Conatus investigated | Conatus delegated an investigation task to an agent and analyzed the result |
+
+The shorthand is convenient in conversation, but use the precise form when discussing design.
+
+---
+
+## 7. Handling Irreversible Actions
+
+A special case during delegation is irreversible actions.
+
+**Examples of irreversible actions:**
+- Deleting or overwriting production data
+- API calls that incur charges to external services
+- Sending mass emails to customers
+- Modifying or destroying existing infrastructure
+
+Actions in this category **always require human approval**, regardless of trust level or goal confidence. Even if Conatus judges something to be "sufficiently certain," it must not delegate without human confirmation.
+
+The approval flow is itself a form of delegation. The question "is it okay to perform this action?" is handed to the human, and the delegation to the agent takes place only after a "yes" is received.
+
+---
+
+## 8. Summary
+
+Conatus's execution boundary in one sentence:
+
+> **Conatus thinks. Agents act.**
+
+Conatus's value lies in continuously discovering "what should be done next" from the gap between goals and reality. It is always agents, humans, or existing systems that carry out the results of that discovery.
+
+This separation makes Conatus scalable. No matter how complex the goal, Conatus keeps deciding "what should be done." "How to execute it" is handled by whichever agent is best suited at that moment.

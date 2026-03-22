@@ -1,368 +1,368 @@
-# ギャップ計算の設計
+# Gap Calculation Design
 
-ゴールの現在地と目標状態の差分（ギャップ）をどう数値化するか。このドキュメントはギャップ計算の構造と設計上の判断を記述する。
+This document describes how the gap between a goal's current state and its target state is quantified, along with the structure and design decisions behind gap calculation.
 
 ---
 
-## 1. 生のギャップ（Raw Gap）
+## 1. Raw Gap
 
-各次元の生のギャップは、閾値の型に応じて計算方法が異なる。閾値型の定義は `state-vector.md` セクション2を参照。
+The raw gap for each dimension is calculated differently depending on the threshold type. See `state-vector.md` section 2 for threshold type definitions.
 
-### 閾値型別のraw_gap計算式
+### Raw Gap Formulas by Threshold Type
 
-#### `min(N)` 型（N以上で達成）
+#### `min(N)` type (achieved when value >= N)
 
 ```
 raw_gap(dim) = max(0, threshold - current_value)
 ```
 
-- 現在値が閾値以上なら 0（達成済み）
-- 現在値が閾値を下回るほど raw_gap は大きくなる
+- 0 if the current value meets or exceeds the threshold (achieved)
+- The further below the threshold, the larger the raw_gap
 
-#### `max(N)` 型（N以下で達成）
+#### `max(N)` type (achieved when value <= N)
 
 ```
 raw_gap(dim) = max(0, current_value - threshold)
 ```
 
-- 現在値が閾値以下なら 0（達成済み）
-- 現在値が閾値を上回るほど raw_gap は大きくなる
+- 0 if the current value is at or below the threshold (achieved)
+- The further above the threshold, the larger the raw_gap
 
-#### `range(low, high)` 型（範囲内で達成）
+#### `range(low, high)` type (achieved when value is within range)
 
 ```
 raw_gap(dim) = max(0, low - current_value) + max(0, current_value - high)
 ```
 
-- 現在値が範囲内なら 0（達成済み）
-- 範囲の下限を下回る場合：`low - current_value`
-- 範囲の上限を上回る場合：`current_value - high`
-- 両辺への逸脱は加算（範囲外の方向と距離に応じた量）
+- 0 if the current value is within the range (achieved)
+- Below the lower bound: `low - current_value`
+- Above the upper bound: `current_value - high`
+- Deviations on either side are additive (amount depends on direction and distance from range)
 
-#### `present` 型（存在すれば達成）
-
-```
-raw_gap(dim) = 0  // 存在する場合
-raw_gap(dim) = 1  // 存在しない場合
-```
-
-- 二値のギャップ（0.0 または 1.0）
-
-#### `match(value)` 型（特定値と一致で達成）
+#### `present` type (achieved when value exists)
 
 ```
-raw_gap(dim) = 0  // current == value の場合
-raw_gap(dim) = 1  // current != value の場合
+raw_gap(dim) = 0  // when present
+raw_gap(dim) = 1  // when absent
 ```
 
-- 二値のギャップ（0.0 または 1.0）
+- Binary gap (0.0 or 1.0)
 
-### ガード条件
-
-**null値（初期状態）**: `current_value` が `null`（初回観測前）の場合、raw_gap は最大値として扱う。
+#### `match(value)` type (achieved when value matches a specific value)
 
 ```
-current_value が null の場合:
-  数値型（min/max/range）→ raw_gap = threshold 全体を未達とみなす最大ギャップ
-  二値型（present/match） → raw_gap = 1
+raw_gap(dim) = 0  // when current == value
+raw_gap(dim) = 1  // when current != value
 ```
 
-**ゼロ除算**: `min`/`max`/`range` 型では除算は発生しない（加減算のみ）。ただし、後続の正規化ステップ（ `normalize_gap` ）で除算が必要になる場合、除数が 0 のときは正規化ギャップを 1.0（最大未達成）とする。
+- Binary gap (0.0 or 1.0)
 
-### 例
+### Guard Conditions
 
-| 次元 | 閾値型 | 閾値 | 現在値 | raw_gap |
-|------|--------|------|--------|---------|
-| 月次売上（万円）| `min(200)` | 200 | 120 | 80 |
-| 解約率 | `max(0.05)` | 0.05 | 0.08 | 0.03 |
-| 体温（℃）| `range(36.0, 37.0)` | 36.0〜37.0 | 35.5 | 0.5 |
-| 設定ファイル | `present` | — | 存在する | 0 |
-| ステータス | `match("approved")` | "approved" | "pending" | 1 |
-| 月次売上（初回観測前）| `min(200)` | 200 | null | 200（最大ギャップ）|
+**Null values (initial state)**: When `current_value` is `null` (before the first observation), the raw_gap is treated as the maximum value.
 
-生のギャップはまだ「信頼できる数字」とは言えない。観測の精度が反映されていないからだ。
+```
+When current_value is null:
+  Numeric types (min/max/range) → raw_gap = maximum gap, treating the full threshold as unmet
+  Binary types (present/match)  → raw_gap = 1
+```
+
+**Division by zero**: No division occurs in the `min`/`max`/`range` types (only addition/subtraction). However, if division is needed in the subsequent normalization step (`normalize_gap`), and the divisor is 0, the normalized gap is set to 1.0 (maximum unmet).
+
+### Examples
+
+| Dimension | Threshold type | Threshold | Current value | raw_gap |
+|-----------|---------------|-----------|---------------|---------|
+| Monthly revenue (¥10k) | `min(200)` | 200 | 120 | 80 |
+| Churn rate | `max(0.05)` | 0.05 | 0.08 | 0.03 |
+| Body temperature (°C) | `range(36.0, 37.0)` | 36.0–37.0 | 35.5 | 0.5 |
+| Config file | `present` | — | exists | 0 |
+| Status | `match("approved")` | "approved" | "pending" | 1 |
+| Monthly revenue (before first observation) | `min(200)` | 200 | null | 200 (maximum gap) |
+
+The raw gap is not yet a "trustworthy number" because it does not reflect observation accuracy.
 
 ---
 
-## 2. 正規化（Normalization）
+## 2. Normalization
 
-各次元のギャップは単位が異なる（万円、割合、整数、二値）。単位の違ったままのギャップを駆動スコアリングに入力すると、「売上が80万円のギャップ」と「解約率が0.03のギャップ」が直接比較されてしまい、絶対値の大きい次元が常に優先される。正規化によってすべての次元のギャップを **[0, 1]** に揃えてから後続処理に渡す。
+Each dimension's gap has a different unit (¥10k, ratio, integer, binary). Feeding gaps with mismatched units into drive scoring would directly compare "a ¥800k revenue gap" with "a 0.03 churn gap," always giving priority to the dimension with the larger absolute value. Normalization converts all dimension gaps to **[0, 1]** before passing them downstream.
 
-### 閾値型別の正規化式
+### Normalization Formulas by Threshold Type
 
-#### `min(N)` 型
-
-```
-normalized_gap(dim) = raw_gap(dim) / threshold
-```
-
-- ギャップを目標値 N に対する割合として表す
-- **ガード条件**: `threshold = 0` の場合、`raw_gap > 0` なら `normalized_gap = 1.0`、`raw_gap = 0` なら `normalized_gap = 0.0`
-
-#### `max(N)` 型
+#### `min(N)` type
 
 ```
 normalized_gap(dim) = raw_gap(dim) / threshold
 ```
 
-- ギャップを上限値 N に対する割合として表す
-- **ガード条件**: `threshold = 0` の場合、`raw_gap` をそのまま使用し 1.0 にキャップする
+- Expresses the gap as a fraction of the target value N
+- **Guard condition**: If `threshold = 0`, set `normalized_gap = 1.0` when `raw_gap > 0`, and `0.0` when `raw_gap = 0`
 
-#### `range(low, high)` 型
+#### `max(N)` type
+
+```
+normalized_gap(dim) = raw_gap(dim) / threshold
+```
+
+- Expresses the gap as a fraction of the upper bound N
+- **Guard condition**: If `threshold = 0`, use `raw_gap` directly, capped at 1.0
+
+#### `range(low, high)` type
 
 ```
 normalized_gap(dim) = min(1.0, raw_gap(dim) / ((high - low) / 2))
 ```
 
-- ギャップを「レンジ幅の半分」に対する割合として表す（半値幅が基準スケール）
-- 上限 1.0 でキャップ（レンジ幅の半分を超えて逸脱しても 1.0 どまり）
+- Expresses the gap as a fraction of the "half-width of the range" (the half-range is the reference scale)
+- Capped at 1.0 (deviations beyond half the range width still return 1.0)
 
-#### `present` 型
-
-```
-normalized_gap(dim) = raw_gap(dim)   // すでに 0 または 1
-```
-
-- 正規化不要。raw_gap がそのまま normalized_gap になる
-
-#### `match(value)` 型
+#### `present` type
 
 ```
-normalized_gap(dim) = raw_gap(dim)   // すでに 0 または 1
+normalized_gap(dim) = raw_gap(dim)   // already 0 or 1
 ```
 
-- 正規化不要。raw_gap がそのまま normalized_gap になる
+- No normalization needed. raw_gap becomes normalized_gap directly.
 
-#### null 値（初回観測前）
+#### `match(value)` type
 
 ```
-current_value が null の場合:
-  normalized_gap = 1.0   // 最大ギャップ
+normalized_gap(dim) = raw_gap(dim)   // already 0 or 1
 ```
 
-セクション1のガード条件に対応する。
+- No normalization needed. raw_gap becomes normalized_gap directly.
 
-### 二値次元の注意点
+#### Null values (before first observation)
 
-`present` / `match` 型は 0 または 1 の飛び値を生成する。これにより、駆動スコアリングで二値次元が「存在する瞬間だけ完全支配」または「達成した瞬間に完全消失」する挙動が起きる。
+```
+When current_value is null:
+  normalized_gap = 1.0   // maximum gap
+```
 
-v1 では現状のまま（0/1）とする。将来的に優先判断が偏る問題が観測された場合は、二値次元に対して `binary_dampening_factor`（例: 0.5）を乗じるオプションを追加することを検討する。
+Corresponds to the guard condition in section 1.
 
-### 正規化後のギャップ例
+### Note on Binary Dimensions
 
-| 次元 | 閾値型 | raw_gap | 正規化基準 | normalized_gap |
-|------|--------|---------|-----------|---------------|
-| 月次売上（万円）| `min(200)` | 80 | ÷200 | 0.40 |
-| 解約率 | `max(0.05)` | 0.03 | ÷0.05 | 0.60 |
-| 体温（℃）| `range(36.0, 37.0)` | 0.5 | ÷((37.0-36.0)/2)=0.5 | 1.00（キャップ）|
-| 設定ファイル | `present` | 0 | — | 0.00 |
-| ステータス | `match("approved")` | 1 | — | 1.00 |
+`present` / `match` types produce jump values of 0 or 1. This causes binary dimensions in drive scoring to behave as "total domination at the moment they appear" or "complete disappearance at the moment of achievement."
 
-売上ギャップ（80万円）の normalized_gap は 0.40 であり、解約率ギャップ（0.03）の 0.60 より小さい。単位を揃えて初めて「解約率の方が今の優先課題」という判断が可能になる。
+In v1, this is left as-is (0/1). If biased prioritization is observed in practice, consider adding an option to apply a `binary_dampening_factor` (e.g., 0.5) to binary dimensions in the future.
+
+### Normalized Gap Examples
+
+| Dimension | Threshold type | raw_gap | Normalization basis | normalized_gap |
+|-----------|---------------|---------|--------------------|--------------:|
+| Monthly revenue (¥10k) | `min(200)` | 80 | ÷200 | 0.40 |
+| Churn rate | `max(0.05)` | 0.03 | ÷0.05 | 0.60 |
+| Body temperature (°C) | `range(36.0, 37.0)` | 0.5 | ÷((37.0–36.0)/2)=0.5 | 1.00 (capped) |
+| Config file | `present` | 0 | — | 0.00 |
+| Status | `match("approved")` | 1 | — | 1.00 |
+
+The revenue gap (¥800k) has a normalized_gap of 0.40, which is smaller than the churn gap (0.03) at 0.60. Only by aligning units can we conclude "churn rate is the higher-priority issue right now."
 
 ---
 
-## 3. 信頼度加重ギャップ（Confidence-Weighted Gap）
+## 3. Confidence-Weighted Gap
 
-> **信頼度調整の唯一の適用箇所**: このセクションは、スコアリングパイプライン全体における信頼度の影響を**この1箇所でのみ**適用する。観測層の進捗上限（`observation.md` §4）は入力データの品質ゲートであり、`state-vector.md` §6 の有効達成度は表示用参考値であるため、三重適用にはならない。パイプラインの順序は次の通りだ: **生観測（進捗上限フィルター適用済み） → 状態ベクトル（値をそのまま保存） → ギャップ計算（ここで信頼度加重を1回適用） → 駆動スコアリング**。
+> **The only place confidence adjustment is applied**: This section applies the effect of confidence **exactly once** throughout the scoring pipeline. The progress ceiling in the observation layer (`observation.md` §4) is a quality gate on input data, and the effective achievement in `state-vector.md` §6 is a reference value for display purposes — this does not constitute triple-application. The pipeline order is: **raw observation (with progress ceiling applied) → state vector (values stored as-is) → gap calculation (confidence weighting applied here, once) → drive scoring**.
 
-観測の信頼度が低い場合、ギャップを保守的に（大きめに）見積もる。正規化ステップの後に適用する。
+When observation confidence is low, the gap is estimated conservatively (i.e., inflated). This is applied after the normalization step.
 
-### 完全なパイプライン
+### Full Pipeline
 
 ```
 raw_gap → normalized_gap → normalized_weighted_gap
 ```
 
-各ステップの定義:
+Definition of each step:
 
 ```
-// ステップ1: セクション1の式で raw_gap を計算
-raw_gap(dim) = ...（閾値型別の式）
+// Step 1: Calculate raw_gap using the formula from section 1
+raw_gap(dim) = ...  (formula by threshold type)
 
-// ステップ2: セクション2の式で正規化
+// Step 2: Normalize using the formula from section 2
 normalized_gap(dim) = raw_gap(dim) / normalize_denominator(dim)
 
-// ステップ3: 信頼度加重（正規化済みギャップに適用）
+// Step 3: Apply confidence weighting (on the normalized gap)
 normalized_weighted_gap(dim) = normalized_gap(dim) × (1 + (1 - confidence(dim)) × uncertainty_weight)
 ```
 
-- `confidence(dim)`: 観測信頼度（0.0〜1.0）
-- `uncertainty_weight`: 不確実性をどれだけ増幅するかのパラメータ（後述）
+- `confidence(dim)`: Observation confidence (0.0–1.0)
+- `uncertainty_weight`: Parameter controlling how much uncertainty is amplified (see below)
 
-この式はすべての閾値型に適用できる。数値型（`min`/`max`/`range`）でも二値型（`present`/`match`）でも、normalized_gap が 0 の場合は normalized_weighted_gap も 0 になり（達成済みは揺るがない）、normalized_gap > 0 の場合に信頼度が低いほどペナルティが増幅される。
+This formula applies to all threshold types. For both numeric (`min`/`max`/`range`) and binary (`present`/`match`) types, if normalized_gap is 0, normalized_weighted_gap is also 0 (achieved status is unaffected). When normalized_gap > 0, lower confidence results in a larger penalty.
 
-**ただし、`current_value = null` の場合は信頼度加重をかけない。** null の場合はセクション1のガード条件が適用され、normalized_gap = 1.0（最大）として確定する。normalized_weighted_gap もその最大値をそのまま使う（信頼度加重で二重に膨らませない）。
+**However, confidence weighting is not applied when `current_value = null`.** In the null case, the guard condition from section 1 applies, locking normalized_gap at 1.0 (maximum). normalized_weighted_gap uses that maximum value directly — no double inflation from confidence weighting.
 
-### 動作の直感
+### Intuition
 
-| confidence | uncertainty_weight | 増幅率 |
-|------------|-------------------|--------|
-| 1.0（完全に確信）| 任意 | 1.0（変化なし） |
-| 0.5（中程度）| 1.0 | 1.5倍 |
-| 0.0（まったく不明）| 1.0 | 2.0倍 |
-| 0.0（まったく不明）| 0.5 | 1.5倍 |
+| confidence | uncertainty_weight | Amplification factor |
+|------------|-------------------|---------------------|
+| 1.0 (fully certain) | any | 1.0 (no change) |
+| 0.5 (moderate) | 1.0 | 1.5× |
+| 0.0 (completely unknown) | 1.0 | 2.0× |
+| 0.0 (completely unknown) | 0.5 | 1.5× |
 
-信頼度が低い次元は「実際には思っているより悪いかもしれない」と見なし、優先的に調査タスクを生成する方向に動く。これは**意図的な保守設計**だ。過小評価よりも過大評価の方が、安全なタスク発見につながる。
+Dimensions with low confidence are treated as "possibly worse than we think," nudging the system to generate investigation tasks first. This is **intentionally conservative design**. Overestimating a problem is safer for task discovery than underestimating it.
 
-### 設計の論拠
+### Design Rationale
 
-「よくわかっていないことを問題なし」と扱うことのリスクが高い。特に長期ゴールでは、見落とした問題が後で大きなコストになる。Conatusは「見えていないものを恐れる」設計にすべきだ。
-
----
-
-## 4. uncertainty_weight パラメータ
-
-`uncertainty_weight` はどれだけ積極的に不確実性をペナルティとして扱うかを制御する。
-
-### グローバル vs. 次元別
-
-**グローバル設定**（単一の値をすべての次元に適用）:
-- シンプルで一貫性がある
-- ゴール全体の「保守度合い」を一つのレバーで調整できる
-- デフォルト推奨: `uncertainty_weight = 1.0`
-
-**次元別設定**（次元ごとに異なる値）:
-- ミスの影響が大きい次元（セキュリティ、コスト、法的要件など）に高い値を設定できる
-- 設定コストが高く、ユーザーの認知負荷が上がる
-- 過度に細かい調整を誘発するリスクがある
-
-**推奨判断**: グローバルをデフォルトにしつつ、次元別オーバーライドをオプションとして許容する。ほとんどのゴールではグローバルで十分だが、リスク管理が重要なドメインでは次元別が有効になる。
-
-### 値の目安
-
-| uncertainty_weight | 性質 | 用途 |
-|-------------------|------|------|
-| 0.5 | 穏やか | 不確実性への感度を下げたい場合 |
-| 1.0 | 標準 | デフォルト推奨 |
-| 2.0 | 積極的 | リスク許容度が低いゴール（健康、コンプライアンス等）|
+The risk of treating something poorly understood as "no problem" is high. Especially for long-term goals, overlooked issues can become costly later. Conatus should be designed to "fear what it cannot see."
 
 ---
 
-## 5. 多次元ギャップ表現（ギャップベクトル）
+## 4. The `uncertainty_weight` Parameter
 
-ゴールは N 個の次元を持ち、ギャップは N 次元のベクトルとして表現される。
+`uncertainty_weight` controls how aggressively uncertainty is treated as a penalty.
+
+### Global vs. Per-dimension
+
+**Global setting** (a single value applied to all dimensions):
+- Simple and consistent
+- The overall "degree of conservatism" for the entire goal can be adjusted with one lever
+- Recommended default: `uncertainty_weight = 1.0`
+
+**Per-dimension setting** (different values per dimension):
+- Allows higher values for high-stakes dimensions (security, cost, legal requirements, etc.)
+- Higher configuration cost and cognitive load for the user
+- Risk of encouraging overly fine-grained tuning
+
+**Recommended decision**: Use global as the default, with per-dimension overrides as an option. Global is sufficient for most goals, but per-dimension settings are useful in domains where risk management is critical.
+
+### Reference Values
+
+| uncertainty_weight | Character | Use case |
+|-------------------|-----------|---------|
+| 0.5 | Mild | When reduced sensitivity to uncertainty is desired |
+| 1.0 | Standard | Recommended default |
+| 2.0 | Aggressive | Low-risk-tolerance goals (health, compliance, etc.) |
+
+---
+
+## 5. Multi-Dimensional Gap Representation (Gap Vector)
+
+A goal has N dimensions, and the gap is represented as an N-dimensional vector.
 
 ```
 gap_vector = [normalized_weighted_gap(dim_1), normalized_weighted_gap(dim_2), ..., normalized_weighted_gap(dim_N)]
 ```
 
-このベクトルが「何が足りないか」の全体像だ。すべての要素は [0, 1] に正規化済みであり、次元をまたいだ直接比較が可能になっている。単一のスカラーに潰すのではなく、ベクトルのまま保持することで、各次元への個別の対応が可能になる。
+This vector is the complete picture of "what is lacking." Every element is normalized to [0, 1], enabling direct cross-dimensional comparison. By keeping the vector form rather than collapsing it into a single scalar, each dimension can be addressed individually.
 
-### 完了判定
+### Completion Determination
 
-すべての次元のギャップがゼロのとき（`normalized_weighted_gap(dim) = 0` for all dim）にゴール完了と判断する。これはすべての閾値型で共通の判定条件だ（二値型は raw_gap = 0 が達成済みを意味し、数値型は閾値を満たすと raw_gap = 0 になる）。信頼度の低い観測だけで達成を判断した次元は、完了前に検証タスクを差し挟む。
+A goal is considered complete when the gap of every dimension is zero (`normalized_weighted_gap(dim) = 0` for all dim). This is the common completion condition for all threshold types (binary types indicate achievement when raw_gap = 0; numeric types produce raw_gap = 0 when the threshold is met). Dimensions where achievement was determined solely from low-confidence observations will have a verification task inserted before completion.
 
 ---
 
-## 6. 親ゴールへのギャップ集約
+## 6. Gap Aggregation to Parent Goals
 
-ゴールはツリー構造を持つ。子ゴールのギャップを親ゴールにどうロールアップするかは設計上の重要な判断だ。
+Goals have a tree structure. How child goal gaps are rolled up to the parent is an important design decision.
 
-### 選択肢の比較
+### Comparison of Options
 
-集約はすべて **正規化済みギャップ**（`normalized_weighted_gap`）を対象に行う。正規化によってすべての子ゴールのギャップが [0, 1] に揃っているため、異なる単位を持つ子ゴール間での集約が意味を持つ。
+All aggregation operates on **normalized gaps** (`normalized_weighted_gap`). Since normalization brings all child goal gaps into [0, 1], aggregation across child goals with different units is meaningful.
 
-**最大値（Max）**: 最もギャップが大きい子が親のギャップを決める。
+**Max**: The child with the largest gap determines the parent's gap.
 
 ```
 parent_gap = max(normalized_weighted_gap(child_1), ..., normalized_weighted_gap(child_K))
 ```
 
-- 「一番弱いリンクが全体の強さを決める」方式
-- どこかが崩壊すると親ゴールが崩壊するような、逐次依存型のゴールに適合する
-- 小さい子ゴールの改善が親スコアに反映されにくく、モチベーション低下につながりうる
+- "The weakest link determines the overall strength" approach
+- Fits sequentially dependent goals where a single failure collapses the parent goal
+- Improvements in small child goals are less likely to be reflected in the parent score, which can reduce motivation
 
-**加重平均（Weighted Average）**: 子ゴールに重みを付けて平均する。
+**Weighted Average**: Children are averaged with weights applied.
 
 ```
 parent_gap = Σ(weight_k × normalized_weighted_gap(child_k)) / Σ(weight_k)
 ```
 
-- 複数の貢献が独立して積み重なる並列型のゴールに適合する
-- どの子ゴールを改善すれば最も効果的かが、重みから読み取れる
+- Fits parallel goals where multiple contributions accumulate independently
+- Weights make it clear which child goal to improve for the greatest effect
 
-**合計（Sum）**: 子ギャップの単純合計。
+**Sum**: Simple sum of child gaps.
 
 ```
 parent_gap = Σ(normalized_weighted_gap(child_k))
 ```
 
-- ゴールサイズが子ゴールの数で増幅されるため、比較に使いにくい
-- 通常は加重平均の方が扱いやすい
+- Goal size is amplified by the number of child goals, making comparison difficult
+- Weighted average is generally more manageable
 
-### 推奨判断
+### Recommended Decision
 
-**デフォルトはボトルネック集約（最悪次元優先）**とする。これは子ゴールのギャップの中で**最大値（Max）を取る**操作であり、「最も弱いリンクが全体の強さを決める」方式だ。
+**The default is bottleneck aggregation (worst-dimension priority)**, which takes the **maximum (Max)** among child goal gaps. This is the "weakest link determines the overall strength" approach.
 
-> **用語の補足**: `state-vector.md` §4 では「最小値集約」という表現を使っているが、これはギャップではなく達成度（achievement）空間での表現だ。ギャップ空間で「最大ギャップを選ぶ（Max）」操作は、達成度空間で「最小達成度を選ぶ（Min）」操作と等価である。両ドキュメントは同じボトルネック優先方式を指しており、空間の表現が異なるだけだ。
+> **Terminology note**: `state-vector.md` §4 uses the term "min aggregation," but this refers to the achievement (not gap) space. Taking the "maximum gap (Max)" in gap space is equivalent to taking the "minimum achievement (Min)" in achievement space. Both documents refer to the same bottleneck-priority approach; only the representation of the space differs.
 
-理由: 最も遅れている子ゴールが親ゴールの達成を律速するため、保守的な判断が満足化（satisficing）の原則と整合する。
+Rationale: The most lagging child goal is the bottleneck for achieving the parent goal, making this conservative judgment consistent with the satisficing principle.
 
-「すべてが揃って初めて成立する」タイプ（例: プロダクトリリース — コード・QA・デプロイインフラ・ドキュメントがすべて揃わないと出せない）は、まさにこのボトルネック集約が適合するケースだ。並列独立型のゴール（複数の貢献が互いに補完しあう）の場合は、加重平均を使うことを検討する。ゴール定義時に集約方式を指定できるようにする。
-
----
-
-## 7. ギャップベクトルと駆動スコアの接続
-
-ギャップベクトルは直接、3つの駆動スコア計算の入力になる。各駆動タイプはギャップを異なる読み方をする。
-
-**重要**: 駆動スコアリングに入力されるギャップ値はすべて `normalized_weighted_gap`（正規化済み・信頼度加重済み）だ。raw_gap や normalized_gap の途中値は内部計算にのみ使用し、駆動スコアには渡さない。
-
-| 駆動タイプ | ギャップの読み方 | 入力値 |
-|-----------|----------------|--------|
-| 不満駆動 | ギャップの相対的大きさ（0〜1、大きいほど優先） | `normalized_weighted_gap(dim)` |
-| 締切駆動 | ギャップの相対量 × 残り時間（急ぐほど優先） | `normalized_weighted_gap(dim)` |
-| 機会駆動 | ギャップへの対処効率（他への波及効果で増幅） | `normalized_weighted_gap(dim)` |
-
-正規化によって「売上が 80 万円不足している」と「解約率が 0.03 超過している」が同じスケール（0.40 vs 0.60）で比較できるようになり、駆動スコアは次元の単位に依存しない優先判断を行う。
-
-ギャップベクトルそのものは中立な事実の記録だ。「何が足りないか」を示すだけで、「何を今やるか」は駆動スコアが決める。この分離により、同じギャップ情報から状況に応じた異なる優先判断が生まれる。
-
-詳細は `drive-scoring.md` を参照。
+"Only achievable when all pieces are in place" type goals (e.g., a product release — can't ship without code, QA, deployment infrastructure, and documentation all ready) are exactly where bottleneck aggregation is appropriate. For parallel-independent goals (where multiple contributions complement each other), consider using weighted average. The aggregation method should be configurable at goal definition time.
 
 ---
 
-## 8. ギャップ履歴と変化の追跡
+## 7. Connecting the Gap Vector to Drive Scores
 
-各反復（ループ1周）の終了時点でギャップベクトルをスナップショットとして記録する。
+The gap vector feeds directly into three drive score calculations. Each drive type reads the gap differently.
+
+**Important**: All gap values fed into drive scoring are `normalized_weighted_gap` (normalized and confidence-weighted). Intermediate values `raw_gap` and `normalized_gap` are used only for internal calculations and are never passed to drive scoring.
+
+| Drive type | How gap is interpreted | Input value |
+|-----------|----------------------|-------------|
+| Dissatisfaction-driven | Relative magnitude of gap (0–1, larger = higher priority) | `normalized_weighted_gap(dim)` |
+| Deadline-driven | Relative gap amount × remaining time (more urgent = higher priority) | `normalized_weighted_gap(dim)` |
+| Opportunity-driven | Efficiency of addressing gap (amplified by spillover effects) | `normalized_weighted_gap(dim)` |
+
+Normalization enables "a ¥800k revenue shortfall" and "a 0.03 churn excess" to be compared on the same scale (0.40 vs 0.60), so drive scores make priority decisions independent of dimension units.
+
+The gap vector itself is a neutral factual record. It only shows "what is lacking"; "what to do now" is determined by drive scores. This separation allows different prioritization decisions from the same gap information depending on context.
+
+See `drive-scoring.md` for details.
+
+---
+
+## 8. Gap History and Change Tracking
+
+A snapshot of the gap vector is recorded at the end of each iteration (one loop).
 
 ```
 gap_history[t] = gap_vector at iteration t
-gap_delta[t]   = gap_history[t-1] - gap_history[t]   // 正なら改善
+gap_delta[t]   = gap_history[t-1] - gap_history[t]   // positive means improvement
 ```
 
-### 記録するもの
+### What Is Recorded
 
-| フィールド | 内容 |
-|-----------|------|
-| `iteration` | ループ番号 |
-| `timestamp` | 記録時刻 |
-| `gap_vector` | 各次元の normalized_weighted_gap |
-| `confidence_vector` | 各次元の信頼度スナップショット |
+| Field | Content |
+|-------|---------|
+| `iteration` | Loop number |
+| `timestamp` | Time of recording |
+| `gap_vector` | normalized_weighted_gap for each dimension |
+| `confidence_vector` | Confidence snapshot for each dimension |
 
-### 用途
+### Uses
 
-- **停滞検知への入力**: `gap_delta` が N 回連続でほぼゼロなら停滞とみなす。閾値とNは停滞検知モジュールが管理する（詳細は `stall-detection.md` を参照）。
-- **戦略評価**: 特定の戦略を採用した前後でギャップが縮まったかを評価する。
-- **学習**: どの次元が改善しやすく、どの次元が頑固かのパターンを蓄積する。
+- **Input for stall detection**: If `gap_delta` is near zero for N consecutive iterations, a stall is declared. The threshold and N are managed by the stall detection module (see `stall-detection.md`).
+- **Strategy evaluation**: Assess whether the gap narrowed before and after adopting a particular strategy.
+- **Learning**: Accumulate patterns about which dimensions are easy to improve and which are stubborn.
 
-ギャップ履歴はゴール状態ファイルの一部としてファイルベースで永続化する。
+Gap history is persisted as part of the goal state file in a file-based format.
 
 ---
 
-## 設計上の判断まとめ
+## Summary of Design Decisions
 
-| 判断項目 | 選択 | 理由 |
-|---------|------|------|
-| 生のギャップ計算 | 閾値型別の5種類の式 | 型ごとに「達成」の意味が異なるため、一様な引き算では表現できない |
-| null値（初期状態）の扱い | 最大ギャップ（normalized_gap = 1.0）として扱う | 未観測を「問題なし」とみなすリスクを排除する |
-| ゼロ除算ガード | 正規化時に除数=0なら正規化ギャップ=1.0 | 安全なデフォルトとして最大未達成を返す |
-| 正規化 | 型別の式で [0,1] に変換（raw_gap → normalized_gap） | 単位の異なる次元を直接比較可能にする |
-| 処理パイプライン順序 | raw_gap → normalized_gap → normalized_weighted_gap | 正規化を先に行い、信頼度加重を正規化済み値に適用する |
-| 二値次元の正規化 | 正規化不要（0/1のまま）、v1はダンピングなし | シンプルさを優先。問題が観測されれば dampening オプションを追加 |
-| 不確実性の扱い | 保守的に膨らませる（nullは除外） | 見落としコストの方が高い |
-| uncertainty_weight | グローバルデフォルト + 次元別オーバーライド | シンプルさと柔軟性の両立 |
-| ギャップ表現 | ベクトルのまま保持（要素は normalized_weighted_gap） | 次元別対応と単位横断比較を両立する |
-| 親ゴール集約 | デフォルトはボトルネック集約＝Maxギャップ（normalized_weighted_gap を集約） | 最弱次元がボトルネック、satisficing原則と整合 |
-| 履歴記録 | 毎反復スナップショット | 停滞検知・学習の基盤 |
+| Decision | Choice | Rationale |
+|---------|--------|-----------|
+| Raw gap calculation | 5 formulas by threshold type | "Achievement" means something different per type; a uniform subtraction cannot express this |
+| Null values (initial state) | Treated as maximum gap (normalized_gap = 1.0) | Eliminates the risk of treating an unobserved state as "no problem" |
+| Division-by-zero guard | Return normalized gap = 1.0 when divisor = 0 at normalization | Return maximum unmet as a safe default |
+| Normalization | Convert to [0, 1] per-type formula (raw_gap → normalized_gap) | Enables direct comparison across dimensions with different units |
+| Pipeline order | raw_gap → normalized_gap → normalized_weighted_gap | Normalize first, then apply confidence weighting to the normalized value |
+| Binary dimension normalization | No normalization needed (remain 0/1); no dampening in v1 | Prioritize simplicity; add dampening option if problems are observed |
+| Handling uncertainty | Inflate conservatively (null excluded) | The cost of overlooking is higher |
+| uncertainty_weight | Global default + per-dimension override | Balance simplicity with flexibility |
+| Gap representation | Keep as a vector (elements are normalized_weighted_gap) | Enables both per-dimension handling and cross-unit comparison |
+| Parent goal aggregation | Default is bottleneck aggregation = Max gap (aggregating normalized_weighted_gap) | Weakest dimension is the bottleneck; consistent with the satisficing principle |
+| History recording | Snapshot every iteration | Foundation for stall detection and learning |

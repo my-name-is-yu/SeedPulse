@@ -1,40 +1,40 @@
-# プラグイン開発ガイド
+# Plugin Development Guide
 
-このガイドでは、Conatusプラグインの開発方法を説明する。
-
----
-
-## プラグインの種類
-
-Conatusは3種類のプラグインをサポートする。
-
-| 種類 | インターフェース | 用途 |
-|------|----------------|------|
-| `data_source` | `IDataSourceAdapter` | 外部APIやDBから状態を観測する |
-| `notifier` | `INotifier` | Conatusイベントを外部サービスに送信する |
-| `adapter` | `IAdapter` | エージェントアダプタ（Claude Code CLI等） |
+This guide explains how to develop Conatus plugins.
 
 ---
 
-## plugin.yaml の書き方
+## Plugin Types
 
-プラグインのルートディレクトリに `plugin.yaml` を配置する。
+Conatus supports three types of plugins.
+
+| Type | Interface | Purpose |
+|------|-----------|---------|
+| `data_source` | `IDataSourceAdapter` | Observe state from external APIs or databases |
+| `notifier` | `INotifier` | Send Conatus events to external services |
+| `adapter` | `IAdapter` | Agent adapters (e.g., Claude Code CLI) |
+
+---
+
+## Writing plugin.yaml
+
+Place a `plugin.yaml` file in the root directory of your plugin.
 
 ```yaml
-name: my-notifier           # 必須。小文字英数字とハイフンのみ
-version: "1.0.0"            # 必須。semver形式
-type: notifier              # 必須。"adapter" | "data_source" | "notifier"
-description: "説明文"       # 必須。プラグインの説明
+name: my-notifier           # Required. Lowercase alphanumeric and hyphens only
+version: "1.0.0"            # Required. Semver format
+type: notifier              # Required. "adapter" | "data_source" | "notifier"
+description: "Description"  # Required. Description of the plugin
 
-# 能力宣言（CapabilityDetectorが参照する）
+# Capability declarations (referenced by CapabilityDetector)
 capabilities:
-  - my_capability           # 必須。1件以上
+  - my_capability           # Required. At least one entry
 
-# data_source のみ: 観測可能な次元名リスト（"*" はワイルドカード）
+# data_source only: list of observable dimension names ("*" is a wildcard)
 dimensions:
   - "*"
 
-# notifier のみ: サポートするイベント種別
+# notifier only: supported event types
 supported_events:
   - goal_complete
   - task_blocked
@@ -43,14 +43,14 @@ supported_events:
   - trust_change
   - goal_progress
 
-# プラグインのエントリポイント（plugin directoryからの相対パス）
-entry_point: "src/index.ts" # デフォルト: "dist/index.js"
+# Plugin entry point (relative path from plugin directory)
+entry_point: "src/index.ts" # Default: "dist/index.js"
 
-# Conatusの対応バージョン範囲（semver）
+# Supported Conatus version range (semver)
 min_conatus_version: "0.1.0"
-max_conatus_version: "2.0.0" # 省略可
+max_conatus_version: "2.0.0" # Optional
 
-# 設定スキーマ（config_schema は PluginLoader が検証に使用）
+# Configuration schema (used by PluginLoader for validation)
 config_schema:
   api_key:
     type: string            # "string" | "number" | "boolean" | "array"
@@ -62,32 +62,32 @@ config_schema:
     default: 5000
     description: "Request timeout in milliseconds"
 
-# リソースアクセス宣言（セキュリティ審査用）
+# Resource access declarations (for security review)
 permissions:
-  network: true             # HTTPリクエストを送信する場合
-  file_read: false          # ファイルを読む場合
-  file_write: false         # ファイルを書く場合
-  shell: false              # シェルコマンドを実行する場合
+  network: true             # If the plugin makes HTTP requests
+  file_read: false          # If the plugin reads files
+  file_write: false         # If the plugin writes files
+  shell: false              # If the plugin executes shell commands
 
-# 必要なnpmパッケージ（PluginLoaderがインストールを確認する）
+# Required npm packages (PluginLoader checks that these are installed)
 dependencies: []
 ```
 
 ---
 
-## IDataSourceAdapter インターフェース仕様
+## IDataSourceAdapter Interface Specification
 
 ```typescript
 export interface IDataSourceAdapter {
-  readonly sourceId: string;       // プラグインの一意なID（DataSourceConfig.idと一致）
+  readonly sourceId: string;       // Unique plugin ID (matches DataSourceConfig.id)
   readonly sourceType: DataSourceType;  // "file" | "http_api" | "database" | "sse" | ...
-  readonly config: DataSourceConfig;   // connect()に渡されたconfig
+  readonly config: DataSourceConfig;   // Config passed to connect()
 
-  connect(): Promise<void>;        // 接続確立。失敗時はthrow
-  query(params: DataSourceQuery): Promise<DataSourceResult>;  // 観測値取得
-  disconnect(): Promise<void>;     // 接続解放
-  healthCheck(): Promise<boolean>; // true = 正常、false = 異常
-  getSupportedDimensions?(): string[];  // オプション: サポートする次元名リスト
+  connect(): Promise<void>;        // Establish connection. Throw on failure
+  query(params: DataSourceQuery): Promise<DataSourceResult>;  // Retrieve observed value
+  disconnect(): Promise<void>;     // Release connection
+  healthCheck(): Promise<boolean>; // true = healthy, false = unhealthy
+  getSupportedDimensions?(): string[];  // Optional: list of supported dimension names
 }
 ```
 
@@ -95,10 +95,10 @@ export interface IDataSourceAdapter {
 
 ```typescript
 interface DataSourceQuery {
-  dimension_name: string;    // 観測する次元名
-  expression?: string;       // クエリ式（SQL, JQL, JSONPath等、プラグイン依存）
-  parameters?: Record<string, unknown>;  // バインドパラメータ
-  timeout_ms?: number;       // タイムアウト（ミリ秒）
+  dimension_name: string;    // Name of the dimension to observe
+  expression?: string;       // Query expression (SQL, JQL, JSONPath, etc. — plugin-specific)
+  parameters?: Record<string, unknown>;  // Bind parameters
+  timeout_ms?: number;       // Timeout in milliseconds
 }
 ```
 
@@ -106,23 +106,23 @@ interface DataSourceQuery {
 
 ```typescript
 interface DataSourceResult {
-  value: number | string | boolean | null;  // スカラー値（ギャップ計算に使用）
-  raw: unknown;              // 生のAPIレスポンス（デバッグ用）
-  timestamp: string;         // ISO 8601形式
-  source_id: string;         // DataSourceAdapter.sourceId と一致
+  value: number | string | boolean | null;  // Scalar value (used for Gap calculation)
+  raw: unknown;              // Raw API response (for debugging)
+  timestamp: string;         // ISO 8601 format
+  source_id: string;         // Matches DataSourceAdapter.sourceId
 }
 ```
 
 ---
 
-## INotifier インターフェース仕様
+## INotifier Interface Specification
 
 ```typescript
 export interface INotifier {
-  readonly name: string;     // プラグイン名（plugin.yamlのnameと一致）
+  readonly name: string;     // Plugin name (matches plugin.yaml name)
 
-  notify(event: NotificationEvent): Promise<void>;  // イベント送信。失敗時はthrow
-  supports(eventType: NotificationEventType): boolean;  // このイベント種別を処理するか
+  notify(event: NotificationEvent): Promise<void>;  // Send event. Throw on failure
+  supports(eventType: NotificationEventType): boolean;  // Whether this event type is handled
 }
 ```
 
@@ -130,28 +130,28 @@ export interface INotifier {
 
 ```typescript
 interface NotificationEvent {
-  type: NotificationEventType;  // イベント種別
-  goal_id: string;              // 関連するゴールID
-  timestamp: string;            // ISO 8601形式
-  summary: string;              // 人間が読む1行サマリー
-  details: Record<string, unknown>;  // イベント種別固有の追加データ
+  type: NotificationEventType;  // Event type
+  goal_id: string;              // ID of the related Goal
+  timestamp: string;            // ISO 8601 format
+  summary: string;              // Human-readable one-line summary
+  details: Record<string, unknown>;  // Additional data specific to the event type
   severity: "info" | "warning" | "critical";
 }
 
 type NotificationEventType =
-  | "goal_progress"    // ゴールの進捗更新
-  | "goal_complete"    // ゴール達成
-  | "task_blocked"     // タスクがブロックされた
-  | "approval_needed"  // 人間の承認が必要
-  | "stall_detected"   // 停滞が検知された
-  | "trust_change";    // 信頼スコアが大きく変化した
+  | "goal_progress"    // Goal progress update
+  | "goal_complete"    // Goal achieved
+  | "task_blocked"     // Task was blocked
+  | "approval_needed"  // Human approval required
+  | "stall_detected"   // Stall was detected
+  | "trust_change";    // Trust score changed significantly
 ```
 
 ---
 
-## 実装例
+## Implementation Examples
 
-### data_source プラグイン
+### data_source Plugin
 
 ```typescript
 // src/index.ts
@@ -175,7 +175,7 @@ export class MyDataSourceAdapter implements IDataSourceAdapter {
   }
 
   async connect(): Promise<void> {
-    // 接続確立ロジック
+    // Connection establishment logic
     this.connected = true;
   }
 
@@ -183,7 +183,7 @@ export class MyDataSourceAdapter implements IDataSourceAdapter {
     if (!this.connected) {
       throw new Error(`MyDataSourceAdapter [${this.sourceId}]: not connected`);
     }
-    // クエリ実行ロジック
+    // Query execution logic
     return {
       value: 42,
       raw: {},
@@ -201,7 +201,7 @@ export class MyDataSourceAdapter implements IDataSourceAdapter {
   }
 }
 
-// PluginLoaderが使用するデフォルトエクスポート
+// Default export used by PluginLoader
 export default new MyDataSourceAdapter({
   id: "my-datasource",
   name: "My DataSource",
@@ -212,7 +212,7 @@ export default new MyDataSourceAdapter({
 });
 ```
 
-### notifier プラグイン
+### notifier Plugin
 
 ```typescript
 // src/index.ts
@@ -253,16 +253,16 @@ export class MyNotifier implements INotifier {
   }
 }
 
-// 環境変数がない場合は null を返す（PluginLoaderが検証する）
+// Return null if the environment variable is not set (PluginLoader will validate)
 const _key = process.env["MY_API_KEY"];
 export default _key ? new MyNotifier(_key) : null;
 ```
 
 ---
 
-## テスト方法（vi.mock パターン）
+## Testing (vi.mock Pattern)
 
-### fetch をモックして notifier をテスト
+### Testing a notifier by mocking fetch
 
 ```typescript
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -307,12 +307,12 @@ describe("MyNotifier", () => {
 });
 ```
 
-### 外部SDKをモックして datasource をテスト
+### Testing a datasource by mocking an external SDK
 
 ```typescript
 import { describe, it, expect, vi } from "vitest";
 
-// vi.hoisted でモックを定義し vi.mock より前に使えるようにする
+// Use vi.hoisted to define mocks before vi.mock
 const { mockPool } = vi.hoisted(() => {
   const mockPool = { query: vi.fn().mockResolvedValue({ rows: [{ count: 5 }] }) };
   return { mockPool };
@@ -327,47 +327,47 @@ import { MyDbAdapter } from "../examples/plugins/my-db-datasource/src/index.js";
 
 ---
 
-## プラグインのインストール方法
+## Installing Plugins
 
-### ローカルインストール
+### Local Installation
 
-プラグインディレクトリを `~/.conatus/plugins/` に配置する。
+Place the plugin directory under `~/.conatus/plugins/`.
 
 ```bash
 cp -r my-plugin ~/.conatus/plugins/my-plugin
 ```
 
-ディレクトリ構造:
+Directory structure:
 
 ```
 ~/.conatus/plugins/
 └── my-plugin/
     ├── plugin.yaml
     ├── src/
-    │   └── index.ts    # entry_point が src/index.ts の場合
+    │   └── index.ts    # When entry_point is src/index.ts
     └── dist/
-        └── index.js    # ビルド後（entry_point が dist/index.js の場合）
+        └── index.js    # After build (when entry_point is dist/index.js)
 ```
 
-### npm からインストール
+### Installing from npm
 
 ```bash
-# npmパッケージとしてインストール
+# Install as an npm package
 npm install -g @conatus-plugins/pagerduty-notifier
 
-# symlink で~/.conatus/plugins/に配置
+# Symlink into ~/.conatus/plugins/
 ln -s $(npm root -g)/@conatus-plugins/pagerduty-notifier ~/.conatus/plugins/pagerduty-notifier
 ```
 
 ---
 
-## `@conatus-plugins/` スコープでの npm 公開手順
+## Publishing to npm under the `@conatus-plugins/` Scope
 
-1. `package.json` の `name` を `@conatus-plugins/<plugin-name>` に設定する。
+1. Set the `name` field in `package.json` to `@conatus-plugins/<plugin-name>`.
 
-2. `peerDependencies` に `"conatus": ">=0.1.0"` を追加する。
+2. Add `"conatus": ">=0.1.0"` to `peerDependencies`.
 
-3. `exports` フィールドでエントリポイントを公開する。
+3. Expose the entry point via the `exports` field.
 
 ```json
 {
@@ -379,13 +379,13 @@ ln -s $(npm root -g)/@conatus-plugins/pagerduty-notifier ~/.conatus/plugins/page
 }
 ```
 
-4. TypeScriptをビルドする。
+4. Build the TypeScript source.
 
 ```bash
 npm run build
 ```
 
-5. npm にログインして公開する。
+5. Log in to npm and publish.
 
 ```bash
 npm login
@@ -394,15 +394,15 @@ npm publish --access public
 
 ---
 
-## 既存プラグイン一覧
+## Existing Plugins
 
-| プラグイン名 | 種類 | 場所 | 説明 |
-|------------|------|------|------|
-| `sqlite-datasource` | `data_source` | `examples/plugins/sqlite-datasource/` | SQLiteデータベース観測 |
-| `postgres-datasource` | `data_source` | `examples/plugins/postgres-datasource/` | PostgreSQLデータベース観測 |
-| `mysql-datasource` | `data_source` | `examples/plugins/mysql-datasource/` | MySQLデータベース観測 |
-| `websocket-datasource` | `data_source` | `examples/plugins/websocket-datasource/` | WebSocketリアルタイムストリーム観測 |
-| `sse-datasource` | `data_source` | `examples/plugins/sse-datasource/` | Server-Sent Eventsリアルタイムストリーム観測 |
-| `jira-datasource` | `data_source` | `examples/plugins/jira-datasource/` | Jira REST API issueカウント観測 |
-| `slack-notifier` | `notifier` | `plugins/slack-notifier/` | Slack Webhookへのイベント送信 |
-| `pagerduty-notifier` | `notifier` | `examples/plugins/pagerduty-notifier/` | PagerDuty Events API v2へのインシデント送信 |
+| Plugin Name | Type | Location | Description |
+|-------------|------|----------|-------------|
+| `sqlite-datasource` | `data_source` | `examples/plugins/sqlite-datasource/` | SQLite database observation |
+| `postgres-datasource` | `data_source` | `examples/plugins/postgres-datasource/` | PostgreSQL database observation |
+| `mysql-datasource` | `data_source` | `examples/plugins/mysql-datasource/` | MySQL database observation |
+| `websocket-datasource` | `data_source` | `examples/plugins/websocket-datasource/` | WebSocket real-time stream observation |
+| `sse-datasource` | `data_source` | `examples/plugins/sse-datasource/` | Server-Sent Events real-time stream observation |
+| `jira-datasource` | `data_source` | `examples/plugins/jira-datasource/` | Jira REST API issue count observation |
+| `slack-notifier` | `notifier` | `plugins/slack-notifier/` | Event delivery to Slack Webhook |
+| `pagerduty-notifier` | `notifier` | `examples/plugins/pagerduty-notifier/` | Incident delivery to PagerDuty Events API v2 |

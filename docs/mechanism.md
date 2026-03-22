@@ -1,441 +1,441 @@
-# Motiva --- コアメカニズム
+# Conatus --- Core Mechanism
 
 ---
 
-## 1. Motivaとは何か
+## 1. What Is Conatus?
 
-Motivaは**タスク発見エンジン**だ。長期的なゴールを受け取り、「次に何をすべきか」を発見し続ける。
+Conatus is a **task discovery engine**. It accepts long-term goals and keeps discovering "what should be done next."
 
-### 解く問題
+### The Problem It Solves
 
-「売上を2倍にしたい」「健康を維持したい」「新規事業を軌道に乗せたい」。こうしたゴールには共通する難しさがある。何をすべきかが自明ではなく、状況が変わり続け、完了までに数ヶ月から数年かかる。
+"I want to double revenue." "I want to stay healthy." "I want to get a new business off the ground." Goals like these share a common difficulty: what needs to be done is not self-evident, the situation keeps changing, and reaching completion takes months to years.
 
-人間はこの種のゴールに対して、日々「今の状況はどうか」「何が足りないか」「次に何をすべきか」を考え続ける。この思考プロセスを、Motivaが代行する。
+Humans dealing with this kind of goal continually think every day: "What's the current situation?" "What's missing?" "What should I do next?" Conatus performs this thinking process on your behalf.
 
-### やることとやらないこと
+### What It Does and Doesn't Do
 
-Motivaがやるのは一つだけ。**ゴールと現実のギャップから、次のタスクを発見すること。**
+Conatus does exactly one thing: **discover the next task from the gap between the goal and reality.**
 
-実行は既存のシステムに委ねる。コードを書くなら外部エージェント。APIを叩くなら適切なツール。人間の判断が必要なら人間に聞く。常駐プロセスが必要ならデーモンやcronを使う。Motivaは「何をすべきか」を決める頭脳であり、「それを実行する」体ではない。
+Execution is left to existing systems. If code needs to be written, an external agent. If an API needs to be called, the appropriate tool. If human judgment is needed, ask a human. If a persistent process is needed, use a daemon or cron. Conatus is the brain that decides "what should be done" — it is not the body that "does it."
 
 ---
 
-## 2. コア --- タスク発見ループ
+## 2. Core --- The Task Discovery Loop
 
-Motivaの中心にあるのは、4ステップのループだ。このループはゴールのドメインに依存しない。健康管理でもビジネスでも教育でも、同じ構造で動く。（実装上は observe → gap → score → task → execute → verify の6ステップに展開される。駆動スコアリングと実行・検証は §2.3 と §2.4 の内部ステップ）
+At the center of Conatus is a 4-step loop. This loop does not depend on the goal's domain. Whether health management, business, or education, the same structure operates. (In implementation, this expands to 6 steps: observe → gap → score → task → execute → verify. Drive scoring and execution/verification are internal steps of §2.3 and §2.4)
 
 ```
-観測 → ギャップ認識 → 戦略選択 → タスク具体化 → (観測に戻る)
+Observe → Gap Recognition → Strategy Selection → Task Concretization → (back to Observe)
 ```
 
-ループは止まらない。ゴールが達成されるか、ユーザーが止めるまで回り続ける。1回のループが数時間のこともあれば数日のこともある。ゴールの性質と状況が回転速度を決める。
+The loop never stops. It keeps running until the goal is achieved or the user stops it. One loop cycle may take hours or days. The nature of the goal and the situation determine the rotation speed.
 
 ---
 
-### 2.1 観測 --- 世界の今を知る
+### 2.1 Observation --- Knowing the World's Current State
 
-タスクを発見するには、まず現実を知る必要がある。Motivaはゴールに関連する現実世界の状態を観測する。
+To discover tasks, we must first know reality. Conatus observes the real-world state relevant to the goal.
 
-#### 何を観測するか
+#### What to Observe
 
-観測対象はゴールによって変わる。IoTセンサーのデータ、ビジネスメトリクス、データベースの値、APIのレスポンス、ファイルの状態、外部サービスの状況。Motivaの観測はコードベースに閉じない。ゴールに関係するあらゆる情報源が対象になる。
+Observation targets change by goal. IoT sensor data, business metrics, database values, API responses, file states, external service conditions. Conatus's observation is not confined to codebases. Any information source related to the goal is a target.
 
-#### 観測の信頼度
+#### Observation Confidence
 
-すべての観測が同じ信頼度を持つわけではない。
+Not all observations carry the same confidence level.
 
-| 観測の種類 | 信頼度 | 例 |
-|------------|--------|-----|
-| 機械的検証 | 高 | テスト結果、センサー数値、API応答 |
-| 独立した評価者による判断 | 中 | 第三者視点での品質評価 |
-| 推定・自己申告 | 低 | 「だいたいこのくらい」という見積もり |
+| Observation Type | Confidence | Example |
+|-----------------|------------|---------|
+| Mechanical verification | High | Test results, sensor values, API responses |
+| Independent evaluator judgment | Medium | Quality evaluation from a third-party perspective |
+| Estimates and self-reports | Low | "Roughly this amount" estimates |
 
-信頼度が低い観測は「まだよくわかっていない」ことを意味する。わかっていないことを「問題なし」と扱わないために、信頼度は後続のギャップ認識に直接影響する。
+Low-confidence observations mean "we don't really know yet." To avoid treating what's unknown as "no problem," confidence directly affects subsequent gap recognition.
 
-#### 観測のタイミング
+#### Observation Timing
 
-観測には2つのリズムがある。
+Observation has two rhythms.
 
-**定期観測**: 一定間隔で状態を確認する。心拍のように、ゴールが生きている限り観測し続ける。間隔はゴールの性質で決まる。健康モニタリングなら毎時、ビジネスメトリクスなら毎日、長期プロジェクトなら毎週。
+**Periodic observation**: Confirming state at regular intervals. Like a heartbeat, observing continuously as long as the goal is alive. The interval is determined by the nature of the goal. Hourly for health monitoring, daily for business metrics, weekly for long-term projects.
 
-**イベント駆動観測**: 状況の変化を検知したら即座に観測する。閾値を超えたセンサー値、急激なメトリクス変動、外部からの通知。変化が起きたときに待つ理由はない。
+**Event-driven observation**: Observing immediately upon detecting a situational change. Sensor values exceeding a threshold, sharp metric fluctuations, external notifications. There's no reason to wait when a change occurs.
 
-この二つを組み合わせることで、Motivaは「見落とし」と「過剰反応」の両方を防ぐ。
+Combining these two, Conatus prevents both "missed signals" and "overreaction."
 
 ---
 
-### 2.2 ギャップ認識 --- 何が足りないか
+### 2.2 Gap Recognition --- What Is Missing?
 
-観測で現実を把握したら、ゴールとの差分を見る。この差分がギャップだ。
+Once the observation establishes a picture of reality, the difference from the goal is examined. This difference is the gap.
 
-#### 多次元のギャップ
+#### Multi-Dimensional Gap
 
-ゴールは一つの数値では表せない。たとえば「事業を成長させたい」というゴールには、売上、顧客満足度、チーム体制、技術基盤、市場ポジションなど複数の側面がある。各側面がそれぞれゴール状態と現在値を持ち、それぞれにギャップがある。
+A goal cannot be represented by a single number. "I want to grow the business," for example, has multiple facets: revenue, customer satisfaction, team structure, technical foundation, market position. Each facet has its own goal state and current value, and each has its own gap.
 
 ```
-ゴール状態         現在値          ギャップ
-売上: 200         売上: 120       → 80 (大)
-満足度: 90        満足度: 85      → 5  (小)
-体制: 10人        体制: 6人       → 4  (中)
-基盤: 安定        基盤: 不安定    → 大 (大)
+Goal State         Current Value        Gap
+Revenue: 200       Revenue: 120        → 80 (large)
+Satisfaction: 90   Satisfaction: 85    → 5  (small)
+Team: 10 people    Team: 6 people      → 4  (medium)
+Foundation: stable Foundation: unstable → large (large)
 ```
 
-このように複数次元でギャップを捉えることで、「何が最も不足しているか」が見える。
+By capturing gaps across multiple dimensions this way, "what is most deficient" becomes visible.
 
-#### 信頼度によるギャップの重み付け
+#### Weighting Gaps by Confidence
 
-ここで2.1の観測信頼度が効いてくる。信頼度が低い観測に基づくギャップは、実際より大きく見積もる。
+Here, the observation confidence from §2.1 comes into play. Gaps based on low-confidence observations are estimated to be larger.
 
-理由は単純だ。よくわかっていないものを「大丈夫」と見なすのは危険だからだ。信頼度が低い次元は「まだ確認できていない = 問題が潜んでいる可能性がある」と保守的に扱う。
+The reason is simple: treating what's not well understood as "fine" is dangerous. Low-confidence dimensions are handled conservatively as "not yet confirmed = a problem may be lurking."
 
-この重み付けにより、Motivaは未確認の領域を放置せず、確認タスクを優先的に生成する方向に動く。
+This weighting causes Conatus to generate confirmation tasks with priority, rather than leaving unconfirmed areas unattended.
 
-#### ギャップが教えること
+#### What Gaps Tell Us
 
-ギャップは単なる差分ではない。「何が足りないか」「どこが弱いか」「何を次にやるべきか」を示す信号だ。大きなギャップは注意を引き、小さなギャップは安心を与える。ギャップのパターンが、次のステップである戦略選択を駆動する。
-
----
-
-### 2.3 戦略選択 --- どう攻めるか
-
-ギャップがわかったら、どう埋めるかを考える。これが戦略選択だ。
-
-#### 仮説の生成
-
-一つのギャップに対して、埋め方は複数ある。たとえば「顧客が離れている」というギャップに対して、「オンボーディングを改善する」「サポート体制を強化する」「価格を見直す」「機能を追加する」といった複数の仮説がありうる。
-
-Motivaは一つの正解を探すのではなく、複数の仮説を生成し、どれが有望かを評価する。
-
-#### 3つの駆動力
-
-どのギャップを今攻めるかの優先順位は、3つの駆動力で決まる。
-
-**締切駆動**: 「いつまでにこの状態でなければならない」。締切が遠いうちは優先度が低いが、近づくにつれ急上昇する。半年後の締切は今日の行動にほとんど影響しないが、来週の締切はすべてに優先する。
-
-**不満駆動**: 「今の状態がゴールに対して不十分だから直す」。最もギャップが大きい次元を攻める。ただし、放置し続けると慣れが生じ、優先度は緩やかに下がる。直近に試みて失敗した次元も一時的に優先度が下がる（同じ壁に繰り返しぶつかることを避ける）。
-
-**機会駆動**: 「今やると効率が良い」。好機は長くは続かない。「今この修正をすれば後続の3つが楽になる」「今この人が空いている」「今このデータが取れる」。機会駆動のスコアは鮮度で急速に減衰する。
-
-この3つの駆動力が組み合わさることで、同じゴールでも今日と来週では優先すべきタスクが変わる。
-
-#### ポートフォリオアプローチ
-
-可能であれば、複数の戦略を並行して走らせる。一つの仮説に全てを賭けるのではなく、投資を分散する。効果が見えた戦略に集中し、見えない戦略を切る。
-
-Stage 9で実装された **PortfolioManager** がこのアプローチの具体実装だ。各戦略は明示的なエンティティ（`Strategy`）としてモデル化され、`candidate → active → evaluating → suspended → completed → terminated` の状態機械で管理される。リソース配分比率は効果計測の結果に応じて自動的に再調整（リバランス）される。詳細は `design/portfolio-management.md` を参照。
-
-#### 「待つ」という戦略
-
-何かを実行した直後に効果を測るのは時期尚早なことがある。施策を打ってから効果が現れるまでの時間を見込み、「今は待って、N日後に計測する」という判断もMotivaの戦略の一つだ。待っている間は別のギャップを攻めればいい。
-
-この「待つ」という判断は、`WaitStrategy` という正式な戦略タイプとして実装されており、PortfolioManager が管理する戦略ポートフォリオの一員として扱われる。
-
-#### ピボットと継続
-
-戦略が効いているかを計測し、効いていなければ切り替える。ただし、短期的な結果だけで判断しない。「効果が出るまでに時間がかかる戦略」と「本当に効いていない戦略」を区別する必要がある。計測期間を設定し、その期間が過ぎてもギャップが縮まらなければピボットする。PortfolioManager は各戦略の有効性追跡ログを保持し、StrategyManager のピボット判断に効果計測データを提供する。
+A gap is not just a difference. It is a signal indicating "what is missing," "where is the weakness," and "what should be done next." Large gaps draw attention; small gaps provide reassurance. The pattern of gaps drives the next step: strategy selection.
 
 ---
 
-### 2.4 タスク具体化 --- 次の一手
+### 2.3 Strategy Selection --- How to Attack?
 
-戦略が決まったら、それを実行可能なタスクに変換する。
+Once gaps are understood, how to close them is determined. This is strategy selection.
 
-#### スコープを絞る
+#### Generating Hypotheses
 
-戦略は方向を示すが、一度に実行するには大きすぎることが多い。Motivaはそれを、一回の実行単位で完了できるサイズに分割する。
+For a single gap, there are multiple ways to close it. For the gap "customers are leaving," hypotheses such as "improve onboarding," "strengthen support," "revisit pricing," and "add features" are all possible.
 
-分割の基準は単純だ。タスクを受け取った実行者（人間でもAIでも）が、追加の情報なしに着手でき、完了を判断できるサイズ。
+Conatus doesn't look for a single right answer — it generates multiple hypotheses and evaluates which are promising.
 
-#### 成功基準の定義
+#### Three Drive Forces
 
-タスクには必ず「何をもって完了か」を定義する。「改善する」ではなく「この指標がこの値を超える」。「調査する」ではなく「この3つの質問に対する回答を得る」。曖昧な完了基準は、実行の質を下げ、検証を不可能にする。
+Prioritization of which gap to tackle now is determined by three drive forces.
 
-#### 実行への引き渡し
+**Deadline-driven**: "What state must we be in by when." Priority is low while the deadline is far, but rises sharply as it approaches. A deadline six months away has almost no influence on today's actions, but a deadline next week takes precedence over everything.
 
-具体化されたタスクは、適切な実行手段に渡される。コードを書く必要があれば外部エージェント。APIを呼ぶ必要があれば適切なツール。人間の判断が必要なら人間に確認する。
+**Dissatisfaction-driven**: "The current state is insufficient relative to the goal, so fix it." Attack the dimension with the largest gap. However, continued neglect causes habituation, and priority gradually decreases. Dimensions that were recently tried and failed also temporarily decrease in priority (to avoid hitting the same wall repeatedly).
 
-Motivaは「何をすべきか」を決めるところまでが仕事だ。実行そのものは、最も適した手段に委ねる。
+**Opportunity-driven**: "Now is a good time to act." Opportunities don't last long. "If we fix this now, three subsequent things become easier." "This person is available right now." "This data can be captured right now." Opportunity-driven scores decay rapidly with freshness.
 
-#### 実行結果のフィードバック
+The combination of these three drive forces means that even for the same goal, the task that should be prioritized today differs from next week.
 
-タスクの結果は次のループの観測に反映される。タスクが成功すればギャップが縮まり、失敗すれば別のアプローチが試みられる。この結果が次のループの入力になることで、ループが閉じる。
+#### Portfolio Approach
+
+When possible, run multiple strategies in parallel. Rather than betting everything on one hypothesis, spread the investment. Concentrate on strategies where results are visible; cut strategies where they're not.
+
+The **PortfolioManager** implemented in Stage 9 is the concrete implementation of this approach. Each strategy is modeled as an explicit entity (`Strategy`) and managed as a state machine: `candidate → active → evaluating → suspended → completed → terminated`. Resource allocation ratios are automatically readjusted (rebalanced) based on effectiveness measurement results. See `design/portfolio-management.md` for details.
+
+#### "Waiting" as a Strategy
+
+Measuring effectiveness immediately after taking action is sometimes premature. Accounting for the time it takes for effects to appear after an initiative is launched, "wait now and measure N days later" is also one of Conatus's strategies. While waiting, other gaps can be tackled.
+
+This "waiting" judgment is implemented as a formal strategy type called `WaitStrategy` and is treated as a member of the strategy portfolio managed by PortfolioManager.
+
+#### Pivot and Continue
+
+Measure whether the strategy is working, and switch if it isn't. However, don't judge based on short-term results alone. There's a need to distinguish between "a strategy that takes time to show effects" and "a strategy that genuinely isn't working." Set a measurement period, and pivot if the gap hasn't narrowed after that period. PortfolioManager maintains an effectiveness tracking log for each strategy and provides effectiveness measurement data to StrategyManager's pivot decisions.
 
 ---
 
-### 2.5 知識獲得 --- コアループへの統合
+### 2.4 Task Concretization --- The Next Move
 
-コアループを回す中で、Motivaが「この観測値が何を意味するのかわからない」「この領域で何が有効なアプローチかわからない」という状態に直面することがある。これは情報の欠如ではなく、**ドメイン知識の欠如**だ。Motivaはこの状態を検知し、知識獲得タスクをコアループ内で能動的に生成する。
+Once the strategy is determined, convert it into executable tasks.
 
-#### 知識不足の検知タイミング
+#### Narrowing Scope
 
-知識不足のシグナルは主に2つのステップで発生する。
+A strategy indicates direction, but is often too large to execute all at once. Conatus splits it into sizes that can be completed in a single execution unit.
 
-**ギャップ認識時**: 観測値を解釈する段階で「この次元の正常値が不明」「この数値が意味するものがわからない」という状態を検知する。ObservationEngine が観測データを処理する際に、解釈に必要なドメイン知識の欠如を検知し、シグナルを発する。
+The splitting criterion is simple: a size at which the executor (human or AI) who receives the task can begin without additional information and can determine when it's complete.
 
-**戦略選択時**: ギャップを埋める戦略を生成する段階で「この領域の有効なアプローチが不明」「比較すべきベースラインがない」という状態を検知する。StrategyManager が戦略候補を生成できない場合、知識不足シグナルを発する。
+#### Defining Success Criteria
+
+Every task must define "what constitutes completion." Not "improve" but "this metric exceeds this value." Not "research" but "obtain answers to these three questions." Vague completion criteria degrade execution quality and make verification impossible.
+
+#### Handing Off to Execution
+
+The concretized task is passed to the appropriate execution means. If code needs to be written, an external agent. If an API needs to be called, the appropriate tool. If human judgment is needed, confirm with a human.
+
+Conatus's job ends at deciding "what should be done." The execution itself is left to the most suitable means.
+
+#### Execution Result Feedback
+
+Task results are reflected in the next loop's observation. If a task succeeds, the gap narrows; if it fails, a different approach is tried. These results become the input of the next loop, closing the loop.
+
+---
+
+### 2.5 Knowledge Acquisition --- Integration into the Core Loop
+
+While running the core loop, Conatus may encounter a state of "I don't know what this observation value means" or "I don't know what effective approaches exist in this domain." This is not an information shortage but a **domain knowledge shortage**. Conatus detects this state and actively generates knowledge acquisition tasks within the core loop.
+
+#### When Knowledge Deficiencies Are Detected
+
+Knowledge deficiency signals occur primarily at two steps.
+
+**During gap recognition**: At the stage of interpreting observation values, the state of "the normal value for this dimension is unknown" or "I don't know what this number means" is detected. When ObservationEngine processes observation data, it detects a lack of domain knowledge needed for interpretation and emits a signal.
+
+**During strategy selection**: At the stage of generating strategies to close the gap, the state of "effective approaches in this domain are unknown" or "there's no baseline to compare against" is detected. When StrategyManager cannot generate strategy candidates, it emits a knowledge deficiency signal.
 
 #### KnowledgeAcquisitionTask
 
-知識不足が検知されると、`task_category: "knowledge_acquisition"` という専用カテゴリのタスクが生成される。これは通常のゴール達成タスクと並列に扱われる正式なタスクタイプだ。調査エージェントに委譲され、実行結果は `domain_knowledge.json` に永続化される。
+When a knowledge deficiency is detected, a task with the dedicated category `task_category: "knowledge_acquisition"` is generated. This is a formal task type handled in parallel with regular goal-achievement tasks. It is delegated to a research agent, and execution results are persisted in `domain_knowledge.json`.
 
-#### 知識のフィードバック
+#### Knowledge Feedback
 
-獲得した知識は次のループから即座に活用される。SessionManager が後続ループのコンテキストに `domain_knowledge.json` の内容を注入することで、全てのタスクタイプ（観測、ギャップ分析、戦略選択、タスク生成）で知識が参照可能になる。これにより、調査→活用のサイクルがコアループ内に閉じる。
+Acquired knowledge is immediately utilized from the next loop. By SessionManager injecting the content of `domain_knowledge.json` into subsequent loop contexts, knowledge becomes referenceable across all task types (observation, gap analysis, strategy selection, task generation). This closes the research→utilization cycle within the core loop.
 
-詳細は `design/knowledge-acquisition.md` を参照。
-
----
-
-### ループ全体の性質
-
-このループには3つの重要な性質がある。
-
-**自己補正**: 1回のループが不完全でも、次のループで補正される。観測が不十分なら次のループで再観測する。戦略が間違っていれば次のループで切り替わる。個々のステップの精度より、ループが回り続けることが重要だ。
-
-**ドメイン非依存**: ループの構造自体はゴールの内容に依存しない。健康管理でもビジネスでも研究でも、「観測 → ギャップ認識 → 戦略選択 → タスク具体化」の構造は同じだ。変わるのは、各ステップの中身（何を観測するか、何をギャップと見なすか）だけだ。
-
-**ペースの適応**: ループの回転速度は固定ではない。緊急度が高ければ高速に回り、安定期にはゆっくり回る。「待つ」戦略を選んでいるときはループが一時停止することもある。ゴールの性質と状況に応じて、自然にペースが変わる。
+See `design/knowledge-acquisition.md` for details.
 
 ---
 
-## 3. ゴールの扱い
+### Overall Loop Properties
 
-### ゴールの受け取り
+This loop has three important properties.
 
-ユーザーはゴールを曖昧な自然言語で与える。「健康でいたい」「事業を成長させたい」「この問題を解決したい」。Motivaはこの曖昧さを受け入れる。最初から精密な定義を要求しない。ループを回しながら、ゴールの理解を深めていく。
+**Self-correcting**: Even if one loop is imperfect, the next loop corrects it. If observation is insufficient, re-observe in the next loop. If the strategy is wrong, it switches in the next loop. The continuity of the loop running is more important than the precision of individual steps.
 
-### ゴール交渉
+**Domain-agnostic**: The loop structure itself does not depend on the goal's content. Whether health management, business, or research, the structure of "observe → gap recognition → strategy selection → task concretization" is the same. What changes is only the content of each step (what to observe, what to regard as a gap).
 
-ゴールを受け取ったら、Motivaはまず実現可能性を6ステップで評価する。「10倍は困難ですが、2倍なら実現可能です」という正直な評価がここから生まれる。最初のステップ（Step 0）は倫理・法的ゲートであり、ゴールの目的と手段が許容されるかを判定する。
+**Pace-adaptive**: Loop rotation speed is not fixed. It rotates fast when urgency is high and slowly during stable periods. When a "wait" strategy is selected, the loop may temporarily pause. The pace naturally changes based on the nature and situation of the goal.
 
-**交渉の流れ:**
+---
 
-0. **倫理・法的ゲート** — ゴールの目的と手段が倫理的・法的に許容されるかを判定する。拒否判定が出た場合、以降のステップには進まない（詳細は `design/goal-ethics.md` 参照）。
-1. **ゴール受け取り** — 曖昧な自然言語のゴールを解釈する。精密な定義を最初から要求しない。
-2. **次元分解プローブ** — LLMによって、ゴールを測定可能な複数の次元に分解する（例: 売上・顧客数・解約率）。
-3. **ベースライン観測** — 最初の観測サイクルを実行し、各次元の現在値と観測信頼度を確立する。
-4. **実現可能性評価（ハイブリッド方式）** — 歴史データがある次元は定量的に評価し、新規ドメインは定性的にLLMが評価する。定量評価では「必要変化率 vs 観測変化率」を比較し、能力・リソースの充足も確認する。定性評価は不確実性が高いため保守的バイアスをかける。
-5. **応答** — 評価結果に基づき3種類の応答を返す: 受諾（現実的）/ カウンター提案（代替目標＋中間マイルストーン）/ 要注意フラグ（新規ドメインや評価信頼度が低い場合）。
+## 3. Handling Goals
 
-**ユーザーが困難なゴールを押し通した場合**: Motivaはそれを受け入れる。ただし初期信頼度を「低」に設定し、評価結果を記録する。盲目的に従うのではなく、評価した上でユーザーの選択を記録して追跡する。
+### Receiving Goals
 
-**再交渉**: 停滞検知後、実行中の新情報による前提変化、またはユーザーの明示的な再評価要求によって再交渉が発生する。合意した目標に対しては全力で追い続ける。
+Users give goals in vague natural language. "I want to stay healthy." "I want to grow the business." "I want to solve this problem." Conatus accepts this vagueness. It doesn't require a precise definition from the start. As the loop runs, understanding of the goal deepens.
 
-詳細は `design/goal-negotiation.md` を参照。
+### Goal Negotiation
 
-### ゴール分解
+Upon receiving a goal, Conatus first evaluates feasibility in 6 steps. The honest evaluation of "10x is difficult, but 2x is achievable" comes from here. The first step (Step 0) is an ethics/legal gate that determines whether the goal's purpose and means are permissible.
 
-大きなゴールはそのまま追えない。再帰的なゴールツリーに分解する。
+**Negotiation flow:**
+
+0. **Ethics/Legal Gate** — Determines whether the goal's purpose and means are ethically and legally permissible. If rejected, no subsequent steps are taken (see `design/goal-ethics.md` for details).
+1. **Goal Reception** — Interprets the vague natural-language goal. Doesn't require a precise definition from the start.
+2. **Dimension Decomposition Probe** — LLM decomposes the goal into multiple measurable dimensions (e.g., revenue, customer count, churn rate).
+3. **Baseline Observation** — Executes the first observation cycle to establish current values and observation confidence for each dimension.
+4. **Feasibility Evaluation (hybrid method)** — Dimensions with historical data are evaluated quantitatively; new domains are evaluated qualitatively by LLM. Quantitative evaluation compares "required rate of change vs. observed rate of change" and confirms capability/resource sufficiency. Qualitative evaluation applies a conservative bias due to high uncertainty.
+5. **Response** — Returns 3 types of responses based on evaluation results: acceptance (realistic) / counter-proposal (alternative target + intermediate milestones) / cautionary flag (for new domains or when evaluation confidence is low).
+
+**When the user pushes through a difficult goal**: Conatus accepts it. However, initial confidence is set to "low" and evaluation results are recorded. Rather than following blindly, it evaluates and then records and tracks the user's choice.
+
+**Renegotiation**: Renegotiation occurs after stall detection, when new information during execution causes premise changes, or upon explicit user request for re-evaluation. Once a target is agreed upon, it is pursued with full effort.
+
+See `design/goal-negotiation.md` for details.
+
+### Goal Decomposition
+
+Large goals cannot be pursued as-is. They are decomposed into a recursive goal tree.
 
 ```
-上位ゴール
-  ├── サブゴール A
-  │     ├── サブゴール A-1
-  │     └── サブゴール A-2
-  ├── サブゴール B
-  └── サブゴール C
+Top-level goal
+  ├── Sub-goal A
+  │     ├── Sub-goal A-1
+  │     └── Sub-goal A-2
+  ├── Sub-goal B
+  └── Sub-goal C
 ```
 
-各ノードが独自のゴール状態・現在値・ギャップ・制約を持つ。つまり、各ノードで2章のタスク発見ループが独立に回る。上位ゴールの状態は下位ゴール群の集約から決まる。
+Each node has its own goal state, current values, gap, and constraints. That is, the task discovery loop from §2 runs independently at each node. The state of a parent goal is determined by aggregating the states of its child goals.
 
-ゴールツリーは静的な計画ではない。実行しながら発見・追加・削除・再構成される動的な構造だ。最初にすべてを計画しようとしない。
+The goal tree is not a static plan. It's a dynamic structure that is discovered, added to, deleted from, and restructured during execution. Don't try to plan everything from the start.
 
-### 完了判断（満足化）
+### Completion Judgment (Satisficing)
 
-完璧を目指さない。「十分」を判断する。
+Don't aim for perfection. Judge "good enough."
 
-各次元に閾値を設定し、すべての次元が閾値を超えたら完了と判断する。ただし、信頼度の低い観測だけで閾値を超えた次元は、検証タスクを生成して確認してから完了とする。
+Set thresholds for each dimension, and determine completion when all dimensions exceed their thresholds. However, dimensions whose thresholds are exceeded only by low-confidence observations generate verification tasks for confirmation before declaring completion.
 
-満足化はゴールレベルだけでなくタスクレベルでも機能する。すべてのギャップを一度に攻めるのではなく、管理可能な部分集合を選んで「まずここまで」と区切る。完璧な計画を立てて一度に実行するより、小さく反復する方がループの補正力を活かせる。
+Satisficing functions not only at the goal level but also at the task level. Rather than attacking all gaps at once, select a manageable subset and delineate "up to here for now." Iterating small is a better use of the loop's corrective power than making a perfect plan and executing all at once.
 
-### 停滞検知
+### Stall Detection
 
-進捗が止まったら、検知して対処する。
+When progress stops, detect it and respond.
 
-検知の指標は単純だ。ギャップがN回のループを経ても縮まらない。同じ種類のタスクが繰り返し失敗する。見積もり時間を大幅に超過している。
+The detection indicators are simple: the gap hasn't narrowed after N loops. The same kind of task repeatedly fails. The estimated time is being significantly exceeded.
 
-停滞を検知したら、Motivaは自律的に対応する。
+When a stall is detected, Conatus responds autonomously.
 
-- **情報不足** → 調査タスクを生成して情報を集める
-- **アプローチが間違い** → 戦略をピボットする
-- **能力の限界** → ユーザーにエスカレーションする
-- **外部依存** → 別のゴールに切り替えて待つ
+- **Insufficient information** → Generate a research task to gather information
+- **Wrong approach** → Pivot the strategy
+- **Capability limit** → Escalate to user
+- **External dependency** → Switch to another goal and wait
 
-停滞を放置しないこと自体が、Motivaの重要な機能だ。
+Not leaving stalls unaddressed is itself an important function of Conatus.
 
-なお、停滞の原因がゴール自体の非現実性や前提の変化にある場合、停滞検知はゴール再交渉をトリガーする。再交渉の詳細は `design/goal-negotiation.md` §6 を参照。
+Note that when the cause of the stall is the unrealistic nature of the goal itself or changes in premises, stall detection triggers goal renegotiation. See `design/goal-negotiation.md` §6 for renegotiation details.
 
 ---
 
-## 4. 学習
+## 4. Learning
 
-Motivaは経験から学ぶ。
+Conatus learns from experience.
 
-### 経験の蓄積
+### Accumulating Experience
 
-すべてのループは「観測した状態 → 選んだ戦略 → 実行した結果」のログとして記録される。このログが蓄積されることで、「どの状況でどのアプローチが効いたか」のパターンが見えてくる。
+Every loop is recorded as a log of "observed state → chosen strategy → execution result." As this log accumulates, the pattern of "what approach worked in what situation" becomes visible.
 
-この蓄積は **3層メモリモデル** として実装されている。Working Memory（現在のループで参照中の情報）、Short-term Memory（直近数ループの経験ログ）、Long-term Memory（ゴールを超えて保持されるパターンと知識）の3層が協調して動作する。詳細は `design/memory-lifecycle.md` を参照。
+This accumulation is implemented as a **3-layer memory model**. Working Memory (information referenced in the current loop), Short-term Memory (experience logs from the most recent loops), and Long-term Memory (patterns and knowledge retained beyond goals) operate in coordination. See `design/memory-lifecycle.md` for details.
 
-### 発見精度の向上
+### Improving Discovery Accuracy
 
-蓄積された経験は、ループの各ステップを改善する。
+Accumulated experience improves each step of the loop.
 
-- 観測: どの情報源が信頼できるかの学習
-- ギャップ認識: どの次元が重要かの重み付け調整
-- 戦略選択: 過去に成功した戦略の優先、失敗した戦略の回避
-- タスク具体化: 適切なスコープサイズの学習
+- Observation: learning which information sources are reliable
+- Gap recognition: adjusting weights for which dimensions are important
+- Strategy selection: prioritizing strategies that succeeded in the past, avoiding those that failed
+- Task concretization: learning appropriate scope sizes
 
-### メタ動機（好奇心）
+### Meta-Motivation (Curiosity)
 
-すべてのゴールが満たされたとき、Motivaは止まるのではなく、新しいゴールを提案する。これは経験の蓄積から生まれる。過去のパターンから「この領域にはまだ改善の余地がある」「このアプローチは別の場面でも有効かもしれない」と気づき、ユーザーに提案する。
+When all goals are satisfied, Conatus doesn't stop — it proposes new goals. This emerges from accumulated experience. From past patterns, it notices "there's still room for improvement in this domain" or "this approach might be effective in another context" and proposes to the user.
 
-好奇心はあくまで提案だ。ユーザーが受け入れなければ追求しない。
+Curiosity is always just a proposal. If the user doesn't accept it, it isn't pursued.
 
-> **実装状況（Stage 11C）**: `src/curiosity-engine.ts` に `CuriosityEngine` クラスとして実装済み。5種類のトリガー条件（ゴール完了、停滞長期化、知識ギャップ検知、未探索領域発見、パターン類似度高）を評価し、LLMを用いて新ゴール候補を生成する。学習フィードバックループ（提案→ユーザー応答→スコア更新）と、LLM呼び出し回数を抑えるリソースバジェット管理を内蔵する。CoreLoop へのオプション依存として統合されており、CuriosityEngine が未注入の場合は好奇心フェーズをスキップして既存のループ動作に影響しない。
+> **Implementation status (Stage 11C)**: Implemented as the `CuriosityEngine` class in `src/curiosity-engine.ts`. Evaluates 5 trigger conditions (goal completion, prolonged stall, knowledge gap detected, unexplored area discovered, high pattern similarity) and uses LLM to generate new goal candidates. Includes a learning feedback loop (proposal → user response → score update) and resource budget management to suppress the number of LLM calls. Integrated as an optional dependency to CoreLoop; when CuriosityEngine is not injected, the curiosity phase is skipped without affecting existing loop behavior.
 
-### 学習パイプライン
+### Learning Pipeline
 
-経験の蓄積（前述）だけでは学習にならない。蓄積されたログを分析し、各ステップにフィードバックする仕組みが必要だ。学習パイプラインは「経験ログ → 分析 → フィードバック → 改善」の流れを定義する。
+Accumulating experience (described above) alone doesn't constitute learning. A mechanism to analyze accumulated logs and feed back into each step is necessary. The learning pipeline defines the flow of "experience log → analysis → feedback → improvement."
 
-#### 分析方法: LLMバッチ分析
+#### Analysis Method: LLM Batch Analysis
 
-経験ログの分析にはLLMを使う。リアルタイム分析ではなく、特定のタイミングでまとまったログをバッチ処理する。
+LLM is used to analyze experience logs. Not real-time analysis, but batch processing of a bulk of logs at specific timings.
 
 ```
 analyze_experience_log(goal, log_entries):
-    // 成功・失敗パターンの抽出
+    // Extract success and failure patterns
     patterns = llm_extract_patterns(log_entries)
-    // 各パターンの信頼度を計算（出現頻度と結果の一貫性から）
+    // Calculate confidence for each pattern (from occurrence frequency and result consistency)
     scored_patterns = score_patterns(patterns)
-    // 信頼度の高いパターンをフィードバックとして登録
+    // Register high-confidence patterns as feedback
     for pattern in scored_patterns:
         if pattern.confidence >= 0.6:
             register_feedback(goal, pattern)
-    // PortfolioManager の有効性追跡データを StrategyManager へ反映
+    // Reflect PortfolioManager's effectiveness tracking data to StrategyManager
     portfolio_insights = portfolio_manager.get_effectiveness_log(goal)
     strategy_manager.update_strategy_weights(portfolio_insights)
-    // KnowledgeManager が獲得した知識を domain_knowledge.json に永続化
+    // KnowledgeManager persists acquired knowledge to domain_knowledge.json
     knowledge_manager.flush_to_domain_knowledge(goal)
 ```
 
-分析の入力は「状態 → 行動 → 結果」のトリプレットだ。LLMはこのトリプレット群から再現性のあるパターンを抽出する。「この種の状態でこのアプローチを取ると、こういう結果になりやすい」という知見だ。PortfolioManager の有効性追跡ログはこのパターン抽出を定量的に補強し、KnowledgeManager が蓄積したドメイン知識は次ループ以降の戦略選択・タスク生成コンテキストとして活用される。
+The input of analysis is triplets of "state → action → result." LLM extracts reproducible patterns from these triplets. The insight is "taking this approach in this type of situation tends to produce this kind of result." PortfolioManager's effectiveness tracking logs quantitatively reinforce this pattern extraction, and domain knowledge accumulated by KnowledgeManager is utilized as strategy selection and task generation context from subsequent loops onward.
 
-#### フィードバック先
+#### Feedback Destinations
 
-抽出されたパターンは、タスク発見ループの4つのステップにフィードバックされる。
+Extracted patterns are fed back into the four steps of the task discovery loop.
 
-| フィードバック先 | 学習内容 | 例 |
-|----------------|---------|-----|
-| **観測精度** | どの観測手段が信頼できるか、どの手段が過大/過小評価する傾向があるか | 「このAPIメトリクスは実態より30分遅れる」→ 観測タイミングの調整 |
-| **戦略選択** | どの状況でどの戦略が有効/無効だったか | 「チャーン改善にはオンボーディング改善が最も効果的だった」→ 類似状況での戦略優先度を調整 |
-| **スコープサイジング** | タスクの適切なサイズ感 | 「この種のタスクは見積もりの2倍かかる傾向がある」→ タスク分割の粒度を調整 |
-| **タスク生成** | 成功基準の定義方法、前提条件の設定 | 「この種のタスクでは〇〇を前提条件に含めるべきだった」→ タスクテンプレートの改善 |
+| Feedback Destination | Learning Content | Example |
+|---------------------|-----------------|---------|
+| **Observation accuracy** | Which observation means are reliable, which tend to over/underestimate | "This API metric lags reality by 30 minutes" → adjust observation timing |
+| **Strategy selection** | Which strategies were effective/ineffective in which situations | "Onboarding improvement was most effective for churn reduction" → adjust strategy priority for similar situations |
+| **Scope sizing** | Appropriate task sizing | "This type of task tends to take twice the estimate" → adjust task splitting granularity |
+| **Task generation** | How to define success criteria, setting preconditions | "This type of task should have included ○○ as a precondition" → improve task templates |
 
-フィードバックは経験ログの `learned_patterns` セクションに永続化され、戦略選択タイミングとタスク具体化タイミングでLLMのコンテキストに含められる。
+Feedback is persisted in the `learned_patterns` section of experience logs and is included in the LLM's context at strategy selection time and task concretization time.
 
-#### 学習ループの頻度
+#### Learning Loop Frequency
 
-学習パイプラインは以下のタイミングで実行される。
+The learning pipeline runs at the following timings.
 
-| トリガー | 分析範囲 | 目的 |
-|---------|---------|------|
-| **ゴール完了時** | そのゴールの全経験ログ | ゴール全体を通じたパターンの抽出。最も包括的な学習機会 |
-| **マイルストーン到達時** | マイルストーン期間の経験ログ | 中間振り返り。戦略の有効性を早期に評価する |
-| **停滞検知時** | 停滞に関連する直近の経験ログ | 停滞の原因パターンを特定し、対策を立てる |
-| **定期レビュー** | 指定期間の経験ログ | 定期的な振り返り。緩やかな変化の検知 |
+| Trigger | Analysis Scope | Purpose |
+|---------|---------------|---------|
+| **Goal completion** | All experience logs for that goal | Extracting patterns across the entire goal. The most comprehensive learning opportunity |
+| **Milestone reached** | Experience logs for the milestone period | Mid-point review. Evaluate strategy effectiveness early |
+| **Stall detected** | Recent experience logs related to the stall | Identify stall cause patterns and devise countermeasures |
+| **Periodic review** | Experience logs for specified period | Regular review. Detecting gradual changes |
 
-> **Stage 14E実装状況**: 上記4トリガーすべて `src/learning-pipeline.ts` の `LearningPipeline` クラスに実装済み。クロスゴールパターン共有は `VectorIndex` による意味的類似度マッチングで実現し、あるゴールで有効だった戦略パターンを類似ゴールへ自動転送する。
+> **Stage 14E implementation status**: All 4 triggers above are implemented in the `LearningPipeline` class in `src/learning-pipeline.ts`. Cross-goal pattern sharing is realized via semantic similarity matching with `VectorIndex`, automatically transferring strategy patterns that were effective for one goal to similar goals.
 
-#### Stage 8以降・Stage 14の実装状況
+#### Stage 8 and Beyond / Stage 14 Implementation Status
 
-| 項目 | 実装状況 |
-|------|---------|
-| 分析トリガー | ゴール完了時・停滞検知時に加え、**知識不足シグナルによりコアループ中盤でも発動**する。ギャップ認識時・戦略選択時に検知した知識不足は即座に `KnowledgeAcquisitionTask` を生成する |
-| フィードバック先 | 戦略選択に限らず、**SessionManager のコンテキスト注入を通じて全タスクタイプへ反映**される。`domain_knowledge.json` に永続化された知識は次ループの観測・ギャップ分析・タスク生成でも参照可能だ |
-| パターン蓄積 | PortfolioManager が各戦略の有効性追跡ログを保持し、そのデータが StrategyManager に渡される。ゴール内だけでなく、類似ドメイン間での戦略パターン共有も視野に入る |
-| メモリ構造 | **3層メモリモデル**（Working / Short-term / Long-term）として実装されている。詳細は `design/memory-lifecycle.md` を参照 |
-| EthicsGate Layer 1（Stage 11A） | LLMを呼ばないルールベースのブロックリスト検査として実装済み。6カテゴリ（暴力・詐欺・プライバシー侵害・法的禁止行為・差別・その他重大リスク）を即時判定し、検査コストゼロでゴール交渉の最前段に配置する |
-| CharacterConfigManager（Stage 11B） | `src/character-config.ts` に実装済み。好奇心・慎重さ・社交性・忍耐力の4軸パラメータをファイルベースで管理し、各モジュール（SatisficingJudge・CuriosityEngine 等）の閾値をペルソナ設定から動的に調整する |
-| CuriosityEngine（Stage 11C） | `src/curiosity-engine.ts` に実装済み。5種トリガー・LLMベースのゴール提案生成・学習フィードバック・リソースバジェット管理を備え、CoreLoop へオプション依存として統合されている |
+| Item | Implementation Status |
+|------|----------------------|
+| Analysis triggers | In addition to goal completion and stall detection, **also fires mid-core-loop due to knowledge deficiency signals**. Knowledge deficiencies detected during gap recognition or strategy selection immediately generate `KnowledgeAcquisitionTask` |
+| Feedback destinations | Not limited to strategy selection — **reflected in all task types via SessionManager context injection**. Knowledge persisted in `domain_knowledge.json` is also referenceable during observation, gap analysis, and task generation in subsequent loops |
+| Pattern accumulation | PortfolioManager maintains an effectiveness tracking log for each strategy, and that data is passed to StrategyManager. Strategy pattern sharing across similar domains (not just within a goal) is also in scope |
+| Memory structure | Implemented as a **3-layer memory model** (Working / Short-term / Long-term). See `design/memory-lifecycle.md` for details |
+| EthicsGate Layer 1 (Stage 11A) | Implemented as a rule-based blocklist check that doesn't call LLM. Immediately evaluates 6 categories (violence, fraud, privacy violation, legally prohibited acts, discrimination, other serious risks) and is placed at the very front of goal negotiation with zero inspection cost |
+| CharacterConfigManager (Stage 11B) | Implemented in `src/character-config.ts`. Manages 4-axis parameters (curiosity, caution, sociability, patience) in a file-based manner, dynamically adjusting thresholds of each module (SatisficingJudge, CuriosityEngine, etc.) from persona settings |
+| CuriosityEngine (Stage 11C) | Implemented in `src/curiosity-engine.ts`. Has 5 trigger types, LLM-based goal proposal generation, learning feedback, and resource budget management, integrated as an optional dependency to CoreLoop |
 
-分析トリガーの拡張とフィードバック先の拡大により、学習パイプラインはもはや「ゴール完了後の振り返り」に留まらない。知識の調達と活用がコアループ内に織り込まれ、ループを回すほど発見精度が上がる構造になっている。
+The expansion of analysis triggers and the widening of feedback destinations means the learning pipeline is no longer merely "a review after goal completion." Knowledge acquisition and utilization are woven into the core loop, creating a structure where discovery accuracy increases as the loop runs.
 
-> **Stage 12（完了）**: 意味的埋め込み基盤を追加。`EmbeddingClient`（OpenAI/Ollama抽象化）、`VectorIndex`（cosine similarity検索）、`KnowledgeGraph`（概念ノード・関係エッジ管理）、`GoalDependencyGraph`（DAG依存関係・LLM自動検出）。KnowledgeManager・CuriosityEngine・MemoryLifecycleManager のセマンティック検索を支える横断インフラ。
+> **Stage 12 (complete)**: Added semantic embedding infrastructure. `EmbeddingClient` (OpenAI/Ollama abstraction), `VectorIndex` (cosine similarity search), `KnowledgeGraph` (concept nodes and relationship edge management), `GoalDependencyGraph` (DAG dependencies, LLM auto-detection). Cross-cutting infrastructure supporting semantic search in KnowledgeManager, CuriosityEngine, and MemoryLifecycleManager.
 
-> **Stage 14（完了）**: Goal横断ポートフォリオと学習を実装。`GoalTreeManager`（再帰的N層ゴールツリー分解・集約・剪定）、`StateAggregator`（子ノード状態集約・完了カスケード）、`TreeLoopOrchestrator`（各ノード独立ループ・並列実行制御）、`CrossGoalPortfolio`（複数ゴール横断の優先度計算・リソース配分・リバランス）、`StrategyTemplateRegistry`（戦略テンプレート管理・類似状況への適用）、`LearningPipeline`（4トリガー学習・クロスゴールパターン共有）、`KnowledgeTransfer`（ゴール間知識転移・メタパターン抽出）。2663テスト通過（53テストファイル）。
-
----
-
-## 5. 既存システムとの統合
-
-Motivaは「何をすべきか」を発見するエンジンだ。それ以外のすべてには、既存のシステムを使う。
-
-### 実行
-
-タスクの実行はMotivaの仕事ではない。Motivaが行うのは「何を実行すべきか」の判断と、「誰に委譲するか」の選択だ。各種AIエージェント（CLI型、API型、カスタムアダプタ）、人間のアクション。ゴールとタスクの性質に応じて、最適な委譲先を選ぶ。委譲の詳細なモデルは `design/execution-boundary.md` を参照。
-
-### 常駐基盤
-
-Motivaが長期にわたって動き続けるためには、常駐する仕組みが必要だ。これは既存のインフラで実現する。デーモンプロセス、cron、ハートビート機構。定期的にMotivaのループを起動し、観測とタスク発見を行う。
-
-### 能力管理
-
-Motivaが使えるツールやデータソースは、動的に追加・削除される。ユーザーがAPIキーを渡せば新しいデータソースが使えるようになり、権限を付与すれば新しいアクションが可能になる。
-
-能力管理は **CapabilityDetector** として実装されており、遅延ロードにとどまらず**能動的な欠如検知**を行う。タスク生成時に必要な能力が未登録であることを検知した場合、ユーザーへのエスカレーションを自動的に発行する。「できると思って試みたら権限がなかった」という事後的な失敗を、タスク委譲前に防ぐ設計だ。
-
-### コミュニケーション
-
-ユーザーへの報告、緊急通知、承認要求。これらはメッセージングプラットフォームやメールなど、既存の通信手段を使う。
-
-### 状態永続化
-
-Motivaの状態（ゴールツリー、観測ログ、学習データ）はファイルベースで保存する。透明で、人間が読めて、gitで管理できる。ブラックボックスのデータベースではなく、いつでも中身を確認できる形式にする。
-
-### Motivaの立ち位置
-
-```
-ユーザー
-  │ ゴールを伝える
-  ↓
-Motiva（タスク発見エンジン）
-  │ 「次に何をすべきか」を発見する
-  ↓
-既存システム群
-  ├── 実行: AIエージェント, 人間
-  ├── 常駐: デーモン, cron, ハートビート
-  ├── 能力: ツール, データソース, API
-  ├── 通信: メッセージング, メール, アラート
-  └── 永続化: ファイル, git
-```
-
-Motivaは頭脳だ。体は既にある。足りなかったのは、長期ゴールに対して「次に何をすべきか」を発見し続ける仕組みだけだ。
+> **Stage 14 (complete)**: Implemented cross-goal portfolio and learning. `GoalTreeManager` (recursive N-level goal tree decomposition, aggregation, pruning), `StateAggregator` (child node state aggregation, completion cascade), `TreeLoopOrchestrator` (each node's independent loop, parallel execution control), `CrossGoalPortfolio` (cross-goal priority calculation, resource allocation, rebalancing), `StrategyTemplateRegistry` (strategy template management, application to similar situations), `LearningPipeline` (4-trigger learning, cross-goal pattern sharing), `KnowledgeTransfer` (cross-goal knowledge transfer, meta-pattern extraction). 2663 tests passing (53 test files).
 
 ---
 
-## 6. 実行境界
+## 5. Integration with Existing Systems
 
-**Motivaは自ら実行しない。Motivaは常にエージェントに委譲する。**
+Conatus is an engine that discovers "what should be done." For everything else, it uses existing systems.
 
-### Motivaが直接行うこと
+### Execution
 
-Motivaが自ら処理するのは、自身の思考プロセスのためのLLM呼び出しと状態の読み書きだけだ。
+Executing tasks is not Conatus's job. What Conatus does is judge "what should be executed" and select "who to delegate to." Various AI agents (CLI type, API type, custom adapters), human actions. The optimal delegation target is chosen based on the nature of the goal and task. See `design/execution-boundary.md` for the detailed delegation model.
 
-- ゴール分解、観測結果の分析、戦略選択、タスク具体化のためのLLM呼び出し
-- ゴールツリー、観測ログ、学習データのファイルへの読み書き
+### Persistent Infrastructure
 
-### Motivaが委譲すること
+For Conatus to keep running over the long term, a persistent mechanism is needed. This is realized with existing infrastructure. Daemon processes, cron, heartbeat mechanisms. Periodically launching Conatus's loop to perform observation and task discovery.
 
-実行に関わるあらゆることは委譲だ。
+### Capability Management
 
-- コード実装、データ収集・分析、ファイル操作 → 専用エージェント
-- 外部サービス連携、API呼び出し → 適切なエージェントまたはツール
-- 通知・レポート送信 → メッセージングシステム
-- 不可逆なアクションの承認 → 人間（必須）
+The tools and data sources Conatus can use are dynamically added and removed. When a user provides an API key, a new data source becomes available; when permissions are granted, new actions become possible.
 
-### 「Motivaが〇〇した」の意味
+Capability management is implemented as **CapabilityDetector**, which goes beyond lazy loading to perform **proactive deficiency detection**. When a required capability is unregistered at task generation time, it automatically issues an escalation to the user. This design prevents the after-the-fact failure of "tried something thinking it was possible, but didn't have permission" before task delegation.
 
-「Motivaがコードを書いた」「Motivaがシステムを構築した」という表現は省略形だ。正確には「Motivaがエージェントにコード実装を指示し、結果を検証した」「Motivaがエージェント群に構築タスクを委譲し、統合を確認した」を意味する。
+### Communication
 
-Motivaは考える存在であり、動く存在ではない。詳細は `design/execution-boundary.md` を参照。
+Reports to users, urgent notifications, approval requests. These use existing communication means such as messaging platforms and email.
+
+### State Persistence
+
+Conatus's state (goal tree, observation logs, learning data) is saved in a file-based format. Transparent, human-readable, and manageable with git. Rather than a black-box database, it's kept in a format that can always be inspected.
+
+### Conatus's Position
+
+```
+User
+  │ Provides goals
+  ↓
+Conatus (task discovery engine)
+  │ Discovers "what should be done next"
+  ↓
+Existing system group
+  ├── Execution: AI agents, humans
+  ├── Persistence: daemon, cron, heartbeat
+  ├── Capabilities: tools, data sources, APIs
+  ├── Communication: messaging, email, alerts
+  └── Persistence: files, git
+```
+
+Conatus is the brain. The body already exists. What was missing was only a mechanism to keep discovering "what should be done next" for long-term goals.
+
+---
+
+## 6. Execution Boundary
+
+**Conatus does not execute anything itself. Conatus always delegates to agents.**
+
+### What Conatus Does Directly
+
+What Conatus processes itself is only LLM calls for its own thinking process and reading/writing state.
+
+- LLM calls for goal decomposition, observation result analysis, strategy selection, and task concretization
+- Reading and writing the goal tree, observation logs, and learning data to files
+
+### What Conatus Delegates
+
+Everything related to execution is delegated.
+
+- Code implementation, data collection and analysis, file operations → dedicated agents
+- External service integrations, API calls → appropriate agents or tools
+- Notification and report delivery → messaging systems
+- Approval for irreversible actions → humans (mandatory)
+
+### What "Conatus Did ○○" Means
+
+Expressions like "Conatus wrote the code" or "Conatus built the system" are shorthand. More precisely, they mean "Conatus instructed an agent to implement the code and verified the results" and "Conatus delegated construction tasks to a group of agents and confirmed the integration."
+
+Conatus is an entity that thinks, not an entity that acts. See `design/execution-boundary.md` for details.

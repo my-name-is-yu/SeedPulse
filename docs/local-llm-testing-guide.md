@@ -1,188 +1,188 @@
-# ローカルLLMテストガイド（古いMacBook用）
+# Local LLM Testing Guide (for Older MacBooks)
 
-## 前提条件
+## Prerequisites
 
 - Intel MacBook (8GB RAM / 256GB Storage)
 - macOS
 - Node.js 20+
-- Ollama インストール済み
-- モデル: `qwen3:4b`
+- Ollama installed
+- Model: `qwen3:4b`
 
-## 1. セットアップ
+## 1. Setup
 
 ### Ollama
 
 ```bash
-# Ollamaインストール（未済の場合）
-# https://ollama.com からダウンロード
+# Install Ollama (if not already installed)
+# Download from https://ollama.com
 
-# モデル取得
+# Pull the model
 ollama pull qwen3:4b
 
-# 確認
-ollama list  # qwen3:4b が表示されればOK
+# Verify
+ollama list  # qwen3:4b should appear in the list
 ```
 
-### Motivaリポジトリ
+### Conatus Repository
 
 ```bash
-git clone <リポジトリURL> Motiva
-cd Motiva
+git clone <repository-url> Conatus
+cd Conatus
 npm install
 npm run build
 ```
 
-## 2. Ollama起動
+## 2. Starting Ollama
 
 ```bash
-# ローカルのみ（同じマシンでMotiva実行する場合）
+# Local only (when running Conatus on the same machine)
 ollama serve
 
-# 外部アクセス許可（別マシンからアクセスする場合）
+# Allow external access (when accessing from another machine)
 OLLAMA_HOST=0.0.0.0 ollama serve
 ```
 
-## 3. Motiva実行
+## 3. Running Conatus
 
-### 共通の環境変数
+### Common Environment Variables
 
 ```bash
 export MOTIVA_LLM_PROVIDER=ollama
 export ANTHROPIC_API_KEY=dummy
 ```
 
-> **注意**: `ANTHROPIC_API_KEY=dummy` はTUI起動時のチェック回避用。Ollama使用時は実際のキーは不要。
+> **Note**: `ANTHROPIC_API_KEY=dummy` is set to bypass the startup check in the TUI. A real key is not required when using Ollama.
 
-### エントリポイント
+### Entry Point
 
-`npx motiva` または直接実行：
+Use `npx motiva` or run directly:
 
 ```bash
-npx motiva <サブコマンド>
-# または
-node dist/cli-runner.js <サブコマンド>
+npx motiva <subcommand>
+# or
+node dist/cli-runner.js <subcommand>
 ```
 
-### ヘルプ
+### Help
 
 ```bash
 node dist/cli-runner.js --help
 ```
 
-### ゴール追加
+### Add a Goal
 
 ```bash
-node dist/cli-runner.js goal add "Motivaのreadmeを作成"
+node dist/cli-runner.js goal add "Create a readme for Conatus"
 ```
 
-### ゴール一覧
+### List Goals
 
 ```bash
 node dist/cli-runner.js goal list
 ```
 
-### コアループ実行
+### Run the Core Loop
 
 ```bash
 node dist/cli-runner.js run
 ```
 
-### ステータス確認
+### Check Status
 
 ```bash
 node dist/cli-runner.js status
 ```
 
-### レポート
+### Report
 
 ```bash
 node dist/cli-runner.js report
 ```
 
-### TUI（インタラクティブUI）
+### TUI (Interactive UI)
 
 ```bash
 node dist/cli-runner.js tui
 ```
 
-TUI操作:
-- `/help` — コマンド一覧
-- `/goal add <ゴール>` — ゴール追加
-- `Ctrl-C` — 終了
+TUI controls:
+- `/help` — show command list
+- `/goal add <goal>` — add a goal
+- `Ctrl-C` — quit
 
-> **TUI注意点**:
-> - SSH + tmux経由だと表示が崩れることがある → `Ctrl-b z` でペインをズームして幅を確保
-> - チャットは自由入力ではなくコマンドベース
-> - フリーズした場合は `Ctrl-C` か別ペインから `pkill -f "node dist/cli-runner.js"`
+> **TUI notes**:
+> - Display may be garbled over SSH + tmux due to insufficient terminal width → use `Ctrl-b z` to zoom the pane and gain more width
+> - Chat is command-based, not free-form input
+> - If frozen, press `Ctrl-C` or run `pkill -f "node dist/cli-runner.js"` from another terminal pane
 
-## 4. 別マシンからOllamaに接続する場合
+## 4. Connecting to Ollama from Another Machine
 
-古いMacBookでOllamaを動かし、開発マシンからMotiva実行：
+Run Ollama on the older MacBook and run Conatus from your development machine:
 
 ```bash
-# 古いMacBookのIPアドレスを確認
+# Find the IP address of the older MacBook
 ifconfig | grep "inet "
 
-# 開発マシンから接続テスト
-curl http://<古いMacのIP>:11434/v1/models
+# Test the connection from your development machine
+curl http://<older-mac-ip>:11434/v1/models
 
-# 開発マシンでMotiva実行
+# Run Conatus from your development machine
 MOTIVA_LLM_PROVIDER=ollama \
-OLLAMA_BASE_URL=http://<古いMacのIP>:11434 \
+OLLAMA_BASE_URL=http://<older-mac-ip>:11434 \
 node dist/cli-runner.js run
 ```
 
-## 5. テストシナリオ
+## 5. Test Scenarios
 
-### A. 基本動作確認
+### A. Basic Operation Check
 
 ```bash
-# 1. ゴール追加
-node dist/cli-runner.js goal add "テスト用のシンプルなゴール"
+# 1. Add a goal
+node dist/cli-runner.js goal add "A simple goal for testing"
 
-# 2. ゴール一覧で登録確認
+# 2. Confirm registration with goal list
 node dist/cli-runner.js goal list
 
-# 3. コアループ実行
+# 3. Run the core loop
 node dist/cli-runner.js run
 
-# 4. ステータス確認
+# 4. Check status
 node dist/cli-runner.js status
 
-# 5. レポート生成
+# 5. Generate a report
 node dist/cli-runner.js report
 ```
 
-### B. TUI動作確認
+### B. TUI Operation Check
 
 ```bash
 node dist/cli-runner.js tui
-# → /help でコマンド確認
-# → ゴール追加・実行を試す
-# → Ctrl-C で終了
+# → Run /help to see available commands
+# → Try adding and running a goal
+# → Press Ctrl-C to exit
 ```
 
-### C. エラーハンドリング確認
+### C. Error Handling Check
 
 ```bash
-# Ollama停止状態でMotiva実行 → リトライ→エラー表示を確認
-# (別ターミナルでollamaを止めてから実行)
+# Run Conatus while Ollama is stopped → verify retry and error output
+# (stop ollama in another terminal first, then run)
 node dist/cli-runner.js run
 ```
 
-## 6. 既知の問題
+## 6. Known Issues
 
-| 問題 | 原因 | 回避策 |
-|------|------|--------|
-| ~~`npx motiva` が何も出力しない~~ | ~~修正済み~~ `import.meta.url` + `realpathSync` 判定に修正 | `npx motiva` も `node dist/cli-runner.js` も使用可 |
-| TUI表示崩れ | SSH+tmux経由でターミナル幅不足 | `Ctrl-b z` でペインズーム |
-| TUIチャットが「I didn't understand」 | コマンドベース（自由入力未対応） | `/help` でコマンド確認して使う |
-| TUIフリーズ | Ink描画問題 | `Ctrl-C` or `pkill -f "node dist/cli-runner.js"` |
-| `ANTHROPIC_API_KEY` 必要 | TUI起動時のハードコードチェック | `ANTHROPIC_API_KEY=dummy` をセット |
+| Issue | Cause | Workaround |
+|-------|-------|------------|
+| ~~`npx motiva` produces no output~~ | ~~Fixed~~ Updated to use `import.meta.url` + `realpathSync` check | Both `npx motiva` and `node dist/cli-runner.js` work |
+| TUI display garbled | Insufficient terminal width over SSH + tmux | Zoom the pane with `Ctrl-b z` |
+| TUI chat says "I didn't understand" | Chat is command-based (free-form input not supported) | Check available commands with `/help` |
+| TUI frozen | Ink rendering issue | `Ctrl-C` or `pkill -f "node dist/cli-runner.js"` |
+| `ANTHROPIC_API_KEY` required | Hard-coded check at TUI startup | Set `ANTHROPIC_API_KEY=dummy` |
 
-## 7. 状態リセット
+## 7. Resetting State
 
-テストデータをクリアして最初からやり直す場合：
+To clear test data and start fresh:
 
 ```bash
 rm -rf ~/.motiva

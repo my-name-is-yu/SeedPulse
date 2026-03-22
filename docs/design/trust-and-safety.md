@@ -1,277 +1,278 @@
-# トラスト・安全設計
+# Trust and Safety Design
 
 ---
 
-## 1. 概要
+## 1. Overview
 
-Conatusはどこまで自律的に動いてよいか。これは「何ができるか」ではなく「何をしてよいか」の問題だ。
+How far can Conatus act autonomously? This is not a question of "what it can do" but of "what it is permitted to do."
 
-能力があっても、信頼がなければ動いてはならない。信頼があっても、確信がなければ慎重に動くべきだ。そして、どれだけ信頼と確信があっても、取り消せない行動は人間の承認なしに実行してはならない。
+Even with the capability, it must not act without trust. Even with trust, it should act cautiously without confidence. And no matter how high the trust and confidence, irreversible actions must never be executed without human approval.
 
-この設計は、この3つの原則を具体的な判断ロジックに落とし込む。
+This design translates these three principles into concrete decision logic.
 
 ---
 
-## 2. 自律性の2軸
+## 2. Two Axes of Autonomy
 
-Conatusの自律度は2つの独立した軸で決まる。
+Conatus's degree of autonomy is determined by two independent axes.
 
-### 軸1: 確信度（Confidence）
+### Axis 1: Confidence
 
-**現在地に対してどれだけ確かなことを言えるか。**
+**How certain can we be about the current position?**
 
-確信度は自己評価ではなく、観測方法によって決まる。「自分はよくできたと思う」はデータではない。
+Confidence is not self-assessed — it is determined by the observation method. "I think I did well" is not data.
 
-| 観測方法 | 確信度 | 例 |
-|----------|--------|-----|
-| 機械的検証 | 高 | テスト結果、センサー数値、APIレスポンス |
-| 独立した評価者による判断 | 中 | Task Reviewerによる品質評価 |
-| 推定・自己申告 | 低 | 「おそらくこのくらい」という見積もり |
+| Observation method | Confidence | Example |
+|-------------------|-----------|---------|
+| Mechanical verification | High | Test results, sensor readings, API responses |
+| Judgment by independent evaluator | Medium | Quality evaluation by Task Reviewer |
+| Estimate / self-report | Low | "It's probably around this much" |
 
-確信度が低い状態でConatusが大胆に動くことを防ぐ。「よくわからないけどおそらく大丈夫」という判断での実行を許可しない。
+This prevents Conatus from acting boldly in a low-confidence state. Execution based on "I don't really know but it's probably fine" is not permitted.
 
-### 軸2: トラストバランス（Trust Balance）
+### Axis 2: Trust Balance
 
-**Conatusがこれまでの実績でどれだけユーザーの信頼を蓄積したか。**
+**How much user trust has Conatus accumulated through its track record so far?**
 
-トラストバランスは過去の行動の積み重ねで決まる数値だ。0からスタートし、成功で少し増え、失敗で大きく減る。
-
-```
-初期値: 0（ニュートラル/低い状態）
-成功（Task Reviewerによる検証済み）: +Δs（小）
-失敗（Task Reviewerによる検証済み）: −Δf（大） where Δf > Δs
-```
-
-**非対称性が重要**. 失敗のコストは成功の報酬より大きい。これは意図的な設計だ。
-
-理由: 一度失われた信頼の回復コスト（ユーザーの精神的負担、損失の修復、関係の修復）は、成功から得られる信頼の蓄積コストより現実的に大きい。スコアはこの現実を反映する。
-
-**ドメイン別管理**: トラストバランスはドメイン（領域）ごとに管理する。コードタスクの実績が、ビジネス戦略タスクの信頼に転用されない。
+Trust balance is a numerical value determined by the accumulation of past actions. It starts at 0, increases slightly with each success, and decreases significantly with each failure.
 
 ```
-ドメイン例:
-  code_tasks: +21（高い）
-  business_strategy: -9（低い）
-  data_analysis: +3（中程度）
-  external_communications: -18（低い）
+Initial value: 0 (neutral / low state)
+Success (verified by Task Reviewer): +Δs (small)
+Failure (verified by Task Reviewer): −Δf (large) where Δf > Δs
 ```
 
-### トラストバランスの数値仕様（v1デフォルト）
+**The asymmetry is important.** The cost of failure is greater than the reward for success. This is an intentional design decision.
 
-象限マトリクスを実際に計算するために、以下の数値をv1のデフォルト値として定義する。ドメインや運用状況に応じて設定変更可能だ。
+Rationale: The cost of recovering lost trust (user's psychological burden, repairing losses, restoring the relationship) is realistically greater than the trust accumulated from successes. The score reflects this reality.
 
-| パラメータ | 値 | 説明 |
-|------------|-----|------|
-| 初期値 | 0 | ニュートラル（低トラスト側） |
-| 最小値 | -100 | 下限キャップ |
-| 最大値 | +100 | 上限キャップ |
-| 成功時増分 Δs | +3 | 小さく保守的。信頼は時間をかけて積む |
-| 失敗時減分 Δf | -10 | 非対称。失敗1回 ≈ 成功3回分以上の重み |
-| 高トラスト境界 | +20以上 | 連続7回成功（失敗なし）で到達する水準 |
-| 低トラスト境界 | +20未満 | 初期値・失敗後・実績不足の状態 |
+**Domain-specific management**: Trust balance is managed per domain (area). A track record in code tasks is not transferred to the trust for business strategy tasks.
+
+```
+Domain examples:
+  code_tasks: +21 (high)
+  business_strategy: -9 (low)
+  data_analysis: +3 (moderate)
+  external_communications: -18 (low)
+```
+
+### Trust Balance Numerical Specification (v1 Defaults)
+
+The following numerical values are defined as v1 defaults to make the quadrant matrix practically computable. These can be changed depending on the domain and operational context.
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| Initial value | 0 | Neutral (toward the low-trust side) |
+| Minimum | -100 | Lower cap |
+| Maximum | +100 | Upper cap |
+| Success increment Δs | +3 | Small and conservative. Trust is built over time |
+| Failure decrement Δf | -10 | Asymmetric. 1 failure ≈ more than 3 successes in weight |
+| High-trust boundary | +20 or above | The level reached by 7 consecutive successes (no failures) |
+| Low-trust boundary | Below +20 | Initial state, post-failure, or insufficient track record |
 
 ```
 trust_balance ∈ [-100, +100]
-高トラスト: trust_balance >= 20
-低トラスト: trust_balance < 20
+High trust: trust_balance >= 20
+Low trust:  trust_balance < 20
 ```
 
-**高トラスト境界の根拠**: 初期値0から+20に到達するには、失敗ゼロで7回連続の成功（7 × 3 = +21）が必要だ。1回でも失敗すると10ポイント失い、回復に4回の成功が必要になる。これにより「7回成功 → 自律実行可」という直感的な基準になる。
+**Rationale for the high-trust boundary**: Starting from 0, reaching +20 requires 7 consecutive successes with no failures (7 × 3 = +21). Even one failure costs 10 points, requiring 4 successes to recover. This creates an intuitive standard of "7 successes → autonomous execution permitted."
 
-### 確信度の数値仕様
+### Confidence Numerical Specification
 
-確信度は `observation.md` の3層観測システムと対応する。
+Confidence corresponds to the 3-layer observation system in `observation.md`.
 
-| 確信度レベル | 数値境界 | 対応する観測方法 |
-|-------------|---------|----------------|
-| 高 | 0.50以上 | 機械的検証（≥0.85）、独立した評価者による判断（0.50〜0.84） |
-| 低 | 0.50未満 | 推定・自己申告のみ |
+| Confidence level | Numeric boundary | Corresponding observation method |
+|-----------------|-----------------|--------------------------------|
+| High | 0.50 or above | Mechanical verification (≥0.85), judgment by independent evaluator (0.50–0.84) |
+| Low | Below 0.50 | Estimate / self-report only |
 
 ```
-confidence_high: confidence >= 0.50   // 機械的検証 + 独立レビューを含む
-confidence_low:  confidence < 0.50    // 自己申告のみ
+confidence_high: confidence >= 0.50   // includes mechanical verification + independent review
+confidence_low:  confidence < 0.50    // self-report only
 ```
 
-この境界は `observation.md` §2 の3層観測システムに整合する。0.50 は「独立した評価者による検証あり」と「自己申告のみ」を分けるラインであり、トラスト判断に最も意味のある境界だ。
+This boundary is consistent with the 3-layer observation system in `observation.md` §2. 0.50 is the line that separates "verified by an independent evaluator" from "self-report only," and is the most meaningful boundary for trust decisions.
 
-これにより4象限マトリクスの判定は以下の条件式で計算可能になる。
+This makes the four-quadrant matrix judgment computable with the following conditions:
 
 ```
 quadrant =
-  trust_balance >= 20 AND confidence >= 0.50 → 象限1（自律実行）
-  trust_balance >= 20 AND confidence < 0.50  → 象限2（実行 + 確認）
-  trust_balance < 20  AND confidence >= 0.50 → 象限3（実行 + 確認）
-  trust_balance < 20  AND confidence < 0.50  → 象限4（観測優先 + 計画提案）
+  trust_balance >= 20 AND confidence >= 0.50 → Quadrant 1 (autonomous execution)
+  trust_balance >= 20 AND confidence < 0.50  → Quadrant 2 (execute + confirm)
+  trust_balance < 20  AND confidence >= 0.50 → Quadrant 3 (execute + confirm)
+  trust_balance < 20  AND confidence < 0.50  → Quadrant 4 (observation first + propose plan)
 ```
 
 ---
 
-## 3. 4象限行動マトリクス
+## 3. Four-Quadrant Action Matrix
 
-確信度とトラストバランスの組み合わせから、Conatusの行動様式が決まる。
+The combination of confidence and trust balance determines Conatus's behavioral mode.
 
 ```
-                    確信度 低                確信度 高
+                    Low Confidence          High Confidence
                  ┌────────────────────┬────────────────────┐
-  トラスト 高   │  実行するが         │  自律実行          │
-               │  人間に確認         │                    │
+  High Trust    │  Execute, but       │  Autonomous        │
+               │  confirm with human │  Execution         │
                ├────────────────────┼────────────────────┤
-  トラスト 低   │  まず観測し        │  実行するが         │
-               │  計画を人間に提案   │  人間に確認         │
+  Low Trust    │  Observe first,    │  Execute, but       │
+               │  propose plan      │  confirm with human │
+               │  to human          │                    │
                └────────────────────┴────────────────────┘
 ```
 
-### 象限1: 高トラスト × 高確信度 → 自律実行
+### Quadrant 1: High Trust × High Confidence → Autonomous Execution
 
-現在地が正確にわかっていて、この領域での実績がある。最も自律的に動ける状態。
+The current position is accurately known and there is a track record in this area. The most autonomous state possible.
 
-ただし「自律実行」は「報告なし」ではない。実行後に結果をレポートする。ユーザーは事後に確認できる。
+However, "autonomous execution" does not mean "no reporting." Results are reported after execution. The user can verify after the fact.
 
-### 象限2: 高トラスト × 低確信度 → 実行するが人間に確認
+### Quadrant 2: High Trust × Low Confidence → Execute but Confirm with Human
 
-実績はある。しかし今回の状況判断に自信がない。「おそらくこれで合ってると思いますが、確認をお願いします」という状態で動く。
+There is a track record. However, confidence in the current situational judgment is low. Acting in a state of "I think this is probably right, but could you confirm?"
 
-### 象限3: 低トラスト × 高確信度 → 実行するが人間に確認
+### Quadrant 3: Low Trust × High Confidence → Execute but Confirm with Human
 
-現在地は正確にわかっている。しかしConatus自体の実績がまだない。最初のうちは「提案して承認をもらってから動く」モードで動き、実績を積む。
+The current position is accurately known. However, Conatus itself has no track record yet. In the early stages, it operates in "propose and get approval before acting" mode, accumulating a track record.
 
-### 象限4: 低トラスト × 低確信度 → 観測優先、計画を人間に提案
+### Quadrant 4: Low Trust × Low Confidence → Observation First, Propose Plan to Human
 
-最も保守的な状態。まず観測タスクを走らせて現状の把握を優先する。その上で「こう動こうと思う」という計画を人間に提示し、承認を得てから実行する。
-
----
-
-## 4. 取り消せない行動の絶対ルール
-
-**トラストとConfidenceがどれだけ高くても、取り消せない行動は常に人間の承認を必要とする。**
-
-これは象限マトリクスの例外ではなく、マトリクスより上位に位置するルールだ。どのスコアも、このルールをオーバーライドできない。
-
-**検知メカニズム**: タスクに取り消せない行動が含まれるかどうかは、タスク生成時にLLMが付与する `reversibility` タグ（`task-lifecycle.md` §2.8）によって判定する。`irreversible` または `unknown`（保守的原則により `irreversible` と同等扱い）と判定されたタスクが、この承認ゲートの対象となる。承認ゲートはタスクの実行開始前に評価する。
-
-**取り消せない行動の定義**:
-
-| カテゴリ | 例 |
-|----------|-----|
-| 本番環境へのデプロイ | 本番サービスへのリリース、本番DBのスキーマ変更 |
-| データの削除 | レコード削除、ファイル削除、バックアップの上書き |
-| 外部APIへの書き込み | メール送信、SNS投稿、決済実行、外部サービスへのデータ送信 |
-| 設定の不可逆変更 | 権限設定の変更、セキュリティポリシーの変更 |
-| 契約・法的行為 | 外部への同意、署名、公式通知 |
-
-**なぜスコアでオーバーライドできないか**: Conatusの判断は確率的だ。信頼度0.95は「95%の確率で正しい」を意味し、「5%の確率で間違っている」を意味する。取り消せない行動において5%の誤りは許容できない。スコアがどれだけ高くても、人間の確認という最終フィルターは外せない。
-
-**discardパスとの連携**: 不可逆アクションの判定は、タスク実行前の承認ゲート（§4）だけでなく、タスク失敗時のリバート判断（`task-lifecycle.md` のdiscardパス）でも参照される。`reversibility` タグが `irreversible` または `unknown` のタスクは、discardパスでリバートを試行せず、人間へのエスカレーションに進む。
-
-**人間への通知フォーマット**:
-
-```
-[承認要求]
-アクション: 本番環境へのデプロイ（v2.3.1）
-取り消せない操作: はい
-現在のトラスト: +42 / 100 / 確信度: 0.91（機械的検証）
-Conatusの評価:
-  - テスト全通過（98/98）
-  - ステージング環境で24時間正常稼働
-  - ロールバック手順: [手順リンク]
-承認: [はい / いいえ / 詳細を確認]
-```
-
-人間が判断するのに必要な情報を提供する。「承認しますか？」だけでは不十分。
+The most conservative state. Observation tasks are run first to prioritize understanding the current situation. Then a plan of "this is what I intend to do" is presented to the human, and execution proceeds only after approval.
 
 ---
 
-## 5. トラスト回復のメカニズム
+## 4. Absolute Rule for Irreversible Actions
 
-失敗によってトラストが下がった後、どのように回復するか。
+**No matter how high the trust and confidence, irreversible actions always require human approval.**
 
-**原則**: 回復は段階的に行う。失敗後に即座に元のレベルに戻ることはない。
+This is not an exception to the quadrant matrix — it is a rule that supersedes the matrix. No score can override this rule.
+
+**Detection mechanism**: Whether a task contains irreversible actions is determined by the `reversibility` tag (`task-lifecycle.md` §2.8) attached by the LLM at task generation time. Tasks judged as `irreversible` or `unknown` (treated as equivalent to `irreversible` by the conservative principle) are subject to this approval gate. The approval gate is evaluated before task execution begins.
+
+**Definition of irreversible actions**:
+
+| Category | Example |
+|----------|---------|
+| Deployment to production | Releasing to a production service, schema change on a production DB |
+| Data deletion | Deleting records, deleting files, overwriting backups |
+| Writing to external APIs | Sending emails, posting on social media, processing payments, sending data to external services |
+| Irreversible configuration changes | Changing permission settings, changing security policies |
+| Contractual / legal acts | External consent, signatures, official notices |
+
+**Why can't scores override this?**: Conatus's judgment is probabilistic. A confidence of 0.95 means "95% probability of being correct," which also means "5% probability of being wrong." A 5% error in irreversible actions is not acceptable. No matter how high the score, the final filter of human confirmation cannot be removed.
+
+**Integration with the discard path**: The determination of irreversible actions is referenced not only in the pre-execution approval gate (§4), but also in the revert decision during task failure (`task-lifecycle.md` discard path). Tasks with a `reversibility` tag of `irreversible` or `unknown` do not attempt a revert on the discard path and proceed directly to human escalation.
+
+**Human notification format**:
 
 ```
-失敗発生 → トラストが下がる
+[Approval Request]
+Action: Deploy to production (v2.3.1)
+Irreversible operation: Yes
+Current trust: +42 / 100 / Confidence: 0.91 (mechanical verification)
+Conatus's assessment:
+  - All tests passed (98/98)
+  - Operating normally in staging environment for 24 hours
+  - Rollback procedure: [procedure link]
+Approve: [Yes / No / Review details]
+```
+
+Provide the information the human needs to make a decision. "Do you approve?" alone is not enough.
+
+---
+
+## 5. Trust Recovery Mechanism
+
+How does trust recover after being reduced by a failure?
+
+**Principle**: Recovery is gradual. There is no immediate return to the previous level after a failure.
+
+```
+Failure occurs → Trust is reduced
   ↓
-小さな安全なタスクで成功を積み重ねる
+Build up successes with small, safe tasks
   ↓
-段階的にスコアが回復
+Score recovers gradually
   ↓
-以前の行動レベルに徐々に戻る
+Gradually return to the previous level of behavior
 ```
 
-**回復の段階**:
+**Recovery phases**:
 
-| フェーズ | トラスト範囲 | 許容される行動 |
-|----------|--------------|----------------|
-| 回復初期 | 失敗直後の低値 | 観測・分析・計画提案のみ |
-| 回復中期 | 中程度 | 低リスクタスクの実行（確認あり） |
-| 回復後期 | 高い | 通常の行動（象限マトリクスに従う） |
+| Phase | Trust range | Permitted actions |
+|-------|------------|------------------|
+| Early recovery | Low value immediately after failure | Observation, analysis, and plan proposals only |
+| Mid recovery | Moderate | Low-risk task execution (with confirmation) |
+| Late recovery | High | Normal behavior (according to quadrant matrix) |
 
-**「すぐに戻れない」ことの意味**: ユーザーが「もう大丈夫、また自律的に動いていい」と明示的に言っても、Conatusは数回の検証済み成功を経てから元の行動レベルに戻る。これは頑固さではなく、「本当に回復したかどうか」を確認するためのプロセスだ。ただし、ユーザーオーバーライド（後述）により強制的に戻すことは可能。
+**What "you can't return immediately" means**: Even if the user explicitly says "it's fine, you can act autonomously again," Conatus returns to its previous behavior level only after several verified successes. This is not stubbornness — it is a process for confirming "whether the recovery is genuine." However, a user override (see below) can force an immediate return.
 
 ---
 
-## 6. ユーザーオーバーライド
+## 6. User Override
 
-ユーザーはConatusの自律度を手動で調整できる。
+Users can manually adjust Conatus's degree of autonomy.
 
-### 信頼の付与
-
-```
-「デプロイは自分で判断して実行していい」
-  → code_tasks のトラストバランスを高いレベルに引き上げ
-  → デプロイに関する承認要求をスキップ（ただし取り消せない操作ルールは維持）
-```
-
-### 永続的なゲートの設定
+### Granting Trust
 
 ```
-「Xをするときは必ず聞いて」
-  → 特定の操作カテゴリに対して、スコアに関わらず確認を強制
-  → これはトラストバランスより上位に位置するルール
+"You can decide and execute deployments on your own"
+  → Raise the trust balance for code_tasks to a high level
+  → Skip approval requests related to deployment (irreversible operation rule is still maintained)
 ```
 
-永続的なゲートは取り消せない操作ルールと同等の扱いをする。スコアの変化で無効化されない。
-
-### オーバーライドの記録
-
-ユーザーオーバーライドは明示的にログに残す。「なぜConatus自身の判断と異なる行動をしているか」が追跡可能であるべきだ。
+### Setting Permanent Gates
 
 ```
-[オーバーライドログ]
-日時: 2026-03-10
-オーバーライド種別: 信頼付与
-対象: production_deploy @ code_tasks
-設定前のトラスト: -16
-設定後のトラスト: +60（ユーザー指定）
+"Always ask me before doing X"
+  → Force confirmation for a specific operation category, regardless of score
+  → This is a rule that supersedes the trust balance
+```
+
+Permanent gates are treated the same as the irreversible operations rule. They are not invalidated by changes in the score.
+
+### Recording Overrides
+
+User overrides are explicitly logged. It should be traceable "why Conatus is acting differently from its own judgment."
+
+```
+[Override Log]
+Date: 2026-03-10
+Override type: Trust grant
+Target: production_deploy @ code_tasks
+Trust before setting: -16
+Trust after setting: +60 (user specified)
 ```
 
 ---
 
-## 7. 安全フロアのまとめ
+## 7. Summary of Safety Floors
 
-複数のルールが存在するとき、優先順位は以下の通り。
+When multiple rules exist, their priority is as follows:
 
 ```
-優先度（高）
-  0. 倫理・法的ゲート（ゴール・サブゴール・タスクの拒否。`goal-ethics.md` 参照）
-  1. 永続的なゲート（ユーザーが「必ず聞いて」と設定したもの）
-  2. 取り消せない操作ルール（デプロイ、削除、外部書き込み等）
-  3. 象限マトリクス（トラスト × 確信度 による行動様式）
-  4. 停滞検知のフィードバック（decay_factorによる優先度調整）
-優先度（低）
+Priority (high)
+  0. Ethics / legal gate (rejection of goals, subgoals, and tasks. See `goal-ethics.md`)
+  1. Permanent gates (those set by the user as "always ask")
+  2. Irreversible operations rule (deployment, deletion, external writes, etc.)
+  3. Quadrant matrix (behavioral mode determined by trust × confidence)
+  4. Stall detection feedback (priority adjustment via decay_factor)
+Priority (low)
 ```
 
-倫理ゲートの詳細は `goal-ethics.md` を参照。ゴールレベルでの「やるべきか」の判断は、すべての運用ルールに先行する。
+For details on the ethics gate, see `goal-ethics.md`. The judgment of "should this be done at all?" at the goal level precedes all operational rules.
 
-上位のルールは下位のルールで無効化できない。信頼度0.99のスコアがあっても、取り消せない操作には承認が必要。象限マトリクスが「自律実行」を示していても、永続的なゲートが設定されていれば確認する。
+Higher-priority rules cannot be invalidated by lower-priority ones. Even with a confidence score of 0.99, irreversible operations require approval. Even if the quadrant matrix indicates "autonomous execution," confirmation is required if a permanent gate is set.
 
 ---
 
-## 8. 設計上の判断と境界
+## 8. Design Decisions and Boundaries
 
-**「信頼する」とはどういう意味か**: ユーザーがConatusを信頼するとは、「Conatusの判断が正しいと信じる」ことではなく、「Conatusの判断を事後確認するコストを払ってもよい」という選択だ。自律実行モードでも、ユーザーはいつでも行動ログを確認できる。信頼は透明性によって支えられる。
+**What does "trusting" mean?**: For a user to trust Conatus means not "believing Conatus's judgment is correct," but "choosing to pay the cost of verifying Conatus's judgment after the fact." Even in autonomous execution mode, users can always check the action log. Trust is supported by transparency.
 
-**ドメイン分離の粒度**: ドメインは細かすぎても粗すぎてもいけない。細かすぎると、類似する状況での学習が転用されない。粗すぎると、コードタスクの高い信頼がビジネス判断に流れ込む。適切な粒度は、「判断の性質が本質的に似ているか」で決める。
+**Granularity of domain separation**: Domains must be neither too fine nor too coarse. Too fine means learning from similar situations cannot be transferred. Too coarse means high trust in code tasks bleeds into business decisions. The appropriate granularity is determined by "whether the nature of the judgment is fundamentally similar."
 
-**確信度の操作不可能性**: 確信度はConatusが主観的に設定するものではない。観測方法によって客観的に決まる。これはConatusが「自分の判断は確かだ」と自己申告して自律度を上げることを防ぐ。確信度を上げる唯一の方法は、より信頼性の高い観測方法を使うことだ。
+**Non-manipulability of confidence**: Confidence is not something Conatus sets subjectively. It is determined objectively by the observation method. This prevents Conatus from self-declaring "my judgment is certain" to increase its own autonomy. The only way to increase confidence is to use a more reliable observation method.
 
-**失敗の定義**: Task Reviewerが「完了基準を満たしていない」と判定したとき。実行が技術的に完了したかどうかではなく、意図した結果が得られたかどうかで判定する。「コードはデプロイできたがバグが混入した」は成功ではなく失敗だ。
+**Definition of failure**: When the Task Reviewer judges that "the completion criteria are not met." The judgment is based on whether the intended result was obtained, not whether execution technically completed. "The code was deployable but a bug was introduced" is a failure, not a success.

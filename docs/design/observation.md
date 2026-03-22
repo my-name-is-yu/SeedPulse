@@ -1,235 +1,235 @@
-# 観測システム設計
+# Observation System Design
 
-> runtime.md が「結果検証は3層で行われる」と定義する。本ドキュメントはその3層の観測システムを具体的に設計する。観測システムは、Conatusが「世界の今を知る」ための唯一の窓口だ。
-
----
-
-## 1. 観測システムの役割
-
-観測システムは、現実世界の状態を読み取り、状態ベクトルの `current_value` と `confidence` を更新する責務を持つ。
-
-観測システムが答える問いは一つだ。**「この次元は今どういう状態か、そしてそれはどの程度信頼できるか」**。
-
-観測は独立したアクティビティだ。タスク実行の一部ではない。実行とは別のサイクルとして設計することで、「実行した」という事実が「達成した」という判断を汚染しない構造を作る。
+> `runtime.md` defines that "result verification is performed across 3 layers." This document provides a concrete design for that 3-layer observation system. The observation system is Conatus's only window into the current state of the world.
 
 ---
 
-## 2. 3層観測アーキテクチャ
+## 1. Role of the Observation System
 
-観測は3つの層で構成される。各層は信頼度が異なり、役割が異なる。上位層の観測結果は下位層によって覆されない。
+The observation system is responsible for reading the state of the real world and updating `current_value` and `confidence` in the state vector.
+
+It answers a single question: **"What is the current state of this dimension, and how much can we trust that assessment?"**
+
+Observation is an independent activity — it is not part of task execution. By designing observation as a separate cycle from execution, we ensure that the fact of "having executed" does not contaminate the judgment of "having achieved."
+
+---
+
+## 2. Three-Layer Observation Architecture
+
+Observation is composed of three layers. Each layer has a different level of trust and a different role. Results from a higher layer are not overridden by a lower layer.
 
 ```
-Layer 1: 機械的観測（最高信頼度）
-  ↓ 証拠不足の次元を補完
-Layer 2: 独立レビューセッション（中信頼度）
-  ↓ 定性的シグナルを補完
-Layer 3: 実行者自己申告（低信頼度）
-  ↓ 補足情報としてのみ記録
+Layer 1: Mechanical observation (highest trust)
+  ↓ supplements dimensions lacking evidence
+Layer 2: Independent review session (medium trust)
+  ↓ supplements qualitative signals
+Layer 3: Executor self-report (low trust)
+  ↓ recorded only as supplementary information
 ```
 
-### Layer 1: 機械的観測
+### Layer 1: Mechanical Observation
 
-**信頼度: 高（0.85〜1.0）**
+**Trust level: High (0.85–1.0)**
 
-コードまたはシステムが自動で実行する観測。解釈の余地がなく、改ざんできない種類の証拠を生成する。
+Observations executed automatically by code or the system. These produce evidence that leaves no room for interpretation and cannot be tampered with.
 
-対象となる観測の種類:
+Types of observations in scope:
 
-| 観測の種類 | 具体例 |
-|---|---|
-| テスト実行 | 自動テストスイートの実行結果（pass/fail/count） |
-| ファイル存在確認 | 必要なファイル・ディレクトリが存在するか |
-| ビルド成否 | ビルドコマンドが成功終了コードを返したか |
-| センサーデータ取得 | IoTセンサー、ウェアラブルデバイスの計測値 |
-| APIメトリクスクエリ | 外部サービスのAPI経由でメトリクス値を取得 |
-| データベースクエリ | DBに対するSQLクエリの結果セット |
-| システムメトリクス | CPU使用率、メモリ使用量、レスポンスタイム |
+| Observation type | Examples |
+|-----------------|---------|
+| Test execution | Results of automated test suite runs (pass/fail/count) |
+| File existence check | Whether required files or directories exist |
+| Build success/failure | Whether a build command returned a success exit code |
+| Sensor data retrieval | Measurements from IoT sensors or wearable devices |
+| API metrics query | Retrieving metric values from external services via API |
+| Database query | Result set from SQL queries against a DB |
+| System metrics | CPU usage, memory usage, response time |
 
-機械的観測は自動実行される。人間の介在や判断は不要だ。観測手段（どのコマンドを実行するか、どのAPIを叩くか）は Advisor がゴール設定時に定義し、観測サイクルが来るたびに Conatus が自律的に実行する。
+Mechanical observations run automatically. No human intervention or judgment is required. The observation method (which command to run, which API to call) is defined by the Advisor at goal-setting time, and Conatus executes it autonomously on each observation cycle.
 
-**Layer 1の制約**: 機械的観測が設定できない次元には、Layer 2またはLayer 3が使われる。すべての次元に機械的観測を設定することが常に可能とは限らない（定性的な品質評価、人間の感情など）。
+**Layer 1 constraint**: Dimensions for which mechanical observation cannot be configured fall back to Layer 2 or Layer 3. It is not always possible to configure mechanical observation for every dimension (e.g., qualitative quality assessments, human emotions).
 
-### Layer 2: 独立レビューセッション
+### Layer 2: Independent Review Session
 
-**信頼度: 中（0.50〜0.84）**
+**Trust level: Medium (0.50–0.84)**
 
-実行者とは**異なるLLMセッション**が、実行者のコンテキストを持たずに成果を評価する。独立性が信頼度の源泉だ。
+A **different LLM session** from the executor evaluates artifacts without holding the executor's context. Independence is the source of trust here.
 
-独立レビューセッションには2つの種類がある。
+There are two types of independent review sessions.
 
-**タスクレビューセッション（Task Reviewer）**
+**Task Reviewer Session**
 
-問い: 「このタスクは正しく完了されたか」
+Question: "Was this task completed correctly?"
 
-渡す情報:
-- タスクの定義と成功基準
-- 成果物へのアクセス手段
+Information provided:
+- Task definition and success criteria
+- Access to artifacts
 
-渡さない情報:
-- 実行セッションのコンテキスト
-- 実行者の自己申告
+Information withheld:
+- Execution session context
+- Executor's self-report
 
-判断基準: 成功基準が満たされているか、満たされていない場合は何が不足しているか。タスクの完了判定に特化した観測だ。
+Judgment basis: Whether success criteria are met, and if not, what is missing. This is an observation focused specifically on task completion.
 
-**ゴールレビューセッション（Goal Reviewer）**
+**Goal Reviewer Session**
 
-問い: 「ゴールの視点から見て、現在の状態で何が足りないか」
+Question: "From the goal's perspective, what is missing from the current state?"
 
-渡す情報:
-- ゴール定義と全次元の閾値
-- 各次元の現在値（機械的観測の結果）
-- ゴールの制約
+Information provided:
+- Goal definition and thresholds for all dimensions
+- Current values per dimension (results from mechanical observation)
+- Goal constraints
 
-渡さない情報:
-- 実行セッションの詳細
-- 過去の失敗の文脈（バイアスを避けるため）
+Information withheld:
+- Details of execution sessions
+- Context from past failures (to avoid bias)
 
-判断基準: ゴール達成の観点から、機械的観測では見えていない欠落・矛盾・リスクを発見する。タスクレベルではなくゴールレベルの評価だ。
+Judgment basis: From the perspective of goal achievement, discover gaps, contradictions, or risks that mechanical observation cannot surface. This is a goal-level evaluation, not a task-level one.
 
-独立レビューセッションは自動実行されるが、タイミングはタスク完了後または定期観測の周期に依存する。常時実行ではなく、必要なタイミングにのみ起動される。
+Independent review sessions run automatically, but their timing depends on task completion or the periodic observation cycle. They are not running constantly — only triggered at the right moments.
 
-### Layer 3: 実行者自己申告
+### Layer 3: Executor Self-Report
 
-**信頼度: 低（0.10〜0.49）**
+**Trust level: Low (0.10–0.49)**
 
-タスクを実行したエージェントまたは人間が、「何をした・できた・できなかった」を報告する。
+The agent or human who executed the task reports "what was done, what succeeded, and what failed."
 
-使用目的:
-- 機械的観測では検出できない**実行の文脈情報**を補完する（例: 「Aの方法を試みたがエラーが出たのでBで代替した」）
-- 次のタスク生成への**ヒント**として使う
-- Layer 1・2との矛盾を検出する**補助シグナル**として使う
+Purposes:
+- Supplements **execution context information** that mechanical observation cannot detect (e.g., "tried approach A but got an error, so substituted B")
+- Used as a **hint** for the next task generation
+- Used as an **auxiliary signal** to detect contradictions with Layer 1 and 2
 
-使用しない目的:
-- 達成度の計算の主たる根拠にすること
-- 完了判定の主たる根拠にすること
+Not used for:
+- As the primary basis for calculating achievement level
+- As the primary basis for completion determination
 
-自己申告の内容は状態ベクトルの `current_value` に直接反映されない。観測ログに記録され、Layer 1・2の観測結果と合わせて Conatus の判断材料になるが、優先度は常に最低だ。
+The content of self-reports is not directly reflected in `current_value` in the state vector. It is recorded in the observation log and feeds into Conatus's decision-making alongside Layer 1 and 2 results, but always has the lowest priority.
 
 ---
 
-## 3. 観測タイミング
+## 3. Observation Timing
 
-観測は以下の3つのタイミングで発生する。
+Observation occurs at three points in time.
 
-### タスク後観測（Post-task）
+### Post-task Observation
 
-タスク実行セッションが終了した直後に必ず走る。
+Runs immediately after a task execution session ends.
 
-目的: タスクの実行が状態を変化させたか確認する。成功した場合はギャップが縮まったはず。失敗した場合は変化しない（または悪化する）はず。
+Purpose: Confirm whether task execution changed the state. On success, the gap should have narrowed. On failure, it should be unchanged (or worsened).
 
-観測の範囲: 当該タスクが影響を与えた次元のみ。無関係な次元は観測しない（コストの節約と、観測ノイズの低減）。
+Observation scope: Only dimensions the task affected. Unrelated dimensions are not observed (to save cost and reduce observation noise).
 
-### 定期観測（Periodic）
+### Periodic Observation
 
-ゴールの性質に応じた間隔で、タスクの実行とは独立して走る。
+Runs independently of task execution at intervals appropriate to the goal's nature.
 
-目的: タスク実行以外の外部変化を検知する。市場の変化、外部サービスの状態変化、時間経過による自然な変動。
+Purpose: Detect external changes that happen outside of task execution — market shifts, external service state changes, natural variation over time.
 
-間隔の決定: ゴール設定時に Advisor が指定する。ゴールの性質が間隔を決める。
+Interval determination: Specified by the Advisor at goal-setting time. The goal's nature determines the interval.
 
-| ゴールの性質 | 定期観測の目安間隔 |
-|---|---|
-| リアルタイム性が必要（アラート系） | 1分〜1時間 |
-| 日次で変動する（健康・ビジネスKPI） | 1日 |
-| 週次で変動する（プロジェクト進捗） | 1週間 |
-| 月次で変動する（長期事業戦略） | 1ヶ月 |
+| Goal nature | Suggested periodic observation interval |
+|------------|----------------------------------------|
+| Requires real-time awareness (alert-type) | 1 minute to 1 hour |
+| Varies daily (health, business KPIs) | 1 day |
+| Varies weekly (project progress) | 1 week |
+| Varies monthly (long-term business strategy) | 1 month |
 
-定期観測では、全次元を対象とする。ゴールの現在地を俯瞰的に確認する。
+Periodic observation covers all dimensions — a comprehensive snapshot of the goal's current position.
 
-### イベント駆動観測（Event-driven）
+### Event-Driven Observation
 
-外部からのトリガーを受けて即座に走る。
+Runs immediately in response to an external trigger.
 
-対象となるトリガー:
-- センサー値が設定した閾値を超えた（または下回った）
-- 外部サービスからアラート通知を受けた
-- ユーザーから手動で観測を要求された
-- 別のゴールの状態変化が、このゴールに影響する依存関係がある
+Triggers include:
+- A sensor value crosses a configured threshold (above or below)
+- An alert notification received from an external service
+- The user manually requests an observation
+- A dependency where another goal's state change affects this goal
 
-イベント駆動観測は定期観測のスケジュールを待たない。変化が起きた時点で即座に観測する。
+Event-driven observation does not wait for the periodic observation schedule. It observes the moment a change occurs.
 
-イベント駆動の観測は、`drive-system.md` §3 のイベント受信機構（MVP: ファイルキュー `~/.conatus/events/`）を通じてトリガーされる。
+Event-driven observation is triggered via the event reception mechanism in `drive-system.md` §3 (MVP: file queue at `~/.conatus/events/`).
 
 ---
 
-## 4. 進捗上限ルール（Progress Ceiling）
+## 4. Progress Ceiling Rule
 
-> **データ品質ゲート**: 進捗上限ルールは、状態ベクトルに**記録できる進捗値の上限**を制約する入力フィルターだ。スコアリングのための調整ではない。信頼度に基づくスコアリング調整は `gap-calculation.md` で一元的に行う。観測層では記録可能な進捗上限のみを管理する。
+> **Data quality gate**: The progress ceiling rule is an input filter that constrains the **maximum progress value that can be recorded** in the state vector. It is not a scoring adjustment. Confidence-based scoring adjustments are handled centrally in `gap-calculation.md`. The observation layer manages only the recordable progress ceiling.
 
-観測によって得られた証拠の量が、状態ベクトルの達成度の上限を制約する。
+The amount of evidence gathered from observation constrains the upper bound of achievement in the state vector.
 
-**「たくさんのことをした」は「ゴールを達成した」を意味しない。**
+**"Having done a lot" does not mean "the goal has been achieved."**
 
-| 証拠の状態 | 達成度の上限 |
-|---|---|
-| 証拠なし（自己申告のみ） | 70% |
-| 部分的な証拠（一部の次元に機械的観測あり） | 90% |
-| 完全な証拠（全次元に機械的観測あり） | 100% |
+| Evidence state | Achievement ceiling |
+|---------------|-------------------|
+| No evidence (self-report only) | 70% |
+| Partial evidence (mechanical observation for some dimensions) | 90% |
+| Full evidence (mechanical observation for all dimensions) | 100% |
 
-### 適用のロジック
+### Application logic
 
 ```
-// 各次元について
-evidence_level = 次元に適用された最高信頼度の観測手段
+// For each dimension
+evidence_level = the highest-trust observation method applied to the dimension
 
 if evidence_level == "mechanical":
-    progress_ceiling = 1.0  // 上限なし
+    progress_ceiling = 1.0  // no ceiling
 elif evidence_level == "independent_review":
     progress_ceiling = 0.90
 else:  // self_report only
     progress_ceiling = 0.70
 
-// 有効達成度
+// Effective achievement
 effective_progress = min(calculated_progress, progress_ceiling)
 ```
 
-### なぜ70%上限なのか
+### Why 70% ceiling
 
-自己申告のみで「達成済み」と判断するリスクは高い。70%という上限は「おそらく良い方向に向かっているが、確認が必要」というシグナルを出し続ける閾値だ。
+The risk of judging "achieved" based on self-report alone is high. The 70% ceiling acts as a continuous signal of "probably heading in the right direction, but confirmation is needed."
 
-70%という数値は固定ではなく、ゴールの設定時に Advisor が調整できる。ただしデフォルトは70%だ。
+The 70% value is not fixed — the Advisor can adjust it at goal-setting time. However, the default is 70%.
 
-### 証拠ゲートと検証タスクの生成
+### Evidence gate and verification task generation
 
-信頼度が低い観測だけで達成度が閾値に達した次元には、Conatus が自動的に**検証タスク**を生成する。
+For dimensions where achievement has reached the threshold based only on low-confidence observation, Conatus automatically generates a **verification task**.
 
 ```
 if effective_progress >= threshold AND confidence < 0.85:
-    → 「この次元を機械的手段で検証せよ」という
-      タスクを自動生成してキューに追加する
+    → Automatically generate and queue a task:
+      "Verify this dimension by mechanical means"
 ```
 
-これにより、「自己申告で完了と言っているが証拠がない」状態をループの外に出さず、内部で解消する。
+This ensures that a state of "self-reported as complete but no evidence" is resolved internally, rather than escaping from the loop.
 
 ---
 
-## 5. 観測手段スキーマ（observation_method）
+## 5. Observation Method Schema (`observation_method`)
 
-各次元の `observation_method` フィールドは、以下の構造化スキーマで定義する。自由文字列ではなく、機械処理可能な定義だ。
+The `observation_method` field for each dimension is defined using the structured schema below. This is not a free-form string — it is a machine-processable definition.
 
 ```
 observation_method: {
   type: "mechanical" | "llm_review" | "api_query" | "file_check" | "manual",
-  source: string,           // 観測元の識別子（例: "fitbit_api", "git_log", "user_input"）
-  schedule: string | null,  // cron式（定期観測の場合）。イベント駆動の場合は null
-  endpoint: string | null,  // URL またはファイルパス（自動観測の場合）。手動の場合は null
+  source: string,           // identifier for the observation source (e.g., "fitbit_api", "git_log", "user_input")
+  schedule: string | null,  // cron expression (for periodic observation). null for event-driven
+  endpoint: string | null,  // URL or file path (for automated observation). null for manual
   confidence_tier: "mechanical" | "independent_review" | "self_report"
 }
 ```
 
-フィールドの意味:
+Field descriptions:
 
-| フィールド | 型 | 説明 |
-|---|---|---|
-| `type` | 列挙型 | 観測の実行方式。`mechanical`（スクリプト自動実行）、`llm_review`（独立LLMセッション）、`api_query`（外部APIへのHTTPリクエスト）、`file_check`（ファイルシステムの確認）、`manual`（人間が入力） |
-| `source` | 文字列 | 観測元の識別子。ログ・デバッグ・フォールバック解決に使う |
-| `schedule` | 文字列 or null | cron式（例: `"0 23 * * *"` = 毎日23:00）。イベント駆動または手動の場合は `null` |
-| `endpoint` | 文字列 or null | APIのURLまたはローカルファイルパス。`manual` や `llm_review` の場合は `null` |
-| `confidence_tier` | 列挙型 | この手段が属する信頼度層。進捗上限ルールに使われる |
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | enum | How the observation is executed. `mechanical` (automated script), `llm_review` (independent LLM session), `api_query` (HTTP request to external API), `file_check` (filesystem check), `manual` (human input) |
+| `source` | string | Identifier for the observation source. Used for logging, debugging, and fallback resolution |
+| `schedule` | string or null | Cron expression (e.g., `"0 23 * * *"` = daily at 23:00). `null` for event-driven or manual |
+| `endpoint` | string or null | API URL or local file path. `null` for `manual` or `llm_review` |
+| `confidence_tier` | enum | The trust layer this method belongs to. Used by the progress ceiling rule |
 
-### observation_method の例
+### `observation_method` examples
 
-**例1: ウェアラブルAPIからの歩数取得（api_query）**
+**Example 1: Step count from wearable API (api_query)**
 
 ```json
 {
@@ -241,7 +241,7 @@ observation_method: {
 }
 ```
 
-**例2: Gitリポジトリのコミット履歴確認（file_check）**
+**Example 2: Git repository commit history check (file_check)**
 
 ```json
 {
@@ -253,7 +253,7 @@ observation_method: {
 }
 ```
 
-**例3: 独立LLMセッションによるコード品質評価（llm_review）**
+**Example 3: Code quality evaluation by independent LLM session (llm_review)**
 
 ```json
 {
@@ -265,7 +265,7 @@ observation_method: {
 }
 ```
 
-**例4: ユーザーによる主観的体調入力（manual）**
+**Example 4: User's subjective wellness input (manual)**
 
 ```json
 {
@@ -279,97 +279,97 @@ observation_method: {
 
 ---
 
-## 6. 観測手段の選択
+## 6. Observation Method Selection
 
-各次元の観測手段は、Advisor がゴール設定時に定義する。観測手段は静的ではなく、利用可能な能力に応じて動的に追加できる。
+The observation method for each dimension is defined by the Advisor at goal-setting time. Observation methods are not static — they can be added dynamically as capabilities become available.
 
-### 選択の原則
+### Selection principles
 
-**最高信頼度の手段を使う**: 機械的観測が設定できる次元には、機械的観測を使う。独立レビューは機械的観測が設定できない次元に対して使う。自己申告は最後の手段だ。
+**Use the highest-trust method available**: Use mechanical observation for dimensions that support it. Use independent review for dimensions where mechanical observation cannot be configured. Self-report is a last resort.
 
-**観測コストと頻度の調整**: 機械的観測はコストが低く高頻度で実行できる。独立レビューセッションはLLMセッションの起動コストがかかるため、低頻度で使う。
+**Balance observation cost and frequency**: Mechanical observation is low-cost and can run at high frequency. Independent review sessions carry the startup cost of an LLM session and should be used infrequently.
 
-### 複数手段の組み合わせ
+### Combining multiple methods
 
-一つの次元に対して複数の観測手段を設定できる。その場合:
+Multiple observation methods can be configured for a single dimension. In that case:
 
-- **主観測手段**: 定期的に使用する手段。最高信頼度のものが選ばれる。
-- **補助観測手段**: 主観測手段が失敗した場合や、追加の確認が必要な場合に使う。
+- **Primary method**: The method used on a regular basis. The highest-trust one is chosen.
+- **Secondary method**: Used when the primary method fails or additional confirmation is needed.
 
 ```
-次元: コード品質
-  主観測手段: 自動テストスイート（機械的）→ 信頼度0.92
-  補助観測手段: 独立コードレビューセッション（独立レビュー）→ 信頼度0.70
+Dimension: code quality
+  Primary method: automated test suite (mechanical) → confidence 0.92
+  Secondary method: independent code review session (independent review) → confidence 0.70
 ```
 
-### 観測手段が利用不可の場合
+### When observation method is unavailable
 
-主観測手段が失敗した（APIエラー、センサー断線など）場合:
-1. 補助観測手段にフォールバックする
-2. 補助手段もない場合は `confidence` を大幅に引き下げる
-3. 観測不可の状態をログに記録し、Conatus に通知する
+If the primary method fails (API error, sensor disconnected, etc.):
+1. Fall back to the secondary method
+2. If no secondary method exists, significantly lower `confidence`
+3. Log the unobservable state and notify Conatus
 
 ---
 
-## 7. 矛盾解決
+## 7. Contradiction Resolution
 
-異なる層の観測が矛盾する場合、以下のルールで解決する。
+When observations from different layers conflict, they are resolved using the following rules.
 
-### 基本ルール: 高信頼度層が優先する
+### Basic rule: Higher-trust layer takes precedence
 
 ```
-機械的観測 > 独立レビューセッション > 実行者自己申告
+Mechanical observation > Independent review session > Executor self-report
 ```
 
-機械的観測が「テストは全部通った（達成）」と言い、独立レビューが「品質が不十分（未達成）」と言う場合、矛盾として扱い、**機械的観測の結果（達成）を採用する**。ただし、独立レビューの判断はゴールレビューセッションへの入力として記録し、新たなタスク（テストカバレッジの改善など）の生成に使う。
+If mechanical observation says "all tests passed (achieved)" and independent review says "quality is insufficient (not achieved)," treat it as a contradiction and **adopt the mechanical observation result (achieved)**. However, the independent review's judgment is recorded as input to the goal review session and used to generate new tasks (e.g., improve test coverage).
 
-### 機械的観測内部の矛盾
+### Contradictions within mechanical observation
 
-複数の機械的観測手段が矛盾する場合（例: 単体テストはpass、E2Eテストはfail）:
-- **両方を記録する**
-- 達成度には悲観的な方の結果を使う（最小値原則）
-- 矛盾の事実を Conatus に通知し、解消タスクを生成する
+If multiple mechanical observation methods conflict (e.g., unit tests pass, E2E tests fail):
+- **Record both**
+- Use the more pessimistic result for achievement (minimum principle)
+- Notify Conatus of the contradiction and generate a resolution task
 
-### 自己申告と機械的観測の矛盾
+### Contradiction between self-report and mechanical observation
 
-実行者が「完了した」と申告しているが機械的観測が「未達成」を示す場合:
-- 機械的観測を採用する
-- 自己申告の内容は実行ログに記録するが、状態ベクトルの更新には使わない
-- 繰り返し矛盾が発生する場合、Conatus はエスカレーションを検討する
+If the executor reports "completed" but mechanical observation shows "not achieved":
+- Adopt the mechanical observation
+- Record the self-report content in the execution log, but do not use it to update the state vector
+- If contradictions recur repeatedly, Conatus considers escalation
 
 ---
 
-## 8. 観測ログの構造
+## 8. Observation Log Structure
 
-すべての観測は永続ファイルにログとして記録される。人間が読める形式であり、git で管理できる。
+All observations are recorded as logs in a persistent file. The format is human-readable and can be managed with git.
 
-各観測ログエントリは以下のフィールドを持つ:
+Each observation log entry has the following fields:
 
-| フィールド | 説明 |
-|---|---|
-| `observation_id` | このエントリを一意に識別するUUID（例: `"obs_a1b2c3d4"`）。`Dimension.history` の各エントリが参照する結合キーとなる |
-| `timestamp` | 観測実行日時（ISO 8601） |
-| `trigger` | 観測のトリガー（post_task / periodic / event_driven） |
-| `goal_id` | 対象ゴール・サブゴールの識別子 |
-| `dimension_name` | 観測した次元 |
-| `layer` | 観測層（mechanical / independent_review / self_report） |
-| `method` | 使用した観測手段の詳細（observation_method スキーマ §5 参照） |
-| `raw_result` | 観測の生の結果 |
-| `extracted_value` | `current_value` として抽出された値 |
-| `confidence` | この観測に割り当てた信頼度 |
-| `notes` | 観測過程での注記（エラー、フォールバックなど） |
+| Field | Description |
+|-------|-------------|
+| `observation_id` | UUID uniquely identifying this entry (e.g., `"obs_a1b2c3d4"`). Acts as the join key referenced by each entry in `Dimension.history` |
+| `timestamp` | Date and time the observation ran (ISO 8601) |
+| `trigger` | What triggered the observation (post_task / periodic / event_driven) |
+| `goal_id` | Identifier of the target goal or sub-goal |
+| `dimension_name` | The dimension that was observed |
+| `layer` | Observation layer (mechanical / independent_review / self_report) |
+| `method` | Details of the observation method used (see `observation_method` schema §5) |
+| `raw_result` | Raw result of the observation |
+| `extracted_value` | The value extracted as `current_value` |
+| `confidence` | Confidence assigned to this observation |
+| `notes` | Notes from the observation process (errors, fallbacks, etc.) |
 
-### ObservationLog と Dimension.history の結合
+### Joining ObservationLog and Dimension.history
 
-ObservationLogと `Dimension.history` は別物だが、明示的な結合キーで紐付けられる。
+ObservationLog and `Dimension.history` are separate entities, joined by an explicit key.
 
-- **結合キー**: `goal_id + dimension_name + timestamp`（タプルで一意）
-- **ObservationLog の役割**: 生の観測イベントを記録する（誰が、どの手段で、何を観測したか、生データは何か）
-- **Dimension.history の役割**: 観測から派生した状態変化を記録する（値の before/after、ギャップの変化量）
-- **参照方向**: `Dimension.history` の各エントリが `source_observation_id` フィールドで対応するObservationLogエントリを参照する
+- **Join key**: `goal_id + dimension_name + timestamp` (unique as a tuple)
+- **ObservationLog's role**: Records the raw observation event (who observed, by what method, what was observed, what the raw data was)
+- **Dimension.history's role**: Records state changes derived from observations (before/after values, change in gap)
+- **Reference direction**: Each entry in `Dimension.history` references the corresponding ObservationLog entry via a `source_observation_id` field
 
 ```
-ObservationLog エントリ                  Dimension.history エントリ
+ObservationLog entry                     Dimension.history entry
 ─────────────────────────────            ──────────────────────────────────
 observation_id: "obs_a1b2c3d4"  ←────── source_observation_id: "obs_a1b2c3d4"
 goal_id: "goal_health_01"                value_before: 7100
@@ -380,20 +380,20 @@ extracted_value: 6200
 confidence: 0.95
 ```
 
-観測ログは「どの手段で何を観測したか」の詳細記録であり、`history` は「値がどう変化したか」のサマリーだ。`source_observation_id` がなければ、その `history` エントリの証拠根拠を遡ることができない。
+The observation log is a detailed record of "what was observed by what method." The `history` is a summary of "how the value changed." Without `source_observation_id`, it is impossible to trace the evidentiary basis of a `history` entry.
 
 ---
 
-## 9. 設計上の判断と根拠
+## 9. Design Decisions and Rationale
 
-**なぜ実行と観測を分離するのか**
+**Why separate execution from observation**
 
-実行者が自分の実行結果を評価すると、楽観バイアスが避けられない。実行と観測を別のサイクルとして設計することで、「実行した」という事実が「観測の結果」を汚染しない。この分離は runtime.md の「実行と検証は構造的に分離する」という原則の、観測システムレベルでの実装だ。
+If the executor evaluates the results of their own execution, optimistic bias is unavoidable. By designing observation as a separate cycle from execution, we ensure that the fact of "having executed" does not contaminate the "observation result." This separation is the observation-system-level implementation of the `runtime.md` principle "execution and verification are structurally separated."
 
-**なぜ機械的観測がLLM判断に覆されないのか**
+**Why mechanical observation is not overridden by LLM judgment**
 
-機械的観測は「テストが通った・通らなかった」「ファイルが存在する・しない」という事実だ。LLMは自然言語の曖昧さを扱うが、事実の判定においては機械的手段の方が正確だ。LLM判断で機械的事実を上書きすることは、信頼性の低い判断で高信頼度の証拠を無効化することを意味する。それは許容しない。
+Mechanical observation deals in facts: "the test passed or didn't," "the file exists or doesn't." LLMs handle the ambiguity of natural language, but mechanical methods are more accurate for determining facts. Allowing LLM judgment to overwrite mechanical facts means invalidating high-trust evidence with low-trust judgment. That is not acceptable.
 
-**なぜ進捗上限ルールが必要か**
+**Why the progress ceiling rule is necessary**
 
-「たくさんタスクをこなした」という感覚は、LLMにとっても人間にとっても「達成した」という誤認につながりやすい。進捗上限ルールは、この誤認を構造的に防ぐメカニズムだ。証拠がなければ達成を宣言できない、という制約を数値で表現したものだ。
+The feeling of "having completed a lot of tasks" can lead both LLMs and humans to falsely believe "it's been achieved." The progress ceiling rule is a structural mechanism to prevent this false belief. It expresses as a number the constraint that achievement cannot be declared without evidence.
