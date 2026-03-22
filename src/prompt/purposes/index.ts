@@ -19,6 +19,7 @@ export * from "./knowledge-transfer.js";
 export * from "./goal-quality.js";
 export * from "./dependency.js";
 export * from "./strategy-template.js";
+export * from "./final-migration.js";
 
 import type { ContextPurpose } from "../slot-definitions.js";
 import { OBSERVATION_SYSTEM_PROMPT } from "./observation.js";
@@ -71,6 +72,18 @@ import {
   CAPABILITY_GOAL_GAP_SYSTEM_PROMPT as CAPABILITY_ASSESS_SYSTEM_PROMPT,
   CAPABILITY_VERIFY_SYSTEM_PROMPT as CAPABILITY_PLAN_SYSTEM_PROMPT,
 } from "./capability.js";
+import {
+  GOAL_SUGGESTION_SYSTEM_PROMPT,
+  REFLECTION_GENERATION_SYSTEM_PROMPT,
+  IMPACT_ANALYSIS_SYSTEM_PROMPT,
+  RESULT_RECONCILIATION_SYSTEM_PROMPT,
+  NEGOTIATION_FEASIBILITY_SYSTEM_PROMPT,
+  NEGOTIATION_CAPABILITY_SYSTEM_PROMPT,
+  NEGOTIATION_RESPONSE_SYSTEM_PROMPT,
+  GOAL_SPECIFICITY_EVALUATION_SYSTEM_PROMPT,
+  GOAL_SUBGOAL_DECOMPOSITION_SYSTEM_PROMPT,
+  GOAL_COVERAGE_VALIDATION_SYSTEM_PROMPT,
+} from "./final-migration.js";
 
 export interface PurposeConfig {
   systemPrompt: string;
@@ -305,6 +318,57 @@ export const PURPOSE_CONFIGS: Record<ContextPurpose, PurposeConfig> = {
   checkpoint_analyze: {
     systemPrompt: CHECKPOINT_ADAPT_SYSTEM_PROMPT,
     defaultMaxTokens: 2048,
+    defaultTemperature: 0,
+  },
+  // Batch F: Final migration (Phase D step 3)
+  goal_suggestion: {
+    systemPrompt: GOAL_SUGGESTION_SYSTEM_PROMPT,
+    defaultMaxTokens: 2048,
+    defaultTemperature: 0.3,
+  },
+  reflection_generation: {
+    systemPrompt: REFLECTION_GENERATION_SYSTEM_PROMPT,
+    defaultMaxTokens: 512,
+    defaultTemperature: 0,
+  },
+  impact_analysis: {
+    systemPrompt: IMPACT_ANALYSIS_SYSTEM_PROMPT,
+    defaultMaxTokens: 1024,
+    defaultTemperature: 0,
+  },
+  result_reconciliation: {
+    systemPrompt: RESULT_RECONCILIATION_SYSTEM_PROMPT,
+    defaultMaxTokens: 512,
+    defaultTemperature: 0,
+  },
+  negotiation_feasibility: {
+    systemPrompt: NEGOTIATION_FEASIBILITY_SYSTEM_PROMPT,
+    defaultMaxTokens: 1024,
+    defaultTemperature: 0,
+  },
+  negotiation_capability: {
+    systemPrompt: NEGOTIATION_CAPABILITY_SYSTEM_PROMPT,
+    defaultMaxTokens: 1024,
+    defaultTemperature: 0,
+  },
+  negotiation_response: {
+    systemPrompt: NEGOTIATION_RESPONSE_SYSTEM_PROMPT,
+    defaultMaxTokens: 1024,
+    defaultTemperature: 0,
+  },
+  goal_specificity_evaluation: {
+    systemPrompt: GOAL_SPECIFICITY_EVALUATION_SYSTEM_PROMPT,
+    defaultMaxTokens: 512,
+    defaultTemperature: 0,
+  },
+  goal_subgoal_decomposition: {
+    systemPrompt: GOAL_SUBGOAL_DECOMPOSITION_SYSTEM_PROMPT,
+    defaultMaxTokens: 2048,
+    defaultTemperature: 0,
+  },
+  goal_coverage_validation: {
+    systemPrompt: GOAL_COVERAGE_VALIDATION_SYSTEM_PROMPT,
+    defaultMaxTokens: 512,
     defaultTemperature: 0,
   },
 };

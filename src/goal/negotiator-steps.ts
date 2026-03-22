@@ -168,7 +168,8 @@ export async function evaluateQualitatively(
   goalDescription: string,
   baselineValue: number | string | boolean | null,
   thresholdValue: number | string | boolean | (number | string)[] | null,
-  timeHorizonDays: number
+  timeHorizonDays: number,
+  gateway?: IPromptGateway
 ): Promise<FeasibilityResult> {
   const prompt = buildFeasibilityPrompt(
     dimensionName,
@@ -178,13 +179,28 @@ export async function evaluateQualitatively(
     timeHorizonDays
   );
 
-  const response = await llmClient.sendMessage(
-    [{ role: "user", content: prompt }],
-    { temperature: 0 }
-  );
-
   try {
-    const parsed = llmClient.parseJSON(response.content, QualitativeFeasibilitySchema);
+    let parsed: { assessment: string; confidence: string; reasoning: string; key_assumptions: string[]; main_risks: string[] };
+    if (gateway) {
+      parsed = await gateway.execute({
+        purpose: "negotiation_feasibility",
+        responseSchema: QualitativeFeasibilitySchema,
+        additionalContext: {
+          prompt,
+          dimensionName,
+          goalDescription,
+          baselineValue: String(baselineValue),
+          thresholdValue: String(thresholdValue),
+          timeHorizonDays: String(timeHorizonDays),
+        },
+      });
+    } else {
+      const response = await llmClient.sendMessage(
+        [{ role: "user", content: prompt }],
+        { temperature: 0 }
+      );
+      parsed = llmClient.parseJSON(response.content, QualitativeFeasibilitySchema);
+    }
     return FeasibilityResultSchema.parse({
       dimension: dimensionName,
       path: "qualitative",
@@ -218,7 +234,8 @@ export async function runCapabilityCheckStep(
   adapterCapabilities: Array<{ adapterType: string; capabilities: string[] }>,
   feasibilityResults: FeasibilityResult[],
   log: NegotiationLog,
-  logger?: Logger
+  logger?: Logger,
+  gateway?: IPromptGateway
 ): Promise<void> {
   try {
     const capCheckPrompt = buildCapabilityCheckPrompt(
@@ -226,14 +243,28 @@ export async function runCapabilityCheckStep(
       dimensions,
       adapterCapabilities
     );
-    const capCheckResponse = await llmClient.sendMessage(
-      [{ role: "user", content: capCheckPrompt }],
-      { temperature: 0 }
-    );
-    const capCheckResult = llmClient.parseJSON(
-      capCheckResponse.content,
-      CapabilityCheckResultSchema
-    );
+    let capCheckResult: z.infer<typeof CapabilityCheckResultSchema>;
+    if (gateway) {
+      capCheckResult = await gateway.execute({
+        purpose: "negotiation_capability",
+        responseSchema: CapabilityCheckResultSchema,
+        additionalContext: {
+          prompt: capCheckPrompt,
+          goalDescription,
+          dimensions: dimensions.map((d) => d.name).join(", "),
+          capabilities: adapterCapabilities.flatMap((ac) => ac.capabilities).join(", "),
+        },
+      });
+    } else {
+      const capCheckResponse = await llmClient.sendMessage(
+        [{ role: "user", content: capCheckPrompt }],
+        { temperature: 0 }
+      );
+      capCheckResult = llmClient.parseJSON(
+        capCheckResponse.content,
+        CapabilityCheckResultSchema
+      );
+    }
 
     const allCapabilities = adapterCapabilities.flatMap((ac) => ac.capabilities);
     const infeasibleDimensions: string[] = [];
@@ -345,7 +376,8 @@ export async function buildNegotiationResponse(
   feasibilityResults: FeasibilityResult[],
   counterProposal: { realistic_target: number; reasoning: string; alternatives: string[] } | undefined,
   ethicsFlags: string[] | undefined,
-  initialConfidence: "high" | "medium" | "low"
+  initialConfidence: "high" | "medium" | "low",
+  gateway?: IPromptGateway
 ): Promise<NegotiationResponse> {
   const responsePrompt = buildResponsePrompt(
     goalDescription,
@@ -353,14 +385,30 @@ export async function buildNegotiationResponse(
     feasibilityResults,
     counterProposal
   );
-  const responseMessage = await llmClient.sendMessage(
-    [{ role: "user", content: responsePrompt }],
-    { temperature: 0 }
-  );
+
+  let messageContent: string;
+  if (gateway) {
+    const result = await gateway.execute({
+      purpose: "negotiation_response",
+      responseSchema: z.object({ message: z.string() }),
+      additionalContext: {
+        prompt: responsePrompt,
+        goalDescription,
+        responseType,
+      },
+    });
+    messageContent = result.message;
+  } else {
+    const responseMessage = await llmClient.sendMessage(
+      [{ role: "user", content: responsePrompt }],
+      { temperature: 0 }
+    );
+    messageContent = responseMessage.content.trim();
+  }
 
   return {
     type: responseType,
-    message: responseMessage.content.trim(),
+    message: messageContent,
     accepted: responseType === "accept" || responseType === "flag_as_ambitious",
     initial_confidence: initialConfidence,
     ...(counterProposal ? { counter_proposal: counterProposal } : {}),

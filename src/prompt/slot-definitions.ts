@@ -54,7 +54,18 @@ export type ContextPurpose =
   | "capability_assess"
   | "capability_plan"
   | "ethics_explain"
-  | "checkpoint_analyze";
+  | "checkpoint_analyze"
+  // Batch F: Final migration (Phase D step 3)
+  | "goal_suggestion"
+  | "reflection_generation"
+  | "impact_analysis"
+  | "result_reconciliation"
+  | "negotiation_feasibility"
+  | "negotiation_capability"
+  | "negotiation_response"
+  | "goal_specificity_evaluation"
+  | "goal_subgoal_decomposition"
+  | "goal_coverage_validation";
 
 export type ContextSlot =
   | "goal_definition"
@@ -401,6 +412,57 @@ const PURPOSE_SLOT_CONFIGS: PurposeSlotConfig[] = [
     purpose: "checkpoint_analyze",
     activeSlots: ["goal_definition", "current_state"],
     budgetOverrides: { goalDefinition: 20, observations: 50, knowledge: 20, transferKnowledge: 5, meta: 5 },
+  },
+  // Batch F: Final migration (Phase D step 3)
+  {
+    purpose: "goal_suggestion",
+    activeSlots: ["goal_definition", "current_state", "knowledge"],
+    budgetOverrides: { goalDefinition: 30, observations: 30, knowledge: 30, transferKnowledge: 5, meta: 5 },
+  },
+  {
+    purpose: "reflection_generation",
+    activeSlots: ["goal_definition", "recent_task_results"],
+    budgetOverrides: { goalDefinition: 20, observations: 60, knowledge: 10, transferKnowledge: 5, meta: 5 },
+  },
+  {
+    purpose: "impact_analysis",
+    activeSlots: ["goal_definition", "recent_task_results"],
+    budgetOverrides: { goalDefinition: 15, observations: 65, knowledge: 10, transferKnowledge: 5, meta: 5 },
+  },
+  {
+    purpose: "result_reconciliation",
+    activeSlots: ["recent_task_results"],
+    budgetOverrides: { goalDefinition: 5, observations: 80, knowledge: 10, transferKnowledge: 0, meta: 5 },
+  },
+  {
+    purpose: "negotiation_feasibility",
+    activeSlots: ["goal_definition", "current_state"],
+    budgetOverrides: { goalDefinition: 30, observations: 40, knowledge: 20, transferKnowledge: 5, meta: 5 },
+  },
+  {
+    purpose: "negotiation_capability",
+    activeSlots: ["goal_definition", "current_state"],
+    budgetOverrides: { goalDefinition: 25, observations: 45, knowledge: 20, transferKnowledge: 5, meta: 5 },
+  },
+  {
+    purpose: "negotiation_response",
+    activeSlots: ["goal_definition"],
+    budgetOverrides: { goalDefinition: 40, observations: 30, knowledge: 20, transferKnowledge: 5, meta: 5 },
+  },
+  {
+    purpose: "goal_specificity_evaluation",
+    activeSlots: ["goal_definition"],
+    budgetOverrides: { goalDefinition: 40, observations: 30, knowledge: 20, transferKnowledge: 5, meta: 5 },
+  },
+  {
+    purpose: "goal_subgoal_decomposition",
+    activeSlots: ["goal_definition", "knowledge"],
+    budgetOverrides: { goalDefinition: 30, observations: 30, knowledge: 30, transferKnowledge: 5, meta: 5 },
+  },
+  {
+    purpose: "goal_coverage_validation",
+    activeSlots: ["goal_definition"],
+    budgetOverrides: { goalDefinition: 40, observations: 30, knowledge: 20, transferKnowledge: 5, meta: 5 },
   },
 ];
 

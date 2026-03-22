@@ -45,7 +45,7 @@ const SubgoalsResponseSchema = z.array(SubgoalItemSchema);
 
 const CoverageResponseSchema = z.object({
   covers_parent: z.boolean(),
-  missing_dimensions: z.array(z.string()).default([]),
+  missing_dimensions: z.array(z.string()).optional().default([]),
   reasoning: z.string(),
 });
 
@@ -238,14 +238,28 @@ export class GoalTreeManager {
   ): Promise<{ score: number; reasoning: string }> {
     const prompt = buildSpecificityPrompt(goal);
     try {
-      const response = await this.llmClient.sendMessage(
-        [{ role: "user", content: prompt }],
-        { temperature: 0 }
-      );
-      const parsed = this.llmClient.parseJSON(
-        response.content,
-        SpecificityResponseSchema
-      );
+      let parsed: { specificity_score: number; reasoning: string };
+      if (this.promptGateway) {
+        parsed = await this.promptGateway.execute({
+          purpose: "goal_specificity_evaluation",
+          goalId: goal.id,
+          responseSchema: SpecificityResponseSchema,
+          additionalContext: {
+            prompt,
+            goalTitle: goal.title,
+            goalDescription: goal.description,
+          },
+        });
+      } else {
+        const response = await this.llmClient.sendMessage(
+          [{ role: "user", content: prompt }],
+          { temperature: 0 }
+        );
+        parsed = this.llmClient.parseJSON(
+          response.content,
+          SpecificityResponseSchema
+        );
+      }
       return { score: parsed.specificity_score, reasoning: parsed.reasoning };
     } catch {
       // Conservative fallback: treat as needing decomposition
@@ -589,14 +603,30 @@ export class GoalTreeManager {
     if (children.length > 0) {
       const coveragePrompt = buildCoveragePrompt(parent, children);
       try {
-        const coverageResponse = await this.llmClient.sendMessage(
-          [{ role: "user", content: coveragePrompt }],
-          { temperature: 0 }
-        );
-        const coverage = this.llmClient.parseJSON(
-          coverageResponse.content,
-          CoverageResponseSchema
-        );
+        let coverage: z.output<typeof CoverageResponseSchema>;
+        if (this.promptGateway) {
+          const raw = await this.promptGateway.execute({
+            purpose: "goal_coverage_validation",
+            goalId: parent.id,
+            responseSchema: CoverageResponseSchema,
+            additionalContext: {
+              prompt: coveragePrompt,
+              parentGoalTitle: parent.title,
+              childCount: String(children.length),
+            },
+          });
+          coverage = { covers_parent: raw.covers_parent, missing_dimensions: raw.missing_dimensions ?? [], reasoning: raw.reasoning };
+        } else {
+          const coverageResponse = await this.llmClient.sendMessage(
+            [{ role: "user", content: coveragePrompt }],
+            { temperature: 0 }
+          );
+          const raw = this.llmClient.parseJSON(
+            coverageResponse.content,
+            CoverageResponseSchema
+          );
+          coverage = { covers_parent: raw.covers_parent, missing_dimensions: raw.missing_dimensions ?? [], reasoning: raw.reasoning };
+        }
         if (!coverage.covers_parent) {
           return false;
         }

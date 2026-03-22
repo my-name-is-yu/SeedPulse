@@ -9,6 +9,7 @@ import type { Logger } from "../runtime/logger.js";
 import type { ILLMClient } from "../llm/llm-client.js";
 import type { EthicsGate } from "../traits/ethics-gate.js";
 import type { CapabilityDetector } from "../observation/capability-detector.js";
+import type { IPromptGateway } from "../prompt/gateway.js";
 import type { DimensionDecomposition } from "../types/negotiation.js";
 
 // ─── Goal Suggestion schemas ───
@@ -129,6 +130,7 @@ export async function suggestGoals(
     existingGoals?: string[];
     capabilityDetector?: CapabilityDetector;
     logger?: Logger;
+    gateway?: IPromptGateway;
   }
 ): Promise<GoalSuggestion[]> {
   const maxSuggestions = options?.maxSuggestions ?? 5;
@@ -140,22 +142,35 @@ export async function suggestGoals(
 
   const prompt = buildSuggestGoalsPrompt(context, maxSuggestions, existingGoals);
 
-  let rawContent: string;
-  try {
-    const response = await llmClient.sendMessage(
-      [{ role: "user", content: prompt }],
-      { temperature: 0.3 }
-    );
-    rawContent = response.content;
-  } catch {
-    return [];
-  }
-
   let suggestions: GoalSuggestion[];
-  try {
-    suggestions = llmClient.parseJSON(rawContent, GoalSuggestionListSchema);
-  } catch {
-    return [];
+  if (options?.gateway) {
+    try {
+      suggestions = await options.gateway.execute({
+        purpose: "goal_suggestion",
+        additionalContext: { prompt },
+        responseSchema: GoalSuggestionListSchema,
+        temperature: 0.3,
+      });
+    } catch {
+      return [];
+    }
+  } else {
+    let rawContent: string;
+    try {
+      const response = await llmClient.sendMessage(
+        [{ role: "user", content: prompt }],
+        { temperature: 0.3 }
+      );
+      rawContent = response.content;
+    } catch {
+      return [];
+    }
+
+    try {
+      suggestions = llmClient.parseJSON(rawContent, GoalSuggestionListSchema);
+    } catch {
+      return [];
+    }
   }
 
   // Apply ethics filtering — remove rejected suggestions

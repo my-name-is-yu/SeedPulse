@@ -7,6 +7,7 @@ import type { VerificationResult } from "../types/task.js";
 import type { KnowledgeManager } from "../knowledge/knowledge-manager.js";
 import type { KnowledgeEntry } from "../types/knowledge.js";
 import { extractJSON } from "../llm/llm-client.js";
+import type { IPromptGateway } from "../prompt/gateway.js";
 
 interface ReflectionLogger {
   debug?: (message: string, context?: Record<string, unknown>) => void;
@@ -41,8 +42,9 @@ export async function generateReflection(params: {
   strategyId?: string;
   llmClient: ILLMClient;
   logger?: ReflectionLogger;
+  gateway?: IPromptGateway;
 }): Promise<ReflectionNote> {
-  const { task, verificationResult, goalId, strategyId, llmClient, logger } = params;
+  const { task, verificationResult, goalId, strategyId, llmClient, logger, gateway } = params;
 
   const prompt = `You are analyzing the result of an AI agent task execution. Generate a structured reflection.
 
@@ -60,13 +62,24 @@ Respond with JSON only:
 }`;
 
   try {
-    const response = await llmClient.sendMessage(
-      [{ role: "user", content: prompt }],
-      { max_tokens: 512 }
-    );
-    const jsonText = extractJSON(response.content);
-    const raw = JSON.parse(jsonText) as unknown;
-    const parsed = LLMReflectionSchema.parse(raw);
+    let parsed: z.infer<typeof LLMReflectionSchema>;
+    if (gateway) {
+      parsed = await gateway.execute({
+        purpose: "reflection_generation",
+        goalId,
+        additionalContext: { prompt },
+        responseSchema: LLMReflectionSchema,
+        maxTokens: 512,
+      });
+    } else {
+      const response = await llmClient.sendMessage(
+        [{ role: "user", content: prompt }],
+        { max_tokens: 512 }
+      );
+      const jsonText = extractJSON(response.content);
+      const raw = JSON.parse(jsonText) as unknown;
+      parsed = LLMReflectionSchema.parse(raw);
+    }
 
     return ReflectionNoteSchema.parse({
       reflection_id: randomUUID(),

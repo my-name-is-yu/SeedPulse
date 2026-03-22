@@ -3,7 +3,9 @@
 // Detects semantic contradictions between parallel subtask results using LLM.
 // Fails open: on any LLM error, returns no contradictions with confidence 0.
 
+import { z } from "zod";
 import type { ILLMClient } from "../llm/llm-client.js";
+import type { IPromptGateway } from "../prompt/gateway.js";
 import type { Logger } from "../runtime/logger.js";
 import type { SubtaskResult } from "./parallel-executor.js";
 
@@ -27,6 +29,7 @@ export interface ContradictionReport {
 export interface ReconcilerDeps {
   llmClient: ILLMClient;
   logger?: Logger;
+  gateway?: IPromptGateway;
 }
 
 // ─── Prompt Builder ───
@@ -66,6 +69,13 @@ interface LLMContradictionItem {
   severity: string;
 }
 
+const ReconciliationResponseSchema = z.object({
+  contradictions: z.array(z.object({
+    description: z.string(),
+    severity: z.string(),
+  })),
+});
+
 async function checkPair(
   deps: ReconcilerDeps,
   resultA: SubtaskResult,
@@ -73,20 +83,38 @@ async function checkPair(
 ): Promise<Contradiction[]> {
   const prompt = buildReconciliationPrompt(resultA, resultB);
 
-  const response = await deps.llmClient.sendMessage(
-    [{ role: "user", content: prompt }],
-    { max_tokens: 512, temperature: 0 }
-  );
-
   let parsed: { contradictions: LLMContradictionItem[] };
-  try {
-    parsed = JSON.parse(response.content);
-  } catch {
-    deps.logger?.warn("[ResultReconciler] Failed to parse LLM response as JSON", {
-      taskAId: resultA.task_id,
-      taskBId: resultB.task_id,
-    });
-    return [];
+  if (deps.gateway) {
+    try {
+      parsed = await deps.gateway.execute({
+        purpose: "result_reconciliation",
+        additionalContext: { reconciliation_prompt: prompt },
+        responseSchema: ReconciliationResponseSchema,
+        maxTokens: 512,
+        temperature: 0,
+      });
+    } catch {
+      deps.logger?.warn("[ResultReconciler] gateway call failed", {
+        taskAId: resultA.task_id,
+        taskBId: resultB.task_id,
+      });
+      return [];
+    }
+  } else {
+    const response = await deps.llmClient.sendMessage(
+      [{ role: "user", content: prompt }],
+      { max_tokens: 512, temperature: 0 }
+    );
+
+    try {
+      parsed = JSON.parse(response.content);
+    } catch {
+      deps.logger?.warn("[ResultReconciler] Failed to parse LLM response as JSON", {
+        taskAId: resultA.task_id,
+        taskBId: resultB.task_id,
+      });
+      return [];
+    }
   }
 
   const items: LLMContradictionItem[] = Array.isArray(parsed?.contradictions)

@@ -6,6 +6,7 @@
  */
 
 import type { ILLMClient } from "../llm/llm-client.js";
+import type { IPromptGateway } from "../prompt/gateway.js";
 import type { Logger } from "../runtime/logger.js";
 import { ImpactAnalysisSchema } from "../types/pipeline.js";
 import type { ImpactAnalysis } from "../types/pipeline.js";
@@ -13,6 +14,7 @@ import type { ImpactAnalysis } from "../types/pipeline.js";
 export interface ImpactAnalyzerDeps {
   llmClient: ILLMClient;
   logger: Logger;
+  gateway?: IPromptGateway;
 }
 
 export interface ImpactAnalyzerContext {
@@ -65,32 +67,48 @@ Rules:
 - side_effects: empty array if none detected
 - confidence: how certain you are about the analysis`;
 
-  let rawContent: string;
-  try {
-    const response = await deps.llmClient.sendMessage(
-      [{ role: "user", content: prompt }],
-      {
-        system: "You are an impact analyzer. Identify unintended side effects objectively. Respond with JSON only.",
-        max_tokens: 1024,
-      }
-    );
-    rawContent = response.content;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    deps.logger.error(`[impact-analyzer] LLM call failed: ${msg}`);
-    return FALLBACK_RESULT;
-  }
+  if (deps.gateway) {
+    try {
+      const raw = await deps.gateway.execute({
+        purpose: "impact_analysis",
+        additionalContext: { impact_analysis_prompt: prompt },
+        responseSchema: ImpactAnalysisSchema,
+        maxTokens: 1024,
+      });
+      return ImpactAnalysisSchema.parse(raw);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      deps.logger.error(`[impact-analyzer] gateway call failed: ${msg}`);
+      return FALLBACK_RESULT;
+    }
+  } else {
+    let rawContent: string;
+    try {
+      const response = await deps.llmClient.sendMessage(
+        [{ role: "user", content: prompt }],
+        {
+          system: "You are an impact analyzer. Identify unintended side effects objectively. Respond with JSON only.",
+          max_tokens: 1024,
+        }
+      );
+      rawContent = response.content;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      deps.logger.error(`[impact-analyzer] LLM call failed: ${msg}`);
+      return FALLBACK_RESULT;
+    }
 
-  try {
-    const sanitized = rawContent
-      .replace(/```json\n?/g, "")
-      .replace(/```/g, "")
-      .trim();
-    const parsed = JSON.parse(sanitized);
-    return ImpactAnalysisSchema.parse(parsed);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    deps.logger.error(`[impact-analyzer] Parse failed: ${msg}`);
-    return FALLBACK_RESULT;
+    try {
+      const sanitized = rawContent
+        .replace(/```json\n?/g, "")
+        .replace(/```/g, "")
+        .trim();
+      const parsed = JSON.parse(sanitized);
+      return ImpactAnalysisSchema.parse(parsed);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      deps.logger.error(`[impact-analyzer] Parse failed: ${msg}`);
+      return FALLBACK_RESULT;
+    }
   }
 }
