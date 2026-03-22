@@ -23,6 +23,7 @@ import type { Logger } from "../runtime/logger.js";
 import type { AgentTask, AgentResult, IAdapter } from "./adapter-layer.js";
 import { AdapterRegistry } from "./adapter-layer.js";
 import { wrapXmlTag, formatKnowledge } from "../prompt/formatters.js";
+import type { IPromptGateway } from "../prompt/gateway.js";
 
 // ─── Re-exported types used by consumers ───
 
@@ -82,6 +83,8 @@ export interface VerifierDeps {
   knowledgeManager?: {
     getRelevantKnowledge?(goalId: string): Promise<Array<{ question: string; answer: string; confidence: number }>>;
   };
+  /** Optional PromptGateway — when provided, LLM review calls are routed through it */
+  gateway?: IPromptGateway;
 }
 
 // ─── verifyTask ───
@@ -759,6 +762,51 @@ Context: ${reviewContext.map((s) => s.content).join(" ")}
 Return JSON:
 {"verdict": "pass"|"partial"|"fail", "reasoning": "...", "criteria_met": #, "criteria_total": #}`;
 
+  // Gateway path: route through PromptGateway when available
+  if (deps.gateway) {
+    let parsed: z.infer<typeof CompletionJudgerResponseSchema>;
+    try {
+      parsed = await withRetry(
+        () => withTimeout(
+          deps.gateway!.execute({
+            purpose: "verification",
+            goalId: task.goal_id,
+            additionalContext: { review_prompt: prompt },
+            responseSchema: CompletionJudgerResponseSchema as z.ZodSchema<z.infer<typeof CompletionJudgerResponseSchema>>,
+            maxTokens: 1024,
+          }),
+          timeoutMs
+        ),
+        maxRetries,
+        retryBackoffMs,
+        deps.logger,
+        `completion_judger for task ${task.id}`
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      deps.logger?.error(`[completion_judger] All retries exhausted for task ${task.id}: ${msg}`);
+      await deps.sessionManager.endSession(reviewSession.id, `completion_judger failed: ${msg}`);
+      return {
+        passed: false,
+        partial: false,
+        description: `completion_judger failed after ${maxRetries + 1} attempt(s): ${msg}`,
+        confidence: 0.0,
+      };
+    }
+    const verdictStr = parsed.verdict;
+    const result = {
+      passed: verdictStr === "pass",
+      partial: verdictStr === "partial",
+      description: parsed.reasoning || "LLM review completed",
+      confidence: verdictStr === "pass" ? 0.8 : verdictStr === "partial" ? 0.6 : 0.8,
+      criteria_met: parsed.criteria_met,
+      criteria_total: parsed.criteria_total,
+    };
+    await deps.sessionManager.endSession(reviewSession.id, `LLM review: ${verdictStr}`);
+    return result;
+  }
+
+  // Direct LLM path (fallback when no gateway)
   let response: import("../llm/llm-client.js").LLMResponse;
   try {
     response = await withRetry(

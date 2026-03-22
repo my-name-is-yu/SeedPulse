@@ -7,6 +7,7 @@
 
 import { z } from "zod";
 import type { ILLMClient } from "../llm/llm-client.js";
+import type { IPromptGateway } from "../prompt/gateway.js";
 import type { ObservationEngine } from "../observation/observation-engine.js";
 import type { Logger } from "../runtime/logger.js";
 import {
@@ -57,7 +58,8 @@ export async function runDecompositionStep(
   observationEngine: ObservationEngine,
   llmClient: ILLMClient,
   workspaceContext?: string,
-  logger?: Logger
+  logger?: Logger,
+  gateway?: IPromptGateway
 ): Promise<{ dimensions: DimensionDecomposition[]; availableDataSources: ReturnType<ObservationEngine["getAvailableDimensionInfo"]> }> {
   const availableDataSources = observationEngine.getAvailableDimensionInfo();
   const decompositionPrompt = buildDecompositionPrompt(
@@ -66,15 +68,29 @@ export async function runDecompositionStep(
     availableDataSources,
     workspaceContext
   );
-  const decompositionResponse = await llmClient.sendMessage(
-    [{ role: "user", content: decompositionPrompt }],
-    { temperature: 0 }
-  );
 
-  const dimensions = llmClient.parseJSON(
-    decompositionResponse.content,
-    z.array(DimensionDecompositionSchema)
-  );
+  let dimensions: DimensionDecomposition[];
+  if (gateway) {
+    dimensions = await gateway.execute({
+      purpose: "goal_decomposition",
+      responseSchema: z.array(DimensionDecompositionSchema),
+      additionalContext: {
+        prompt: decompositionPrompt,
+        goalDescription,
+        constraints: constraints.join(", "),
+        ...(workspaceContext ? { workspaceContext } : {}),
+      },
+    });
+  } else {
+    const decompositionResponse = await llmClient.sendMessage(
+      [{ role: "user", content: decompositionPrompt }],
+      { temperature: 0 }
+    );
+    dimensions = llmClient.parseJSON(
+      decompositionResponse.content,
+      z.array(DimensionDecompositionSchema)
+    );
+  }
 
   // Post-process: map dimension names to DataSource dimensions when similar
   if (availableDataSources.length > 0) {

@@ -122,12 +122,12 @@ export class ContextAssembler {
 
   async build(
     purpose: ContextPurpose,
-    goalId: string,
+    goalId: string | undefined,
     dimensionName?: string,
     additionalContext?: Record<string, string>
   ): Promise<AssembledContext> {
     const slotConfig = getSlotConfig(purpose);
-    const goalState = await this.loadGoalState(goalId);
+    const goalState = goalId ? await this.loadGoalState(goalId) : null;
     const dims = this.extractDimensionNames(goalState, dimensionName);
 
     // Compute per-category token budgets
@@ -183,7 +183,7 @@ export class ContextAssembler {
 
   private async assembleSlot(
     slot: ContextSlot,
-    goalId: string,
+    goalId: string | undefined,
     goalState: any,
     dims: string[],
     additionalContext?: Record<string, string>
@@ -203,18 +203,22 @@ export class ContextAssembler {
           return this.buildRecentTaskResults(additionalContext);
 
         case "reflections":
+          if (!goalId) return "";
           return await this.buildReflections(goalId);
 
         case "lessons":
+          if (!goalId) return "";
           return await this.buildLessons(goalId, dims);
 
         case "knowledge":
+          if (!goalId) return "";
           return await this.buildKnowledge(goalId);
 
         case "strategy_templates":
           return await this.buildStrategyTemplates(goalState);
 
         case "workspace_state":
+          if (!goalId) return "";
           return await this.buildWorkspaceState(goalId, dims[0]);
 
         case "failure_context":
@@ -394,8 +398,8 @@ export class ContextAssembler {
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-  private async loadGoalState(goalId: string): Promise<any | null> {
-    if (!this.deps.stateManager) return null;
+  private async loadGoalState(goalId: string | undefined): Promise<any | null> {
+    if (!goalId || !this.deps.stateManager) return null;
     try {
       return await this.deps.stateManager.loadGoalState(goalId);
     } catch {

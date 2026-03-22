@@ -199,6 +199,25 @@ describe("PromptGateway", () => {
         gateway.execute({ purpose: "observation", goalId: "goal-1", responseSchema: schema })
       ).resolves.toBeDefined();
     });
+
+    it("works without goalId — passes undefined to assembler.build", async () => {
+      const assembler = makeMockAssembler();
+      const llmClient = makeMockLLMClient({ score: 0.3 });
+      const gateway = new PromptGateway(llmClient, assembler);
+
+      const result = await gateway.execute({
+        purpose: "observation",
+        responseSchema: schema,
+      });
+
+      expect(assembler.build).toHaveBeenCalledWith(
+        "observation",
+        undefined,
+        undefined,
+        undefined
+      );
+      expect(result).toEqual({ score: 0.3 });
+    });
   });
 
   describe("error handling", () => {

@@ -13,6 +13,7 @@ import type { TaskPipeline } from "../types/pipeline.js";
 import { wrapXmlTag, formatReflections, formatLessons } from "../prompt/formatters.js";
 import { getReflectionsForGoal } from "./reflection-generator.js";
 import type { KnowledgeManager } from "../knowledge/knowledge-manager.js";
+import type { IPromptGateway } from "../prompt/gateway.js";
 
 // ─── Schema for LLM-generated task fields ───
 
@@ -52,6 +53,8 @@ export interface TaskGenerationDeps {
   strategyManager: StrategyManager;
   logger?: Logger;
   knowledgeManager?: KnowledgeManager;
+  /** Optional PromptGateway — when provided, LLM calls are routed through it */
+  gateway?: IPromptGateway;
   memoryLifecycle?: {
     selectForWorkingMemory(
       goalId: string,
@@ -277,24 +280,43 @@ export async function generateTask(
     lessonsBlock || undefined
   );
 
-  const response = await deps.llmClient.sendMessage(
-    [{ role: "user", content: prompt }],
-    {
-      system:
-        "You are a task generation assistant. Given a goal and target dimension, generate a concrete, actionable task. Respond with a JSON object inside a markdown code block.",
-      max_tokens: 2048,
-    }
-  );
-
   let generated: ReturnType<typeof LLMGeneratedTaskSchema.parse>;
-  try {
-    generated = deps.llmClient.parseJSON(response.content, LLMGeneratedTaskSchema) as ReturnType<typeof LLMGeneratedTaskSchema.parse>;
-  } catch (err) {
-    deps.logger?.error(
-      "Task generation failed: LLM response did not match expected schema.",
-      { rawResponse: response.content.substring(0, 500) }
+  if (deps.gateway) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      generated = await deps.gateway.execute({
+        purpose: "task_generation",
+        goalId,
+        dimensionName: targetDimension,
+        additionalContext: { task_prompt: prompt },
+        responseSchema: LLMGeneratedTaskSchema as z.ZodSchema<ReturnType<typeof LLMGeneratedTaskSchema.parse>>,
+        maxTokens: 2048,
+      });
+    } catch (err) {
+      deps.logger?.error(
+        "Task generation failed: PromptGateway.execute() error.",
+        { error: String(err) }
+      );
+      throw err;
+    }
+  } else {
+    const response = await deps.llmClient.sendMessage(
+      [{ role: "user", content: prompt }],
+      {
+        system:
+          "You are a task generation assistant. Given a goal and target dimension, generate a concrete, actionable task. Respond with a JSON object inside a markdown code block.",
+        max_tokens: 2048,
+      }
     );
-    throw err;
+    try {
+      generated = deps.llmClient.parseJSON(response.content, LLMGeneratedTaskSchema) as ReturnType<typeof LLMGeneratedTaskSchema.parse>;
+    } catch (err) {
+      deps.logger?.error(
+        "Task generation failed: LLM response did not match expected schema.",
+        { rawResponse: response.content.substring(0, 500) }
+      );
+      throw err;
+    }
   }
 
   // §4.2 Duplicate task guard — reject if too similar to a recent completed/failed task
@@ -393,8 +415,10 @@ export async function generateTaskGroup(
     gap: number;
     availableAdapters: string[];
     contextBlock?: string;
+    goalId?: string;
   },
-  logger?: Logger
+  logger?: Logger,
+  gateway?: IPromptGateway
 ): Promise<TaskGroup | null> {
   const promptParts = [
     `You are a task decomposition assistant. Decompose the following complex task into 2-5 focused subtasks that can be assigned to separate agents.`,
@@ -425,28 +449,44 @@ export async function generateTaskGroup(
 
   const prompt = promptParts.join("\n");
 
-  let response: { content: string };
-  try {
-    response = await llmClient.sendMessage(
-      [{ role: "user", content: prompt }],
-      {
-        system: "You are a task decomposition assistant. Respond with valid JSON only.",
-        max_tokens: 4096,
-      }
-    );
-  } catch (err) {
-    logger?.error("generateTaskGroup: LLM call failed", { error: String(err) });
-    return null;
-  }
-
   let raw: z.infer<typeof LLMTaskGroupSchema>;
-  try {
-    raw = llmClient.parseJSON(response.content, LLMTaskGroupSchema) as z.infer<typeof LLMTaskGroupSchema>;
-  } catch (err) {
-    logger?.error("generateTaskGroup: LLM response did not match TaskGroup schema", {
-      rawResponse: response.content.substring(0, 500),
-    });
-    return null;
+  if (gateway) {
+    try {
+      raw = await gateway.execute({
+        purpose: "task_generation",
+        goalId: context.goalId,
+        dimensionName: context.targetDimension,
+        additionalContext: { decomposition_prompt: prompt },
+        responseSchema: LLMTaskGroupSchema as z.ZodSchema<z.infer<typeof LLMTaskGroupSchema>>,
+        maxTokens: 4096,
+      });
+    } catch (err) {
+      logger?.error("generateTaskGroup: PromptGateway.execute() failed", { error: String(err) });
+      return null;
+    }
+  } else {
+    let response: { content: string };
+    try {
+      response = await llmClient.sendMessage(
+        [{ role: "user", content: prompt }],
+        {
+          system: "You are a task decomposition assistant. Respond with valid JSON only.",
+          max_tokens: 4096,
+        }
+      );
+    } catch (err) {
+      logger?.error("generateTaskGroup: LLM call failed", { error: String(err) });
+      return null;
+    }
+
+    try {
+      raw = llmClient.parseJSON(response.content, LLMTaskGroupSchema) as z.infer<typeof LLMTaskGroupSchema>;
+    } catch (err) {
+      logger?.error("generateTaskGroup: LLM response did not match TaskGroup schema", {
+        rawResponse: response.content.substring(0, 500),
+      });
+      return null;
+    }
   }
 
   const now = new Date().toISOString();

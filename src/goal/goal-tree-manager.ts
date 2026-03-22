@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Logger } from "../runtime/logger.js";
 import type { StateManager } from "../state-manager.js";
 import type { ILLMClient } from "../llm/llm-client.js";
+import type { IPromptGateway } from "../prompt/gateway.js";
 import type { EthicsGate } from "../traits/ethics-gate.js";
 import type { GoalDependencyGraph } from "./goal-dependency-graph.js";
 import type { GoalNegotiator } from "./goal-negotiator.js";
@@ -210,7 +211,8 @@ export class GoalTreeManager {
     private readonly ethicsGate: EthicsGate,
     private readonly goalDependencyGraph: GoalDependencyGraph,
     private readonly goalNegotiator?: GoalNegotiator,
-    options?: GoalTreeManagerOptions
+    options?: GoalTreeManagerOptions,
+    private readonly promptGateway?: IPromptGateway
   ) {
     // null means concreteness auto-stop is disabled (backward compatible)
     this.concretenesThreshold = options?.concretenesThreshold ?? null;
@@ -358,78 +360,108 @@ export class GoalTreeManager {
 
     let subgoalSpecs: z.infer<typeof SubgoalsResponseSchema> = [];
     try {
-      const subgoalResponse = await this.llmClient.sendMessage(
-        [{ role: "user", content: subgoalPrompt }],
-        { temperature: 0 }
-      );
-      // Sanitize threshold_type values before schema validation --
-      // LLMs sometimes return "exact", "scale", "qualitative" etc.
-      const THRESHOLD_TYPE_MAP: Record<string, string> = {
-        exact: "match",
-        scale: "min",
-        qualitative: "min",
-        boolean: "present",
-        percentage: "min",
-        count: "min",
-      };
-      const VALID_TYPES = new Set(["min", "max", "range", "present", "match"]);
-      const rawContent = subgoalResponse.content;
-      let sanitized = rawContent.replace(
-        /"threshold_type"\s*:\s*"([^"]+)"/g,
-        (_match: string, val: string) => {
-          if (VALID_TYPES.has(val)) return `"threshold_type": "${val}"`;
-          const mapped = THRESHOLD_TYPE_MAP[val] ?? "min";
-          return `"threshold_type": "${mapped}"`;
-        }
-      );
-      // Sanitize hypothesis field: LLMs may use "title", "description", "goal", etc.
-      let preprocessed: unknown;
-      try {
-        preprocessed = JSON.parse(sanitized);
-      } catch {
-        preprocessed = null;
-      }
-      if (Array.isArray(preprocessed)) {
-        for (const item of preprocessed) {
-          if (item && typeof item === "object" && !("hypothesis" in item)) {
-            this.logger?.warn(
-              `[GoalTreeManager] Subgoal item missing hypothesis. Keys: ${Object.keys(item as object).join(", ")}`
-            );
-            const alt =
-              (item as Record<string, unknown>).title ??
-              (item as Record<string, unknown>).description ??
-              (item as Record<string, unknown>).goal ??
-              (item as Record<string, unknown>).objective ??
-              (item as Record<string, unknown>).name ??
-              (item as Record<string, unknown>).text ??
-              (item as Record<string, unknown>).summary ??
-              (item as Record<string, unknown>).label ??
-              "Unnamed subgoal";
-            (item as Record<string, unknown>).hypothesis = String(alt);
+      if (this.promptGateway) {
+        const parsed = await this.promptGateway.execute({
+          purpose: "goal_decomposition",
+          goalId: goal.id,
+          responseSchema: SubgoalsResponseSchema,
+          additionalContext: {
+            prompt: subgoalPrompt,
+            parentGoalTitle: goal.title,
+            parentGoalDescription: goal.description,
+          },
+        });
+        subgoalSpecs = parsed.map((sg) => {
+          let hypothesis = sg.hypothesis;
+          if (!hypothesis) {
+            const firstDimLabel = sg.dimensions?.[0]?.label;
+            hypothesis = firstDimLabel ? firstDimLabel : goal.title;
           }
-        }
-        sanitized = JSON.stringify(preprocessed);
-      }
-      const parsed = this.llmClient.parseJSON(sanitized, SubgoalsResponseSchema);
-      subgoalSpecs = parsed.map((sg: (typeof parsed)[number]) => {
-        // Derive hypothesis from dimensions or parent goal title when the LLM omitted it
-        let hypothesis = sg.hypothesis;
-        if (!hypothesis) {
-          const firstDimLabel = sg.dimensions?.[0]?.label;
-          hypothesis = firstDimLabel ? firstDimLabel : goal.title;
-        }
-        return {
-          ...sg,
-          hypothesis,
-          dimensions: (sg.dimensions ?? []).map((d) => ({
-            ...d,
-            observation_method_hint: d.observation_method_hint ?? "",
-          })),
-          constraints: sg.constraints ?? [],
+          return {
+            ...sg,
+            hypothesis,
+            dimensions: (sg.dimensions ?? []).map((d) => ({
+              ...d,
+              observation_method_hint: d.observation_method_hint ?? "",
+            })),
+            constraints: sg.constraints ?? [],
+          };
+        });
+        subgoalSpecs = subgoalSpecs.slice(0, maxChildren);
+      } else {
+        const subgoalResponse = await this.llmClient.sendMessage(
+          [{ role: "user", content: subgoalPrompt }],
+          { temperature: 0 }
+        );
+        // Sanitize threshold_type values before schema validation --
+        // LLMs sometimes return "exact", "scale", "qualitative" etc.
+        const THRESHOLD_TYPE_MAP: Record<string, string> = {
+          exact: "match",
+          scale: "min",
+          qualitative: "min",
+          boolean: "present",
+          percentage: "min",
+          count: "min",
         };
-      });
-      // Clamp to max_children_per_node
-      subgoalSpecs = subgoalSpecs.slice(0, maxChildren);
+        const VALID_TYPES = new Set(["min", "max", "range", "present", "match"]);
+        const rawContent = subgoalResponse.content;
+        let sanitized = rawContent.replace(
+          /"threshold_type"\s*:\s*"([^"]+)"/g,
+          (_match: string, val: string) => {
+            if (VALID_TYPES.has(val)) return `"threshold_type": "${val}"`;
+            const mapped = THRESHOLD_TYPE_MAP[val] ?? "min";
+            return `"threshold_type": "${mapped}"`;
+          }
+        );
+        // Sanitize hypothesis field: LLMs may use "title", "description", "goal", etc.
+        let preprocessed: unknown;
+        try {
+          preprocessed = JSON.parse(sanitized);
+        } catch {
+          preprocessed = null;
+        }
+        if (Array.isArray(preprocessed)) {
+          for (const item of preprocessed) {
+            if (item && typeof item === "object" && !("hypothesis" in item)) {
+              this.logger?.warn(
+                `[GoalTreeManager] Subgoal item missing hypothesis. Keys: ${Object.keys(item as object).join(", ")}`
+              );
+              const alt =
+                (item as Record<string, unknown>).title ??
+                (item as Record<string, unknown>).description ??
+                (item as Record<string, unknown>).goal ??
+                (item as Record<string, unknown>).objective ??
+                (item as Record<string, unknown>).name ??
+                (item as Record<string, unknown>).text ??
+                (item as Record<string, unknown>).summary ??
+                (item as Record<string, unknown>).label ??
+                "Unnamed subgoal";
+              (item as Record<string, unknown>).hypothesis = String(alt);
+            }
+          }
+          sanitized = JSON.stringify(preprocessed);
+        }
+        const parsed = this.llmClient.parseJSON(sanitized, SubgoalsResponseSchema);
+        subgoalSpecs = parsed.map((sg: (typeof parsed)[number]) => {
+          // Derive hypothesis from dimensions or parent goal title when the LLM omitted it
+          let hypothesis = sg.hypothesis;
+          if (!hypothesis) {
+            const firstDimLabel = sg.dimensions?.[0]?.label;
+            hypothesis = firstDimLabel ? firstDimLabel : goal.title;
+          }
+          return {
+            ...sg,
+            hypothesis,
+            dimensions: (sg.dimensions ?? []).map((d) => ({
+              ...d,
+              observation_method_hint: d.observation_method_hint ?? "",
+            })),
+            constraints: sg.constraints ?? [],
+          };
+        });
+        // Clamp to max_children_per_node
+        subgoalSpecs = subgoalSpecs.slice(0, maxChildren);
+      }
     } catch (err) {
       // If subgoal generation fails, treat as leaf -- but log the error for diagnostics
       this.logger?.error(

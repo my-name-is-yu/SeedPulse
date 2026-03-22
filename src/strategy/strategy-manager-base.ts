@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { StateManager } from "../state-manager.js";
 import { StrategySchema, PortfolioSchema } from "../types/strategy.js";
 import type { Strategy, Portfolio } from "../types/strategy.js";
 import type { StrategyState } from "../types/core.js";
 import type { ILLMClient } from "../llm/llm-client.js";
+import type { IPromptGateway } from "../prompt/gateway.js";
 import type { KnowledgeGapSignal } from "../types/knowledge.js";
 import type { KnowledgeManager } from "../knowledge/knowledge-manager.js";
 import {
@@ -23,14 +25,17 @@ export class StrategyManagerBase {
   protected readonly llmClient: ILLMClient;
   /** Optional KnowledgeManager for decision-history-aware strategy selection (M14-S3). */
   protected knowledgeManager?: KnowledgeManager;
+  /** Optional PromptGateway for memory-enriched LLM calls. */
+  protected promptGateway?: IPromptGateway;
 
   /** In-memory index: strategyId → goalId */
   protected readonly strategyIndex: Map<string, string> = new Map();
 
-  constructor(stateManager: StateManager, llmClient: ILLMClient, knowledgeManager?: KnowledgeManager) {
+  constructor(stateManager: StateManager, llmClient: ILLMClient, knowledgeManager?: KnowledgeManager, promptGateway?: IPromptGateway) {
     this.stateManager = stateManager;
     this.llmClient = llmClient;
     this.knowledgeManager = knowledgeManager;
+    this.promptGateway = promptGateway;
   }
 
   /** Inject or update KnowledgeManager after construction (e.g., when KM is instantiated after SM). */
@@ -64,20 +69,36 @@ export class StrategyManagerBase {
       enrichment
     );
 
-    const response = await this.llmClient.sendMessage(
-      [{ role: "user", content: prompt }],
-      {
-        system:
-          "You are a strategic planning assistant. Generate concrete, actionable strategies to close the goal gap. Respond with a JSON array of 1–2 strategies.",
-        max_tokens: 2048,
-      }
-    );
-
-    // Parse and validate the LLM response
-    const strategiesRaw = this.llmClient.parseJSON(
-      response.content,
-      StrategyArraySchema
-    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let strategiesRaw: any[];
+    if (this.promptGateway) {
+      strategiesRaw = await this.promptGateway.execute({
+        purpose: "strategy_generation",
+        goalId,
+        responseSchema: StrategyArraySchema,
+        additionalContext: {
+          prompt,
+          primaryDimension,
+          targetDimensions: targetDimensions.join(","),
+          currentGap: String(context.currentGap),
+        },
+        maxTokens: 2048,
+      });
+    } else {
+      const response = await this.llmClient.sendMessage(
+        [{ role: "user", content: prompt }],
+        {
+          system:
+            "You are a strategic planning assistant. Generate concrete, actionable strategies to close the goal gap. Respond with a JSON array of 1–2 strategies.",
+          max_tokens: 2048,
+        }
+      );
+      // Parse and validate the LLM response
+      strategiesRaw = this.llmClient.parseJSON(
+        response.content,
+        StrategyArraySchema
+      );
+    }
 
     const now = new Date().toISOString();
     const candidates: Strategy[] = strategiesRaw.map((raw) =>

@@ -13,7 +13,7 @@ import type { ContextPurpose } from "./slot-definitions.js";
 
 export interface PromptGatewayInput<T> {
   purpose: ContextPurpose;
-  goalId: string;
+  goalId?: string;
   dimensionName?: string;
   additionalContext?: Record<string, string>;
   responseSchema: z.ZodSchema<T>;
@@ -47,7 +47,7 @@ export class PromptGateway implements IPromptGateway {
       );
     } catch (err) {
       throw new Error(
-        `[PromptGateway] context assembly failed (purpose=${input.purpose}, goalId=${input.goalId}): ${err}`
+        `[PromptGateway] context assembly failed (purpose=${input.purpose}, goalId=${input.goalId ?? "none"}): ${err}`
       );
     }
 
@@ -63,7 +63,7 @@ export class PromptGateway implements IPromptGateway {
       );
     } catch (err) {
       throw new Error(
-        `[PromptGateway] LLM call failed (purpose=${input.purpose}, goalId=${input.goalId}): ${err}`
+        `[PromptGateway] LLM call failed (purpose=${input.purpose}, goalId=${input.goalId ?? "none"}): ${err}`
       );
     }
 

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { ILLMClient } from "../llm/llm-client.js";
+import type { IPromptGateway } from "../prompt/gateway.js";
 import { EthicsGate } from "../traits/ethics-gate.js";
 import { GoalSchema } from "../types/goal.js";
 import type { Goal } from "../types/goal.js";
@@ -71,6 +72,7 @@ export interface GoalDecomposerDeps {
   ethicsGate: EthicsGate;
   satisficingJudge?: SatisficingJudge;
   goalTreeManager?: GoalTreeManager;
+  promptGateway?: IPromptGateway;
 }
 
 // ─── decompose() ───
@@ -83,16 +85,29 @@ export async function decompose(
   subgoals: Goal[];
   rejectedSubgoals: Array<{ description: string; reason: string }>;
 }> {
-  const { stateManager, llmClient, ethicsGate, satisficingJudge } = deps;
+  const { stateManager, llmClient, ethicsGate, satisficingJudge, promptGateway } = deps;
 
   // Step 1: LLM generates subgoals
   const prompt = buildSubgoalDecompositionPrompt(parentGoal);
-  const response = await llmClient.sendMessage(
-    [{ role: "user", content: prompt }],
-    { temperature: 0 }
-  );
-
-  const subgoalSpecs = llmClient.parseJSON(response.content, SubgoalListSchema);
+  let subgoalSpecs: z.infer<typeof SubgoalListSchema>;
+  if (promptGateway) {
+    subgoalSpecs = await promptGateway.execute({
+      purpose: "goal_decomposition",
+      goalId,
+      responseSchema: SubgoalListSchema,
+      additionalContext: {
+        prompt,
+        parentGoalTitle: parentGoal.title,
+        parentGoalDescription: parentGoal.description,
+      },
+    });
+  } else {
+    const response = await llmClient.sendMessage(
+      [{ role: "user", content: prompt }],
+      { temperature: 0 }
+    );
+    subgoalSpecs = llmClient.parseJSON(response.content, SubgoalListSchema);
+  }
 
   const subgoals: Goal[] = [];
   const rejectedSubgoals: Array<{ description: string; reason: string }> = [];

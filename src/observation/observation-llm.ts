@@ -11,6 +11,7 @@ import type { ObservationEngineOptions } from "./observation-helpers.js";
 import type { Logger } from "../runtime/logger.js";
 import { wrapXmlTag, formatObservationHistory } from "../prompt/formatters.js";
 import { OBSERVATION_SYSTEM_PROMPT } from "../prompt/purposes/observation.js";
+import type { IPromptGateway } from "../prompt/gateway.js";
 
 /**
  * Fetch a concise workspace context via git diff when no contextProvider is available.
@@ -106,7 +107,8 @@ export async function observeWithLLM(
   previousScore?: number | null,
   dryRun?: boolean,
   logger?: Logger,
-  dimensionHistory?: Array<{ value: number; timestamp?: string; date?: string }>
+  dimensionHistory?: Array<{ value: number; timestamp?: string; date?: string }>,
+  gateway?: IPromptGateway
 ): Promise<ObservationLogEntry> {
   logger?.info(
     `[ObservationEngine] LLM observation for dimension "${dimensionLabel}" (goal: ${goalId})`
@@ -175,12 +177,34 @@ export async function observeWithLLM(
     `${contextContent}\n\n` +
     `Score now based strictly on the above content.`;
 
-  const response = await llmClient.sendMessage(
-    [{ role: "user", content: prompt }],
-    { system: OBSERVATION_SYSTEM_PROMPT, max_tokens: 512, temperature: 0 }
-  );
-
-  const parsed = llmClient.parseJSON(response.content, LLMObservationResponseSchema);
+  let parsed: { score: number; reason: string };
+  if (gateway) {
+    try {
+      parsed = await gateway.execute({
+        purpose: "observation",
+        goalId,
+        dimensionName,
+        additionalContext: { observation_prompt: prompt },
+        responseSchema: LLMObservationResponseSchema,
+        maxTokens: 512,
+        temperature: 0,
+      });
+    } catch (err) {
+      // Fallback to direct LLM call if gateway fails
+      logger?.warn(`[ObservationEngine] PromptGateway failed for "${dimensionLabel}", falling back to direct LLM: ${String(err)}`);
+      const response = await llmClient.sendMessage(
+        [{ role: "user", content: prompt }],
+        { system: OBSERVATION_SYSTEM_PROMPT, max_tokens: 512, temperature: 0 }
+      );
+      parsed = llmClient.parseJSON(response.content, LLMObservationResponseSchema);
+    }
+  } else {
+    const response = await llmClient.sendMessage(
+      [{ role: "user", content: prompt }],
+      { system: OBSERVATION_SYSTEM_PROMPT, max_tokens: 512, temperature: 0 }
+    );
+    parsed = llmClient.parseJSON(response.content, LLMObservationResponseSchema);
+  }
 
   // P0: Score-evidence consistency check (§4.3)
   // If no evidence (no context, no git diff), LLM score > 0.0 is unreliable
