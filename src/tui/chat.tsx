@@ -300,7 +300,7 @@ export function Chat({ messages, onSubmit, isProcessing, goalNames = [] }: ChatP
                 value={input}
                 onChange={(val) => { justSelected.current = false; setInput(val); }}
                 onSubmit={handleSubmit}
-                placeholder="/ でコマンド一覧"
+                placeholder="/ for commands"
               />
             </Box>
             <Text dimColor>{borderLine}</Text>

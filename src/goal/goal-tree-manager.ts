@@ -57,9 +57,10 @@ function buildSpecificityPrompt(goal: Goal): string {
     goal.constraints.length > 0
       ? `\nConstraints: ${goal.constraints.join(", ")}`
       : "";
-  return `Score goal specificity (0=abstract, 1=atomic).
->=0.7: single atomic task, no meaningful sub-components.
-<0.7: has distinct aspects requiring subgoals.
+  return `Score how decomposable this goal is (0=high-level, 1=single atomic task).
+Treat 1.0 as a goal that can be executed as one task with no meaningful sub-components.
+Use lower scores when the goal clearly contains distinct aspects that should become separate subgoals.
+Root goals should still be scored for decomposability, not assumed to be leaves.
 
 Title: ${goal.title}
 Description: ${goal.description}
@@ -338,8 +339,9 @@ export class GoalTreeManager {
     };
 
     // Step 2: Determine if this is a leaf node
+    const isRootGoal = goal.decomposition_depth === 0;
     const isLeaf =
-      (goal.decomposition_depth > 0 && specificityScore >= config.min_specificity) ||
+      (!isRootGoal && specificityScore >= config.min_specificity) ||
       goal.decomposition_depth >= effectiveMaxDepth;
 
     if (isLeaf) {

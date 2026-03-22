@@ -67,6 +67,7 @@ const LLMIntentSchema = z.object({
     "loop_stop",
     "goal_create",
     "chat",
+    "unknown",
   ]),
   response: z.string().optional(),
   params: z.object({
@@ -151,8 +152,9 @@ export class IntentRecognizer {
         response: parsed.response,
         raw: input,
       };
-    } catch {
-      // LLM failure — fall back to unknown
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[IntentRecognizer] LLM fallback failed: ${msg}`);
       return { intent: "unknown", raw: input };
     }
   }

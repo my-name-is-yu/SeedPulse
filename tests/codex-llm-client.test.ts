@@ -111,7 +111,7 @@ describe("CodexLLMClient", () => {
   // ─── spawn arguments ───
 
   describe("sendMessage: spawn args", () => {
-    it("spawns with exec --ephemeral --full-auto --path . -o <path> - (stdin mode)", async () => {
+    it("spawns with exec --ephemeral --full-auto -o <path> - (stdin mode) and cwd set", async () => {
       const client = new CodexLLMClient();
       const child = makeFakeChild();
 
@@ -120,12 +120,13 @@ describe("CodexLLMClient", () => {
       child.emit("close", 0);
       await promise;
 
-      const [, spawnArgs] = mockSpawn.mock.calls[0] as [string, string[]];
+      const [, spawnArgs, spawnOpts] = mockSpawn.mock.calls[0] as [string, string[], Record<string, unknown>];
       expect(spawnArgs[0]).toBe("exec");
       expect(spawnArgs).toContain("--ephemeral");
       expect(spawnArgs).toContain("--full-auto");
-      expect(spawnArgs).toContain("--path");
-      expect(spawnArgs[spawnArgs.indexOf("--path") + 1]).toBe(".");
+      // --path is not supported by codex-cli 0.114.0+; cwd is used instead
+      expect(spawnArgs).not.toContain("--path");
+      expect(spawnOpts.cwd).toBeTruthy();
       expect(spawnArgs).toContain("-o");
       // -o must be followed by a path
       const dashOIdx = spawnArgs.indexOf("-o");

@@ -1,6 +1,6 @@
 {
   "name": "conatus",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "AI agent orchestrator that gives existing agents the drive to persist — set a goal, and Conatus observes, delegates, verifies, and loops until done.",
   "type": "module",
   "main": "dist/index.js",

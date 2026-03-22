@@ -469,6 +469,26 @@ export class CoreLoop {
    * Called by run() when treeMode=true.
    */
   async runTreeIteration(rootId: string, loopIndex: number): Promise<LoopIterationResult> {
+    if (this.deps.goalTreeManager && this.deps.treeLoopOrchestrator) {
+      const rootGoal = await this.deps.stateManager.loadGoal(rootId);
+      if (rootGoal && rootGoal.children_ids.length === 0) {
+        const defaultConfig = {
+          min_specificity: 0.7,
+          max_depth: 3,
+          parallel_loop_limit: 3,
+          auto_prune_threshold: 0.3,
+        };
+        try {
+          await this.deps.goalTreeManager.decomposeGoal(rootId, defaultConfig);
+        } catch (err) {
+          this.logger?.warn("CoreLoop: tree pre-decomposition failed, continuing with tree iteration", {
+            rootId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    }
+
     return runTreeIterationImpl(rootId, loopIndex, this.deps, this.config, this.logger,
       (id, idx) => this.runOneIteration(id, idx));
   }

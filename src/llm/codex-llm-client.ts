@@ -132,7 +132,8 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
 
       // Build spawn args: exec --ephemeral --full-auto -o <tmpfile> [--model <model>] -
       // Prompt is sent via stdin (using "-" as positional arg) to avoid arg length limits.
-      const spawnArgs: string[] = ["exec", "--ephemeral", "--full-auto", "--path", this.repoPath, "-o", tmpFile];
+      // --path is not supported by codex-cli 0.114.0+; use cwd instead (see src/adapters/openai-codex.ts)
+      const spawnArgs: string[] = ["exec", "--ephemeral", "--full-auto", "-o", tmpFile];
 
       if (model) {
         spawnArgs.push("--model", model);
@@ -143,6 +144,7 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
       const child = spawn(this.cliPath, spawnArgs, {
         stdio: ["pipe", "pipe", "pipe"],
         env: process.env,
+        cwd: this.repoPath,
       });
 
       let timedOut = false;

@@ -182,6 +182,15 @@ describe("IntentRecognizer — LLM fallback", () => {
     expect(result.params?.["response"]).toBe("You can use 'run' to start the goal loop.");
   });
 
+  it("returns unknown intent when LLM responds with 'unknown'", async () => {
+    const mockResponse = JSON.stringify({ intent: "unknown" });
+    const llm = makeMockLLMClient(mockResponse);
+    const recognizer = new IntentRecognizer(llm);
+
+    const result = await recognizer.recognize("some ambiguous input");
+    expect(result.intent).toBe("unknown");
+  });
+
   it("does not include empty params object when no params returned", async () => {
     const mockResponse = JSON.stringify({ intent: "chat", response: "Hello!" });
     const llm = makeMockLLMClient(mockResponse);

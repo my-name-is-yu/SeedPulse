@@ -18,13 +18,13 @@ function renderBar(progress: number): string {
 
 export function statusLabel(status: string): string {
   switch (status) {
-    case "idle":          return "待機中";
-    case "running":       return "実行中";
-    case "completed":     return "完了";
-    case "stalled":       return "停滞";
-    case "max_iterations": return "最大回数到達";
-    case "error":         return "エラー";
-    case "stopped":       return "停止";
+    case "idle":          return "Idle";
+    case "running":       return "Running";
+    case "completed":     return "Completed";
+    case "stalled":       return "Stalled";
+    case "max_iterations": return "Max iterations reached";
+    case "error":         return "Error";
+    case "stopped":       return "Stopped";
     default:              return status;
   }
 }
