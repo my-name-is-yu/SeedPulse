@@ -1,292 +1,178 @@
+<div align="center">
+
 # Motiva
+
+### Give your AI agents motivation.
 
 [![CI](https://github.com/my-name-is-yu/Motiva/actions/workflows/ci.yml/badge.svg)](https://github.com/my-name-is-yu/Motiva/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/motiva.svg)](https://www.npmjs.com/package/motiva)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-AI agent orchestrator that gives existing agents "motivation" — goal-driven task discovery, autonomous progress observation, and satisficing completion judgment.
+Set a goal. Motiva observes the world, finds the gap, generates the next task, delegates it to any AI agent, verifies the result, and loops — until done.
 
----
+<!-- TODO: Replace with actual demo recording -->
+<br/>
 
-## What is Motiva?
+*Demo video coming soon*
 
-Motiva is a **task discovery engine**. You give it a long-term goal — "double revenue in 6 months," "keep my dog healthy and happy" — and it pursues that goal autonomously, indefinitely. It observes the real world, calculates the gap between the goal and current reality, generates the next task to close that gap, delegates it to an AI agent (CLI-type, API-type, or a custom adapter — e.g., Claude Code, OpenAI Codex CLI, Browser Use), and verifies the result. Then it loops.
-
-The key distinction from existing tools: Motiva doesn't execute. It orchestrates. It makes agents think, then verifies that their thinking produced real progress. Every action is delegated; Motiva's direct operations are limited to LLM calls (for reasoning) and state file read/write.
-
-Motiva is built on a **4-element model**: a Goal (with measurable thresholds), Current State (observed with confidence scores), the Gap between them, and Constraints that govern how tasks may be executed. The **core loop** — observe → gap → score → task → execute → verify — runs until the goal is satisfied or the system escalates to a human.
-
-Motiva knows when to stop. Rather than pursuing perfection, it applies *satisficing*: when all goal dimensions cross their thresholds with sufficient evidence, the goal is complete. No runaway loops. No premature completion on self-reported progress alone.
-
----
-
-## Why Motiva?
-
-- **Execution boundary** — Motiva never executes. It orchestrates agents and verifies results. No runaway scripts, no side effects from the orchestrator itself.
-- **Goal-driven, not prompt-driven** — You set a long-term goal with measurable thresholds. Motiva autonomously decomposes, delegates, observes, and loops until satisfied.
-- **Satisficing** — Stops when "good enough," not when perfect. Prevents infinite loops and wasted compute on diminishing returns.
-- **Asymmetric trust** — Failure costs 3x more than success rewards. Irreversible actions always require human approval, regardless of track record.
-- **Agent-agnostic** — Works with any AI agent: Claude Code CLI, OpenAI Codex, Browser Use, or your own custom adapter. Swap agents without changing goals.
-
----
-
-## How Motiva Compares
-
-| | AutoGen | LangGraph | CrewAI | **Motiva** |
-|---|---|---|---|---|
-| **Approach** | Conversation-driven multi-agent dialogue | Graph-based workflow engine | Role-based agent crews | Orchestration-only loop: observe → gap → score → task → verify |
-| **Executes tasks?** | Yes — runs generated code locally/Docker | Yes — nodes execute LLM and tool calls | Yes — agents execute tasks directly | **No** — always delegates to external agents |
-| **Goal model** | Prompt-driven; no measurable thresholds | Workflow-driven; developer-defined graph | Text-based role goals (not measurable) | Quantitative thresholds (min/max/range); gap drives every decision |
-| **When to stop** | 11 termination conditions (keyword, timeout, token limit) | Developer-defined edge predicates | Guardrail validation + retry | Satisficing: stops at "good enough," not perfect |
-| **Trust & safety** | Opt-in human gateway; Docker sandbox | Graph interrupts for human review | Task guardrails (fn/LLM-judge) | Asymmetric trust (failure −10 vs success +3); irreversible actions always need approval |
-| **Verification** | None — results are chat messages | None — developer-built | Output-only guardrail check | 3-layer: mechanical checks → LLM review → self-report |
-| **Agent support** | OpenAI-compatible LLMs | LLMs with tool-calling | Any provider via LiteLLM | Any agent: CLI, API, Browser Use, A2A, custom adapters |
-
----
+<br/>
+</div>
 
 ## Quick Start
 
-**Requirements:** Node.js 20+, an OpenAI or Anthropic API key.
-
-### Installation
+**1. Install Motiva (Node.js 20+):**
 
 ```bash
 npm install -g motiva
-
-# Set your API key (OpenAI is the default provider)
-export OPENAI_API_KEY=sk-...
-
-# Or use Anthropic instead
-export MOTIVA_LLM_PROVIDER=anthropic
-export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-### First Run
+**2. Set your API key:**
 
 ```bash
-# Register a goal (Motiva assesses feasibility and proposes measurable dimensions)
-motiva goal add "Create a comprehensive README for this project"
+export OPENAI_API_KEY=sk-...
 
-# Run one iteration of the core loop
-motiva run
-
-# Check current goal progress
-motiva status
-
-# List all registered goals
-motiva goal list
-
-# Display the latest report
-motiva report
+# Or use Anthropic
+# export MOTIVA_LLM_PROVIDER=anthropic
+# export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-On first run, Motiva initializes its state directory at `~/.motiva/`.
+**3. Set a goal and run:**
 
-### Development Installation
+```bash
+motiva goal add "Increase test coverage to 90%"
+motiva run
+motiva status
+```
+
+That's it. Motiva assesses feasibility, decomposes the goal into measurable dimensions, delegates tasks to agents, and tracks progress automatically.
+
+## What is Motiva?
+
+Motiva is a **task discovery engine**. You give it a long-term goal — "double revenue in 6 months," "keep my dog healthy" — and it pursues it autonomously. It observes, calculates the gap, generates tasks, delegates to AI agents, and verifies results. Then it loops.
+
+**Motiva doesn't execute. It orchestrates.** Every action is delegated to external agents (Claude Code, OpenAI Codex, Browser Use, or your own adapter). Motiva's only direct operations are LLM calls for reasoning and state file read/write.
+
+**Motiva knows when to stop.** It applies *satisficing* — when all goal dimensions cross their thresholds with sufficient evidence, the goal is complete. No runaway loops. No premature completion.
+
+## Why Motiva?
+
+- **Execution boundary** — Motiva never executes. It orchestrates and verifies. No runaway scripts.
+- **Goal-driven, not prompt-driven** — Set a long-term goal with measurable thresholds. Motiva decomposes, delegates, observes, and loops.
+- **Satisficing** — Stops when "good enough." Prevents infinite loops and wasted compute.
+- **Asymmetric trust** — Failure costs 3x more than success rewards. Irreversible actions always require human approval.
+- **Agent-agnostic** — Works with any AI agent. Swap agents without changing goals.
+
+## Demos
+
+### Code Quality Goal
+
+> Goal = "Increase test coverage to 90% across the project"
+
+Motiva observes current coverage, identifies untested modules, delegates test writing to a coding agent, and verifies results with actual test runs.
+
+*Demo coming soon* · [Example goal config](docs/design/goal-negotiation.md)
+
+### Revenue Target
+
+> Goal = "Double monthly revenue within 6 months"
+
+Motiva tracks revenue metrics, identifies growth opportunities, delegates research and implementation tasks, and measures real outcomes.
+
+*Demo coming soon*
+
+### Health Monitoring
+
+> Goal = "Keep my dog healthy and happy"
+
+Motiva monitors health indicators, schedules vet checkups, tracks nutrition, and escalates to you when human judgment is needed.
+
+*Demo coming soon*
+
+## How It Works
+
+The core loop runs at each goal node:
+
+```
+Observe → Gap → Score → Task → Execute → Verify → Loop
+```
+
+1. **Observe** — 3-layer evidence collection (mechanical checks, LLM review, self-report)
+2. **Gap** — quantify how far current state is from the goal threshold
+3. **Score** — prioritize by dissatisfaction, deadline urgency, and opportunity
+4. **Task** — LLM generates a concrete, verifiable task
+5. **Execute** — delegate to the selected agent adapter
+6. **Verify** — 3-layer result verification; pass, partial, or fail
+
+For detailed architecture, see [docs/architecture-map.md](docs/architecture-map.md).
+
+## Supported Adapters
+
+| Adapter | Type | Use Case |
+|---------|------|----------|
+| `claude_code_cli` | CLI | Code execution, file operations |
+| `openai_codex_cli` | CLI | Code execution, file operations |
+| `browser_use_cli` | CLI | Web browsing, scraping, form filling |
+| `claude_api` | LLM API | Text generation, analysis |
+| `github_issue` | REST API | Issue creation, search |
+| `a2a` | A2A Protocol | Remote agent delegation |
+
+Custom adapters can be added as [plugins](docs/design/plugin-development-guide.md) in `~/.motiva/plugins/`.
+
+## Programmatic Usage
+
+```typescript
+import { CoreLoop, StateManager } from "motiva";
+
+const stateManager = new StateManager("~/.motiva");
+const loop = new CoreLoop({ stateManager, /* ...adapters */ });
+await loop.runOnce();
+```
+
+## CLI
+
+| Command | Description |
+|---------|-------------|
+| `motiva goal add "<goal>"` | Negotiate and register a new goal |
+| `motiva goal list` | List all goals with status |
+| `motiva run` | Run one core loop iteration |
+| `motiva status` | Show progress, gaps, trust scores |
+| `motiva report` | Display latest report |
+| `motiva cleanup` | Archive completed goals |
+| `motiva datasource add/list/remove` | Manage data sources |
+
+## FAQ
+
+**How does Motiva verify progress?**
+
+3-layer verification: mechanical checks (test results, file diffs, metrics) first, then independent LLM review, then executor self-report. Self-report alone caps progress at 70%.
+
+**Is it safe? Can it run dangerous commands?**
+
+Trust is asymmetric: failure costs -10, success only +3. Irreversible actions always require human approval regardless of trust level. Every goal also passes through an ethics gate before execution begins.
+
+**What happens when it gets stuck?**
+
+Stall detection uses four indicators. Responses are graduated: try a different approach, pivot strategy, then escalate to human. No infinite loops.
+
+**Can I use it for free?**
+
+Yes. Motiva is open source and free. You only need an LLM API key (OpenAI or Anthropic).
+
+## Development
 
 ```bash
 git clone https://github.com/my-name-is-yu/Motiva.git
 cd Motiva
 npm install
 npm run build
-export OPENAI_API_KEY=sk-...
-npx tsx src/index.ts goal add "Your goal here"
-npx tsx src/index.ts run
+npm test
 ```
 
----
-
-## Programmatic Usage
-
-```typescript
-import { CoreLoop, StateManager, GoalNegotiator } from "motiva";
-
-// Initialize state
-const stateManager = new StateManager("~/.motiva");
-
-// Run one loop iteration
-const loop = new CoreLoop({ stateManager, /* ...adapters */ });
-await loop.runOnce();
-```
-
----
-
-## Architecture
-
-### System Diagram
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                          User                                        │
-│   Goals: "2x revenue"  "keep my dog healthy"                         │
-│   Constraints: "don't share customer data"  "respect vet's judgment" │
-│   Capabilities: API keys, sensor access, DB connections              │
-└───────────────┬─────────────────────────────┬───────────────────────┘
-                │ goal + constraints           │ reports + approval requests
-                ↓                             ↑
-┌───────────────────────────────────────────────────────────────────────┐
-│                                                                       │
-│                    Motiva (Task Discovery Engine)                      │
-│                                                                       │
-│  ┌──────────────────────────────────────────────────────────────┐     │
-│  │           Goal Negotiation                                    │     │
-│  │  Ethics Gate (Step 0) → receive → decompose → baseline obs   │     │
-│  │  → feasibility eval → accept / counter-propose / flag        │     │
-│  └──────────────────────────┬───────────────────────────────────┘     │
-│                              ↓ agreed goal                            │
-│  ┌──────────────────────────────────────────────────────────────┐     │
-│  │           Goal Tree (recursive)                               │     │
-│  │     top-level goal                                            │     │
-│  │      ├── sub-goal A ── each node holds its own state vector  │     │
-│  │      │    ├── sub-goal A-1                                    │     │
-│  │      │    └── sub-goal A-2                                    │     │
-│  │      ├── sub-goal B                                           │     │
-│  │      └── sub-goal C                                           │     │
-│  └──────────────────────────┬───────────────────────────────────┘     │
-│                              ↓ loop runs at each node                 │
-│  ┌──────────────────────────────────────────────────────────────┐     │
-│  │                   Core Loop                                   │     │
-│  │                                                               │     │
-│  │  ┌────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │     │
-│  │  │ Observe│─→│  Gap     │─→│  Drive   │─→│  Task    │       │     │
-│  │  │ (3-layer)  │ Calc     │  │ Scoring  │  │ Generate │       │     │
-│  │  └────────┘  └──────────┘  └──────────┘  └────┬─────┘       │     │
-│  │      ↑                                        │              │     │
-│  │      │       ┌──────────┐  ┌──────────┐       │              │     │
-│  │      └───────│  Verify  │←─│ Execute  │←──────┘              │     │
-│  │              │ (3-layer)│  │ (agent)  │                      │     │
-│  │              └──────────┘  └──────────┘                      │     │
-│  └──────────────────────────────────────────────────────────────┘     │
-│                                                                       │
-│  ┌──── Cross-cutting ────────────────────────────────────────────┐    │
-│  │  Trust & Safety │ Satisficing │ Stall Detection │ Ethics Gate │    │
-│  │  Curiosity Engine │ Character Config │ Embedding / Vector KB  │    │
-│  └───────────────────────────────────────────────────────────────┘    │
-│                                                                       │
-│  ┌──── Infrastructure ───────────────────────────────────────────┐    │
-│  │  Drive System (4 triggers) │ Context Mgmt │ State (JSON)      │    │
-│  │  Daemon/PID │ Event Server │ Notification │ Memory Lifecycle  │    │
-│  └───────────────────────────────────────────────────────────────┘    │
-│                                                                       │
-└───────────────────────────────┬───────────────────────────────────────┘
-                                │ task delegation
-                                ↓
-┌───────────────────────────────────────────────────────────────────────┐
-│                     Execution Layer (existing systems)                │
-│                                                                       │
-│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌──────────────┐     │
-│  │ CLI Agent  │ │ LLM API    │ │ Browser Use│ │ Custom       │     │
-│  │ (implement)│ │ (analysis) │ │ (web auto) │ │ Agents       │     │
-│  └────────────┘ └────────────┘ └────────────┘ └──────────────┘     │
-│  ┌────────────────────────────┐ ┌────────────────────────────────┐  │
-│  │ A2A Protocol (remote)      │ │ Human (approve/decide)         │  │
-│  └────────────────────────────┘ └────────────────────────────────┘  │
-│                                                                       │
-│  ┌────────────────────────────────────────────────────────────────┐  │
-│  │ Data Sources: sensors, DB, analytics, CRM, external APIs, IoT  │  │
-│  └────────────────────────────────────────────────────────────────┘  │
-└───────────────────────────────────────────────────────────────────────┘
-```
-
-### Implementation Layers
-
-| Layer | Modules | Role |
-|-------|---------|------|
-| 0 | StateManager, AdapterLayer | Persistence and agent abstraction |
-| 1 | GapCalculator, DriveSystem, TrustManager | Gap computation, event scheduling, trust tracking |
-| 2 | ObservationEngine, DriveScorer, SatisficingJudge, StallDetector | Observation, scoring, completion and stall judgment |
-| 3 | LLMClient, EthicsGate, SessionManager, StrategyManager, GoalNegotiator | LLM interface, ethics, session context, goal negotiation |
-| 4 | TaskLifecycle | Full task lifecycle: select → generate → approve → execute → verify |
-| 5 | CoreLoop, ReportingEngine | Orchestration loop, report generation |
-| 6 | CLIRunner | Entry point, subcommand dispatch |
-| 7 | TUI (Ink/React) | Terminal dashboard, approval UI, chat |
-| 8 | KnowledgeManager | Knowledge acquisition and injection |
-| 9 | PortfolioManager | Parallel strategy execution |
-| 10 | DaemonRunner, PIDManager, Logger, EventServer, NotificationDispatcher, MemoryLifecycleManager | Persistent runtime, eventing, notifications |
-| 11 | CuriosityEngine, CharacterConfigManager | Curiosity-driven exploration, ethics enforcement, character configuration |
-| 12 | EmbeddingClient, VectorIndex, KnowledgeGraph, GoalDependencyGraph | Semantic embedding infrastructure, vector search, knowledge graph |
-| 13 | CapabilityDetector, DataSourceAdapter | Autonomous capability acquisition, external data source connections |
-| 14 | GoalTreeManager, CrossGoalPortfolio, LearningPipeline, KnowledgeTransfer | Cross-goal portfolio, learning, knowledge transfer |
-
----
-
-## Core Loop
-
-Each iteration moves a goal closer to its thresholds:
-
-1. **Observe** — collect evidence using 3-layer observation: mechanical checks → independent LLM review → executor self-report. Higher layers override lower ones.
-2. **Gap calculation** — compute `raw_gap` per dimension, normalize to `[0,1]`, apply confidence weighting (low confidence inflates the gap estimate).
-3. **Drive scoring** — score three drives: dissatisfaction (gap magnitude), deadline urgency (exponential as deadline approaches), opportunity (time-decaying value). The highest score selects the priority dimension.
-4. **Task generation** — an LLM concretizes "what to do": work description, verifiable success criteria, scope boundaries, inherited constraints.
-5. **Execute** — delegate to the selected adapter. Motiva does not intervene during execution; it only monitors status, timeout, and heartbeat.
-6. **Verify** — 3-layer result verification: mechanical checks → independent LLM reviewer → executor self-report. Verdict: `pass / partial / fail`. On failure: keep, discard, or escalate to human.
-
-The loop repeats until: goal completed (SatisficingJudge), stall escalation, max iterations reached, or explicit stop.
-
----
-
-## Key Design Principles
-
-- **Evidence-based observation** — progress is never inferred from activity. Only verifiable evidence (test results, file diffs, metric readings) can advance a goal dimension. Self-report alone caps progress at 70%.
-- **Satisficing** — Motiva stops when all dimensions cross their thresholds with sufficient confidence. It does not pursue perfection.
-- **Trust balance (asymmetric)** — trust score is per-domain, range `[-100, +100]`. Success: `+3`. Failure: `-10`. Irreversible actions always require human approval, regardless of trust level.
-- **Execution boundary** — Motiva reasons; agents act. The only direct operations Motiva performs are LLM calls and state file read/write.
-- **Ethics gate** — every goal passes through a two-stage ethics check before negotiation begins. Goals that cross legal or ethical lines are rejected outright.
-- **Stall detection** — four stall indicators trigger graduated responses: approach change → strategy pivot → human escalation.
-
----
-
-## CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `motiva goal add "<description>"` | Start goal negotiation. Motiva evaluates feasibility, decomposes into measurable dimensions, and registers the agreed goal. |
-| `motiva goal list` | Display all registered goals with current status. |
-| `motiva goal archive <id>` | Archive a completed goal. |
-| `motiva run` | Execute one iteration of the core loop across active goals. |
-| `motiva status` | Show current progress report: goal dimensions, gaps, trust scores, recent activity. |
-| `motiva report` | Display the latest generated report. |
-| `motiva cleanup` | Archive all completed goals and clean up state. |
-| `motiva datasource add/list/remove` | Manage external data sources for mechanical observation. |
-
-Exit codes: `0` normal completion, `1` error, `2` stall escalation requiring human input.
-
----
-
-## Supported Adapters
-
-| Adapter | Type | Capabilities |
-|---------|------|-------------|
-| `claude_code_cli` | CLI | Code execution, file read/write, shell commands |
-| `openai_codex_cli` | CLI | Code execution, file read/write, shell commands |
-| `browser_use_cli` | CLI | Web browsing, scraping, form filling, screenshots |
-| `claude_api` | LLM API | Text generation, analysis, planning |
-| `github_issue` | REST API | Issue creation, search |
-| `a2a` | A2A Protocol | Remote agent delegation (configurable) |
-
-Custom adapters can be added as [plugins](docs/design/plugin-development-guide.md) in `~/.motiva/plugins/`.
-
----
-
-## Development
-
-```bash
-npm install
-npm run build           # TypeScript → dist/
-npm test                # Run all tests
-npm run typecheck       # Type check without emit
-npm run test:watch      # Watch mode
-```
-
-State files: `~/.motiva/`. Reports: `~/.motiva/reports/`. Ethics logs: `~/.motiva/ethics/`.
-
-For detailed implementation status, see [`docs/status.md`](docs/status.md).
-
----
+State: `~/.motiva/` · Reports: `~/.motiva/reports/` · Ethics logs: `~/.motiva/ethics/`
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to contribute.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## Changelog
 
@@ -294,12 +180,10 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ---
 
-## Privacy
+Motiva stores all state locally. No telemetry. No phone-home. Your LLM provider is the only external connection.
 
-Motiva stores all state locally in `~/.motiva/`. It sends prompts to your configured LLM provider (OpenAI/Anthropic) but collects no telemetry and phones home to no server.
+[MIT License](LICENSE)
 
 ---
 
-## License
-
-MIT
+**Tell your agents what to achieve, not what to do.**
