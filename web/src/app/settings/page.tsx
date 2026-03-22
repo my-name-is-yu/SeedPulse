@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useMoxenStore } from '../../lib/store';
+import { useTavoriStore } from '../../lib/store';
 
 // ─── Types ───
 
@@ -189,13 +189,13 @@ function PluginsSection() {
 }
 
 function SystemHealthSection() {
-  const connected = useMoxenStore((s) => s.connected);
+  const connected = useTavoriStore((s) => s.connected);
 
   return (
     <SectionCard title="System Health">
       <FieldRow label="Connection" value={<ConnectionDot connected={connected} />} />
       <FieldRow label="Node.js" value={typeof process !== 'undefined' ? process.version : '—'} />
-      <FieldRow label="Moxen Version" value="0.1.0" />
+      <FieldRow label="Tavori Version" value="0.1.0" />
       <FieldRow label="Data Directory" value="~/.moxen/" />
       <FieldRow
         label="CoreLoop Status"

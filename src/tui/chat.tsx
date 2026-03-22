@@ -12,7 +12,7 @@ import { renderMarkdownLines, type MarkdownLine, type MarkdownSegment } from "./
 import { fuzzyMatch, fuzzyFilter } from "./fuzzy.js";
 
 export interface ChatMessage {
-  role: "user" | "moxen";
+  role: "user" | "tavori";
   text: string;
   timestamp: Date;
   messageType?: "info" | "error" | "warning" | "success";
@@ -252,7 +252,7 @@ export function Chat({ messages, onSubmit, isProcessing, goalNames = [] }: ChatP
             );
           }
 
-          // Moxen message — render markdown lines individually
+          // Tavori message — render markdown lines individually
           const typeColor = getMessageTypeColor(msg.messageType);
           const mdLines = renderMarkdownLines(msg.text);
 
@@ -260,7 +260,7 @@ export function Chat({ messages, onSubmit, isProcessing, goalNames = [] }: ChatP
             <Box key={absoluteIdx} flexDirection="column" marginBottom={1} marginLeft={2}>
               <Box justifyContent="space-between">
                 <Text color="magenta" bold>
-                  Moxen
+                  Tavori
                 </Text>
                 <Text dimColor>{timeStr}</Text>
               </Box>
