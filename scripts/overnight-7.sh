@@ -20,7 +20,7 @@ TMP_DIR="$REPO_DIR/memory/.overnight-tmp-${DATE_TAG}-$$"
 mkdir -p "$TMP_DIR"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-say "# Moxen overnight improvement loop (${DATE_TAG})" > "$REPORT"
+say "# Tavori overnight improvement loop (${DATE_TAG})" > "$REPORT"
 say "" >> "$REPORT"
 say "Started: ${START_TS}" >> "$REPORT"
 say "Repo: ${REPO_DIR}" >> "$REPORT"
@@ -59,17 +59,17 @@ for i in $(seq 1 7); do
   say "Started: ${ITER_TS}" >> "$REPORT"
   say "" >> "$REPORT"
 
-  # 1) Moxen run (improvement loop)
+  # 1) Tavori run (improvement loop)
   set +e
   node dist/cli-runner.js improve . --auto --yes >"$OUT_IMPROVE" 2>&1
   IMPROVE_CODE=$?
   set -e
 
-  # Extract the "task" we asked Moxen to pursue (best-effort from output)
-  SUGGESTED_TITLE="$(grep -E "^\[Moxen Improve\] Negotiating goal:" "$OUT_IMPROVE" | head -n 1 | sed -E 's/^\[Moxen Improve\] Negotiating goal: "(.*)"\.\.\./\1/' || true)"
-  GOAL_ID="$(grep -E "^\[Moxen Improve\] Goal registered:" "$OUT_IMPROVE" | head -n 1 | awk '{print $5}' || true)"
+  # Extract the "task" we asked Tavori to pursue (best-effort from output)
+  SUGGESTED_TITLE="$(grep -E "^\[Tavori Improve\] Negotiating goal:" "$OUT_IMPROVE" | head -n 1 | sed -E 's/^\[Tavori Improve\] Negotiating goal: "(.*)"\.\.\./\1/' || true)"
+  GOAL_ID="$(grep -E "^\[Tavori Improve\] Goal registered:" "$OUT_IMPROVE" | head -n 1 | awk '{print $5}' || true)"
 
-  say "## What Moxen was asked to do" >> "$REPORT"
+  say "## What Tavori was asked to do" >> "$REPORT"
   if [[ -n "$SUGGESTED_TITLE" ]]; then
     say "- Goal (selected suggestion): ${SUGGESTED_TITLE}" >> "$REPORT"
   else
@@ -78,14 +78,14 @@ for i in $(seq 1 7); do
   if [[ -n "$GOAL_ID" ]]; then
     say "- Goal ID: ${GOAL_ID}" >> "$REPORT"
   fi
-  say "- Command: moxen improve . --auto --yes" >> "$REPORT"
+  say "- Command: tavori improve . --auto --yes" >> "$REPORT"
   say "- Exit: ${IMPROVE_CODE}" >> "$REPORT"
   say "" >> "$REPORT"
 
   say "## Findings / issues surfaced" >> "$REPORT"
   if [[ $IMPROVE_CODE -ne 0 ]]; then
     # Show a short tail; avoid dumping everything.
-    say "Moxen run returned non-zero. Tail:" >> "$REPORT"
+    say "Tavori run returned non-zero. Tail:" >> "$REPORT"
     say "\`\`\`" >> "$REPORT"
     tail -n 60 "$OUT_IMPROVE" >> "$REPORT"
     say "\`\`\`" >> "$REPORT"
@@ -98,7 +98,7 @@ for i in $(seq 1 7); do
       printf "%s\n" "$ERR_LINES" >> "$REPORT"
       say "\`\`\`" >> "$REPORT"
     else
-      say "No obvious errors in Moxen output." >> "$REPORT"
+      say "No obvious errors in Tavori output." >> "$REPORT"
     fi
   fi
   say "" >> "$REPORT"

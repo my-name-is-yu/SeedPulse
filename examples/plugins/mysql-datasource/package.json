@@ -1,5 +1,5 @@
 {
-  "name": "@motiva-plugins/mysql-datasource",
+  "name": "@tavori-plugins/mysql-datasource",
   "version": "1.0.0",
   "type": "module",
   "dependencies": {

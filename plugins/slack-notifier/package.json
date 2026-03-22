@@ -1,7 +1,7 @@
 {
-  "name": "@motiva/plugin-slack-notifier",
+  "name": "@tavori/plugin-slack-notifier",
   "version": "1.0.0",
-  "description": "Send Motiva events to a Slack channel via webhook",
+  "description": "Send Tavori events to a Slack channel via webhook",
   "type": "module",
   "main": "dist/index.js",
   "exports": {
@@ -10,10 +10,10 @@
   "scripts": {
     "build": "tsc --project tsconfig.json"
   },
-  "keywords": ["motiva", "plugin", "slack", "notifier"],
+  "keywords": ["tavori", "plugin", "slack", "notifier"],
   "license": "MIT",
   "peerDependencies": {
-    "motiva": ">=0.1.0"
+    "tavori": ">=0.1.0"
   },
   "devDependencies": {
     "typescript": "^5.3.0"

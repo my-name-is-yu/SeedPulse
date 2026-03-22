@@ -1,5 +1,5 @@
 {
-  "name": "motiva-web",
+  "name": "tavori-web",
   "private": true,
   "scripts": {
     "dev": "next dev",

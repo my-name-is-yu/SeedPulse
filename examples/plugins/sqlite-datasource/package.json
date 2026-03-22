@@ -1,5 +1,5 @@
 {
-  "name": "@motiva-plugins/sqlite-datasource",
+  "name": "@tavori-plugins/sqlite-datasource",
   "version": "1.0.0",
   "type": "module",
   "dependencies": {

@@ -1,7 +1,7 @@
 {
-  "name": "@motiva-plugins/jira-datasource",
+  "name": "@tavori-plugins/jira-datasource",
   "version": "1.0.0",
-  "description": "Jira REST API issue count observation source for Motiva",
+  "description": "Jira REST API issue count observation source for Tavori",
   "type": "module",
   "main": "dist/index.js",
   "exports": {
@@ -10,10 +10,10 @@
   "scripts": {
     "build": "tsc --project tsconfig.json"
   },
-  "keywords": ["motiva", "plugin", "jira", "datasource"],
+  "keywords": ["tavori", "plugin", "jira", "datasource"],
   "license": "MIT",
   "peerDependencies": {
-    "motiva": ">=0.1.0"
+    "tavori": ">=0.1.0"
   },
   "devDependencies": {
     "typescript": "^5.3.0"

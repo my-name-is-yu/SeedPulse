@@ -1,5 +1,5 @@
 {
-  "name": "@motiva-plugins/sse-datasource",
+  "name": "@tavori-plugins/sse-datasource",
   "version": "1.0.0",
   "type": "module",
   "dependencies": {

@@ -1,5 +1,5 @@
 {
-  "name": "@motiva-plugins/postgres-datasource",
+  "name": "@tavori-plugins/postgres-datasource",
   "version": "1.0.0",
   "type": "module",
   "dependencies": {

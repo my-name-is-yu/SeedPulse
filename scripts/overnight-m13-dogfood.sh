@@ -4,7 +4,7 @@
 
 set +e  # Don't exit on error — we want both phases to run
 
-MOXEN="node dist/cli-runner.js"
+TAVORI="node dist/cli-runner.js"
 LOG_DIR="memory/archive/.overnight-m13-$(date +%Y-%m-%d)-$$"
 mkdir -p "$LOG_DIR"
 
@@ -23,7 +23,7 @@ done
 echo "--- Phase 1: tsc_error_count:min:0 ---" | tee -a "$LOG_DIR/summary.log"
 
 # Add goal (raw mode, no LLM)
-GOAL1_OUTPUT=$($MOXEN goal add --title "zero-tsc-errors" --dim "tsc_error_count:min:0" 2>&1)
+GOAL1_OUTPUT=$($TAVORI goal add --title "zero-tsc-errors" --dim "tsc_error_count:min:0" 2>&1)
 echo "$GOAL1_OUTPUT" | tee "$LOG_DIR/phase1-goal-add.log"
 GOAL1_ID=$(echo "$GOAL1_OUTPUT" | grep "Goal ID:" | awk '{print $NF}')
 
@@ -31,7 +31,7 @@ if [ -z "$GOAL1_ID" ]; then
   echo "ERROR: Failed to create goal 1" | tee -a "$LOG_DIR/summary.log"
 else
   echo "Goal 1: $GOAL1_ID" | tee -a "$LOG_DIR/summary.log"
-  $MOXEN run --goal "$GOAL1_ID" --yes --max-iterations 3 2>&1 | tee "$LOG_DIR/phase1.log"
+  $TAVORI run --goal "$GOAL1_ID" --yes --max-iterations 3 2>&1 | tee "$LOG_DIR/phase1.log"
   echo "Phase 1 exit: $?" | tee -a "$LOG_DIR/summary.log"
 fi
 
@@ -60,7 +60,7 @@ YAML
 echo "Created plugin at $PLUGIN_DIR" | tee -a "$LOG_DIR/summary.log"
 
 # Add goal with dimensions that should match the plugin
-GOAL2_OUTPUT=$($MOXEN goal add --title "improve-test-coverage" --dim "test_coverage:min:80" --dim "test_count:min:4000" 2>&1)
+GOAL2_OUTPUT=$($TAVORI goal add --title "improve-test-coverage" --dim "test_coverage:min:80" --dim "test_count:min:4000" 2>&1)
 echo "$GOAL2_OUTPUT" | tee "$LOG_DIR/phase2-goal-add.log"
 GOAL2_ID=$(echo "$GOAL2_OUTPUT" | grep "Goal ID:" | awk '{print $NF}')
 
@@ -68,7 +68,7 @@ if [ -z "$GOAL2_ID" ]; then
   echo "ERROR: Failed to create goal 2" | tee -a "$LOG_DIR/summary.log"
 else
   echo "Goal 2: $GOAL2_ID" | tee -a "$LOG_DIR/summary.log"
-  $MOXEN run --goal "$GOAL2_ID" --yes --max-iterations 2 2>&1 | tee "$LOG_DIR/phase2.log"
+  $TAVORI run --goal "$GOAL2_ID" --yes --max-iterations 2 2>&1 | tee "$LOG_DIR/phase2.log"
   echo "Phase 2 exit: $?" | tee -a "$LOG_DIR/summary.log"
 fi
 
@@ -79,4 +79,4 @@ echo "Logs: $LOG_DIR" | tee -a "$LOG_DIR/summary.log"
 
 # Show plugin list to verify plugin was detected
 echo "--- Plugin list ---" | tee -a "$LOG_DIR/summary.log"
-$MOXEN plugin list 2>&1 | tee -a "$LOG_DIR/summary.log"
+$TAVORI plugin list 2>&1 | tee -a "$LOG_DIR/summary.log"
