@@ -26,7 +26,7 @@ GOALS=(
   "Harden CLI UX around API/provider configuration: ensure error messages mention the correct env vars for OpenAI vs Anthropic vs Codex; add tests for missing/invalid provider config. Follow docs/design/provider spec."
   "Stability: make 'tavori run' resilient to adapter failures/timeouts (clear reporting, non-zero exits, no silent success). Add tests to cover adapter error propagation."
   "Docs/design alignment pass: pick one subsystem with drift (goal negotiation / observation / verification) and align implementation to docs/design. Add a regression test demonstrating the spec."
-  "Improve state integrity: detect and repair/avoid corrupted goal state files under ~/.moxen (e.g., partial writes). Add atomic write strategy or validation + recovery. Tests required."
+  "Improve state integrity: detect and repair/avoid corrupted goal state files under ~/.tavori (e.g., partial writes). Add atomic write strategy or validation + recovery. Tests required."
   "TUI reliability: ensure TUI start doesn't crash without optional dependencies/config and handles missing goals gracefully. Add tests or a smoke test harness."
   "Performance/ergonomics: reduce unnecessary LLM calls in one core path (e.g., observation dedup/context) while preserving correctness. Add a unit test proving fewer calls in a mocked scenario."
 )

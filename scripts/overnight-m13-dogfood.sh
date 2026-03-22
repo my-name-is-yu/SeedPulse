@@ -13,9 +13,9 @@ echo "=== M13 Dogfooding $(date) ===" | tee "$LOG_DIR/summary.log"
 # --- Cleanup leftover test plugin artifacts ---
 echo "--- Cleaning up test plugin artifacts ---" | tee -a "$LOG_DIR/summary.log"
 for plugin in existing-plugin my-plugin shell-plugin; do
-  if [ -d "$HOME/.moxen/plugins/$plugin" ]; then
+  if [ -d "$HOME/.tavori/plugins/$plugin" ]; then
     echo "Removing test artifact: $plugin" | tee -a "$LOG_DIR/summary.log"
-    rm -rf "$HOME/.moxen/plugins/$plugin"
+    rm -rf "$HOME/.tavori/plugins/$plugin"
   fi
 done
 
@@ -39,7 +39,7 @@ fi
 echo "--- Phase 2: Plugin matching ---" | tee -a "$LOG_DIR/summary.log"
 
 # Create a test data_source plugin with dimensions matching a goal
-PLUGIN_DIR="$HOME/.moxen/plugins/test-coverage-source"
+PLUGIN_DIR="$HOME/.tavori/plugins/test-coverage-source"
 mkdir -p "$PLUGIN_DIR"
 cat > "$PLUGIN_DIR/plugin.yaml" <<'YAML'
 name: test-coverage-source

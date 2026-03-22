@@ -1,8 +1,7 @@
 node_modules/
 dist/
 coverage-c8/
-.moxen/
-.moxen/
+.tavori/
 .claire/
 .claude/
 memory/

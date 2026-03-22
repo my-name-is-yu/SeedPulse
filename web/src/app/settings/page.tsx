@@ -126,7 +126,7 @@ function ProviderSection() {
         <>
           {!data.exists && (
             <p className="text-xs mb-3 px-3 py-2 rounded" style={{ color: 'var(--status-warning)', background: 'color-mix(in srgb, var(--status-warning) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--status-warning) 25%, transparent)' }}>
-              ~/.moxen/provider.json not found — showing defaults
+              ~/.tavori/provider.json not found — showing defaults
             </p>
           )}
           <FieldRow label="LLM Provider" value={cfg?.llm_provider ?? '—'} />
@@ -158,7 +158,7 @@ function PluginsSection() {
         <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>Loading…</p>
       ) : plugins.length === 0 ? (
         <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-          No plugins found in ~/.moxen/plugins/
+          No plugins found in ~/.tavori/plugins/
         </p>
       ) : (
         <table className="w-full text-sm border-collapse">
@@ -196,7 +196,7 @@ function SystemHealthSection() {
       <FieldRow label="Connection" value={<ConnectionDot connected={connected} />} />
       <FieldRow label="Node.js" value={typeof process !== 'undefined' ? process.version : '—'} />
       <FieldRow label="Tavori Version" value="0.1.0" />
-      <FieldRow label="Data Directory" value="~/.moxen/" />
+      <FieldRow label="Data Directory" value="~/.tavori/" />
       <FieldRow
         label="CoreLoop Status"
         value={<span style={{ color: 'var(--text-tertiary)' }}>n/a (not running in web mode)</span>}
