@@ -39,13 +39,10 @@ import {
   touchIndexEntry,
   archiveOldestLongTermEntries,
   storeLessonsLongTerm,
-  updateStatistics,
-  queryLessons,
-  queryCrossGoalLessons,
-  extractPatterns,
-  distillLessons,
-  validateCompressionQuality,
-} from "./memory-phases.js";
+} from "./memory-index.js";
+import { updateStatistics } from "./memory-stats.js";
+import { queryLessons, queryCrossGoalLessons } from "./memory-query.js";
+import { extractPatterns, distillLessons, validateCompressionQuality } from "./memory-distill.js";
 import {
   compressToLongTerm as _compressToLongTerm,
   compressAllRemainingToLongTerm as _compressAllRemainingToLongTerm,
@@ -642,23 +639,10 @@ export {
   extractPatterns,
   distillLessons,
   validateCompressionQuality,
-  updateStatistics,
-  storeLessonsLongTerm,
-  queryLessons,
-  queryCrossGoalLessons,
-  loadIndex,
-  saveIndex,
-  updateIndex,
-  removeFromIndex,
-  removeGoalFromIndex,
-  touchIndexEntry,
-  archiveOldestLongTermEntries,
-  initializeIndex,
-  mergeTaskStats,
-  mergeDimStats,
-  computeTrend,
-  computePeriod,
-} from "./memory-phases.js";
+} from "./memory-distill.js";
+export { updateStatistics, mergeTaskStats, mergeDimStats, computeTrend, computePeriod } from "./memory-stats.js";
+export { storeLessonsLongTerm, loadIndex, saveIndex, updateIndex, removeFromIndex, removeGoalFromIndex, touchIndexEntry, archiveOldestLongTermEntries, initializeIndex } from "./memory-index.js";
+export { queryLessons, queryCrossGoalLessons } from "./memory-query.js";
 
 export {
   atomicWriteAsync,

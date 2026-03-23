@@ -12,12 +12,8 @@ import type { IDriveScorer } from "./drive-score-adapter.js";
 import {
   readJsonFileAsync,
 } from "./memory-persistence.js";
-import {
-  loadIndex,
-  queryLessons,
-  queryCrossGoalLessons,
-  touchIndexEntry,
-} from "./memory-phases.js";
+import { loadIndex, touchIndexEntry } from "./memory-index.js";
+import { queryLessons, queryCrossGoalLessons } from "./memory-query.js";
 import { classifyTier, sortByTier, computeDynamicBudget, filterByTierBudget, llmClassifyTier } from "./memory-tier.js";
 
 // ─── Deps interface ───

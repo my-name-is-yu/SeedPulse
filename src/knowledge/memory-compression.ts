@@ -28,11 +28,13 @@ import {
   extractPatterns,
   distillLessons,
   validateCompressionQuality,
+} from "./memory-distill.js";
+import {
   storeLessonsLongTerm,
-  updateStatistics,
   removeFromIndex,
   archiveOldestLongTermEntries,
-} from "./memory-phases.js";
+} from "./memory-index.js";
+import { updateStatistics } from "./memory-stats.js";
 
 // ─── Deps interface ───
 

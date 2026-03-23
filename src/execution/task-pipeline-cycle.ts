@@ -5,7 +5,6 @@ import type { ILLMClient } from "../llm/llm-client.js";
 import type { KnowledgeManager } from "../knowledge/knowledge-manager.js";
 import type { EthicsGate } from "../traits/ethics-gate.js";
 import type { CapabilityDetector } from "../observation/capability-detector.js";
-import { TaskSchema, VerificationResultSchema } from "../types/task.js";
 import type { Task, VerificationResult } from "../types/task.js";
 import type { GapVector } from "../types/gap.js";
 import type { DriveContext } from "../types/drive.js";
@@ -15,6 +14,7 @@ import type { AgentTask, IAdapter } from "./adapter-layer.js";
 import { AdapterRegistry } from "./adapter-layer.js";
 import type { ObservationEngine, TaskObservationContext } from "../observation/observation-engine.js";
 import type { TaskCycleResult } from "./task-lifecycle.js";
+import { createSkippedTaskResult } from "./task-execution-types.js";
 import { PipelineExecutor } from "./pipeline-executor.js";
 import { runPreExecutionChecks } from "./task-approval.js";
 import { durationToMs } from "./task-executor.js";
@@ -91,9 +91,7 @@ export async function runPipelineTaskCycle(
   );
   if (task === null) {
     deps.logger?.warn("TaskLifecycle: task generation returned null (duplicate detected), skipping pipeline cycle");
-    const skippedTask = TaskSchema.parse({ id: "skipped", goal_id: goalId, target_dimensions: [], primary_dimension: targetDimension, work_description: "skipped (duplicate)", rationale: "", approach: "", success_criteria: [], scope_boundary: { in_scope: [], out_of_scope: [], blast_radius: "" }, constraints: [], created_at: new Date().toISOString() });
-    const skippedVerification = VerificationResultSchema.parse({ task_id: "skipped", verdict: "fail", confidence: 0, evidence: [], dimension_updates: [], timestamp: new Date().toISOString() });
-    return { task: skippedTask, verificationResult: skippedVerification, action: "discard" };
+    return createSkippedTaskResult(goalId, targetDimension);
   }
 
   // 3. Build AgentTask from Task (needed for observation and pipeline execution)

@@ -10,18 +10,7 @@ import type { TaskGroup } from "../types/index.js";
 import type { AgentTask } from "./adapter-layer.js";
 import type { PipelineExecutor } from "./pipeline-executor.js";
 import { reconcileResults } from "./result-reconciler.js";
-
-// ─── Helpers ───
-
-function convertToMs(duration: { value: number; unit: string }): number {
-  const multipliers: Record<string, number> = {
-    minutes: 60_000,
-    hours: 3_600_000,
-    days: 86_400_000,
-    weeks: 604_800_000,
-  };
-  return duration.value * (multipliers[duration.unit] ?? 60_000);
-}
+import { durationToMs } from "./task-executor.js";
 
 // ─── Result Types ───
 
@@ -206,7 +195,7 @@ export class ParallelExecutor {
     const agentTask: AgentTask = {
       prompt: subtask.work_description,
       timeout_ms: subtask.estimated_duration
-        ? convertToMs(subtask.estimated_duration)
+        ? durationToMs(subtask.estimated_duration)
         : 60_000,
       adapter_type: "default",
     };
