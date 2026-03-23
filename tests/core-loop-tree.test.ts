@@ -568,8 +568,12 @@ describe("CoreLoop tree mode (14C)", async () => {
 
     const { deps, mocks } = createTreeModeDeps(tmpDir, orchestratorMock);
 
-    const rootGoal = makeGoal({ id: "root-1", children_ids: [] });
+    // Root must have children so the flat-iteration fallback is skipped and
+    // selectNextNode is actually reached (returning null to signal completion).
+    const rootGoal = makeGoal({ id: "root-1", children_ids: ["node-id-1"] });
+    const nodeGoal = makeGoal({ id: "node-id-1", parent_id: "root-1" });
     await mocks.stateManager.saveGoal(rootGoal);
+    await mocks.stateManager.saveGoal(nodeGoal);
 
     const loop = new CoreLoop(deps, { treeMode: true, maxIterations: 10, delayBetweenLoopsMs: 0 });
     const result = await loop.run("root-1");
@@ -693,8 +697,12 @@ describe("CoreLoop tree mode (14C)", async () => {
     orchestratorMock.selectNextNode.mockReturnValue(null);
     const { deps, mocks } = createTreeModeDeps(tmpDir, orchestratorMock);
 
-    const rootGoal = makeGoal({ id: "root-1", children_ids: [] });
+    // Root must have children so the flat-iteration fallback is skipped and
+    // selectNextNode is actually reached (returning null to signal completion).
+    const rootGoal = makeGoal({ id: "root-1", children_ids: ["node-id-1"] });
+    const nodeGoal = makeGoal({ id: "node-id-1", parent_id: "root-1" });
     await mocks.stateManager.saveGoal(rootGoal);
+    await mocks.stateManager.saveGoal(nodeGoal);
 
     const loop = new CoreLoop(deps, { treeMode: true, delayBetweenLoopsMs: 0 });
     const iterResult = await loop.runTreeIteration("root-1", 0);

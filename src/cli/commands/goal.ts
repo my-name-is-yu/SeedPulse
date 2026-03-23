@@ -149,16 +149,36 @@ export async function cmdGoalList(
     if (goalDirs.length === 0) {
       console.log("No goals registered. Use `tavori goal add` to create one.");
     } else {
-      console.log(`Found ${goalDirs.length} goal(s):\n`);
+      const allGoals: Array<{ id: string; title: string; status: string; dimensions: number; isSubgoal: boolean }> = [];
       for (const goalId of goalDirs) {
         const goal = await stateManager.loadGoal(goalId);
         if (!goal) {
-          console.log(`[${goalId}] (could not load)`);
-          continue;
+          allGoals.push({ id: goalId, title: "(could not load)", status: "unknown", dimensions: 0, isSubgoal: false });
+        } else {
+          allGoals.push({
+            id: goalId,
+            title: goal.title,
+            status: goal.status,
+            dimensions: goal.dimensions.length,
+            isSubgoal: !!goal.parent_id,
+          });
         }
-        console.log(
-          `[${goalId}] status: ${goal.status} — ${goal.title} (dimensions: ${goal.dimensions.length})`
-        );
+      }
+
+      const rootGoals = allGoals.filter((g) => !g.isSubgoal);
+      const subgoalCount = allGoals.length - rootGoals.length;
+
+      if (rootGoals.length === 0) {
+        console.log("No root goals found.");
+      } else {
+        console.log(`Found ${rootGoals.length} root goal(s):\n`);
+        for (const g of rootGoals) {
+          console.log(`[${g.id}] status: ${g.status} — ${g.title} (dimensions: ${g.dimensions})`);
+        }
+      }
+
+      if (subgoalCount > 0) {
+        console.log(`\n(${subgoalCount} subgoal(s) hidden — use \`tavori goal show <id>\` for tree details)`);
       }
     }
   }
@@ -274,6 +294,20 @@ export async function cmdGoalShow(stateManager: StateManager, goalId: string): P
     console.log(`\nConstraints:`);
     for (const c of goal.constraints) {
       console.log(`  - ${c}`);
+    }
+  }
+
+  // Tree structure info
+  if (goal.parent_id) {
+    console.log(`\nParent:      ${goal.parent_id}`);
+  }
+  if (goal.node_type && goal.node_type !== "goal") {
+    console.log(`Node type:   ${goal.node_type}`);
+  }
+  if (goal.children_ids && goal.children_ids.length > 0) {
+    console.log(`Children:    ${goal.children_ids.length} subgoal(s)`);
+    for (const childId of goal.children_ids) {
+      console.log(`  - ${childId}`);
     }
   }
 

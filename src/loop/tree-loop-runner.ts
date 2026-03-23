@@ -31,6 +31,16 @@ export async function runTreeIteration(
     }
   }
 
+  // 0b. If goal still has no children after any decomposition attempt, fall back to
+  // flat iteration — tree mode cannot proceed without subgoals.
+  // We check this regardless of whether goalTreeManager was present, so that the
+  // no-goalTreeManager path (where decomposition was skipped) is also covered.
+  const rootGoalCheck = await deps.stateManager.loadGoal(rootId);
+  if (rootGoalCheck && rootGoalCheck.children_ids.length === 0) {
+    logger?.info("[TREE] Goal has no subgoals, falling back to flat iteration", { rootId });
+    return runOneIteration(rootId, loopIndex);
+  }
+
   // 1. Select next node to iterate
   const selectedNodeId = await orchestrator.selectNextNode(rootId);
 

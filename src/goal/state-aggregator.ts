@@ -124,9 +124,52 @@ export class StateAggregator {
     const aggregatedConfidence =
       childConfidences.length > 0 ? Math.min(...childConfidences) : 1.0;
 
+    const clampedGap = Math.min(1, Math.max(0, aggregatedGap));
+
+    // Persist aggregated progress back to the parent goal so that
+    // `tavori status --goal <id>` shows progress rather than "not yet measured".
+    if (childIds.length > 0) {
+      const freshParent = await this.stateManager.loadGoal(parentId);
+      if (freshParent !== null && freshParent.dimensions.length > 0) {
+        const now = new Date().toISOString();
+        const updatedDimensions = freshParent.dimensions.map((dim) => {
+          const t = dim.threshold;
+          // Only update numeric threshold dimensions
+          if (t.type === "present" || t.type === "match") return dim;
+
+          // Derive a synthetic current_value from the aggregated progress (1 - gap)
+          let syntheticValue: number;
+          if (t.type === "min") {
+            syntheticValue = t.value * (1 - clampedGap);
+          } else if (t.type === "max") {
+            // For max threshold: higher gap means current is further above target,
+            // but as a normalized progress indicator we map 0 gap → target value.
+            syntheticValue = t.value * (1 - clampedGap);
+          } else {
+            // range: use midpoint as reference
+            const mid = (t.low + t.high) / 2;
+            syntheticValue = mid * (1 - clampedGap);
+          }
+
+          return {
+            ...dim,
+            current_value: syntheticValue,
+            confidence: aggregatedConfidence,
+            last_updated: now,
+          };
+        });
+
+        await this.stateManager.saveGoal({
+          ...freshParent,
+          dimensions: updatedDimensions,
+          updated_at: now,
+        });
+      }
+    }
+
     return {
       parent_id: parentId,
-      aggregated_gap: Math.min(1, Math.max(0, aggregatedGap)),
+      aggregated_gap: clampedGap,
       aggregated_confidence: aggregatedConfidence,
       child_gaps: childGaps,
       child_completions: childCompletions,
