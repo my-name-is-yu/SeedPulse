@@ -142,9 +142,8 @@ export class StateAggregator {
           if (t.type === "min") {
             syntheticValue = t.value * (1 - clampedGap);
           } else if (t.type === "max") {
-            // For max threshold: higher gap means current is further above target,
-            // but as a normalized progress indicator we map 0 gap → target value.
-            syntheticValue = t.value * (1 - clampedGap);
+            // For max threshold: gap=0 means at/below cap (best=0), gap=1 means far above cap (worst)
+            syntheticValue = t.value * clampedGap;
           } else {
             // range: use midpoint as reference
             const mid = (t.low + t.high) / 2;
