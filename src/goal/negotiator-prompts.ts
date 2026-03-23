@@ -23,7 +23,7 @@ ${availableDataSources.map((ds) => `- "${ds.name}": ${ds.dimensions.join(", ")}`
       : "";
 
   const workspaceSection = workspaceContext
-    ? `\nWorkspace:\n${workspaceContext}\nDerive dimensions measurable from this codebase (e.g. "task_note_count" max:0 if TODOs exist).\n`
+    ? `\nWorkspace:\n${workspaceContext}\nDerive dimensions measurable from this codebase (e.g. "task_note_count" max:0 if task notes exist).\n`
     : "";
 
   return `${dataSourcesSection}Decompose this goal into measurable dimensions.

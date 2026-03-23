@@ -200,7 +200,10 @@ export async function cmdGoalShow(stateManager: StateManager, goalId: string): P
   if (goal.children_ids && goal.children_ids.length > 0) {
     console.log(`Children:    ${goal.children_ids.length} subgoal(s)`);
     for (const childId of goal.children_ids) {
-      console.log(`  - ${childId}`);
+      const shortId = childId.substring(0, 8);
+      const childGoal = await stateManager.loadGoal(childId);
+      const childTitle = childGoal ? childGoal.title : "(unknown)";
+      console.log(`  - ${shortId}... — ${childTitle}`);
     }
   }
 

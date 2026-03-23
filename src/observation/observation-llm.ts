@@ -298,8 +298,34 @@ export async function observeWithLLM(
   });
 
   if (!dryRun) {
-    await applyObservation(goalId, entry);
+    try {
+      await applyObservation(goalId, entry);
+    } catch (persistErr) {
+      // Persistence failed (e.g., dimension name mismatch in applyObservation).
+      // Wrap the error with the successfully-observed entry so callers can
+      // recover the LLM score rather than silently falling back to null.
+      throw new ObservationPersistenceError(
+        `Failed to persist LLM observation for dimension "${dimensionName}": ${persistErr instanceof Error ? persistErr.message : String(persistErr)}`,
+        entry,
+        persistErr instanceof Error ? persistErr : new Error(String(persistErr))
+      );
+    }
   }
 
   return entry;
+}
+
+/**
+ * Thrown when the LLM observation succeeded but persistence (applyObservation) failed.
+ * Carries the successfully-observed entry so callers can recover the value.
+ */
+export class ObservationPersistenceError extends Error {
+  constructor(
+    message: string,
+    public readonly entry: ObservationLogEntry,
+    public readonly cause: Error
+  ) {
+    super(message);
+    this.name = "ObservationPersistenceError";
+  }
 }

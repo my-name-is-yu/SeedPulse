@@ -24,7 +24,7 @@ import {
   loadOrEmptyObservationLog,
 } from "./observation-helpers.js";
 import type { ObservationEngineOptions, CrossValidationResult } from "./observation-helpers.js";
-import { observeWithLLM as llmObserve } from "./observation-llm.js";
+import { observeWithLLM as llmObserve, ObservationPersistenceError } from "./observation-llm.js";
 import {
   applyObservation as applyObservationFn,
   observeFromDataSource as observeFromDataSourceFn,
@@ -318,6 +318,32 @@ export class ObservationEngine {
           this.logger?.warn(
             `[ObservationEngine] LLM observation failed for dimension "${dim.name}": ${err instanceof Error ? err.message : String(err)}. Falling back to self_report.`
           );
+          // If persistence failed but LLM succeeded, recover the observed value
+          // so the self_report fallback uses the real score instead of null.
+          if (err instanceof ObservationPersistenceError) {
+            const recoveredValue = err.entry.extracted_value;
+            this.logger?.warn(
+              `[ObservationEngine] Recovering LLM-observed value=${recoveredValue} for dimension "${dim.name}" via self_report fallback.`
+            );
+            const recoveryEntry = createObservationEntry({
+              goalId,
+              dimensionName: dim.name,
+              layer: "self_report",
+              method,
+              trigger: "periodic",
+              rawResult: recoveredValue,
+              extractedValue:
+                typeof recoveredValue === "number" ||
+                typeof recoveredValue === "string" ||
+                typeof recoveredValue === "boolean" ||
+                recoveredValue === null
+                  ? (recoveredValue as number | string | boolean | null)
+                  : null,
+              confidence: err.entry.confidence,
+            });
+            await this.applyObservation(goalId, recoveryEntry);
+            continue;
+          }
         }
       } else if (this.dataSources.length > 0) {
         // DataSources exist but none match this dimension and no LLM client
@@ -326,7 +352,7 @@ export class ObservationEngine {
         );
       }
 
-      // 3. Fall back to self_report
+      // 3. Fall back to self_report (no LLM result available)
       const entry = createObservationEntry({
         goalId,
         dimensionName: dim.name,

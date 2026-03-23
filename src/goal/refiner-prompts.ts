@@ -32,6 +32,47 @@ export function sanitizeThresholdTypes(raw: string): string {
 }
 
 /**
+ * Sanitizes LLM-returned threshold_value when threshold_type is "present".
+ * When the LLM returns an object (e.g. `{"type":"present"}`) as the value for
+ * a present threshold, replace it with null so downstream Zod schemas accept it.
+ *
+ * Operates on the raw JSON string before parsing to avoid any type-safety issues
+ * with the un-parsed LLM output.
+ */
+export function sanitizeThresholdValues(raw: string): string {
+  // Find any "threshold_value": <object> that immediately follows a "present" threshold_type.
+  // Strategy: parse and re-serialize only the threshold_value fields for present dimensions.
+  // We use a two-pass approach on the raw string to avoid fragile regex on nested JSON.
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const sanitized = sanitizePresentThresholdValues(parsed);
+    return JSON.stringify(sanitized);
+  } catch {
+    // If JSON parsing fails, return as-is and let downstream parsers handle it.
+    return raw;
+  }
+}
+
+function sanitizePresentThresholdValues(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sanitizePresentThresholdValues);
+  }
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(record)) {
+      result[k] = sanitizePresentThresholdValues(v);
+    }
+    // If this object has threshold_type === "present" and threshold_value is an object, null it out.
+    if (result["threshold_type"] === "present" && typeof result["threshold_value"] === "object" && result["threshold_value"] !== null) {
+      result["threshold_value"] = null;
+    }
+    return result;
+  }
+  return value;
+}
+
+/**
  * Builds the leaf test prompt for the GoalRefiner.
  *
  * The returned prompt asks an LLM to evaluate whether the given goal is
@@ -75,10 +116,19 @@ Return JSON:
       "threshold_value": 80,
       "data_source": "shell",
       "observation_command": "npm test -- --coverage | grep Statements"
+    },
+    {
+      "name": "config_file",
+      "label": "Config File Present",
+      "threshold_type": "present",
+      "threshold_value": null,
+      "data_source": "file_existence",
+      "observation_command": "test -f config.json"
     }
   ],
   "reason": "Brief explanation"
 }
 
-When is_measurable is false, set "dimensions" to null.`;
+When is_measurable is false, set "dimensions" to null.
+For "present" threshold_type, always set "threshold_value" to null.`;
 }

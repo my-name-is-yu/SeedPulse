@@ -15,7 +15,8 @@ import type {
   ConcretenessScore,
 } from "../types/goal-tree.js";
 import { scoreConcreteness as _scoreConcreteness } from "./goal-tree-quality.js";
-import { sanitizeThresholdTypes } from "./refiner-prompts.js";
+import { sanitizeThresholdTypes, sanitizeThresholdValues } from "./refiner-prompts.js";
+import { buildThreshold } from "./goal-validation.js";
 
 // ─── LLM Response Schemas ───
 
@@ -136,10 +137,7 @@ function buildGoalFromSubgoalSpec(
     name: d.name,
     label: d.label,
     current_value: null,
-    threshold: {
-      type: d.threshold_type,
-      value: d.threshold_value ?? null,
-    },
+    threshold: buildThreshold(d.threshold_type, d.threshold_value),
     confidence: 0.5,
     observation_method: {
       type: "manual" as const,
@@ -414,7 +412,7 @@ export class GoalTreeManager {
         // Sanitize threshold_type values before schema validation --
         // LLMs sometimes return "exact", "scale", "qualitative" etc.
         const rawContent = subgoalResponse.content;
-        let sanitized = sanitizeThresholdTypes(rawContent);
+        let sanitized = sanitizeThresholdValues(sanitizeThresholdTypes(rawContent));
         // Sanitize hypothesis field: LLMs may use "title", "description", "goal", etc.
         let preprocessed: unknown;
         try {

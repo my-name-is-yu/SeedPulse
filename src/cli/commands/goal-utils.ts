@@ -195,7 +195,8 @@ export async function autoRegisterFileExistenceDataSources(
     const datasourcesDir = getDatasourcesDir(stateManager.getBaseDir());
     await fsp.mkdir(datasourcesDir, { recursive: true });
 
-    const id = `ds_auto_${Date.now()}`;
+    const dimKeys = Object.keys(dimensionMapping).sort().join("_");
+    const id = `ds_auto_${goalId}_${dimKeys}`;
     const config = {
       id,
       name: `auto:file_existence (${Object.values(dimensionMapping).join(", ")})`,
@@ -238,7 +239,7 @@ export async function autoRegisterShellDataSources(
     const datasourcesDir = getDatasourcesDir(stateManager.getBaseDir());
     await fsp.mkdir(datasourcesDir, { recursive: true });
 
-    const id = `ds_auto_shell_${Date.now()}`;
+    const id = `ds_auto_shell_${goalId}_${Object.keys(matchedCommands).sort().join("_")}`;
 
     // Serialize commands in the format ShellDataSourceAdapter expects:
     // Record<dimensionName, ShellCommandSpec>

@@ -26,7 +26,7 @@ import type {
   LeafDimension,
   RefineResult,
 } from "../types/goal-refiner.js";
-import { buildLeafTestPrompt, sanitizeThresholdTypes } from "./refiner-prompts.js";
+import { buildLeafTestPrompt, sanitizeThresholdTypes, sanitizeThresholdValues } from "./refiner-prompts.js";
 import { evaluateQualitatively, DEFAULT_TIME_HORIZON_DAYS } from "./negotiator-steps.js";
 
 // ─── Conversion helpers ───
@@ -232,7 +232,7 @@ export class GoalRefiner {
       );
       tokensUsed += (response.usage?.input_tokens ?? 0) + (response.usage?.output_tokens ?? 1000);
 
-      const sanitized = sanitizeThresholdTypes(response.content);
+      const sanitized = sanitizeThresholdValues(sanitizeThresholdTypes(response.content));
       const parsed = LeafTestResultSchema.safeParse(JSON.parse(sanitized));
       if (!parsed.success) {
         console.error("[GoalRefiner] LeafTestResult parse error:", parsed.error.message);
@@ -291,16 +291,7 @@ export class GoalRefiner {
       });
     } catch (err) {
       console.error("[GoalRefiner] decomposeGoal failed:", err);
-      // Fallback: force leaf
-      const forcedLeaf = await this._forceLeaf(goal, now);
-      return {
-        goal: forcedLeaf,
-        leaf: true,
-        children: null,
-        feasibility: null,
-        tokensUsed,
-        reason: `decomposition failed: ${String(err)}`,
-      };
+      throw err;
     }
 
     // Reload goal after decomposition (children_ids may have been updated)
