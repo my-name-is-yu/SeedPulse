@@ -62,7 +62,7 @@ export interface CodexLLMClientConfig {
  * Routes all Tavori internal LLM calls through the Codex CLI, which uses
  * the ChatGPT subscription (no separate API key needed).
  *
- * Uses `codex exec --ephemeral --full-auto -o <tmpfile> "PROMPT"` per call.
+ * Uses `codex exec -s danger-full-access -o <tmpfile> "PROMPT"` per call.
  * The -o flag writes the final response to a temp file for clean output.
  * Usage stats are not available from the CLI and will always be 0.
  *
@@ -120,7 +120,7 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
   }
 
   /**
-   * Spawn `codex exec --ephemeral --full-auto [-o <tmpfile>] [--model <model>] "PROMPT"`
+   * Spawn `codex exec -s danger-full-access [-o <tmpfile>] [--model <model>] "PROMPT"`
    * and return the response content read from the temp output file.
    */
   private async _spawnCodex(prompt: string, model?: string): Promise<string> {
@@ -130,10 +130,10 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
 
     return new Promise((resolve, reject) => {
 
-      // Build spawn args: exec --ephemeral --full-auto -o <tmpfile> [--model <model>] -
+      // Build spawn args: exec -s danger-full-access -o <tmpfile> [--model <model>] -
       // Prompt is sent via stdin (using "-" as positional arg) to avoid arg length limits.
       // --path is not supported by codex-cli 0.114.0+; use cwd instead (see src/adapters/openai-codex.ts)
-      const spawnArgs: string[] = ["exec", "--ephemeral", "--full-auto", "-o", tmpFile];
+      const spawnArgs: string[] = ["exec", "-s", "danger-full-access", "-o", tmpFile];
 
       if (model) {
         spawnArgs.push("--model", model);
