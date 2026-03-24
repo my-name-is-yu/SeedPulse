@@ -264,6 +264,25 @@ export function aggregateGaps(
   }
 }
 
+// ─── Convenience Helper ───
+
+/**
+ * Compute normalized progress [0,1] for a dimension.
+ * Returns null if value or threshold is missing.
+ *
+ * Progress = 1 - clamp(normalizedGap, 0, 1), where normalizedGap is derived
+ * from the raw gap pipeline (computeRawGap → normalizeGap).
+ */
+export function dimensionProgress(
+  currentValue: number | string | boolean | null | undefined,
+  threshold: Threshold | null | undefined
+): number | null {
+  if (currentValue === null || currentValue === undefined || !threshold) return null;
+  const rawGap = computeRawGap(currentValue, threshold);
+  const normalizedGap = normalizeGap(rawGap, threshold, currentValue);
+  return 1 - Math.max(0, Math.min(1, normalizedGap));
+}
+
 // ─── Helpers ───
 
 function toNumber(value: number | string | boolean | null): number {
