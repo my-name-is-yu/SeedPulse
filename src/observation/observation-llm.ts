@@ -207,9 +207,11 @@ export async function observeWithLLM(
   }
 
   // P0: Score-evidence consistency check (§4.3)
-  // If no evidence (no context, no git diff), LLM score > 0.0 is unreliable
+  // If no evidence (no context, no git diff), LLM score > 0.0 is unreliable.
+  // Skip this check in dryRun (cross-validation) mode — the caller needs the
+  // raw LLM score to compare against the mechanical value.
   let score = parsed.score;
-  if (!hasContext && score > 0.0) {
+  if (!hasContext && score > 0.0 && !dryRun) {
     logger?.warn(
       `score overridden to 0.0 (no evidence available, LLM returned ${score})`
     );
