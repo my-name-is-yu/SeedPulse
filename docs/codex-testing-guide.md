@@ -47,11 +47,12 @@ export OPENAI_API_KEY=sk-...
 ### Optional
 
 ```bash
-# Model to use (default: gpt-4o)
-export OPENAI_MODEL=gpt-4o          # default
-export OPENAI_MODEL=gpt-4o-mini     # lower cost (recommended for ChatGPT Plus $20 plan)
+# Model to use (default: gpt-5.4-mini)
+export OPENAI_MODEL=gpt-5.4-mini    # default (recommended)
+export OPENAI_MODEL=gpt-4.1         # higher-capability model
 export OPENAI_MODEL=o3              # high-performance reasoning model
 export OPENAI_MODEL=o4-mini         # reasoning model (lightweight)
+# NOTE: gpt-4o-mini is NOT compatible with the openai_codex_cli adapter — use gpt-5.4-mini instead
 
 # When using Azure OpenAI or a proxy
 export OPENAI_BASE_URL=https://<your-endpoint>.openai.azure.com/
@@ -67,7 +68,7 @@ Create a `.env` file at the project root (**confirm it is in .gitignore**):
 # .env
 TAVORI_LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxx
-OPENAI_MODEL=gpt-4o
+OPENAI_MODEL=gpt-5.4-mini
 
 # For switching to Anthropic (see below)
 # ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxx
@@ -241,7 +242,7 @@ You can switch providers simply by changing environment variables.
 ```bash
 export TAVORI_LLM_PROVIDER=openai
 export OPENAI_API_KEY=sk-...
-# OPENAI_MODEL=gpt-4o  # omit to use default
+# OPENAI_MODEL=gpt-5.4-mini  # omit to use default
 ```
 
 ### Switch Back to Anthropic (Default)
@@ -259,7 +260,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 # --- OpenAI ---
 TAVORI_LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxx
-OPENAI_MODEL=gpt-4o
+OPENAI_MODEL=gpt-5.4-mini
 
 # --- Anthropic (default) ---
 # TAVORI_LLM_PROVIDER=

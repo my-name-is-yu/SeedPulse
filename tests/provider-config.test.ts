@@ -368,6 +368,19 @@ describe("loadProviderConfig", () => {
     expect(config.api_key).toBe("sk-test");
   });
 
+  it("auto-corrects gpt-4o-mini to gpt-5.4-mini when adapter is openai_codex_cli", async () => {
+    process.env["OPENAI_MODEL"] = "gpt-4o-mini";
+    process.env["OPENAI_API_KEY"] = "sk-test";
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const config = await loadProviderConfig();
+
+    expect(config.model).toBe("gpt-5.4-mini");
+    expect(config.adapter).toBe("openai_codex_cli");
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('not compatible with adapter "openai_codex_cli"'));
+    warnSpy.mockRestore();
+  });
+
   it("OPENAI_API_KEY env var overrides file api_key for openai provider", async () => {
     mockAccess.mockResolvedValue(undefined);
     mockReadFile.mockResolvedValue(JSON.stringify({
