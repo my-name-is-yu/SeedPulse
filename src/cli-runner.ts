@@ -43,6 +43,7 @@ import {
   cmdDatasourceAdd,
   cmdDatasourceList,
   cmdDatasourceRemove,
+  cmdDatasourceDedup,
   cmdCapabilityList,
   cmdCapabilityRemove,
 } from "./cli/commands/config.js";
@@ -289,7 +290,7 @@ export class CLIRunner {
       const dsSubcommand = argv[1];
 
       if (!dsSubcommand) {
-        logger.error("Error: datasource subcommand required. Available: datasource add, datasource list, datasource remove");
+        logger.error("Error: datasource subcommand required. Available: datasource add, datasource list, datasource remove, datasource dedup");
         return 1;
       }
 
@@ -305,8 +306,12 @@ export class CLIRunner {
         return cmdDatasourceRemove(this.stateManager, argv.slice(2));
       }
 
+      if (dsSubcommand === "dedup") {
+        return cmdDatasourceDedup(this.stateManager);
+      }
+
       logger.error(`Unknown datasource subcommand: "${dsSubcommand}"`);
-      logger.error("Available: datasource add, datasource list, datasource remove");
+      logger.error("Available: datasource add, datasource list, datasource remove, datasource dedup");
       return 1;
     }
 

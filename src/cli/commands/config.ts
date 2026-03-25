@@ -8,6 +8,7 @@ import { writeJsonFile, readJsonFile } from "../../utils/json-io.js";
 
 import { StateManager } from "../../state-manager.js";
 import { CharacterConfigManager } from "../../traits/character-config.js";
+
 import { loadProviderConfig, saveProviderConfig } from "../../llm/provider-config.js";
 import type { ProviderConfig } from "../../llm/provider-config.js";
 import { buildLLMClient } from "../../llm/provider-factory.js";
@@ -368,6 +369,78 @@ export async function cmdDatasourceRemove(
   await fsp.unlink(configPath);
   console.log(`Data source "${id}" removed.`);
 
+  return 0;
+}
+
+export async function cmdDatasourceDedup(stateManager: StateManager): Promise<number> {
+  const datasourcesDir = getDatasourcesDir(stateManager.getBaseDir());
+
+  let entries: string[];
+  try {
+    entries = await fsp.readdir(datasourcesDir);
+  } catch {
+    console.log("No datasources directory found. Nothing to deduplicate.");
+    return 0;
+  }
+
+  const jsonFiles = entries.filter((e) => e.endsWith(".json")).sort();
+  if (jsonFiles.length === 0) {
+    console.log("No datasources found. Nothing to deduplicate.");
+    return 0;
+  }
+
+  // Load configs with their filenames
+  const configs: Array<{ file: string; cfg: Record<string, unknown> }> = [];
+  for (const file of jsonFiles) {
+    try {
+      const raw = await fsp.readFile(path.join(datasourcesDir, file), "utf-8");
+      configs.push({ file, cfg: JSON.parse(raw) as Record<string, unknown> });
+    } catch {
+      // Skip unreadable files
+    }
+  }
+
+  // Build dedup key: type + sorted dimension names
+  function dedupKey(cfg: Record<string, unknown>): string {
+    const type = (cfg["type"] as string | undefined) ?? "unknown";
+    let dims: string[] = [];
+    if (type === "shell") {
+      const commands = (cfg["connection"] as Record<string, unknown> | undefined)?.["commands"];
+      dims = commands ? Object.keys(commands as Record<string, unknown>).sort() : [];
+    } else if (type === "file_existence") {
+      const dimMapping = cfg["dimension_mapping"];
+      dims = dimMapping ? Object.keys(dimMapping as Record<string, unknown>).sort() : [];
+    }
+    return `${type}::${dims.join(",")}`;
+  }
+
+  // Group by dedup key; first entry (oldest by sorted filename) is the keeper
+  const seen = new Map<string, string>(); // key → first filename
+  const toRemove: string[] = [];
+
+  for (const { file, cfg } of configs) {
+    const key = dedupKey(cfg);
+    if (seen.has(key)) {
+      toRemove.push(file);
+    } else {
+      seen.set(key, file);
+    }
+  }
+
+  if (toRemove.length === 0) {
+    console.log("No duplicate datasources found.");
+    return 0;
+  }
+
+  for (const file of toRemove) {
+    try {
+      await fsp.unlink(path.join(datasourcesDir, file));
+    } catch (err) {
+      getCliLogger().error(formatOperationError(`remove duplicate datasource "${file}"`, err));
+    }
+  }
+
+  console.log(`Removed ${toRemove.length} duplicate datasource(s).`);
   return 0;
 }
 

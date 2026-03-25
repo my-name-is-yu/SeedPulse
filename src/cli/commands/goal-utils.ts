@@ -132,7 +132,7 @@ interface DatasourceConfig {
  * Load all existing datasource configs from the datasources directory.
  * Returns an empty array if the directory does not exist or cannot be read.
  */
-async function loadExistingDatasources(datasourcesDir: string): Promise<DatasourceConfig[]> {
+export async function loadExistingDatasources(datasourcesDir: string): Promise<DatasourceConfig[]> {
   let entries: string[];
   try {
     entries = await fsp.readdir(datasourcesDir);

@@ -17,6 +17,7 @@ import {
   autoRegisterFileExistenceDataSources,
   autoRegisterShellDataSources,
 } from "./goal-utils.js";
+import { cmdDatasourceDedup } from "./config.js";
 import type { RefineResult } from "../../types/goal-refiner.js";
 
 // ─── Display helpers ───
@@ -371,6 +372,9 @@ export async function cmdCleanup(stateManager: StateManager): Promise<number> {
     }
     console.log("(These can be removed manually from ~/.seedpulse/reports/)");
   }
+
+  // Deduplicate datasources
+  await cmdDatasourceDedup(stateManager);
 
   return 0;
 }
