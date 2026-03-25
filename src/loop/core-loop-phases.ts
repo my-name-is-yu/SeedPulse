@@ -67,6 +67,48 @@ export async function loadGoalWithAggregation(
   return goal;
 }
 
+// ─── Phase 1b: Auto-decompose ───
+
+/**
+ * Automatically decompose an abstract goal into sub-goals using
+ * TreeLoopOrchestrator.ensureGoalRefined(). Skipped when disabled,
+ * when the goal already has children, or when the goal is a leaf.
+ * Specificity checks are delegated to ensureGoalRefined internally.
+ */
+export async function phaseAutoDecompose(
+  goalId: string,
+  goal: Goal,
+  deps: CoreLoopDeps,
+  config: ResolvedLoopConfig,
+  logger: Logger | undefined
+): Promise<void> {
+  if (config.autoDecompose === false) return;
+  if (!deps.treeLoopOrchestrator) return;
+
+  if (goal.children_ids.length > 0) {
+    logger?.debug("[CoreLoop] phaseAutoDecompose: skipped — goal already has children", { goalId });
+    return;
+  }
+
+  if (goal.node_type === "leaf") {
+    logger?.debug("[CoreLoop] phaseAutoDecompose: skipped — goal is leaf", { goalId });
+    return;
+  }
+
+  logger?.info("[CoreLoop] phaseAutoDecompose: decomposing abstract goal", { goalId });
+  try {
+    await deps.treeLoopOrchestrator.ensureGoalRefined(goalId);
+  } catch (err) {
+    logger?.warn("[CoreLoop] phaseAutoDecompose: ensureGoalRefined failed (non-fatal)", {
+      goalId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
+
+  logger?.info("[CoreLoop] phaseAutoDecompose: decomposition complete", { goalId });
+}
+
 // ─── Phase 2 ───
 
 /** Run observation engine, reload goal after observation.

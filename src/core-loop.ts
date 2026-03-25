@@ -25,6 +25,7 @@ import {
   observeAndReload,
   calculateGapOrComplete,
   scoreDrivesAndCheckKnowledge,
+  phaseAutoDecompose,
   type PhaseCtx,
 } from "./loop/core-loop-phases.js";
 import {
@@ -65,6 +66,7 @@ const DEFAULT_CONFIG: Required<Omit<LoopConfig, "iterationBudget">> = {
   autoArchive: false,
   dryRun: false,
   maxConsecutiveSkips: 5,
+  autoDecompose: true,
 };
 
 // ─── CoreLoop ───
@@ -85,6 +87,8 @@ export class CoreLoop {
   /** Optional StateDiffCalculator for loop-skip optimization. */
   private readonly stateDiff?: StateDiffCalculator;
   private stateDiffState = new Map<string, { previousSnapshot: IterationSnapshot | null; consecutiveSkips: number }>();
+  /** Tracks goals that have already been through auto-decompose this run. */
+  private decomposedGoals = new Set<string>();
 
   constructor(deps: CoreLoopDeps, config?: LoopConfig, stateDiff?: StateDiffCalculator) {
     this.deps = deps;
@@ -108,6 +112,8 @@ export class CoreLoop {
     this.stopped = false;
     // Reset state diff tracking for each run (snapshots are in-memory only)
     this.stateDiffState.clear();
+    // Reset auto-decompose tracking for each run
+    this.decomposedGoals.clear();
 
     // Load and validate goal
     const goal = await this.deps.stateManager.loadGoal(goalId);
@@ -327,6 +333,11 @@ export class CoreLoop {
     const loadedGoal = await loadGoalWithAggregation(ctx, goalId, result, startTime);
     if (!loadedGoal) return result;
     let goal = loadedGoal;
+
+    if (!this.decomposedGoals.has(goalId)) {
+      this.decomposedGoals.add(goalId);
+      await phaseAutoDecompose(goalId, goal, this.deps, this.config, this.logger);
+    }
 
     // 2. Observe + reload
     goal = await observeAndReload(ctx, goalId, goal, loopIndex);

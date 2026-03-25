@@ -117,6 +117,12 @@ export interface LoopConfig {
    */
   maxConsecutiveSkips?: number;
   /**
+   * When true (default), automatically decompose an abstract goal into sub-goals
+   * using TreeLoopOrchestrator.ensureGoalRefined() before the first iteration.
+   * Set to false to disable auto-decomposition.
+   */
+  autoDecompose?: boolean;
+  /**
    * Shared iteration budget for parent-child agent trees.
    * When set, all iterations (including child node iterations in tree mode) consume
    * from this budget. Prevents runaway recursion across hierarchical agent invocations.
