@@ -86,6 +86,17 @@ const DEFAULT_PROVIDER_CONFIG: ProviderConfig = {
 // Track whether we've already warned about provider config issues in this process
 let _warnedOnce = false;
 
+// ─── Helpers ───
+
+/** Default model for a given provider. Single source of truth. */
+function defaultModelForProvider(provider: ProviderConfig["provider"]): string {
+  switch (provider) {
+    case "anthropic": return "claude-sonnet-4-6";
+    case "ollama": return "qwen3:4b";
+    default: return "gpt-5.4-mini";
+  }
+}
+
 // ─── Migration ───
 
 /**
@@ -106,19 +117,19 @@ export function migrateProviderConfig(old: LegacyProviderConfig): ProviderConfig
   let model: string;
   switch (old.llm_provider) {
     case "codex":
-      model = old.codex?.model ?? old.openai?.model ?? "gpt-5.4-mini";
+      model = old.codex?.model ?? old.openai?.model ?? defaultModelForProvider(provider);
       break;
     case "openai":
-      model = old.openai?.model ?? "gpt-5.4-mini";
+      model = old.openai?.model ?? defaultModelForProvider(provider);
       break;
     case "anthropic":
-      model = old.anthropic?.model ?? "claude-sonnet-4-6";
+      model = old.anthropic?.model ?? defaultModelForProvider(provider);
       break;
     case "ollama":
-      model = old.ollama?.model ?? "qwen3:4b";
+      model = old.ollama?.model ?? defaultModelForProvider(provider);
       break;
     default:
-      model = "gpt-5.4-mini";
+      model = defaultModelForProvider(provider);
   }
 
   const adapter: ProviderConfig["adapter"] = old.default_adapter ?? "openai_codex_cli";
@@ -233,12 +244,7 @@ function resolveModel(
     if (m) return m;
   }
 
-  // Defaults per provider
-  switch (provider) {
-    case "anthropic": return "claude-sonnet-4-6";
-    case "ollama": return "qwen3:4b";
-    default: return "gpt-5.4-mini";
-  }
+  return defaultModelForProvider(provider);
 }
 
 function resolveApiKey(
@@ -310,7 +316,7 @@ export async function loadProviderConfig(): Promise<ProviderConfig> {
   // Auto-correct model-adapter incompatibility (e.g. OPENAI_MODEL=gpt-4o-mini with openai_codex_cli)
   const registryEntry = MODEL_REGISTRY[model];
   if (registryEntry && !registryEntry.adapters.includes(adapter)) {
-    const fallback = provider === "anthropic" ? "claude-sonnet-4-6" : provider === "ollama" ? "qwen3:4b" : "gpt-5.4-mini";
+    const fallback = defaultModelForProvider(provider);
     console.warn(
       `[provider-config] Model "${model}" is not compatible with adapter "${adapter}". Falling back to "${fallback}".`
     );
