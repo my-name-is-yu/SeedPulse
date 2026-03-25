@@ -1,5 +1,17 @@
 // ─── CLI Shared Utilities ───
 
+export async function promptYesNo(question: string): Promise<boolean> {
+  const readline = await import("node:readline");
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise<boolean>((resolve) => {
+    process.stdout.write(question);
+    rl.once("line", (answer) => {
+      rl.close();
+      resolve(answer.trim().toLowerCase() === "y");
+    });
+  });
+}
+
 export function formatOperationError(operation: string, err: unknown): string {
   if (err instanceof Error) {
     return `Operation "${operation}" failed. Original error: ${err.name}: ${err.message}`;

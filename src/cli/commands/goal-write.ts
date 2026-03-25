@@ -169,7 +169,6 @@ async function cmdGoalAddLegacyNegotiate(
   opts: { deadline?: string; constraints?: string[]; yes?: boolean }
 ): Promise<number> {
   const { gatherNegotiationContext } = await import("../../goal/goal-negotiator.js");
-  const readline = await import("node:readline");
 
   console.log(`Negotiating goal (legacy): "${description}"`);
   if (opts.deadline) console.log(`Deadline: ${opts.deadline}`);
@@ -198,17 +197,8 @@ async function cmdGoalAddLegacyNegotiate(
         console.log("\n--- Auto-accepted counter-proposal (--yes) ---");
         accepted = true;
       } else {
-        accepted = await new Promise<boolean>((resolve) => {
-          const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout,
-          });
-          process.stdout.write("\nAccept this counter-proposal and register the goal? [y/N] ");
-          rl.once("line", (answer) => {
-            rl?.close();
-            resolve(answer.trim().toLowerCase() === "y");
-          });
-        });
+        const { promptYesNo } = await import("../utils.js");
+        accepted = await promptYesNo("\nAccept this counter-proposal and register the goal? [y/N] ");
       }
 
       if (!accepted) {

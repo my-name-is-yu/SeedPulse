@@ -82,6 +82,49 @@ export async function dispatchGoalCommand(
     const yes = globalYes || (addValues.yes ?? false);
     const rawDimensions = addValues.dim ?? [];
 
+    // Auto-infer mode: title provided, no --dim, no --negotiate
+    const inferTitle = addValues.title || description;
+    if (inferTitle && rawDimensions.length === 0 && !addValues.negotiate) {
+      const { buildLLMClient } = await import("../../llm/provider-factory.js");
+      const { inferDimensionsFromTitle, formatInferredDimensions } = await import("./goal-infer.js");
+
+      let llmClient;
+      try {
+        llmClient = await buildLLMClient();
+      } catch {
+        // No LLM configured — fall through to refine mode
+        llmClient = null;
+      }
+
+      if (llmClient) {
+        const inferred = await inferDimensionsFromTitle(inferTitle, llmClient);
+
+        if (inferred.length > 0) {
+          console.log("\n--- Inferred dimensions ---");
+          console.log(formatInferredDimensions(inferred));
+
+          let accepted = yes;
+          if (!yes) {
+            const { promptYesNo } = await import("../utils.js");
+            accepted = await promptYesNo("\nAccept these dimensions? [y/N] ");
+          } else {
+            console.log("--- Auto-accepted (--yes) ---");
+          }
+
+          if (accepted) {
+            const rawDims = inferred.map((d) => `${d.name}:${d.type}:${d.value}`);
+            return await cmdGoalAddRaw(stateManager, {
+              title: inferTitle,
+              description: inferTitle,
+              rawDimensions: rawDims,
+              parent_id: addValues.parent,
+            });
+          }
+          // If rejected, fall through to refine mode
+        }
+      }
+    }
+
     // Raw mode: --dim provided and --negotiate not set
     if (rawDimensions.length > 0 && !addValues.negotiate) {
       const title = addValues.title || description;
