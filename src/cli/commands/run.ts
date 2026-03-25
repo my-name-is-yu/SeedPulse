@@ -1,18 +1,21 @@
 // ─── seedpulse run command ───
 
 import * as readline from "node:readline";
-import { getLogsDir } from "../../utils/paths.js";
 
 import { StateManager } from "../../state-manager.js";
 import { CharacterConfigManager } from "../../traits/character-config.js";
 import { ensureProviderConfig } from "../ensure-api-key.js";
-import { Logger } from "../../runtime/logger.js";
 import type { LoopConfig } from "../../core-loop.js";
-import type { ProgressEvent } from "../../core-loop.js";
 import type { Task } from "../../types/task.js";
 import { buildDeps } from "../setup.js";
 import { formatOperationError } from "../utils.js";
 import { getCliLogger } from "../cli-logger.js";
+import {
+  buildAutoApprovalFn,
+  buildLoopLogger,
+  buildProgressHandler,
+  runLoopWithSignals,
+} from "../utils/loop-runner.js";
 
 function buildApprovalFn(rl: readline.Interface): (task: Task) => Promise<boolean> {
   return (task: Task): Promise<boolean> => {
@@ -54,52 +57,10 @@ export async function cmdRun(
         output: process.stdout,
       });
 
-  const approvalFn = autoApprove
-    ? async (task: Task) => {
-        console.log(`\n--- Auto-approved (--yes) ---`);
-        console.log(`Task: ${task.work_description.split("\n")[0]}`);
-        return true;
-      }
-    : buildApprovalFn(rl!);
+  const approvalFn = autoApprove ? buildAutoApprovalFn() : buildApprovalFn(rl!);
+  const logger = buildLoopLogger();
+  const onProgress = buildProgressHandler();
 
-  const logger = new Logger({
-    dir: getLogsDir(),
-    level: "debug",
-    consoleOutput: false,
-  });
-
-  let lastIterationLogged = -1;
-  const onProgress = (event: ProgressEvent): void => {
-    const prefix = `[${event.iteration}/${event.maxIterations}]`;
-    if (event.phase === "Observing...") {
-      if (event.iteration !== lastIterationLogged) {
-        lastIterationLogged = event.iteration;
-        const gapStr = event.gap !== undefined ? ` gap=${event.gap.toFixed(2)}` : "";
-        process.stdout.write(`${prefix} Observing...${gapStr}\n`);
-      }
-    } else if (event.phase === "Generating task...") {
-      const gapStr = event.gap !== undefined ? ` gap=${event.gap.toFixed(2)}` : "";
-      const confStr = event.confidence !== undefined ? ` confidence=${Math.round(event.confidence * 100)}%` : "";
-      process.stdout.write(`${prefix} Generating task...${gapStr}${confStr}\n`);
-    } else if (event.phase === "Skipped") {
-      const reason = event.skipReason ?? "unknown";
-      process.stdout.write(`${prefix} Skipped — ${reason.replace(/_/g, " ")}\n`);
-    } else if (event.phase === "Executing task...") {
-      if (event.taskDescription) {
-        process.stdout.write(`${prefix} Executing task: "${event.taskDescription}"\n`);
-      } else {
-        process.stdout.write(`${prefix} Executing task...\n`);
-      }
-    } else if (event.phase === "Verifying result...") {
-      if (event.taskDescription) {
-        process.stdout.write(`${prefix} Verifying: "${event.taskDescription}"\n`);
-      } else {
-        process.stdout.write(`${prefix} Verifying result...\n`);
-      }
-    } else if (event.phase === "Skipped (no state change)") {
-      process.stdout.write(`${prefix} Skipped (no state change detected)\n`);
-    }
-  };
   let deps: Awaited<ReturnType<typeof buildDeps>>;
   try {
     deps = await buildDeps(stateManager, characterConfigManager, loopConfig, approvalFn, logger, onProgress);
@@ -128,35 +89,24 @@ export async function cmdRun(
   }
   console.log("Press Ctrl+C to stop.\n");
 
-  const shutdown = () => {
-    console.log("\nStopping loop...");
-    coreLoop.stop();
-  };
-  process.once("SIGINT", shutdown);
-  process.once("SIGTERM", shutdown);
-
   if (activeCoreLoopRef) {
     activeCoreLoopRef.value = coreLoop;
   }
 
   let result: Awaited<ReturnType<typeof coreLoop.run>>;
   try {
-    result = await coreLoop.run(goalId);
+    result = await runLoopWithSignals(coreLoop, goalId);
   } catch (err) {
     logger.error(formatOperationError(`run core loop for goal "${goalId}"`, err));
     logger.error(`Hint: Check ~/.seedpulse/logs/ for details or re-run with DEBUG=1 for stack traces.`);
     if (verbose || process.env.DEBUG) {
       logger.error(err instanceof Error ? err.stack ?? String(err) : String(err));
     }
-    process.off("SIGINT", shutdown);
-    process.off("SIGTERM", shutdown);
     if (activeCoreLoopRef) activeCoreLoopRef.value = null;
     rl?.close();
     return 1;
   }
 
-  process.off("SIGINT", shutdown);
-  process.off("SIGTERM", shutdown);
   if (activeCoreLoopRef) activeCoreLoopRef.value = null;
   rl?.close();
 

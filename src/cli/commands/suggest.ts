@@ -16,6 +16,12 @@ import {
   generateSuggestOutput,
   gatherProjectContext,
 } from "./suggest-normalizer.js";
+import {
+  buildAutoApprovalFn,
+  buildLoopLogger,
+  buildProgressHandler,
+  runLoopWithSignals,
+} from "../utils/loop-runner.js";
 
 // ─── Shared setup helper ───
 
@@ -238,13 +244,30 @@ export async function cmdImprove(
   // Run the loop if --auto or --yes
   if (values.auto || values.yes) {
     console.log(`[SeedPulse Improve] Starting improvement loop for goal ${goal.id}...`);
+    const loopLogger = buildLoopLogger();
+    const loopDeps = await buildDeps(
+      stateManager,
+      characterConfigManager,
+      undefined,
+      buildAutoApprovalFn(),
+      loopLogger,
+      buildProgressHandler()
+    );
     try {
-      await deps.coreLoop.run(goal.id);
+      const result = await runLoopWithSignals(loopDeps.coreLoop, goal.id);
+      console.log(`[SeedPulse Improve] Loop completed for goal ${goal.id}`);
+      if (result.finalStatus === "stalled") {
+        logger.error("Improvement loop stalled. No further progress detected.");
+        return 2;
+      }
+      if (result.finalStatus === "error") {
+        logger.error("Improvement loop ended with an error.");
+        return 1;
+      }
     } catch (err) {
       logger.error(formatOperationError(`run improvement loop for goal "${goal.id}"`, err));
       return 1;
     }
-    console.log(`[SeedPulse Improve] Loop completed for goal ${goal.id}`);
   } else {
     console.log(`Goal created. Run with: seedpulse run --goal ${goal.id}`);
   }
