@@ -17,11 +17,9 @@ import { formatOperationError, printCharacterConfig } from "../utils.js";
 import { getCliLogger } from "../cli-logger.js";
 
 function maskSecrets(config: ProviderConfig): ProviderConfig {
-  const mask = (val: string | undefined): string | undefined =>
-    val && val.length > 8 ? val.slice(0, 4) + "..." + val.slice(-4) : val ? "****" : undefined;
   return JSON.parse(JSON.stringify(config), (key, value) => {
     if (typeof value === "string" && (key === "api_key" || key === "apiKey")) {
-      return mask(value);
+      return value.length > 0 ? "****" : value;
     }
     return value as unknown;
   }) as ProviderConfig;

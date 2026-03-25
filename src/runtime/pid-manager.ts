@@ -41,7 +41,8 @@ export class PIDManager {
       process.kill(info.pid, 0);
       return true;
     } catch {
-      // Process doesn't exist - stale PID file
+      // Process doesn't exist - clean up stale PID file
+      await this.cleanup();
       return false;
     }
   }

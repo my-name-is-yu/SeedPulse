@@ -15,7 +15,7 @@ import type { DriveScore } from "../types/drive.js";
 import {
   buildDriveContext,
   type CoreLoopDeps,
-  type LoopConfig,
+  type ResolvedLoopConfig,
   type LoopIterationResult,
 } from "./core-loop-types.js";
 import { logRewardComputation } from "../drive/reward-log.js";
@@ -23,7 +23,7 @@ import { logRewardComputation } from "../drive/reward-log.js";
 /** Minimal context passed to every phase function. */
 export interface PhaseCtx {
   deps: CoreLoopDeps;
-  config: Required<LoopConfig>;
+  config: ResolvedLoopConfig;
   logger: Logger | undefined;
 }
 
@@ -83,20 +83,13 @@ export async function observeAndReload(
     phase: "Observing...",
   });
   try {
-    const engine = ctx.deps.observationEngine as unknown as {
-      observe?: (goalId: string, methods: unknown[]) => Promise<void> | void;
-      getDataSources?: () => Array<{ sourceId: string }>;
-    };
+    const engine = ctx.deps.observationEngine;
 
-    ctx.logger?.debug("CoreLoop: engine.getDataSources exists", { exists: typeof engine.getDataSources === "function" });
-    const dataSources = typeof engine.getDataSources === "function"
-      ? engine.getDataSources()
-      : [];
+    ctx.logger?.debug("CoreLoop: engine.getDataSources exists", { exists: true });
+    const dataSources = engine.getDataSources();
     ctx.logger?.debug("CoreLoop: observation setup", { dataSourceCount: dataSources.length });
 
-    if (typeof engine.observe === "function") {
-      await engine.observe(goalId, []);
-    }
+    await engine.observe(goalId, []);
 
     const reloaded = await ctx.deps.stateManager.loadGoal(goalId);
     if (reloaded) return reloaded;
@@ -162,11 +155,15 @@ export async function calculateGapOrComplete(
     return { gapVector, gapAggregate, skipTaskGeneration: true };
   }
 
+  const avgConf = gapVector.gaps.length > 0
+    ? gapVector.gaps.reduce((s, g) => s + g.confidence, 0) / gapVector.gaps.length
+    : undefined;
   ctx.deps.onProgress?.({
     iteration: loopIndex + 1,
     maxIterations: ctx.config.maxIterations,
     phase: "Generating task...",
     gap: gapAggregate,
+    confidence: avgConf,
   });
 
   return { gapVector, gapAggregate };

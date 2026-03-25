@@ -69,7 +69,8 @@ export class DriveSystem {
       if (
         goal.status === "completed" ||
         goal.status === "cancelled" ||
-        goal.status === "archived"
+        goal.status === "archived" ||
+        goal.status === "abandoned"
       ) {
         return false;
       }

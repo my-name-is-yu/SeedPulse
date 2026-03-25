@@ -315,7 +315,7 @@ export class StateAggregator {
         if (effectivelyComplete.has(childId)) continue; // treated as complete
         const child = await this.stateManager.loadGoal(childId);
         if (child === null) { allChildrenDone = false; break; }
-        if (child.status === "completed" || child.status === "cancelled") continue;
+        if (child.status === "completed" || child.status === "cancelled" || child.status === "abandoned") continue;
         allChildrenDone = false;
         break;
       }
@@ -357,7 +357,7 @@ function computeChildGap(goal: Goal): number {
   if (goal.dimensions.length === 0) return 0;
 
   // If the goal is already completed/cancelled, gap = 0
-  if (goal.status === "completed" || goal.status === "cancelled") return 0;
+  if (goal.status === "completed" || goal.status === "cancelled" || goal.status === "abandoned") return 0;
 
   const dimGaps = goal.dimensions.map((dim) => computeDimensionGapSimple(dim));
   const sum = dimGaps.reduce((acc, g) => acc + g, 0);

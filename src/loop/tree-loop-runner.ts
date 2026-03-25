@@ -1,5 +1,7 @@
-import type { CoreLoopDeps, LoopConfig, LoopIterationResult } from "./core-loop-types.js";
+import type { CoreLoopDeps, ResolvedLoopConfig, LoopIterationResult } from "./core-loop-types.js";
+import { makeEmptyIterationResult } from "./core-loop-types.js";
 import type { Logger } from "../runtime/logger.js";
+import type { IterationBudget } from "./iteration-budget.js";
 
 /**
  * Standalone function extracted from CoreLoop.runTreeIteration.
@@ -11,14 +13,24 @@ export async function runTreeIteration(
   rootId: string,
   loopIndex: number,
   deps: CoreLoopDeps,
-  config: Required<LoopConfig>,
+  config: ResolvedLoopConfig,
   logger: Logger | undefined,
-  runOneIteration: (goalId: string, loopIndex: number) => Promise<LoopIterationResult>
+  runOneIteration: (goalId: string, loopIndex: number) => Promise<LoopIterationResult>,
+  nodeConsumedMap: Map<string, number>
 ): Promise<LoopIterationResult> {
   const orchestrator = deps.treeLoopOrchestrator!;
 
-  // 0. Auto-decompose (or refine) if root has no children yet
+  // 0. Auto-decompose (or refine) if root has no children yet.
+  // If root already has children (e.g. resumed session), reset all nodes to "idle"
+  // so that stale "running" statuses from a prior run do not block node selection.
   const rootGoalForDecomp = await deps.stateManager.loadGoal(rootId);
+  // On the first iteration, if root already has children (resumed session), reset all
+  // nodes to "idle" so stale "running" statuses from a prior run do not block selection.
+  if (rootGoalForDecomp && rootGoalForDecomp.children_ids.length > 0 && loopIndex === 0) {
+    const defaultConfig = { min_specificity: 0.7, max_depth: 3, parallel_loop_limit: 3, auto_prune_threshold: 0.3 };
+    await deps.treeLoopOrchestrator?.startTreeExecution(rootId, defaultConfig);
+  }
+  let decomposed = false;
   if (rootGoalForDecomp && rootGoalForDecomp.children_ids.length === 0) {
     const defaultConfig = { min_specificity: 0.7, max_depth: 3, parallel_loop_limit: 3, auto_prune_threshold: 0.3 };
     if (deps.goalRefiner) {
@@ -27,6 +39,7 @@ export async function runTreeIteration(
         const refineResult = await deps.goalRefiner.refine(rootId);
         logger?.info("CoreLoop: refinement complete", { rootId, leaf: refineResult.leaf });
         await deps.treeLoopOrchestrator?.startTreeExecution(rootId, defaultConfig);
+        decomposed = true;
       } catch (err) {
         logger?.warn("CoreLoop: refinement failed, falling back to flat iteration", { rootId, err });
       }
@@ -36,6 +49,7 @@ export async function runTreeIteration(
         const decompResult = await deps.goalTreeManager.decomposeGoal(rootId, defaultConfig);
         logger?.info("CoreLoop: decomposition complete", { rootId, childCount: decompResult.children.length });
         await deps.treeLoopOrchestrator?.startTreeExecution(rootId, defaultConfig);
+        decomposed = true;
       } catch (err) {
         logger?.warn("CoreLoop: decomposition failed, falling back to flat iteration", { rootId, err });
       }
@@ -46,7 +60,9 @@ export async function runTreeIteration(
   // flat iteration — tree mode cannot proceed without subgoals.
   // We check this regardless of whether goalTreeManager was present, so that the
   // no-goalTreeManager path (where decomposition was skipped) is also covered.
-  const rootGoalCheck = await deps.stateManager.loadGoal(rootId);
+  const rootGoalCheck = decomposed
+    ? await deps.stateManager.loadGoal(rootId)
+    : rootGoalForDecomp;
   if (rootGoalCheck && rootGoalCheck.children_ids.length === 0) {
     logger?.info("[TREE] Goal has no subgoals, falling back to flat iteration", { rootId });
     return runOneIteration(rootId, loopIndex);
@@ -64,19 +80,25 @@ export async function runTreeIteration(
           : deps.satisficingJudge.isGoalComplete(rootGoal))
       : { is_complete: false, blocking_dimensions: [], low_confidence_dimensions: [], needs_verification_task: false, checked_at: new Date().toISOString() };
 
-    return {
-      loopIndex,
-      goalId: rootId,
-      gapAggregate: 0,
-      driveScores: [],
-      taskResult: null,
-      stallDetected: false,
-      stallReport: null,
-      pivotOccurred: false,
-      completionJudgment: isComplete,
-      elapsedMs: 0,
-      error: null,
-    };
+    return makeEmptyIterationResult(rootId, loopIndex, { completionJudgment: isComplete });
+  }
+
+  // 3. Enforce per-node limit if a shared budget with per_node_limit is configured
+  const budget = config.iterationBudget;
+  if (budget && budget.perNodeLimit !== undefined) {
+    const nodeCount = nodeConsumedMap.get(selectedNodeId) ?? 0;
+    if (nodeCount >= budget.perNodeLimit) {
+      logger?.info(
+        `[TREE] Node "${selectedNodeId}" has reached per-node limit (${budget.perNodeLimit}), skipping`,
+        { selectedNodeId, nodeCount }
+      );
+      // Return a no-op result so the loop can continue with the next node
+      return makeEmptyIterationResult(rootId, loopIndex, {
+        skipped: true,
+        skipReason: "per_node_limit",
+      });
+    }
+    nodeConsumedMap.set(selectedNodeId, nodeCount + 1);
   }
 
   // 3. Run normal iteration on selected node
@@ -95,9 +117,20 @@ export async function runTreeIteration(
     }
   }
 
-  // 4. If the node's goal is now completed, call onNodeCompleted
+  // 4. If the node's goal is now completed, call onNodeCompleted.
+  // Otherwise reset loop_status to "idle" so the node remains eligible for
+  // future iterations (the eligibility filter skips "running" nodes).
   if (result.completionJudgment.is_complete) {
     await orchestrator.onNodeCompleted(selectedNodeId);
+  } else {
+    const nodeGoal = await deps.stateManager.loadGoal(selectedNodeId);
+    if (nodeGoal) {
+      await deps.stateManager.saveGoal({
+        ...nodeGoal,
+        loop_status: "idle",
+        updated_at: new Date().toISOString(),
+      });
+    }
   }
 
   return result;
@@ -119,7 +152,7 @@ export async function runTreeIteration(
 export async function runMultiGoalIteration(
   loopIndex: number,
   deps: CoreLoopDeps,
-  config: Required<LoopConfig>,
+  config: ResolvedLoopConfig,
   runOneIteration: (goalId: string, loopIndex: number) => Promise<LoopIterationResult>
 ): Promise<LoopIterationResult> {
   if (!config.multiGoalMode || !config.goalIds || config.goalIds.length === 0) {

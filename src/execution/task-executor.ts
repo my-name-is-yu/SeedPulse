@@ -4,7 +4,7 @@ import { SessionManager } from "./session-manager.js";
 import type { AgentTask, AgentResult, IAdapter } from "./adapter-layer.js";
 import type { Task } from "../types/task.js";
 import { TaskSchema } from "../types/task.js";
-
+import type { Strategy } from "../types/strategy.js";
 const DEBUG = process.env.TAVORI_DEBUG === "true";
 
 // ─── Deps interface ───
@@ -40,7 +40,8 @@ export async function executeTask(
   deps: TaskExecutorDeps,
   task: Task,
   adapter: IAdapter,
-  workspaceContext?: string
+  workspaceContext?: string,
+  activeStrategy?: Strategy
 ): Promise<AgentResult> {
   const { stateManager, sessionManager, logger, execFileSyncFn } = deps;
 
@@ -58,15 +59,11 @@ export async function executeTask(
   );
 
   // Convert to AgentTask
+  // If the adapter provides formatPrompt, delegate prompt construction to it.
+  // Otherwise use the default builder.
   let prompt: string;
-  if (adapter.adapterType === "github_issue") {
-    // For github_issue adapter, format as a structured JSON block so
-    // GitHubIssueAdapter.parsePrompt extracts a proper title instead of
-    // picking up the context-slot label as the issue title.
-    const titleLine = task.work_description.split("\n")[0]?.trim() ?? task.work_description;
-    const title = titleLine.length > 120 ? titleLine.slice(0, 117) + "..." : titleLine;
-    const issuePayload = JSON.stringify({ title, body: task.work_description });
-    prompt = `\`\`\`github-issue\n${issuePayload}\n\`\`\``;
+  if (adapter.formatPrompt) {
+    prompt = adapter.formatPrompt(task, workspaceContext);
   } else {
     // Build prompt with task description as primary content
     const scopeConstraints =
@@ -95,10 +92,20 @@ export async function executeTask(
     ? durationToMs(task.estimated_duration)
     : 30 * 60 * 1000; // default 30 minutes
 
+  // Resolve allowed_tools from the active strategy (if any).
+  // If toolset_locked=true, the strategy must have allowed_tools defined — log a warning if not.
+  if (activeStrategy?.toolset_locked && !activeStrategy.allowed_tools?.length) {
+    logger?.warn(`[TaskExecutor] Strategy ${activeStrategy.id} has toolset_locked=true but no allowed_tools defined`, {
+      taskId: task.id,
+    });
+  }
+  const allowedTools = activeStrategy?.allowed_tools?.length ? activeStrategy.allowed_tools : undefined;
+
   const agentTask: AgentTask = {
     prompt,
     timeout_ms: timeoutMs,
     adapter_type: adapter.adapterType,
+    ...(allowedTools !== undefined ? { allowed_tools: allowedTools } : {}),
   };
 
   // Update task status to running
@@ -109,9 +116,9 @@ export async function executeTask(
   let result: AgentResult;
   try {
     // Generic dedup check — any adapter may optionally implement checkDuplicate
-    if ('checkDuplicate' in adapter && typeof (adapter as unknown as Record<string, unknown>).checkDuplicate === 'function') {
+    if (adapter.checkDuplicate) {
       try {
-        const isDuplicate = await (adapter as unknown as { checkDuplicate: (t: AgentTask) => Promise<boolean> }).checkDuplicate(agentTask);
+        const isDuplicate = await adapter.checkDuplicate(agentTask);
         if (isDuplicate) {
           // Return synthetic result — task already exists, skip execution
           result = {
@@ -144,7 +151,8 @@ export async function executeTask(
     };
   }
 
-  // Post-execution scope check: revert changes to protected files
+  // Post-execution scope check: revert changes to protected files,
+  // and annotate result.filesChanged from the same git diff --name-only call.
   if (result.success) {
     try {
       const diffOutput = execFileSyncFn("git", ["diff", "--name-only"], {
@@ -152,8 +160,16 @@ export async function executeTask(
         encoding: "utf-8",
       }).trim();
 
-      if (diffOutput) {
-        const changedFiles = diffOutput.split("\n");
+      const changedFiles = diffOutput ? diffOutput.split("\n") : [];
+      result.filesChanged = changedFiles.length > 0;
+      if (!result.filesChanged) {
+        logger?.warn(
+          "[TaskLifecycle] Adapter reported success but no files were modified",
+          { taskId: task.id }
+        );
+      }
+
+      if (changedFiles.length > 0) {
         const protectedPatterns = [
           /vitest\.config/,
           /jest\.config/,
@@ -178,26 +194,6 @@ export async function executeTask(
       }
     } catch {
       // Non-fatal: scope check failure should not break execution
-    }
-  }
-
-  // Post-execution: check whether any files were actually modified via git diff --stat.
-  // This is a diagnostic annotation only — it does NOT fail the task.
-  if (result.success) {
-    try {
-      const diffStat = execFileSyncFn("git", ["diff", "--stat"], {
-        cwd: process.cwd(),
-        encoding: "utf-8",
-      });
-      result.filesChanged = diffStat.trim().length > 0;
-      if (!result.filesChanged) {
-        logger?.warn(
-          "[TaskLifecycle] Adapter reported success but no files were modified",
-          { taskId: task.id }
-        );
-      }
-    } catch {
-      // Not a git repo or git is unavailable — skip the check silently
     }
   }
 

@@ -43,7 +43,7 @@ export function buildTodoLikeMarkerInventory(todoCount: number, fixmeCount: numb
 
 export function formatTodoLikeMarkerInventory(inventory: TodoLikeMarkerInventory): string {
   return [
-    "TODO-like marker inventory:",
+    "Tracked marker inventory:",
     `  grouped_counts: ${JSON.stringify(inventory.grouped_counts)}`,
     `  raw_total_count: ${inventory.raw_total_count}`,
   ].join("\n");

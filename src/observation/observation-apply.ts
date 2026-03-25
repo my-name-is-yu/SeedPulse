@@ -91,7 +91,13 @@ export async function applyObservation(
   const existingTier = (dim.last_observed_layer ?? dim.observation_method.confidence_tier ?? "self_report") as ObservationLayer;
   const existingPriority = LAYER_PRIORITY[existingTier] ?? 0;
   const incomingPriority = LAYER_PRIORITY[entry.layer] ?? 0;
-  const shouldUpdateConfidence = incomingPriority >= existingPriority;
+  // Allow update only when the incoming layer has strictly higher priority, OR
+  // when layers are equal AND the new confidence is at least as high as the existing one.
+  // This prevents a same-layer observation from downgrading a previously established
+  // confidence value (e.g., an LLM jump-suppression 0.50 overwriting a 0.70).
+  const shouldUpdateConfidence =
+    incomingPriority > existingPriority ||
+    (incomingPriority === existingPriority && entry.confidence >= (dim.confidence ?? 0));
 
   // Update dimension values
   const updatedDim = {

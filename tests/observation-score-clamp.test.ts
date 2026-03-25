@@ -76,7 +76,7 @@ describe("ObservationEngine — score jump suppression (§3.3)", () => {
     expect(warnMessages.some((m) => m.includes("observation score jump suppressed"))).toBe(false);
   });
 
-  it("suppresses score jump when delta > 0.4 — score stays at prev, confidence=0.3", async () => {
+  it("suppresses score jump when delta > 0.4 — score stays at prev, confidence=0.50", async () => {
     const goal = makeGoal({ id: "goal-jump" });
     await stateManager.saveGoal(goal);
 
@@ -105,7 +105,7 @@ describe("ObservationEngine — score jump suppression (§3.3)", () => {
 
     // Score should be suppressed to previousScore
     expect(entry.extracted_value).toBe(0.2);
-    expect(entry.confidence).toBe(0.3);
+    expect(entry.confidence).toBe(0.50);
 
     const suppressMsg = warnMessages.find((m) => m.includes("observation score jump suppressed"));
     expect(suppressMsg).toBeDefined();
@@ -141,7 +141,7 @@ describe("ObservationEngine — score jump suppression (§3.3)", () => {
     );
 
     expect(entry.extracted_value).toBe(0.9); // suppressed — stays at prev
-    expect(entry.confidence).toBe(0.3);
+    expect(entry.confidence).toBe(0.50);
     expect(warnMessages.some((m) => m.includes("observation score jump suppressed"))).toBe(true);
   });
 

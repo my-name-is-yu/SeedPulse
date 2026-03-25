@@ -396,10 +396,43 @@ export class ObservationEngine {
           const hasPriorObs = Array.isArray(dim.history) && dim.history.length > 0;
           const lastObsEntry =
             hasPriorObs ? dim.history[dim.history.length - 1] : null;
-          const previousScore =
-            lastObsEntry && typeof lastObsEntry.value === "number"
-              ? lastObsEntry.value
-              : null;
+          // Normalize the stored history value (which is threshold-scaled) back to
+          // the 0-1 range that observeWithLLM's jump-suppression (§3.3) expects.
+          // min threshold: extractedValue = score * threshold.value → score = rawVal / threshold.value
+          // max threshold: extractedValue = threshold.value * (2 - score) → score = 2 - rawVal / threshold.value
+          // range: normalize via (rawVal - low) / (high - low); present/match: already 0-1, pass as-is.
+          let previousScore: number | null = null;
+          if (lastObsEntry && typeof lastObsEntry.value === "number") {
+            const rawVal = lastObsEntry.value;
+            try {
+              const threshold = JSON.parse(JSON.stringify(dim.threshold));
+              if (
+                threshold.type === "min" &&
+                typeof threshold.value === "number" &&
+                threshold.value > 1
+              ) {
+                previousScore = Math.min(1, Math.max(0, rawVal / threshold.value));
+              } else if (
+                threshold.type === "max" &&
+                typeof threshold.value === "number" &&
+                threshold.value > 1
+              ) {
+                previousScore = Math.min(1, Math.max(0, 2 - rawVal / threshold.value));
+              } else if (
+                threshold.type === "range" &&
+                typeof threshold.low === "number" &&
+                typeof threshold.high === "number" &&
+                threshold.high > threshold.low
+              ) {
+                const span = threshold.high - threshold.low;
+                previousScore = Math.min(1, Math.max(0, (rawVal - threshold.low) / span));
+              } else {
+                previousScore = Math.min(1, Math.max(0, rawVal));
+              }
+            } catch {
+              previousScore = Math.min(1, Math.max(0, rawVal));
+            }
+          }
           await this.observeWithLLM(
             goalId,
             dim.name,

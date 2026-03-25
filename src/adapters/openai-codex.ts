@@ -15,7 +15,8 @@
 //   - NOTE: --full-auto does NOT exist in this version; use sandbox policy instead
 
 import type { IAdapter, AgentTask, AgentResult } from "../execution/adapter-layer.js";
-import { spawnWithTimeout } from "./spawn-helper.js";
+import type { Logger } from "../runtime/logger.js";
+import { spawnWithTimeout, spawnResultToAgentResult } from "./spawn-helper.js";
 
 export interface OpenAICodexCLIAdapterConfig {
   /** The executable name / path for the codex CLI. Default: "codex" */
@@ -40,13 +41,15 @@ export class OpenAICodexCLIAdapter implements IAdapter {
   private readonly sandboxPolicy: string | null;
   private readonly model: string | undefined;
   private readonly repoPath: string;
+  private readonly logger?: Logger;
 
-  constructor(config: OpenAICodexCLIAdapterConfig = {}) {
+  constructor(config: OpenAICodexCLIAdapterConfig = {}, logger?: Logger) {
     this.cliPath = config.cliPath ?? "codex";
     this.sandboxPolicy =
       config.sandboxPolicy !== undefined ? config.sandboxPolicy : "danger-full-access";
     this.model = config.model;
     this.repoPath = config.repoPath?.trim() || ".";
+    this.logger = logger;
   }
 
   async execute(task: AgentTask): Promise<AgentResult> {
@@ -64,6 +67,17 @@ export class OpenAICodexCLIAdapter implements IAdapter {
       spawnArgs.push("-m", this.model);
     }
 
+    // allowed_tools: codex-cli does not have a native tool-restriction flag.
+    // Log a warning for observability; toolset constraint is enforced at the
+    // Tavori layer (ToolsetLock) rather than being delegated to the CLI.
+    if (task.allowed_tools && task.allowed_tools.length > 0) {
+      this.logger?.warn(
+        "[OpenAICodexCLIAdapter] allowed_tools is set but codex-cli does not support " +
+          "a native tool-restriction flag. Proceeding without restriction.",
+        { allowed_tools: task.allowed_tools }
+      );
+    }
+
     // NOTE: --path is NOT supported by codex-cli 0.114.0; use cwd instead
     const result = await spawnWithTimeout(
       this.cliPath,
@@ -73,37 +87,6 @@ export class OpenAICodexCLIAdapter implements IAdapter {
     );
 
     const elapsed = Date.now() - startedAt;
-
-    if (result.timedOut) {
-      return {
-        success: false,
-        output: result.stdout,
-        error: `Timed out after ${task.timeout_ms}ms`,
-        exit_code: result.exitCode,
-        elapsed_ms: elapsed,
-        stopped_reason: "timeout",
-      };
-    }
-
-    if (result.exitCode === null) {
-      return {
-        success: false,
-        output: result.stdout,
-        error: result.stderr,
-        exit_code: null,
-        elapsed_ms: elapsed,
-        stopped_reason: "error",
-      };
-    }
-
-    const success = result.exitCode === 0;
-    return {
-      success,
-      output: result.stdout,
-      error: success ? null : result.stderr || `Process exited with code ${result.exitCode}`,
-      exit_code: result.exitCode,
-      elapsed_ms: elapsed,
-      stopped_reason: success ? "completed" : "error",
-    };
+    return spawnResultToAgentResult(result, elapsed, task.timeout_ms);
   }
 }

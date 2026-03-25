@@ -233,7 +233,7 @@ export async function observeWithLLM(
       `WARN: observation score jump suppressed: prev=${previousScore.toFixed(3)}, proposed=${score.toFixed(3)}, delta=${delta.toFixed(3)}`
     );
     score = previousScore;
-    resolvedConfidence = 0.3;
+    resolvedConfidence = 0.50;
   }
 
   logger?.info(

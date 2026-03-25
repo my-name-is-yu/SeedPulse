@@ -107,6 +107,7 @@ export const GoalStatusEnum = z.enum([
   "cancelled",
   "waiting",
   "archived",
+  "abandoned",
 ]);
 export type GoalStatus = z.infer<typeof GoalStatusEnum>;
 

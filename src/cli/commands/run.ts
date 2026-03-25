@@ -79,7 +79,11 @@ export async function cmdRun(
       }
     } else if (event.phase === "Generating task...") {
       const gapStr = event.gap !== undefined ? ` gap=${event.gap.toFixed(2)}` : "";
-      process.stdout.write(`${prefix} Generating task...${gapStr}\n`);
+      const confStr = event.confidence !== undefined ? ` confidence=${Math.round(event.confidence * 100)}%` : "";
+      process.stdout.write(`${prefix} Generating task...${gapStr}${confStr}\n`);
+    } else if (event.phase === "Skipped") {
+      const reason = event.skipReason ?? "unknown";
+      process.stdout.write(`${prefix} Skipped — ${reason.replace(/_/g, " ")}\n`);
     } else if (event.phase === "Executing task...") {
       if (event.taskDescription) {
         process.stdout.write(`${prefix} Executing task: "${event.taskDescription}"\n`);
@@ -92,6 +96,8 @@ export async function cmdRun(
       } else {
         process.stdout.write(`${prefix} Verifying result...\n`);
       }
+    } else if (event.phase === "Skipped (no state change)") {
+      process.stdout.write(`${prefix} Skipped (no state change detected)\n`);
     }
   };
   let deps: Awaited<ReturnType<typeof buildDeps>>;

@@ -1,5 +1,7 @@
 import { CuriosityEngine } from "../traits/curiosity-engine.js";
+import type { IterationBudget } from "./iteration-budget.js";
 import type { Logger } from "../runtime/logger.js";
+import type { StrategyTemplateRegistry } from "../strategy/strategy-template-registry.js";
 import type { TrustManager } from "../traits/trust-manager.js";
 import type { KnowledgeTransfer } from "../knowledge/knowledge-transfer.js";
 import type { TransferCandidate } from "../types/cross-portfolio.js";
@@ -77,6 +79,12 @@ export interface ReportingEngine {
 
 // ─── Config ───
 
+/**
+ * LoopConfig with all required fields resolved (except iterationBudget which remains optional).
+ * Used as the internal config type throughout CoreLoop and its sub-modules.
+ */
+export type ResolvedLoopConfig = Required<Omit<LoopConfig, "iterationBudget">> & Pick<LoopConfig, "iterationBudget">;
+
 export interface LoopConfig {
   maxIterations?: number;
   maxConsecutiveErrors?: number;
@@ -108,6 +116,13 @@ export interface LoopConfig {
    * runs regardless so stall detection can fire. Default: 5.
    */
   maxConsecutiveSkips?: number;
+  /**
+   * Shared iteration budget for parent-child agent trees.
+   * When set, all iterations (including child node iterations in tree mode) consume
+   * from this budget. Prevents runaway recursion across hierarchical agent invocations.
+   * If not set, maxIterations acts as the sole upper bound.
+   */
+  iterationBudget?: IterationBudget;
 }
 
 // ─── Result types ───
@@ -140,6 +155,37 @@ export interface LoopIterationResult {
   skipReason?: string;
 }
 
+/**
+ * Factory that returns a zeroed-out LoopIterationResult for the given goalId
+ * and loopIndex. Accepts optional overrides for fields that vary per call-site.
+ */
+export function makeEmptyIterationResult(
+  goalId: string,
+  loopIndex: number,
+  overrides?: Partial<LoopIterationResult>
+): LoopIterationResult {
+  return {
+    loopIndex,
+    goalId,
+    gapAggregate: 0,
+    driveScores: [],
+    taskResult: null,
+    stallDetected: false,
+    stallReport: null,
+    pivotOccurred: false,
+    completionJudgment: {
+      is_complete: false,
+      blocking_dimensions: [],
+      low_confidence_dimensions: [],
+      needs_verification_task: false,
+      checked_at: new Date().toISOString(),
+    },
+    elapsedMs: 0,
+    error: null,
+    ...overrides,
+  };
+}
+
 export interface LoopResult {
   goalId: string;
   totalIterations: number;
@@ -153,28 +199,49 @@ export interface LoopResult {
 
 // ─── Dependencies ───
 
-export interface CoreLoopDeps {
-  stateManager: StateManager;
+/** Deps needed for observation phase */
+export interface ObservationDeps {
   observationEngine: ObservationEngine;
-  gapCalculator: GapCalculatorModule;
-  driveScorer: DriveScorerModule;
-  taskLifecycle: TaskLifecycle;
+  stateManager: StateManager;
+}
+
+/** Deps needed for tree iteration */
+export interface TreeDeps {
+  stateManager: StateManager;
+  treeLoopOrchestrator?: TreeLoopOrchestrator;
   satisficingJudge: SatisficingJudge;
-  stallDetector: StallDetector;
-  strategyManager: StrategyManager;
-  reportingEngine: ReportingEngine;
-  driveSystem: DriveSystem;
-  adapterRegistry: AdapterRegistry;
-  knowledgeManager?: KnowledgeManager;
-  capabilityDetector?: CapabilityDetector;
-  portfolioManager?: PortfolioManager;
-  curiosityEngine?: CuriosityEngine;
-  goalDependencyGraph?: GoalDependencyGraph;
+  goalRefiner?: GoalRefiner;
   goalTreeManager?: GoalTreeManager;
   stateAggregator?: StateAggregator;
-  treeLoopOrchestrator?: TreeLoopOrchestrator;
-  crossGoalPortfolio?: CrossGoalPortfolio;
+}
+
+/** Deps needed for stall detection and recovery */
+export interface StallDeps {
+  stallDetector: StallDetector;
+  strategyManager: StrategyManager;
+  knowledgeManager?: KnowledgeManager;
   learningPipeline?: LearningPipeline;
+  goalRefiner?: GoalRefiner;
+}
+
+/** Deps needed for task execution cycle */
+export interface TaskCycleDeps {
+  taskLifecycle: TaskLifecycle;
+  adapterRegistry: AdapterRegistry;
+  portfolioManager?: PortfolioManager;
+  knowledgeManager?: KnowledgeManager;
+  contextProvider?: (goalId: string, dimensionName: string) => Promise<string>;
+}
+
+export interface CoreLoopDeps extends ObservationDeps, TreeDeps, StallDeps, TaskCycleDeps {
+  gapCalculator: GapCalculatorModule;
+  driveScorer: DriveScorerModule;
+  reportingEngine: ReportingEngine;
+  driveSystem: DriveSystem;
+  capabilityDetector?: CapabilityDetector;
+  curiosityEngine?: CuriosityEngine;
+  goalDependencyGraph?: GoalDependencyGraph;
+  crossGoalPortfolio?: CrossGoalPortfolio;
   knowledgeTransfer?: KnowledgeTransfer;
   memoryLifecycleManager?: MemoryLifecycleManager;
   /**
@@ -203,11 +270,6 @@ export interface CoreLoopDeps {
    */
   parallelExecutor?: ParallelExecutor;
   /**
-   * Optional GoalRefiner. When present, tree-mode decomposition calls refine()
-   * instead of raw decomposeGoal(), and observation-failure stalls call reRefineLeaf().
-   */
-  goalRefiner?: GoalRefiner;
-  /**
    * Optional factory function to generate a TaskGroup for a large task.
    * Provided as a callback so the caller owns the llmClient dependency.
    * If not provided (or returns null), the normal single-task flow is used.
@@ -221,14 +283,26 @@ export interface CoreLoopDeps {
     contextBlock?: string;
   }) => Promise<import("../types/index.js").TaskGroup | null>;
   logger?: Logger;
-  /** Optional context provider for workspace-aware task generation */
-  contextProvider?: (goalId: string, dimensionName: string) => Promise<string>;
   /**
    * Optional progress callback. Called at key phases during each iteration so
    * callers (e.g. CLIRunner) can print user-friendly progress lines.
    */
   onProgress?: (event: ProgressEvent) => void;
+  /**
+   * Optional StrategyTemplateRegistry. When provided, CoreLoop wires it into
+   * StrategyManager so that strategies completing with effectiveness_score >= 0.5
+   * are automatically registered as reusable templates.
+   */
+  strategyTemplateRegistry?: StrategyTemplateRegistry;
 }
+
+export type ProgressPhase =
+  | "Observing..."
+  | "Generating task..."
+  | "Executing task..."
+  | "Verifying result..."
+  | "Skipped"
+  | "Skipped (no state change)";
 
 export interface ProgressEvent {
   /** 1-based iteration number */
@@ -236,11 +310,15 @@ export interface ProgressEvent {
   /** Maximum iterations configured */
   maxIterations: number;
   /** Current phase label */
-  phase: string;
+  phase: ProgressPhase;
   /** Gap aggregate from latest gap calculation (undefined before first gap calc) */
   gap?: number;
+  /** Average confidence across gap dimensions (undefined before first gap calc) */
+  confidence?: number;
   /** Short description of the task being executed (undefined outside execute phase) */
   taskDescription?: string;
+  /** Reason this iteration was skipped (undefined when not skipped) */
+  skipReason?: string;
 }
 
 // ─── Helpers ───
@@ -256,6 +334,7 @@ export function buildDriveContext(goal: Goal): DriveContext {
   const opportunities: Record<string, { value: number; detected_at: string }> = {};
 
   const now = Date.now();
+  const deadlineTime = goal.deadline ? new Date(goal.deadline).getTime() : null;
 
   for (const dim of goal.dimensions) {
     // Calculate hours since last update
@@ -268,8 +347,7 @@ export function buildDriveContext(goal: Goal): DriveContext {
     }
 
     // Deadline: compute hours remaining from goal.deadline
-    if (goal.deadline) {
-      const deadlineTime = new Date(goal.deadline).getTime();
+    if (deadlineTime !== null) {
       const hoursRemaining = (deadlineTime - now) / (1000 * 60 * 60);
       deadlines[dim.name] = hoursRemaining;
     } else {

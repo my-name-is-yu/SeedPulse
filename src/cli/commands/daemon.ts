@@ -80,8 +80,15 @@ export async function cmdStop(_args: string[]): Promise<void> {
       process.kill(info.pid, "SIGTERM");
       console.log("Stop signal sent");
     } catch (err) {
-      getCliLogger().error(formatOperationError(`stop daemon process ${info.pid}`, err));
-      await pidManager.cleanup();
+      // ESRCH means the process no longer exists (died between isRunning check and kill)
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ESRCH") {
+        await pidManager.cleanup();
+        console.log("No running daemon found");
+      } else {
+        getCliLogger().error(formatOperationError(`stop daemon process ${info.pid}`, err));
+        await pidManager.cleanup();
+      }
     }
   }
 }
