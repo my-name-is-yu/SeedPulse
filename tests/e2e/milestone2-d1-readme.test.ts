@@ -2,7 +2,7 @@
  * Milestone 2 D-1: README quality goal — E2E tests
  *
  * Tests that a "Improve README quality" goal running through SeedPulse's CoreLoop:
- *   1. Uses LLM observation (independent_review confidence tier) for all 3 dimensions
+ *   1. Uses LLM observation (self_report confidence tier when no DataSource registered) for all 3 dimensions
  *   2. Converges within 2 iterations when LLM reports improvement
  *   3. Generates README improvement tasks
  *   4. Satisficing judge correctly determines goal completion
@@ -56,7 +56,7 @@ const llmObservationMethod: ObservationMethod = {
   source: "readme-quality-observer",
   schedule: null,
   endpoint: null,
-  confidence_tier: "independent_review",
+  confidence_tier: "self_report",
 };
 
 // ─── Goal factory ───
@@ -302,9 +302,9 @@ describe("Milestone 2 D-1: README quality goal", () => {
     removeTempDir(tempDir);
   });
 
-  // ── Test 1: LLM observation returns independent_review confidence for all 3 dimensions ──
+  // ── Test 1: LLM observation returns self_report confidence when no DataSource registered ──
 
-  it("LLM observation returns independent_review confidence for all 3 dimensions", async () => {
+  it("LLM observation returns self_report confidence when no DataSource registered", async () => {
     const stateManager = new StateManager(tempDir);
 
     // One LLM observation call per dimension (3 dimensions)
@@ -327,19 +327,19 @@ describe("Milestone 2 D-1: README quality goal", () => {
       llmObservationMethod,
     ]);
 
-    // Verify that all observations are recorded with independent_review layer
+    // Verify that all observations are recorded with self_report layer (no DataSource registered)
     const log = await observationEngine.getObservationLog(goalId);
     expect(log.entries.length).toBeGreaterThanOrEqual(3);
 
-    const llmEntries = log.entries.filter((e) => e.layer === "independent_review");
+    const llmEntries = log.entries.filter((e) => e.layer === "self_report");
     expect(llmEntries.length).toBeGreaterThanOrEqual(3);
 
-    // Each entry should have the correct tier
+    // Each entry should have the correct tier (self_report when no DataSource)
     for (const entry of llmEntries) {
-      expect(entry.method.confidence_tier).toBe("independent_review");
+      expect(entry.method.confidence_tier).toBe("self_report");
       expect(entry.method.type).toBe("llm_review");
-      expect(entry.confidence).toBeGreaterThanOrEqual(0.5);
-      expect(entry.confidence).toBeLessThanOrEqual(0.84);
+      expect(entry.confidence).toBeGreaterThanOrEqual(0.1);
+      expect(entry.confidence).toBeLessThanOrEqual(0.49);
     }
   });
 

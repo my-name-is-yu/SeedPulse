@@ -443,7 +443,8 @@ export class ObservationEngine {
             ctx,
             previousScore,
             undefined, // dryRun
-            typeof dim.current_value === "number" ? dim.current_value : null
+            typeof dim.current_value === "number" ? dim.current_value : null,
+            !!dataSource
           );
           continue;
         } catch (err) {
@@ -499,7 +500,7 @@ export class ObservationEngine {
           dim.current_value === null
             ? (dim.current_value as number | string | boolean | null)
             : null,
-        confidence: dim.confidence,
+        confidence: dataSource ? dim.confidence : Math.min(dim.confidence, 0.30),
       });
 
       await this.applyObservation(goalId, entry);
@@ -557,7 +558,8 @@ export class ObservationEngine {
     workspaceContext?: string,
     previousScore?: number | null,
     dryRun?: boolean,
-    currentValue?: number | null
+    currentValue?: number | null,
+    sourceAvailable?: boolean
   ): Promise<ObservationLogEntry> {
     if (!this.llmClient) {
       throw new Error("observeWithLLM: llmClient is not configured");
@@ -577,7 +579,8 @@ export class ObservationEngine {
       this.logger,
       undefined, // dimensionHistory
       undefined, // gateway
-      currentValue
+      currentValue,
+      sourceAvailable
     );
   }
 

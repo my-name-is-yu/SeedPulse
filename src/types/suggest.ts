@@ -9,7 +9,7 @@ export const SuggestionSchema = z.object({
   rationale: z.string().trim().min(1),
   steps: z.array(z.string().trim().min(1)).min(1),
   success_criteria: z.array(z.string().trim().min(1)).min(1),
-  repo_context: SuggestionRepoContextSchema,
+  repo_context: SuggestionRepoContextSchema.optional(),
 });
 
 export const SuggestOutputSchema = z.object({

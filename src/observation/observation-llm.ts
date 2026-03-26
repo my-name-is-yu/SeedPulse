@@ -109,7 +109,8 @@ export async function observeWithLLM(
   logger?: Logger,
   dimensionHistory?: Array<{ value: number; timestamp?: string; date?: string }>,
   gateway?: IPromptGateway,
-  currentValue?: number | null
+  currentValue?: number | null,
+  sourceAvailable?: boolean
 ): Promise<ObservationLogEntry> {
   logger?.info(
     `[ObservationEngine] LLM observation for dimension "${dimensionLabel}" (goal: ${goalId})`
@@ -153,13 +154,13 @@ export async function observeWithLLM(
       trigger: "periodic",
       goal_id: goalId,
       dimension_name: dimensionName,
-      layer: "independent_review",
+      layer: sourceAvailable === false ? "self_report" : "independent_review",
       method: {
         type: "llm_review",
         source: "llm",
         schedule: null,
         endpoint: null,
-        confidence_tier: "independent_review",
+        confidence_tier: sourceAvailable === false ? "self_report" : "independent_review",
       },
       raw_result: { score: null, reason: "no_context_existing_value" },
       extracted_value: currentValue,
@@ -257,7 +258,15 @@ export async function observeWithLLM(
   // When no mechanical source is available and the LLM score jumps more than 0.4
   // from the previous score, suppress the change and lower confidence.
   const MAX_SCORE_DELTA = 0.4;
-  let resolvedConfidence = !hasContext ? 0.1 : 0.70;
+  let resolvedLayer: "self_report" | "independent_review";
+  let resolvedConfidence: number;
+  if (sourceAvailable === false) {
+    resolvedLayer = "self_report";
+    resolvedConfidence = hasContext ? 0.30 : 0.10;
+  } else {
+    resolvedLayer = "independent_review";
+    resolvedConfidence = hasContext ? 0.70 : 0.10;
+  }
   if (
     typeof previousScore === "number" &&
     previousScore !== null &&
@@ -320,13 +329,13 @@ export async function observeWithLLM(
     trigger: "periodic",
     goal_id: goalId,
     dimension_name: dimensionName,
-    layer: "independent_review",
+    layer: resolvedLayer,
     method: {
       type: "llm_review",
       source: "llm",
       schedule: null,
       endpoint: null,
-      confidence_tier: "independent_review",
+      confidence_tier: resolvedLayer,
     },
     raw_result: { score, reason: parsed.reason },
     extracted_value: extractedValue,

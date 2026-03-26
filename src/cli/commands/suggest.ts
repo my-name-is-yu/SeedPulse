@@ -16,6 +16,7 @@ import {
   generateSuggestOutput,
   gatherProjectContext,
 } from "./suggest-normalizer.js";
+import { looksLikeSoftwareGoal } from "../../goal/goal-suggest.js";
 import {
   buildAutoApprovalFn,
   buildLoopLogger,
@@ -101,6 +102,7 @@ export async function cmdSuggest(
   const targetPath = values.path?.trim() ? values.path : ".";
   const maxSuggestions = parseInt(values.max ?? "5", 10);
   const repoFiles: string[] = [];
+  const isSoftware = looksLikeSoftwareGoal(context);
 
   console.log("Generating goal suggestions...\n");
 
@@ -116,7 +118,7 @@ export async function cmdSuggest(
     return 1;
   }
 
-  const finalPayload = normalizeSuggestPayload(suggestions, targetPath, targetPath, context, maxSuggestions, repoFiles);
+  const finalPayload = normalizeSuggestPayload(suggestions, targetPath, targetPath, context, maxSuggestions, repoFiles, isSoftware);
   console.log(JSON.stringify(finalPayload, null, 2));
 
   return 0;
@@ -170,6 +172,7 @@ export async function cmdImprove(
   const context = await gatherProjectContext(targetPath);
   const maxSuggestions = parseInt(values.max || "3", 10);
   const repoFiles: string[] = [];
+  const isSoftware = looksLikeSoftwareGoal(context);
 
   let rawSuggestions: unknown;
   try {
@@ -183,7 +186,7 @@ export async function cmdImprove(
     return 1;
   }
 
-  const normalizedPayload = normalizeSuggestPayload(rawSuggestions, targetPath, targetPath, context, maxSuggestions, repoFiles);
+  const normalizedPayload = normalizeSuggestPayload(rawSuggestions, targetPath, targetPath, context, maxSuggestions, repoFiles, isSoftware);
   const suggestions = normalizedPayload.suggestions;
 
   if (suggestions.length === 0) {

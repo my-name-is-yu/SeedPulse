@@ -45,6 +45,8 @@ import type { CompletionJudgment } from "../../src/types/satisficing.js";
 import type { GapVector } from "../../src/types/gap.js";
 import type { DriveScore } from "../../src/types/drive.js";
 import type { TaskCycleResult } from "../../src/execution/task-lifecycle.js";
+import type { IDataSourceAdapter } from "../../src/observation/data-source-adapter.js";
+import type { DataSourceConfig, DataSourceResult, DataSourceQuery } from "../../src/types/data-source.js";
 import { makeTempDir } from "../helpers/temp-dir.js";
 
 // ─── Helpers ───
@@ -54,6 +56,21 @@ const fakeGitContextFetcher = () => "File: src/main.ts\nconst quality = 0.85; //
 
 function removeTempDir(dir: string): void {
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// ─── Mock DataSource (marks dimensions as observable so LLM gets independent_review confidence) ───
+
+class MockAllDimensionDataSource implements IDataSourceAdapter {
+  readonly sourceId = "mock-all-dims";
+  readonly sourceType = "file" as const;
+  readonly config: DataSourceConfig = { id: "mock-all-dims", type: "file", path: "/dev/null" };
+  async connect() {}
+  async query(_params: DataSourceQuery): Promise<DataSourceResult> {
+    return { value: null, raw: "", timestamp: new Date().toISOString() };
+  }
+  async disconnect() {}
+  async healthCheck() { return true; }
+  getSupportedDimensions() { return ["code_quality", "test_coverage", "documentation_coverage", "readme_quality"]; }
 }
 
 // ─── Observation method configs ───
@@ -281,7 +298,7 @@ function buildCoreLoop(
   maxIterations: number,
   observationEngine?: ObservationEngine
 ): CoreLoop {
-  const obsEngine = observationEngine ?? new ObservationEngine(stateManager, [], llmClient, undefined, { gitContextFetcher: fakeGitContextFetcher });
+  const obsEngine = observationEngine ?? new ObservationEngine(stateManager, [new MockAllDimensionDataSource()], llmClient, undefined, { gitContextFetcher: fakeGitContextFetcher });
   const sessionManager = new SessionManager(stateManager);
   const trustManager = new TrustManager(stateManager);
   const stallDetector = new StallDetector(stateManager);
@@ -743,7 +760,7 @@ describe("R7-3: LLM observation min-type scaling accuracy", () => {
     }
   });
 
-  it("LLM observation confidence is in medium tier (independent_review: 0.5-0.84)", async () => {
+  it("LLM observation confidence is in medium tier (independent_review: 0.5-0.84) with DataSource", async () => {
     const stateManager = new StateManager(tempDir);
     const goalId = "r7-3-confidence-tier";
 
@@ -758,7 +775,7 @@ describe("R7-3: LLM observation min-type scaling accuracy", () => {
       makeLLMReviewResponse(),
     ]);
 
-    const obsEngine = new ObservationEngine(stateManager, [], llmClient, undefined, { gitContextFetcher: fakeGitContextFetcher });
+    const obsEngine = new ObservationEngine(stateManager, [new MockAllDimensionDataSource()], llmClient, undefined, { gitContextFetcher: fakeGitContextFetcher });
     const coreLoop = buildCoreLoop(stateManager, llmClient, 3, obsEngine);
 
     const goal = makeOneDimGoal(goalId, "code_quality", 0.8);
@@ -766,7 +783,7 @@ describe("R7-3: LLM observation min-type scaling accuracy", () => {
 
     await coreLoop.run(goalId);
 
-    // Verify confidence tier from observation log
+    // Verify confidence tier from observation log (independent_review with DataSource)
     const log = await obsEngine.getObservationLog(goalId);
     const llmEntries = log.entries.filter((e) => e.layer === "independent_review");
 

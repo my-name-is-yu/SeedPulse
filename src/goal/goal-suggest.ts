@@ -38,6 +38,12 @@ export const CapabilityCheckResultSchema = z.object({
 
 // ─── Prompts ───
 
+export function looksLikeSoftwareGoal(context: string): boolean {
+  const keywords = ['package.json', 'src/', 'tests/', 'node_modules', '.git', 'npm', 'build', 'deploy', 'api', 'repository', 'code', 'function', 'class', 'module'];
+  const lower = context.toLowerCase();
+  return keywords.some(kw => lower.includes(kw));
+}
+
 export function buildSuggestGoalsPrompt(
   context: string,
   maxSuggestions: number,
@@ -48,7 +54,10 @@ export function buildSuggestGoalsPrompt(
       ? `\nExisting goals (do NOT suggest duplicates):\n${existingGoals.map((g) => `- ${g}`).join("\n")}`
       : "";
 
-  return `You are a goal advisor for a software project. Given the project context below, suggest concrete, measurable improvement goals.
+  const isSoftware = looksLikeSoftwareGoal(context);
+
+  const systemPrompt = isSoftware
+    ? `You are a goal advisor for a software project. Given the project context below, suggest concrete, measurable improvement goals.
 
 Each goal should:
 1. Be specific and achievable (not vague like "improve code quality")
@@ -56,7 +65,18 @@ Each goal should:
 3. Include 2-4 dimension hints (what to measure)
 4. Be independent of other suggestions
 
-The "description" field must describe a concrete action — it must start with an action verb (e.g., "Add", "Update", "Implement", "Refactor", "Document", "Create", "Fix") and refer to a specific file or module path (e.g., "src/...", "tests/...", "docs/..."). Do NOT include instructions about updating README.md unless the goal is genuinely about documentation. Do NOT use vague descriptions like "deliver a verifiable improvement".
+The "description" field must describe a concrete action — it must start with an action verb (e.g., "Add", "Update", "Implement", "Refactor", "Document", "Create", "Fix") and refer to a specific file or module path (e.g., "src/...", "tests/...", "docs/..."). Do NOT include instructions about updating README.md unless the goal is genuinely about documentation. Do NOT use vague descriptions like "deliver a verifiable improvement".`
+    : `You are a goal advisor. Given the context below, suggest concrete, measurable improvement goals.
+
+Each goal should:
+1. Be specific and achievable
+2. Have clear success criteria that can be measured
+3. Include 2-4 dimension hints (what to measure)
+4. Be independent of other suggestions
+
+The "description" field must describe a concrete action starting with an action verb (e.g., "Add", "Update", "Implement", "Create", "Fix"). Do NOT use vague descriptions like "deliver a verifiable improvement".`;
+
+  return `${systemPrompt}
 
 Context:
 ${context}${existingGoalsSection}
@@ -65,7 +85,7 @@ Return a JSON array of up to ${maxSuggestions} suggestions:
 [
   {
     "title": "Short descriptive title",
-    "description": "Add/Update/Implement [specific file or module] to [concrete outcome]",
+    "description": "Add/Update/Implement [specific action] to [concrete outcome]",
     "rationale": "Why this goal matters",
     "dimensions_hint": ["dimension_name_1", "dimension_name_2"]
   }
