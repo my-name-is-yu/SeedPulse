@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { suggestGoals } from "../src/goal/goal-suggest.js";
+import { suggestGoals, SuggestTimeoutError } from "../src/goal/goal-suggest.js";
 import type { ILLMClient } from "../src/llm/llm-client.js";
 import type { EthicsGate } from "../src/traits/ethics-gate.js";
 
@@ -59,6 +59,7 @@ describe("suggestGoals — timeout mechanism", () => {
     // Advance fake timers past the timeout
     await vi.advanceTimersByTimeAsync(6_000);
 
+    await expect(promise).rejects.toBeInstanceOf(SuggestTimeoutError);
     await expect(promise).rejects.toThrow("timed out");
     await expect(promise).rejects.toThrow("5s");
   });

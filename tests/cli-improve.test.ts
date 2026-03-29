@@ -124,6 +124,7 @@ import type { Goal } from "../src/types/goal.js";
 import type { LoopResult } from "../src/core-loop.js";
 import { makeTempDir } from "./helpers/temp-dir.js";
 import { makeGoal } from "./helpers/fixtures.js";
+import { SuggestTimeoutError } from "../src/goal/goal-suggest.js";
 
 function makeLoopResult(overrides: Partial<LoopResult> = {}): LoopResult {
   const now = new Date().toISOString();
@@ -603,9 +604,9 @@ describe("improve subcommand — gatherProjectContext", () => {
 
 describe("improve subcommand — timeout and LLM failure handling", () => {
   it("exits with code 1 and prints a timeout message when suggestGoals times out", async () => {
-    // Simulate a timeout by having suggestGoals reject with a "timed out" error
+    // Simulate a timeout by having suggestGoals reject with a SuggestTimeoutError
     const mockSuggest = vi.fn().mockRejectedValue(
-      new Error("LLM request timed out after 30s")
+      new SuggestTimeoutError(30_000)
     );
 
     vi.mocked(GoalNegotiator).mockImplementation(() => ({

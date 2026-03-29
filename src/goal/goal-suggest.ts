@@ -159,13 +159,22 @@ Return ONLY a JSON object, no other text.`;
 
 export const DEFAULT_SUGGEST_TIMEOUT_MS = 30_000;
 
+// ─── Custom timeout error ───
+
+export class SuggestTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`LLM request timed out after ${timeoutMs / 1000}s`);
+    this.name = 'SuggestTimeoutError';
+  }
+}
+
 // ─── suggestGoals (standalone) ───
 
 /**
  * Suggest measurable improvement goals based on the given context.
  * Does NOT save goals — it only suggests. Use GoalNegotiator.negotiate() to register a suggestion.
  *
- * Throws an Error with message containing "timed out" if the LLM call exceeds timeoutMs.
+ * Throws a SuggestTimeoutError if the LLM call exceeds timeoutMs.
  */
 export async function suggestGoals(
   context: string,
@@ -196,7 +205,7 @@ export async function suggestGoals(
     let timerId: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
       timerId = setTimeout(() => {
-        reject(new Error(`LLM request timed out after ${timeoutMs / 1000}s`));
+        reject(new SuggestTimeoutError(timeoutMs));
       }, timeoutMs);
     });
     try {
@@ -209,18 +218,17 @@ export async function suggestGoals(
         }),
         timeoutPromise,
       ]);
-      clearTimeout(timerId);
     } catch (err) {
-      clearTimeout(timerId);
-      const isTimeout = err instanceof Error && err.message.includes("timed out");
-      if (isTimeout) throw err;
+      if (err instanceof SuggestTimeoutError) throw err;
       return [];
+    } finally {
+      clearTimeout(timerId);
     }
   } else {
     let timerId: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
       timerId = setTimeout(() => {
-        reject(new Error(`LLM request timed out after ${timeoutMs / 1000}s`));
+        reject(new SuggestTimeoutError(timeoutMs));
       }, timeoutMs);
     });
     let rawContent: string;
@@ -232,14 +240,13 @@ export async function suggestGoals(
         ),
         timeoutPromise,
       ]);
-      clearTimeout(timerId);
       rawContent = response.content;
     } catch (err) {
-      clearTimeout(timerId);
-      const isTimeout = err instanceof Error && err.message.includes("timed out");
-      if (isTimeout) throw err;
+      if (err instanceof SuggestTimeoutError) throw err;
       options?.logger?.warn(`[suggestGoals] LLM call failed: ${String(err)}`);
       return [];
+    } finally {
+      clearTimeout(timerId);
     }
 
     try {
