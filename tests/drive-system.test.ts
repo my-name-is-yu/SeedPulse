@@ -41,7 +41,7 @@ describe("DriveSystem", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3 });
   });
 
   // ─── directory creation ───
