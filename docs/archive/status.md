@@ -119,7 +119,7 @@ Current repository state as of 2026-03-20.
 
 ## Phase 3: Development Infrastructure (complete)
 
-Phase 3 is not about adding new features — it focuses on improving codebase quality and maintainability across three pillars. See `docs/design/phase3-plan.md`.
+Phase 3 is not about adding new features — it focuses on improving codebase quality and maintainability across three pillars. See `docs/archive/phase3-plan.md`.
 
 ### Pillar 1: Large File Splitting (complete)
 - Phase 2: Split 4 files into 18 files (`cross-goal-portfolio.ts`, `capability-detector.ts`, `memory-lifecycle.ts`, `learning-pipeline.ts` — each decomposed into responsibility-specific submodules)
