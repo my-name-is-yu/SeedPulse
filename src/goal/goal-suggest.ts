@@ -38,7 +38,19 @@ export const CapabilityCheckResultSchema = z.object({
 
 // ─── Prompts ───
 
-export function looksLikeSoftwareGoal(context: string): boolean {
+const NON_SOFTWARE_KEYWORDS = [
+  'communication', 'team morale', 'health', 'fitness', 'cooking', 'recipe',
+  'learning language', 'marketing', 'sales', 'hiring', 'recruitment', 'exercise',
+  'diet', 'sleep', 'meditation', 'relationship', 'parenting', 'travel',
+];
+
+export function looksLikeSoftwareGoal(context: string, goalDescription?: string): boolean {
+  if (goalDescription) {
+    const descLower = goalDescription.toLowerCase();
+    if (NON_SOFTWARE_KEYWORDS.some(kw => descLower.includes(kw))) {
+      return false;
+    }
+  }
   const keywords = ['package.json', 'src/', 'tests/', 'node_modules', '.git', 'npm', 'build', 'deploy', 'api', 'repository', 'code', 'function', 'class', 'module'];
   const lower = context.toLowerCase();
   return keywords.some(kw => lower.includes(kw));
@@ -47,14 +59,15 @@ export function looksLikeSoftwareGoal(context: string): boolean {
 export function buildSuggestGoalsPrompt(
   context: string,
   maxSuggestions: number,
-  existingGoals: string[]
+  existingGoals: string[],
+  goalDescription?: string
 ): string {
   const existingGoalsSection =
     existingGoals.length > 0
       ? `\nExisting goals (do NOT suggest duplicates):\n${existingGoals.map((g) => `- ${g}`).join("\n")}`
       : "";
 
-  const isSoftware = looksLikeSoftwareGoal(context);
+  const isSoftware = looksLikeSoftwareGoal(context, goalDescription);
 
   const systemPrompt = isSoftware
     ? `You are a goal advisor for a software project. Given the project context below, suggest concrete, measurable improvement goals.

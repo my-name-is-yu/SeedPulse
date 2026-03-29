@@ -7,7 +7,7 @@ import { EthicsGate } from "../src/traits/ethics-gate.js";
 import { ObservationEngine } from "../src/observation/observation-engine.js";
 import { GoalNegotiator } from "../src/goal/goal-negotiator.js";
 import type { GoalSuggestion } from "../src/goal/goal-negotiator.js";
-import { buildSuggestGoalsPrompt } from "../src/goal/goal-suggest.js";
+import { buildSuggestGoalsPrompt, looksLikeSoftwareGoal } from "../src/goal/goal-suggest.js";
 import { createMockLLMClient } from "./helpers/mock-llm.js";
 import {
   PASS_VERDICT_SAFE_JSON as PASS_VERDICT,
@@ -261,5 +261,35 @@ describe("buildSuggestGoalsPrompt()", () => {
     expect(prompt).toContain("Goal A");
     expect(prompt).toContain("Goal B");
     expect(prompt).toContain("do NOT suggest duplicates");
+  });
+});
+
+// ─── looksLikeSoftwareGoal ───
+
+describe("looksLikeSoftwareGoal", () => {
+  const softwareContext = "Project has package.json, src/ directory, tests/, node_modules";
+
+  it("returns true for software context with software goal", () => {
+    expect(looksLikeSoftwareGoal(softwareContext, "Increase test coverage in src/")).toBe(true);
+  });
+
+  it("returns false for software context when goal description is clearly non-software", () => {
+    expect(looksLikeSoftwareGoal(softwareContext, "Improve team communication")).toBe(false);
+  });
+
+  it("returns false for software context when goal is about health/fitness", () => {
+    expect(looksLikeSoftwareGoal(softwareContext, "Build a daily fitness routine")).toBe(false);
+  });
+
+  it("returns false for non-software context with no goal description", () => {
+    expect(looksLikeSoftwareGoal("Personal journal about cooking recipes and travel")).toBe(false);
+  });
+
+  it("falls back to context check when no goalDescription is provided", () => {
+    expect(looksLikeSoftwareGoal(softwareContext)).toBe(true);
+  });
+
+  it("falls back to context check when goalDescription has no non-software keywords", () => {
+    expect(looksLikeSoftwareGoal(softwareContext, "Improve API response times")).toBe(true);
   });
 });

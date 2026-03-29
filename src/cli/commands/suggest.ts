@@ -102,7 +102,7 @@ export async function cmdSuggest(
   const targetPath = values.path?.trim() ? values.path : ".";
   const maxSuggestions = parseInt(values.max ?? "5", 10);
   const repoFiles: string[] = [];
-  const isSoftware = looksLikeSoftwareGoal(context);
+  const isSoftware = looksLikeSoftwareGoal(context, context);
 
   console.log("Generating goal suggestions...\n");
 

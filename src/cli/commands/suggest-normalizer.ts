@@ -359,6 +359,11 @@ export function normalizeSuggestPayload(
 ): SuggestOutput {
   const parsed = SuggestOutputSchema.safeParse(rawOutput);
   if (parsed.success) {
+    if (!isSoftwareGoal) {
+      return {
+        suggestions: parsed.data.suggestions.map(({ repo_context: _rc, ...rest }) => rest),
+      };
+    }
     return parsed.data;
   }
 
