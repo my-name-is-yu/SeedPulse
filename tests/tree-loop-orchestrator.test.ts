@@ -1194,3 +1194,126 @@ describe("ensureGoalRefined — GoalRefiner integration", () => {
     expect(mockRefiner.refine).not.toHaveBeenCalled();
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// 6. CURRICULUM ORDERING TESTS
+// ═══════════════════════════════════════════════════════════════════
+
+describe("selectNextNode — curriculum ordering", async () => {
+  // Difficulty calculation:
+  //   easy:   min threshold=10, current=9 → normalizedGap=0.1, confidence=0   → difficulty=0.1
+  //   medium: current_value=null          → normalizedGap=1.0, confidence=0.5 → difficulty=0.5
+  //   hard:   current_value=null          → normalizedGap=1.0, confidence=0.1 → difficulty=0.9
+  //
+  // Center-biased distances from 0.5:
+  //   medium: |0.5 - 0.5| = 0.0  ← selected first
+  //   easy:   |0.1 - 0.5| = 0.4
+  //   hard:   |0.9 - 0.5| = 0.4
+
+  function makeEasyDimension(): Dimension {
+    return makeDimension({
+      name: "score",
+      current_value: 9,
+      threshold: { type: "min", value: 10 },
+      confidence: 0,
+      weight: 1.0,
+    });
+  }
+
+  function makeMediumDimension(): Dimension {
+    return makeDimension({
+      name: "score",
+      current_value: null,
+      threshold: { type: "min", value: 10 },
+      confidence: 0.5,
+      weight: 1.0,
+    });
+  }
+
+  function makeHardDimension(): Dimension {
+    return makeDimension({
+      name: "score",
+      current_value: null,
+      threshold: { type: "min", value: 10 },
+      confidence: 0.1,
+      weight: 1.0,
+    });
+  }
+
+  it("prefers medium-difficulty leaf over easy and hard leaves", async () => {
+    await saveGoal({
+      id: "root",
+      node_type: "goal",
+      children_ids: ["easy-leaf", "medium-leaf", "hard-leaf"],
+    });
+    await saveGoal({
+      id: "easy-leaf",
+      node_type: "leaf",
+      parent_id: "root",
+      decomposition_depth: 1,
+      dimensions: [makeEasyDimension()],
+    });
+    await saveGoal({
+      id: "medium-leaf",
+      node_type: "leaf",
+      parent_id: "root",
+      decomposition_depth: 1,
+      dimensions: [makeMediumDimension()],
+    });
+    await saveGoal({
+      id: "hard-leaf",
+      node_type: "leaf",
+      parent_id: "root",
+      decomposition_depth: 1,
+      dimensions: [makeHardDimension()],
+    });
+
+    const result = await orchestrator.selectNextNode("root");
+    expect(result).toBe("medium-leaf");
+  });
+
+  it("selects nodes in center-biased order across three calls", async () => {
+    // After medium (distance=0.0) is selected, easy and hard (both distance=0.4)
+    // share equal distance; next call returns one of them, then the other.
+    await saveGoal({
+      id: "root",
+      node_type: "goal",
+      children_ids: ["easy-leaf", "medium-leaf", "hard-leaf"],
+    });
+    await saveGoal({
+      id: "easy-leaf",
+      node_type: "leaf",
+      parent_id: "root",
+      decomposition_depth: 1,
+      dimensions: [makeEasyDimension()],
+    });
+    await saveGoal({
+      id: "medium-leaf",
+      node_type: "leaf",
+      parent_id: "root",
+      decomposition_depth: 1,
+      dimensions: [makeMediumDimension()],
+    });
+    await saveGoal({
+      id: "hard-leaf",
+      node_type: "leaf",
+      parent_id: "root",
+      decomposition_depth: 1,
+      dimensions: [makeHardDimension()],
+    });
+
+    await orchestrator.startTreeExecution("root", {
+      ...DEFAULT_CONFIG,
+      parallel_loop_limit: 3,
+    });
+
+    const sel1 = await orchestrator.selectNextNode("root");
+    const sel2 = await orchestrator.selectNextNode("root");
+    const sel3 = await orchestrator.selectNextNode("root");
+
+    // First must be medium (closest to 0.5)
+    expect(sel1).toBe("medium-leaf");
+    // Second and third must be easy and hard (in any order — both equidistant)
+    expect(new Set([sel2, sel3])).toEqual(new Set(["easy-leaf", "hard-leaf"]));
+  });
+});

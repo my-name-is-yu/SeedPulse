@@ -6,6 +6,7 @@ import type { StateAggregator } from "./state-aggregator.js";
 import type { SatisficingJudge } from "../drive/satisficing-judge.js";
 import type { GoalDecompositionConfig } from "../types/goal-tree.js";
 import type { Goal } from "../types/goal.js";
+import { estimateDifficulty, curriculumSort } from "./subgoal-curriculum.js";
 
 /**
  * TreeLoopOrchestrator manages the execution of independent loops across
@@ -251,7 +252,7 @@ export class TreeLoopOrchestrator {
    * and deeper leaves before non-leaf nodes.
    */
   private async _selectEligibleNodeId(allIds: string[]): Promise<string | null> {
-    const eligibleLeaves: Array<{ id: string; depth: number }> = [];
+    const eligibleLeaves: Array<{ id: string; depth: number; difficulty: number }> = [];
     const eligibleNonLeaves: string[] = [];
 
     for (const id of allIds) {
@@ -261,13 +262,13 @@ export class TreeLoopOrchestrator {
       if (goal.loop_status === "running" || goal.loop_status === "paused") continue;
 
       if (goal.node_type === "leaf") {
-        eligibleLeaves.push({ id, depth: goal.decomposition_depth ?? 0 });
+        eligibleLeaves.push({ id, depth: goal.decomposition_depth ?? 0, difficulty: estimateDifficulty(goal) });
       } else {
         eligibleNonLeaves.push(id);
       }
     }
 
-    eligibleLeaves.sort((a, b) => b.depth - a.depth);
+    curriculumSort(eligibleLeaves);
     return eligibleLeaves[0]?.id ?? eligibleNonLeaves[0] ?? null;
   }
 
