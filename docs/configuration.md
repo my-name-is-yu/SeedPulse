@@ -178,7 +178,7 @@ npm install -g @pulseed/slack-notifier
 
 The OpenClaw plugin reads `PULSEED_CLI_PATH` if `pulseed` is not in `$PATH`.
 
-For building your own plugin, see [docs/design/plugin-development-guide.md](design/plugin-development-guide.md).
+For building your own plugin, see [docs/design/infrastructure/plugin-development-guide.md](design/infrastructure/plugin-development-guide.md).
 
 ---
 

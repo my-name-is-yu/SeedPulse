@@ -72,7 +72,7 @@ PulSeed is a **task discovery engine**. You give it a long-term goal — "double
 
 PulSeed observes current coverage, identifies untested modules, delegates test writing to a coding agent, and verifies results with actual test runs.
 
-See [docs/usecase.md](docs/usecase.md) for full walkthroughs · [Example goal config](docs/design/goal-negotiation.md)
+See [docs/usecase.md](docs/usecase.md) for full walkthroughs · [Example goal config](docs/design/goal/goal-negotiation.md)
 
 ### Revenue Target
 
@@ -117,7 +117,7 @@ For detailed architecture, see [docs/architecture-map.md](docs/architecture-map.
 
 ## Loop-Stall Prevention
 
-SeedPulse includes built-in stall detection to prevent loops from spinning without progress. When repeated cycles produce no measurable movement on a goal node, the orchestrator records the stall, changes the plan, and stops treating repetition as progress. See [Stall Detection Design](docs/design/stall-detection.md) for details.
+SeedPulse includes built-in stall detection to prevent loops from spinning without progress. When repeated cycles produce no measurable movement on a goal node, the orchestrator records the stall, changes the plan, and stops treating repetition as progress. See [Stall Detection Design](docs/design/core/stall-detection.md) for details.
 
 ## Supported Adapters
 
@@ -131,7 +131,7 @@ SeedPulse includes built-in stall detection to prevent loops from spinning witho
 | `github_issue` | REST API | Issue creation, search |
 | `a2a` | A2A Protocol | Remote agent delegation |
 
-Custom adapters can be added as [plugins](docs/design/plugin-development-guide.md) in `~/.pulseed/plugins/`.
+Custom adapters can be added as [plugins](docs/design/infrastructure/plugin-development-guide.md) in `~/.pulseed/plugins/`.
 
 ## Plugins & Integrations
 
@@ -140,7 +140,7 @@ Custom adapters can be added as [plugins](docs/design/plugin-development-guide.m
 | [`@pulseed/openclaw-plugin`](openclaw-plugin/) | OpenClaw Gateway — goal detection, agent orchestration, progress tracking | ✅ Stable |
 | [`@pulseed/slack-notifier`](plugins/slack-notifier/) | Slack notifications for goal events | ✅ Stable |
 
-See [Plugin Development Guide](docs/design/plugin-development-guide.md) for creating custom plugins.
+See [Plugin Development Guide](docs/design/infrastructure/plugin-development-guide.md) for creating custom plugins.
 
 ## Programmatic Usage
 
