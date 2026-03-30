@@ -7,6 +7,7 @@
 
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
+import { theme } from "./theme.js";
 import { Dashboard, statusLabel } from "./dashboard.js";
 import { Chat, type ChatMessage } from "./chat.js";
 import { HelpOverlay } from "./help-overlay.js";
@@ -48,7 +49,7 @@ const StatusBar: React.FC<{
 }> = ({ goalCount, trustScore, status, iteration }) => (
   <Box
     borderStyle="single"
-    borderColor="gray"
+    borderColor={theme.border}
     paddingX={1}
     justifyContent="space-between"
   >
@@ -232,7 +233,7 @@ export function App({
     <Box flexDirection="column" height={termRows}>
       {/* App header */}
       <Box>
-        <Text bold color="blue">[ PULSEED ]</Text>
+        <Text bold color={theme.header}>[ PULSEED ]</Text>
         {(cwd || gitBranch || providerName) && (
           <Text dimColor>
             {"  "}
@@ -251,7 +252,7 @@ export function App({
             flexDirection="column"
             width="30%"
             borderStyle="single"
-            borderColor="gray"
+            borderColor={theme.border}
             paddingX={1}
             overflow="hidden"
           >

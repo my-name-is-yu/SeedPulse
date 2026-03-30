@@ -9,33 +9,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import { renderMarkdownLines } from "./markdown-renderer.js";
 import type { Report } from "../types/report.js";
-
-// ─── Per-type header color ───
-
-function reportColor(reportType: Report["report_type"]): string {
-  switch (reportType) {
-    case "execution_summary":
-      return "cyan";
-    case "daily_summary":
-      return "blue";
-    case "weekly_report":
-      return "magenta";
-    case "urgent_alert":
-      return "red";
-    case "approval_request":
-      return "yellow";
-    case "stall_escalation":
-      return "red";
-    case "goal_completion":
-      return "green";
-    case "capability_escalation":
-      return "yellow";
-    case "strategy_change":
-      return "cyan";
-    default:
-      return "white";
-  }
-}
+import { reportColor } from "./theme.js";
 
 function reportIcon(reportType: Report["report_type"]): string {
   switch (reportType) {

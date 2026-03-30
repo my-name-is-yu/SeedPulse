@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import type { LoopState, DimensionProgress } from "./use-loop.js";
+import { theme, statusColor, progressColor } from "./theme.js";
 
 interface DashboardProps {
   state: LoopState;
@@ -29,27 +30,6 @@ export function statusLabel(status: string): string {
   }
 }
 
-function statusColor(status: string): string {
-  switch (status) {
-    case "running":
-      return "green";
-    case "completed":
-      return "cyan";
-    case "stalled":
-    case "error":
-      return "red";
-    case "stopped":
-      return "yellow";
-    default:
-      return "white";
-  }
-}
-
-function progressColor(progress: number): string {
-  if (progress >= 80) return "green";
-  if (progress >= 40) return "yellow";
-  return "red";
-}
 
 function formatElapsed(startedAt: string): string {
   const secs = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
@@ -86,26 +66,26 @@ export function Dashboard({ state }: DashboardProps) {
         paddingY={1}
         overflow="hidden"
       >
-        <Text bold color="magenta">
+        <Text bold color={theme.brand}>
           🎯 PULSEED
         </Text>
         <Text> </Text>
-        <Text color="yellow">No active goals.</Text>
+        <Text color={theme.warning}>No active goals.</Text>
         <Text> </Text>
         <Text dimColor>Get started:</Text>
         <Text>
           {"  1. Type a goal: "}
-          <Text color="cyan">"improve test coverage to 90%"</Text>
+          <Text color={theme.userPrefix}>"improve test coverage to 90%"</Text>
         </Text>
         <Text>
           {"  2. Then type: "}
-          <Text color="green">/run</Text>
+          <Text color={theme.command}>/run</Text>
         </Text>
         <Text>{"  3. PulSeed will decompose and execute automatically."}</Text>
         <Text> </Text>
         <Text dimColor>
           {"Type "}
-          <Text color="white">/help</Text>
+          <Text color={theme.text}>/help</Text>
           {" for all commands."}
         </Text>
       </Box>
@@ -118,14 +98,14 @@ export function Dashboard({ state }: DashboardProps) {
     <Box flexDirection="column" paddingX={1} overflow="hidden">
       {/* Header */}
       <Box>
-        <Text bold color="magenta">
+        <Text bold color={theme.brand}>
           PULSEED
         </Text>
         <Text>{"  goal: "}</Text>
         <Text bold>{goalLabel}</Text>
         <Text>{"  "}</Text>
         {state.status === "running" ? (
-          <Text color="green">
+          <Text color={theme.success}>
             <Spinner type="dots" />
             {" " + statusLabel("running")}
           </Text>
@@ -135,7 +115,7 @@ export function Dashboard({ state }: DashboardProps) {
       </Box>
 
       {/* Separator */}
-      <Box borderStyle="single" borderColor="gray" borderTop={false} borderLeft={false} borderRight={false} />
+      <Box borderStyle="single" borderColor={theme.border} borderTop={false} borderLeft={false} borderRight={false} />
 
       {/* Stats row: iter, elapsed, last result */}
       {(state.running || state.iteration > 0) && (
@@ -159,7 +139,7 @@ export function Dashboard({ state }: DashboardProps) {
 
       {/* Dimension progress bars */}
       {state.dimensions.length === 0 ? (
-        <Text color="gray">Loading dimensions...</Text>
+        <Text color={theme.border}>Loading dimensions...</Text>
       ) : (
         state.dimensions.map((dim) => (
           <DimensionRow key={dim.name} dim={dim} />
@@ -168,7 +148,7 @@ export function Dashboard({ state }: DashboardProps) {
 
       {/* Error message */}
       {state.status === "error" && state.lastError && (
-        <Text color="red">Error: {state.lastError}</Text>
+        <Text color={theme.error}>Error: {state.lastError}</Text>
       )}
     </Box>
   );

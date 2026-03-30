@@ -8,6 +8,8 @@
 // Instead, we do lightweight manual conversion that produces clean text
 // which Ink can properly measure and render.
 
+import { theme } from "./theme.js";
+
 export interface MarkdownSegment {
   text: string;
   bold?: boolean;
@@ -209,7 +211,7 @@ function getKeywords(language: string): Set<string> {
 export function highlightCodeLine(line: string, language: string): MarkdownSegment[] {
   // Comment lines
   if (/^\s*(\/\/|#)/.test(line)) {
-    return [{ text: '  ' + line, color: 'gray' }];
+    return [{ text: '  ' + line, color: theme.codeComment }];
   }
 
   const indentMatch = line.match(/^(\s*)/);
@@ -235,13 +237,13 @@ export function highlightCodeLine(line: string, language: string): MarkdownSegme
 
     if (/^["'`]/.test(token)) {
       // String literal
-      segments.push({ text: token, color: 'green' });
+      segments.push({ text: token, color: theme.codeString });
     } else if (/^\d/.test(token)) {
       // Number
-      segments.push({ text: token, color: 'yellow' });
+      segments.push({ text: token, color: theme.codeNumber });
     } else if (/^[A-Za-z_$]/.test(token) && keywords.has(token)) {
       // Keyword
-      segments.push({ text: token, color: 'blue' });
+      segments.push({ text: token, color: theme.codeKeyword });
     } else {
       segments.push({ text: token });
     }
