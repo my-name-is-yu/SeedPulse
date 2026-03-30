@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.2] - 2026-03-30
+
+### Added
+
+- Added `ProgressPredictor` for early stall detection via linear regression on gap history, with new stall types `predicted_plateau` and `predicted_regression` (#343).
+- Added difficulty-based curriculum ordering for subgoal selection — medium-complexity subgoals (0.3–0.7 band) are prioritized, with a near-complete guard to prevent task starvation (#344).
+- Added PulSeed ASCII banner (Sprout Green) to setup wizard (#342).
+- Added per-iteration log line in CoreLoop for timeout diagnosis (#349).
+
+### Fixed
+
+- Fixed `improve` / `suggest` commands hanging indefinitely on LLM timeout — added `SuggestTimeoutError` with configurable 30s default and `try/finally` cleanup (#351).
+- Fixed `cleanup` command not removing orphaned datasources for deleted goals (#350).
+- Fixed datasource dedup key to include `scope_goal_id`, preventing incorrect merging of scoped datasources for different goals (#350).
+- Fixed Anthropic adapter ignoring `config.model` setting (#341).
+
+## [0.1.1] - 2026-03-29
+
+### Fixed
+
+- Added `maxRetries` to `rmSync` for Node 22 flaky test reliability (#340).
+- Parallelized dimension LLM calls in negotiate/renegotiate for faster goal setup (#338).
+- Fixed `looksLikeSoftwareGoal` bypassing normalizer `isSoftwareGoal` check (#337).
+- Improved OSS documentation readability — reorganized, translated, and added missing docs (#339).
+
 ## [0.1.0] - 2026-03-28
 
 ### Demo Release
