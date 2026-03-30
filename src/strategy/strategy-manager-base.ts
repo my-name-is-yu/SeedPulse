@@ -15,6 +15,7 @@ import {
   StrategyArraySchema,
   buildGenerationPrompt,
   detectStrategyGap,
+  unwrapStrategyResponse,
 } from "./strategy-helpers.js";
 
 /**
@@ -84,10 +85,12 @@ export class StrategyManagerBase {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let strategiesRaw: any[];
     if (this.promptGateway) {
+      // Wrap the schema to unwrap any LLM wrapper object before array validation.
+      const unwrappingSchema = z.unknown().transform(unwrapStrategyResponse).pipe(StrategyArraySchema);
       strategiesRaw = await this.promptGateway.execute({
         purpose: "strategy_generation",
         goalId,
-        responseSchema: StrategyArraySchema,
+        responseSchema: unwrappingSchema,
         additionalContext: {
           prompt,
           primaryDimension,
@@ -106,11 +109,10 @@ export class StrategyManagerBase {
           model_tier: 'main',
         }
       );
-      // Parse and validate the LLM response
-      strategiesRaw = this.llmClient.parseJSON(
-        response.content,
-        StrategyArraySchema
-      );
+      // Parse and validate the LLM response.
+      // Unwrap { candidates: [...] } shape in case the LLM returns a wrapped object.
+      const parsed = this.llmClient.parseJSON(response.content, z.unknown());
+      strategiesRaw = StrategyArraySchema.parse(unwrapStrategyResponse(parsed));
     }
 
     const now = new Date().toISOString();
@@ -314,7 +316,10 @@ export class StrategyManagerBase {
           pastStrategies,
         }
       );
-    } catch {
+    } catch (err) {
+      this.logger?.warn(
+        `[StrategyManager] generateCandidates failed during stall recovery for goal "${goalId}": ${err instanceof Error ? err.message : String(err)}`
+      );
       return null;
     }
 

@@ -41,6 +41,26 @@ export const StrategyArraySchema = z.array(
   })
 );
 
+/**
+ * Unwrap a potentially-wrapped LLM response before schema validation.
+ * LLMs may return a wrapper object instead of a bare array. This function
+ * checks common wrapper keys, then falls back to single-key unwrapping.
+ */
+export function unwrapStrategyResponse(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return raw;
+  }
+  const record = raw as Record<string, unknown>;
+  for (const key of ["candidates", "strategies", "data", "results", "items"]) {
+    if (Array.isArray(record[key])) return record[key];
+  }
+  const keys = Object.keys(record);
+  if (keys.length === 1 && Array.isArray(record[keys[0]!])) {
+    return record[keys[0]!];
+  }
+  return raw;
+}
+
 // ─── LLM prompt builder ───
 
 export function buildGenerationPrompt(

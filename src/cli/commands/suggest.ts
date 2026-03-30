@@ -106,9 +106,9 @@ export async function cmdSuggest(
 
   console.log("Generating goal suggestions...\n");
 
-  let suggestions: unknown;
+  let suggestRaw: unknown;
   try {
-    suggestions = await generateSuggestOutput(
+    suggestRaw = await generateSuggestOutput(
       deps.goalNegotiator.suggestGoals.bind(deps.goalNegotiator),
       context,
       { maxSuggestions, existingGoals: existingTitles, repoPath: targetPath, capabilityDetector }
@@ -122,6 +122,7 @@ export async function cmdSuggest(
     return 1;
   }
 
+  const suggestions = Array.isArray(suggestRaw) ? { suggestions: suggestRaw } : suggestRaw;
   const finalPayload = normalizeSuggestPayload(suggestions, targetPath, targetPath, context, maxSuggestions, repoFiles, isSoftware);
   console.log(JSON.stringify(finalPayload, null, 2));
 
@@ -178,9 +179,9 @@ export async function cmdImprove(
   const repoFiles: string[] = [];
   const isSoftware = looksLikeSoftwareGoal(context);
 
-  let rawSuggestions: unknown;
+  let rawSuggestOutput: unknown;
   try {
-    rawSuggestions = await generateSuggestOutput(
+    rawSuggestOutput = await generateSuggestOutput(
       deps.goalNegotiator.suggestGoals.bind(deps.goalNegotiator),
       context,
       { maxSuggestions, existingGoals: existingTitles, repoPath: targetPath, capabilityDetector }
@@ -194,6 +195,7 @@ export async function cmdImprove(
     return 1;
   }
 
+  const rawSuggestions = Array.isArray(rawSuggestOutput) ? { suggestions: rawSuggestOutput } : rawSuggestOutput;
   const normalizedPayload = normalizeSuggestPayload(rawSuggestions, targetPath, targetPath, context, maxSuggestions, repoFiles, isSoftware);
   const suggestions = normalizedPayload.suggestions;
 
