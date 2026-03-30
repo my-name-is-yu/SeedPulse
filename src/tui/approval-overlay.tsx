@@ -7,6 +7,7 @@
 import React from "react";
 import { Box, Text, useInput } from "ink";
 import type { Task } from "../types/task.js";
+import { theme } from "./theme.js";
 
 interface ApprovalOverlayProps {
   task: Task;
@@ -29,12 +30,12 @@ export function ApprovalOverlay({ task, onDecision }: ApprovalOverlayProps) {
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="yellow"
+      borderColor={theme.overlayBorder}
       paddingX={2}
       paddingY={1}
     >
       <Box justifyContent="center">
-        <Text bold color="yellow">
+        <Text bold color={theme.overlayHeader}>
           TASK APPROVAL REQUIRED
         </Text>
       </Box>
@@ -43,29 +44,29 @@ export function ApprovalOverlay({ task, onDecision }: ApprovalOverlayProps) {
       <Box flexDirection="column" marginTop={1}>
         <Box>
           <Box width={14}>
-            <Text bold color="cyan">Task:</Text>
+            <Text bold color={theme.label}>Task:</Text>
           </Box>
           <Text wrap="wrap">{task.work_description}</Text>
         </Box>
 
         <Box marginTop={1}>
           <Box width={14}>
-            <Text bold color="cyan">Rationale:</Text>
+            <Text bold color={theme.label}>Rationale:</Text>
           </Box>
           <Text wrap="wrap">{task.rationale}</Text>
         </Box>
 
         <Box marginTop={1}>
           <Box width={14}>
-            <Text bold color="cyan">Reversibility:</Text>
+            <Text bold color={theme.label}>Reversibility:</Text>
           </Box>
           <Text
             color={
               task.reversibility === "irreversible"
-                ? "red"
+                ? theme.error
                 : task.reversibility === "reversible"
-                ? "green"
-                : "yellow"
+                ? theme.success
+                : theme.warning
             }
           >
             {task.reversibility}
@@ -77,9 +78,9 @@ export function ApprovalOverlay({ task, onDecision }: ApprovalOverlayProps) {
 
       <Box justifyContent="center" marginTop={1}>
         <Text bold>Approve this task? </Text>
-        <Text bold color="green">[y]</Text>
+        <Text bold color={theme.success}>[y]</Text>
         <Text bold> / </Text>
-        <Text bold color="red">[N]</Text>
+        <Text bold color={theme.error}>[N]</Text>
         <Text bold> / </Text>
         <Text dimColor>ESC to reject</Text>
       </Box>

@@ -10,6 +10,7 @@ import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
 import { renderMarkdownLines, type MarkdownLine, type MarkdownSegment } from "./markdown-renderer.js";
 import { fuzzyMatch, fuzzyFilter } from "./fuzzy.js";
+import { theme, getMessageTypeColor } from "./theme.js";
 
 export interface ChatMessage {
   role: "user" | "pulseed";
@@ -25,22 +26,6 @@ interface ChatProps {
   goalNames?: string[];
 }
 
-function getMessageTypeColor(
-  messageType: ChatMessage["messageType"]
-): string | undefined {
-  switch (messageType) {
-    case "error":
-      return "red";
-    case "warning":
-      return "yellow";
-    case "success":
-      return "green";
-    case "info":
-      return "blue";
-    default:
-      return undefined;
-  }
-}
 
 function formatTime(date: Date): string {
   return date.toLocaleTimeString("en-US", {
@@ -62,7 +47,7 @@ function SegmentComponent({ seg, baseColor }: { seg: MarkdownSegment; baseColor?
     return <Text italic color={seg.color ?? baseColor}>{seg.text}</Text>;
   }
   if (seg.code) {
-    return <Text color="cyan">{seg.text}</Text>;
+    return <Text color={theme.codeInline}>{seg.text}</Text>;
   }
   if (seg.color) {
     return <Text color={seg.color}>{seg.text}</Text>;
@@ -242,7 +227,7 @@ export function Chat({ messages, onSubmit, isProcessing, goalNames = [] }: ChatP
             return (
               <Box key={absoluteIdx} flexDirection="column" marginBottom={2}>
                 <Box>
-                  <Text color="cyan" bold>
+                  <Text color={theme.userPrefix} bold>
                     {"\u276F "}
                   </Text>
                   <Text>{msg.text}</Text>
@@ -259,7 +244,7 @@ export function Chat({ messages, onSubmit, isProcessing, goalNames = [] }: ChatP
           return (
             <Box key={absoluteIdx} flexDirection="column" marginBottom={1} marginLeft={2}>
               <Box justifyContent="space-between">
-                <Text color="magenta" bold>
+                <Text color={theme.brand} bold>
                   PulSeed
                 </Text>
                 <Text dimColor>{timeStr}</Text>
@@ -280,19 +265,19 @@ export function Chat({ messages, onSubmit, isProcessing, goalNames = [] }: ChatP
         {/* Thinking spinner */}
         {isProcessing && (
           <Box>
-            <Text color="yellow">
+            <Text color={theme.warning}>
               <Spinner type="dots" />
             </Text>
-            <Text color="yellow"> Thinking...</Text>
+            <Text color={theme.warning}> Thinking...</Text>
           </Box>
         )}
       </Box>
 
       {/* Input area with borders */}
       <Box flexDirection="column">
-        <Box borderStyle="single" borderColor="gray" borderBottom={false} borderLeft={false} borderRight={false} />
+        <Box borderStyle="single" borderColor={theme.border} borderBottom={false} borderLeft={false} borderRight={false} />
         <Box>
-          <Text color="green" bold>
+          <Text color={theme.userPrompt} bold>
             {"\u276F "}
           </Text>
           <TextInput
@@ -302,7 +287,7 @@ export function Chat({ messages, onSubmit, isProcessing, goalNames = [] }: ChatP
             placeholder="/ for commands"
           />
         </Box>
-        <Box borderStyle="single" borderColor="gray" borderTop={false} borderLeft={false} borderRight={false} />
+        <Box borderStyle="single" borderColor={theme.border} borderTop={false} borderLeft={false} borderRight={false} />
         {hasMatches && (
           <Box flexDirection="column">
             {matches.map((suggestion, idx) => {
@@ -312,7 +297,7 @@ export function Chat({ messages, onSubmit, isProcessing, goalNames = [] }: ChatP
                 : `  ${suggestion.name.padEnd(20)}${suggestion.description}`;
               const key = `${suggestion.type}-${suggestion.name}-${suggestion.description}`;
               return isSelected ? (
-                <Text key={key} bold color="blue">{label}</Text>
+                <Text key={key} bold color={theme.selected}>{label}</Text>
               ) : (
                 <Text key={key} dimColor>{label}</Text>
               );
