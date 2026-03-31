@@ -315,10 +315,11 @@ export async function scoreDrivesAndCheckKnowledge(
           Math.max(gapVector.gaps.length, 1),
       };
 
-      // Skip knowledge gap detection when there's no observation data at all.
-      // confidence === 0 means no observation was performed yet; distinct from a real
-      // low-confidence observation (> 0 but < 0.3) where gap detection is useful.
-      const gapSignal = (observationContext.confidence === 0 || !Number.isFinite(observationContext.confidence))
+      // Skip knowledge gap detection when observations are purely self-report
+      // (no data sources configured). confidence <= 0.3 means all observations are
+      // LLM self-report only; running gap detection here would block task execution
+      // every iteration without any way to improve confidence.
+      const gapSignal = (observationContext.confidence <= 0.3 || !Number.isFinite(observationContext.confidence))
         ? null
         : await ctx.deps.knowledgeManager.detectKnowledgeGap(observationContext);
       if (gapSignal !== null) {
