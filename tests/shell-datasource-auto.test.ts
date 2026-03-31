@@ -157,7 +157,7 @@ describe("autoRegisterShellDataSources", () => {
     expect(fs.existsSync(datasourcesDir)).toBe(true);
   });
 
-  it("does not create a duplicate shell datasource for the same dimensions across runs", async () => {
+  it("does not create a duplicate shell datasource for the same goal, dimensions, and path", async () => {
     const sm = makeFakeStateManager(tmpDir);
 
     // First registration
@@ -167,11 +167,11 @@ describe("autoRegisterShellDataSources", () => {
       "goal_first"
     );
 
-    // Second registration with same dimension but different goalId
+    // Second registration with same goal ID, dimension, and path — exact duplicate
     await autoRegisterShellDataSources(
       sm as never,
       [{ name: "todo_count" }],
-      "goal_second"
+      "goal_first"
     );
 
     const configs = readDsConfigs(datasourcesDir);
@@ -179,7 +179,29 @@ describe("autoRegisterShellDataSources", () => {
     expect(configs).toHaveLength(1);
   });
 
-  it("does not create a duplicate when dimensions are same but in different order", async () => {
+  it("creates separate shell datasources for different goalIds with same dimensions", async () => {
+    const sm = makeFakeStateManager(tmpDir);
+
+    // First registration
+    await autoRegisterShellDataSources(
+      sm as never,
+      [{ name: "todo_count" }],
+      "goal_first"
+    );
+
+    // Second registration with same dimension but different goalId — should create a new entry
+    await autoRegisterShellDataSources(
+      sm as never,
+      [{ name: "todo_count" }],
+      "goal_second"
+    );
+
+    const configs = readDsConfigs(datasourcesDir);
+    // Two separate datasources — one per goal
+    expect(configs).toHaveLength(2);
+  });
+
+  it("does not create a duplicate when dimensions are same, same goalId, same path but different order", async () => {
     const sm = makeFakeStateManager(tmpDir);
 
     await autoRegisterShellDataSources(
@@ -188,11 +210,11 @@ describe("autoRegisterShellDataSources", () => {
       "goal_order_a"
     );
 
-    // Same dimensions, reversed order, different goalId
+    // Same dimensions, reversed order, same goalId — exact duplicate
     await autoRegisterShellDataSources(
       sm as never,
       [{ name: "fixme_count" }, { name: "todo_count" }],
-      "goal_order_b"
+      "goal_order_a"
     );
 
     const configs = readDsConfigs(datasourcesDir);

@@ -146,7 +146,7 @@ export async function cmdGoalAdd(
     const leafGoal = await stateManager.loadGoal(leafId);
     if (leafGoal && leafGoal.dimensions.length > 0) {
       await autoRegisterFileExistenceDataSources(stateManager, leafGoal.dimensions, leafGoal.description, leafId, leafGoal.constraints);
-      await autoRegisterShellDataSources(stateManager, leafGoal.dimensions, leafId);
+      await autoRegisterShellDataSources(stateManager, leafGoal.dimensions, leafId, leafGoal.constraints);
     }
   }
 
@@ -209,7 +209,7 @@ async function cmdGoalAddLegacyNegotiate(
     }
 
     await autoRegisterFileExistenceDataSources(stateManager, goal.dimensions, goal.description, goal.id, goal.constraints);
-    await autoRegisterShellDataSources(stateManager, goal.dimensions, goal.id);
+    await autoRegisterShellDataSources(stateManager, goal.dimensions, goal.id, goal.constraints);
 
     console.log(`Goal registered successfully!`);
     console.log(`Goal ID:    ${goal.id}`);

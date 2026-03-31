@@ -167,15 +167,25 @@ export async function loadExistingDatasources(datasourcesDir: string): Promise<D
 
 /**
  * Returns true if an existing shell datasource already covers the exact same
- * set of dimension names.
+ * set of dimension names, path, and scope_goal_id.
+ * Dedup requires all three to match to avoid reusing a datasource from a
+ * different goal or workspace path.
  */
-function shellDatasourceExists(existing: DatasourceConfig[], dimensionNames: string[]): boolean {
+function shellDatasourceExists(
+  existing: DatasourceConfig[],
+  dimensionNames: string[],
+  workspacePath: string,
+  goalId: string
+): boolean {
   const sorted = [...dimensionNames].sort().join(",");
   return existing.some((cfg) => {
     if (cfg.type !== "shell") return false;
     const commands = cfg.connection?.commands ?? {};
     const existingDims = Object.keys(commands).sort().join(",");
-    return existingDims === sorted;
+    if (existingDims !== sorted) return false;
+    if (cfg.connection?.path !== workspacePath) return false;
+    if (cfg.scope_goal_id !== goalId) return false;
+    return true;
   });
 }
 
@@ -321,7 +331,8 @@ export function findShellPattern(dimName: string): ShellCommandConfig | undefine
 export async function autoRegisterShellDataSources(
   stateManager: StateManager,
   dimensions: Array<{ name: string }>,
-  goalId: string
+  goalId: string,
+  constraints?: string[]
 ): Promise<void> {
   try {
     // Collect dimensions that match known shell patterns
@@ -338,8 +349,11 @@ export async function autoRegisterShellDataSources(
     const datasourcesDir = getDatasourcesDir(stateManager.getBaseDir());
     await fsp.mkdir(datasourcesDir, { recursive: true });
 
+    const wsConstraint = constraints?.find((c) => c.startsWith("workspace_path:"));
+    const workspacePath = wsConstraint ? wsConstraint.slice("workspace_path:".length) : process.cwd();
+
     const existing = await loadExistingDatasources(datasourcesDir);
-    if (shellDatasourceExists(existing, Object.keys(matchedCommands))) {
+    if (shellDatasourceExists(existing, Object.keys(matchedCommands), workspacePath, goalId)) {
       getCliLogger().info(
         `[auto] Skipping ShellDataSource registration — duplicate already exists for: ${Object.keys(matchedCommands).join(", ")}`
       );
@@ -359,7 +373,7 @@ export async function autoRegisterShellDataSources(
       id,
       name: `auto:shell (${Object.keys(matchedCommands).join(", ")})`,
       type: "shell",
-      connection: { path: process.cwd(), commands: commandsConfig },
+      connection: { path: workspacePath, commands: commandsConfig },
       scope_goal_id: goalId,
       enabled: true,
       created_at: new Date().toISOString(),

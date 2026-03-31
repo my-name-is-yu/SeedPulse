@@ -106,7 +106,7 @@ export async function cmdGoalAddRaw(
   }
 
   await autoRegisterFileExistenceDataSources(stateManager, dimensions, opts.description || title, goalId, opts.constraints);
-  await autoRegisterShellDataSources(stateManager, dimensions, goalId);
+  await autoRegisterShellDataSources(stateManager, dimensions, goalId, opts.constraints);
 
   console.log(`Goal registered successfully!`);
   console.log(`Goal ID:    ${goalId}`);
