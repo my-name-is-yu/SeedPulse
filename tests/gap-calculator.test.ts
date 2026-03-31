@@ -104,10 +104,38 @@ describe("computeRawGap", () => {
       expect(computeRawGap(null, threshold)).toBe(1);
     });
 
-    it("works with numeric match", () => {
+    it("treats numeric currentValue as 0-1 score (not exact equality)", () => {
       const numThreshold: Threshold = { type: "match", value: 42 };
-      expect(computeRawGap(42, numThreshold)).toBe(0);
-      expect(computeRawGap(41, numThreshold)).toBe(1);
+      // Numeric currentValue is always treated as a 0-1 observation score.
+      // Exact numeric equality is handled by min/max/range threshold types.
+      expect(computeRawGap(1, numThreshold)).toBe(0);   // score=1.0 → gap=0
+      expect(computeRawGap(0, numThreshold)).toBe(1);   // score=0.0 → gap=1
+      expect(computeRawGap(0.7, numThreshold)).toBeCloseTo(0.3); // score=0.7 → gap=0.3
+    });
+
+    it("numeric 1.0 (fully matched) → gap = 0", () => {
+      const threshold: Threshold = { type: "match", value: "export function greet" };
+      expect(computeRawGap(1.0, threshold)).toBe(0);
+    });
+
+    it("numeric 0.0 (not matched at all) → gap = 1", () => {
+      const threshold: Threshold = { type: "match", value: "export function greet" };
+      expect(computeRawGap(0.0, threshold)).toBe(1);
+    });
+
+    it("numeric 0.7 (partial match score) → gap = 0.3", () => {
+      const threshold: Threshold = { type: "match", value: "export function greet" };
+      expect(computeRawGap(0.7, threshold)).toBeCloseTo(0.3);
+    });
+
+    it("string match → gap = 0 (existing behavior preserved)", () => {
+      const threshold: Threshold = { type: "match", value: "approved" };
+      expect(computeRawGap("approved", threshold)).toBe(0);
+    });
+
+    it("string mismatch → gap = 1 (existing behavior preserved)", () => {
+      const threshold: Threshold = { type: "match", value: "approved" };
+      expect(computeRawGap("pending", threshold)).toBe(1);
     });
 
     it("works with boolean match", () => {
@@ -177,6 +205,7 @@ describe("normalizeGap", () => {
     const t: Threshold = { type: "match", value: "ok" };
     expect(normalizeGap(0, t, "ok")).toBe(0);
     expect(normalizeGap(1, t, "bad")).toBe(1);
+    expect(normalizeGap(0.3, t, 0.7)).toBeCloseTo(0.3);
   });
 });
 
@@ -334,6 +363,41 @@ describe("calculateDimensionGap", () => {
     expect(present.raw_gap).toBe(0);
     expect(present.normalized_gap).toBe(0);
     expect(present.normalized_weighted_gap).toBe(0);
+  });
+
+  it("handles match threshold with numeric observation score (LLM/DataSource)", () => {
+    // LLM observation returns 0-1 score: gap = 1 - score
+    const fullMatch = calculateDimensionGap({
+      name: "greet_func",
+      current_value: 1.0,
+      threshold: { type: "match", value: "export function greet" },
+      confidence: 0.9,
+      uncertainty_weight: null,
+    });
+    expect(fullMatch.raw_gap).toBe(0);
+    expect(fullMatch.normalized_gap).toBe(0);
+    expect(fullMatch.normalized_weighted_gap).toBe(0);
+
+    const noMatch = calculateDimensionGap({
+      name: "greet_func",
+      current_value: 0.0,
+      threshold: { type: "match", value: "export function greet" },
+      confidence: 0.9,
+      uncertainty_weight: null,
+    });
+    expect(noMatch.raw_gap).toBe(1);
+    expect(noMatch.normalized_gap).toBe(1);
+
+    const partialMatch = calculateDimensionGap({
+      name: "greet_func",
+      current_value: 0.7,
+      threshold: { type: "match", value: "export function greet" },
+      confidence: 1.0,
+      uncertainty_weight: null,
+    });
+    expect(partialMatch.raw_gap).toBeCloseTo(0.3);
+    expect(partialMatch.normalized_gap).toBeCloseTo(0.3);
+    expect(partialMatch.normalized_weighted_gap).toBeCloseTo(0.3);
   });
 
   it("handles match threshold", () => {
@@ -599,6 +663,13 @@ describe("edge cases", () => {
     // treat -Infinity as invalid/unobserved data rather than relying on this.
     const result = computeRawGap(-Infinity, { type: "max", value: 0.05 });
     expect(result).toBe(0);
+  });
+
+  it("match type: NaN and Infinity return gap=1", () => {
+    const t: Threshold = { type: "match", value: "ok" };
+    expect(computeRawGap(NaN, t)).toBe(1);
+    expect(computeRawGap(Infinity, t)).toBe(1);
+    expect(computeRawGap(-Infinity, t)).toBe(1);
   });
 
   it("doc example: full pipeline verification", () => {

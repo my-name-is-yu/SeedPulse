@@ -75,7 +75,14 @@ export function computeRawGap(
       return isTruthy(currentValue) ? 0 : 1;
     }
     case "match": {
-      // Strict equality comparison for match type
+      // When current_value is numeric (from LLM/DataSource observation), treat as 0-1 score.
+      // Note: numeric threshold values like {type:"match", value:42} are not used in PulSeed;
+      // numeric comparisons use min/max/range types. All numeric currentValues here are 0-1 scores.
+      if (typeof currentValue === "number") {
+        if (!isFinite(currentValue)) return 1; // NaN/Infinity → full gap
+        return Math.max(0, Math.min(1, 1 - currentValue));
+      }
+      // String/boolean: strict equality comparison
       return currentValue === threshold.value ? 0 : 1;
     }
   }
@@ -91,7 +98,7 @@ export function computeRawGap(
  *   max(N):        raw_gap / threshold (guard: if threshold=0 -> cap at 1.0)
  *   range(lo, hi): min(1.0, raw_gap / ((high - low) / 2))
  *   present:       raw_gap (already 0 or 1)
- *   match:         raw_gap (already 0 or 1)
+ *   match:         raw_gap (0 or 1 for string/boolean, continuous [0,1] for numeric scores)
  *
  * null current_value => normalized_gap = 1.0
  */
@@ -126,8 +133,9 @@ export function normalizeGap(
       return Math.min(1.0, rawGap / halfWidth);
     }
     case "present":
-    case "match":
       return rawGap; // already 0 or 1
+    case "match":
+      return rawGap; // 0-1 for string/boolean equality, continuous [0,1] for numeric scores
   }
 }
 
