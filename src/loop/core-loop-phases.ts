@@ -315,11 +315,16 @@ export async function scoreDrivesAndCheckKnowledge(
           Math.max(gapVector.gaps.length, 1),
       };
 
-      // Skip knowledge gap detection when observations are purely self-report
-      // (no data sources configured). confidence <= 0.3 means all observations are
-      // LLM self-report only; running gap detection here would block task execution
-      // every iteration without any way to improve confidence.
-      const gapSignal = (observationContext.confidence <= 0.3 || !Number.isFinite(observationContext.confidence))
+      // Skip knowledge gap detection when:
+      // 1. Observations are purely self-report (confidence <= 0.3, no data sources)
+      // 2. Not the first iteration — prevents repeated gap detection from blocking
+      //    task execution every loop. Gap detection runs once; after that, let the
+      //    normal task cycle proceed.
+      const skipGapDetection =
+        observationContext.confidence <= 0.3 ||
+        !Number.isFinite(observationContext.confidence) ||
+        loopIndex > 0;
+      const gapSignal = skipGapDetection
         ? null
         : await ctx.deps.knowledgeManager.detectKnowledgeGap(observationContext);
       if (gapSignal !== null) {
