@@ -71,7 +71,7 @@ const READABLE_EXTENSIONS = new Set([
  * Filters to common code/config extensions. Caps total output at maxChars.
  */
 export async function readWorkspaceFiles(workspacePath: string, maxChars = 3000): Promise<string> {
-  let entries: fsPromises.Dirent[];
+  let entries: import("node:fs").Dirent[];
   try {
     entries = await fsPromises.readdir(workspacePath, { withFileTypes: true });
   } catch {
