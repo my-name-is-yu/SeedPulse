@@ -44,66 +44,66 @@ vi.mock("../src/goal/goal-refiner.js", async (importOriginal) => {
 });
 
 vi.mock("../src/llm/llm-client.js", () => ({
-  LLMClient: vi.fn().mockImplementation(() => ({})),
+  LLMClient: vi.fn().mockImplementation(function() { return {}; }),
   MockLLMClient: vi.fn(),
 }));
 
 vi.mock("../src/trust-manager.js", () => ({
-  TrustManager: vi.fn().mockImplementation(() => ({})),
+  TrustManager: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/drive-system.js", () => ({
-  DriveSystem: vi.fn().mockImplementation(() => ({})),
+  DriveSystem: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/observation/observation-engine.js", () => ({
-  ObservationEngine: vi.fn().mockImplementation(() => ({})),
+  ObservationEngine: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/stall-detector.js", () => ({
-  StallDetector: vi.fn().mockImplementation(() => ({})),
+  StallDetector: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/satisficing-judge.js", () => ({
-  SatisficingJudge: vi.fn().mockImplementation(() => ({})),
+  SatisficingJudge: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/ethics-gate.js", () => ({
-  EthicsGate: vi.fn().mockImplementation(() => ({})),
+  EthicsGate: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/execution/session-manager.js", () => ({
-  SessionManager: vi.fn().mockImplementation(() => ({})),
+  SessionManager: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/strategy/strategy-manager.js", () => ({
-  StrategyManager: vi.fn().mockImplementation(() => ({})),
+  StrategyManager: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/execution/adapter-layer.js", () => ({
-  AdapterRegistry: vi.fn().mockImplementation(() => ({
+  AdapterRegistry: vi.fn().mockImplementation(function() { return {
     register: vi.fn(),
     getAdapterCapabilities: vi.fn().mockReturnValue([]),
-  })),
+  }; }),
 }));
 
 vi.mock("../src/adapters/claude-code-cli.js", () => ({
-  ClaudeCodeCLIAdapter: vi.fn().mockImplementation(() => ({})),
+  ClaudeCodeCLIAdapter: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/adapters/claude-api.js", () => ({
-  ClaudeAPIAdapter: vi.fn().mockImplementation(() => ({})),
+  ClaudeAPIAdapter: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/execution/task-lifecycle.js", () => ({
-  TaskLifecycle: vi.fn().mockImplementation(() => ({})),
+  TaskLifecycle: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/reporting-engine.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/reporting-engine.js")>();
   return {
     ...actual,
-    ReportingEngine: vi.fn().mockImplementation((...args) => new actual.ReportingEngine(...args)),
+    ReportingEngine: vi.fn().mockImplementation(function(...args: ConstructorParameters<typeof actual.ReportingEngine>) { return new actual.ReportingEngine(...args); }),
   };
 });
 
@@ -199,11 +199,11 @@ describe("CLIRunner — auto FileExistenceDataSource registration", () => {
     const sm = new StateManager(tmpDir);
     await sm.saveGoal(goal);
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       negotiate: vi.fn().mockResolvedValue(makeNegotiationResult(goal)),
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
-    vi.mocked(GoalRefiner).mockImplementation(() => ({
+    vi.mocked(GoalRefiner).mockImplementation(function() { return {
       refine: vi.fn().mockResolvedValue({
         goal,
         leaf: true,
@@ -212,7 +212,7 @@ describe("CLIRunner — auto FileExistenceDataSource registration", () => {
         tokensUsed: 100,
         reason: "measurable",
       }),
-    } as unknown as GoalRefiner));
+    } as unknown as GoalRefiner; });
 
     const runner = new CLIRunner(tmpDir);
     const exitCode = await runner.run(["goal", "add", "Ensure CONTRIBUTING.md exists in the repo"]);
@@ -261,11 +261,11 @@ describe("CLIRunner — auto FileExistenceDataSource registration", () => {
     const sm = new StateManager(tmpDir);
     await sm.saveGoal(goal);
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       negotiate: vi.fn().mockResolvedValue(makeNegotiationResult(goal)),
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
-    vi.mocked(GoalRefiner).mockImplementation(() => ({
+    vi.mocked(GoalRefiner).mockImplementation(function() { return {
       refine: vi.fn().mockResolvedValue({
         goal,
         leaf: true,
@@ -274,7 +274,7 @@ describe("CLIRunner — auto FileExistenceDataSource registration", () => {
         tokensUsed: 100,
         reason: "measurable",
       }),
-    } as unknown as GoalRefiner));
+    } as unknown as GoalRefiner; });
 
     const runner = new CLIRunner(tmpDir);
     const exitCode = await runner.run(["goal", "add", "Make sure LICENSE.md file is present"]);
@@ -318,11 +318,11 @@ describe("CLIRunner — auto FileExistenceDataSource registration", () => {
     const sm = new StateManager(tmpDir);
     await sm.saveGoal(goal);
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       negotiate: vi.fn().mockResolvedValue(makeNegotiationResult(goal)),
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
-    vi.mocked(GoalRefiner).mockImplementation(() => ({
+    vi.mocked(GoalRefiner).mockImplementation(function() { return {
       refine: vi.fn().mockResolvedValue({
         goal,
         leaf: true,
@@ -331,7 +331,7 @@ describe("CLIRunner — auto FileExistenceDataSource registration", () => {
         tokensUsed: 100,
         reason: "measurable",
       }),
-    } as unknown as GoalRefiner));
+    } as unknown as GoalRefiner; });
 
     const runner = new CLIRunner(tmpDir);
     const exitCode = await runner.run(["goal", "add", "Increase test coverage to 80%"]);
@@ -373,9 +373,9 @@ describe("CLIRunner — auto FileExistenceDataSource registration", () => {
     const sm = new StateManager(tmpDir);
     await sm.saveGoal(goal);
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       negotiate: vi.fn().mockResolvedValue(makeNegotiationResult(goal)),
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
     const runner = new CLIRunner(tmpDir);
     // Description has no filename with an extension — no auto-registration expected
@@ -419,9 +419,9 @@ describe("CLIRunner — auto FileExistenceDataSource registration", () => {
     const sm = new StateManager(tmpDir);
     await sm.saveGoal(goal);
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       negotiate: vi.fn().mockResolvedValue(makeNegotiationResult(goal)),
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
     const runner = new CLIRunner(tmpDir);
     await runner.run(["goal", "add", "Ensure README.md exists"]);

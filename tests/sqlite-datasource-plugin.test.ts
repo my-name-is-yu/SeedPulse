@@ -16,7 +16,7 @@ const { mockStatement, mockDb, mockDatabaseConstructor } = vi.hoisted(() => {
     prepare: vi.fn().mockReturnValue(mockStatement),
     close: vi.fn(),
   };
-  const mockDatabaseConstructor = vi.fn().mockReturnValue(mockDb);
+  const mockDatabaseConstructor = vi.fn().mockImplementation(function() { return mockDb; });
   return { mockStatement, mockDb, mockDatabaseConstructor };
 });
 
@@ -54,7 +54,7 @@ describe("SqliteDataSourceAdapter", () => {
     mockDb.prepare.mockReturnValue(mockStatement);
     mockStatement.all.mockReturnValue([]);
     mockStatement.get.mockReturnValue({ "1": 1 });
-    mockDatabaseConstructor.mockReturnValue(mockDb);
+    mockDatabaseConstructor.mockImplementation(function() { return mockDb; });
     adapter = new SqliteDataSourceAdapter(makeConfig());
   });
 

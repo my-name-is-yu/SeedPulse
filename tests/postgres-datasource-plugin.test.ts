@@ -16,7 +16,7 @@ const { mockClient, mockPool, mockPoolConstructor } = vi.hoisted(() => {
     query: vi.fn().mockResolvedValue({ rows: [] }),
     end: vi.fn().mockResolvedValue(undefined),
   };
-  const mockPoolConstructor = vi.fn().mockReturnValue(mockPool);
+  const mockPoolConstructor = vi.fn().mockImplementation(function() { return mockPool; });
   return { mockClient, mockPool, mockPoolConstructor };
 });
 
@@ -54,7 +54,7 @@ describe("PostgresDataSourceAdapter", () => {
     mockPool.connect.mockResolvedValue(mockClient);
     mockPool.query.mockResolvedValue({ rows: [] });
     mockPool.end.mockResolvedValue(undefined);
-    mockPoolConstructor.mockReturnValue(mockPool);
+    mockPoolConstructor.mockImplementation(function() { return mockPool; });
     adapter = new PostgresDataSourceAdapter(makeConfig());
   });
 

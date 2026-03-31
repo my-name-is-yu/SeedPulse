@@ -83,7 +83,7 @@ vi.mock("../src/reporting-engine.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/reporting-engine.js")>();
   return {
     ...actual,
-    ReportingEngine: vi.fn().mockImplementation((...args) => new actual.ReportingEngine(...args)),
+    ReportingEngine: vi.fn().mockImplementation(function(...args: ConstructorParameters<typeof actual.ReportingEngine>) { return new actual.ReportingEngine(...args); }),
   };
 });
 

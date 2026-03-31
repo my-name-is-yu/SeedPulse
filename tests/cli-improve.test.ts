@@ -50,66 +50,66 @@ vi.mock("../src/goal/goal-negotiator.js", async (importOriginal) => {
 });
 
 vi.mock("../src/llm/llm-client.js", () => ({
-  LLMClient: vi.fn().mockImplementation(() => ({})),
+  LLMClient: vi.fn().mockImplementation(function() { return {}; }),
   MockLLMClient: vi.fn(),
 }));
 
 vi.mock("../src/trust-manager.js", () => ({
-  TrustManager: vi.fn().mockImplementation(() => ({})),
+  TrustManager: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/drive-system.js", () => ({
-  DriveSystem: vi.fn().mockImplementation(() => ({})),
+  DriveSystem: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/observation/observation-engine.js", () => ({
-  ObservationEngine: vi.fn().mockImplementation(() => ({})),
+  ObservationEngine: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/stall-detector.js", () => ({
-  StallDetector: vi.fn().mockImplementation(() => ({})),
+  StallDetector: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/satisficing-judge.js", () => ({
-  SatisficingJudge: vi.fn().mockImplementation(() => ({})),
+  SatisficingJudge: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/ethics-gate.js", () => ({
-  EthicsGate: vi.fn().mockImplementation(() => ({})),
+  EthicsGate: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/execution/session-manager.js", () => ({
-  SessionManager: vi.fn().mockImplementation(() => ({})),
+  SessionManager: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/strategy/strategy-manager.js", () => ({
-  StrategyManager: vi.fn().mockImplementation(() => ({})),
+  StrategyManager: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/execution/adapter-layer.js", () => ({
-  AdapterRegistry: vi.fn().mockImplementation(() => ({
+  AdapterRegistry: vi.fn().mockImplementation(function() { return {
     register: vi.fn(),
     getAdapterCapabilities: vi.fn().mockReturnValue([]),
-  })),
+  }; }),
 }));
 
 vi.mock("../src/adapters/claude-code-cli.js", () => ({
-  ClaudeCodeCLIAdapter: vi.fn().mockImplementation(() => ({})),
+  ClaudeCodeCLIAdapter: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/adapters/claude-api.js", () => ({
-  ClaudeAPIAdapter: vi.fn().mockImplementation(() => ({})),
+  ClaudeAPIAdapter: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/execution/task-lifecycle.js", () => ({
-  TaskLifecycle: vi.fn().mockImplementation(() => ({})),
+  TaskLifecycle: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/reporting-engine.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/reporting-engine.js")>();
   return {
     ...actual,
-    ReportingEngine: vi.fn().mockImplementation((...args) => new actual.ReportingEngine(...args)),
+    ReportingEngine: vi.fn().mockImplementation(function(...args: ConstructorParameters<typeof actual.ReportingEngine>) { return new actual.ReportingEngine(...args); }),
   };
 });
 
@@ -214,15 +214,15 @@ describe("improve subcommand — basic routing", () => {
     const mockSuggest = vi.fn().mockResolvedValue([makeSuggestion()]);
     const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: mockSuggest,
       negotiate: mockNegotiate,
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
-    vi.mocked(CoreLoop).mockImplementation(() => ({
+    vi.mocked(CoreLoop).mockImplementation(function() { return {
       run: vi.fn().mockResolvedValue(makeLoopResult()),
       stop: vi.fn(),
-    } as unknown as CoreLoop));
+    } as unknown as CoreLoop; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const code = await runCLI("improve", ".");
@@ -247,15 +247,15 @@ describe("improve subcommand — suggestion flow", () => {
     const mockSuggest = vi.fn().mockResolvedValue([makeSuggestion()]);
     const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: mockSuggest,
       negotiate: mockNegotiate,
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
-    vi.mocked(CoreLoop).mockImplementation(() => ({
+    vi.mocked(CoreLoop).mockImplementation(function() { return {
       run: vi.fn().mockResolvedValue(makeLoopResult()),
       stop: vi.fn(),
-    } as unknown as CoreLoop));
+    } as unknown as CoreLoop; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await runCLI("improve", ".");
@@ -274,15 +274,15 @@ describe("improve subcommand — suggestion flow", () => {
     const mockSuggest = vi.fn().mockResolvedValue([]);
     const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: mockSuggest,
       negotiate: mockNegotiate,
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
-    vi.mocked(CoreLoop).mockImplementation(() => ({
+    vi.mocked(CoreLoop).mockImplementation(function() { return {
       run: vi.fn(),
       stop: vi.fn(),
-    } as unknown as CoreLoop));
+    } as unknown as CoreLoop; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const code = await runCLI("improve", ".");
@@ -298,15 +298,15 @@ describe("improve subcommand — suggestion flow", () => {
     const mockSuggest = vi.fn().mockResolvedValue([makeSuggestion()]);
     const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: mockSuggest,
       negotiate: mockNegotiate,
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
-    vi.mocked(CoreLoop).mockImplementation(() => ({
+    vi.mocked(CoreLoop).mockImplementation(function() { return {
       run: vi.fn().mockResolvedValue(makeLoopResult()),
       stop: vi.fn(),
-    } as unknown as CoreLoop));
+    } as unknown as CoreLoop; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await runCLI("improve", ".", "--max", "7");
@@ -326,15 +326,15 @@ describe("improve subcommand — negotiation", () => {
     const mockSuggest = vi.fn().mockResolvedValue([suggestion]);
     const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: mockSuggest,
       negotiate: mockNegotiate,
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
-    vi.mocked(CoreLoop).mockImplementation(() => ({
+    vi.mocked(CoreLoop).mockImplementation(function() { return {
       run: vi.fn().mockResolvedValue(makeLoopResult()),
       stop: vi.fn(),
-    } as unknown as CoreLoop));
+    } as unknown as CoreLoop; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await runCLI("improve", ".");
@@ -363,15 +363,15 @@ describe("improve subcommand — negotiation", () => {
     const mockSuggest = vi.fn().mockResolvedValue(suggestOutput);
     const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: mockSuggest,
       negotiate: mockNegotiate,
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
-    vi.mocked(CoreLoop).mockImplementation(() => ({
+    vi.mocked(CoreLoop).mockImplementation(function() { return {
       run: vi.fn().mockResolvedValue(makeLoopResult()),
       stop: vi.fn(),
-    } as unknown as CoreLoop));
+    } as unknown as CoreLoop; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const code = await runCLI("improve", ".");
@@ -404,15 +404,15 @@ describe("improve subcommand — negotiation", () => {
       },
     });
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: mockSuggest,
       negotiate: mockNegotiate,
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
-    vi.mocked(CoreLoop).mockImplementation(() => ({
+    vi.mocked(CoreLoop).mockImplementation(function() { return {
       run: vi.fn(),
       stop: vi.fn(),
-    } as unknown as CoreLoop));
+    } as unknown as CoreLoop; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const code = await runCLI("improve", ".");
@@ -429,15 +429,15 @@ describe("improve subcommand — loop execution", () => {
     const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
     const mockRun = vi.fn().mockResolvedValue(makeLoopResult());
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: mockSuggest,
       negotiate: mockNegotiate,
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
-    vi.mocked(CoreLoop).mockImplementation(() => ({
+    vi.mocked(CoreLoop).mockImplementation(function() { return {
       run: mockRun,
       stop: vi.fn(),
-    } as unknown as CoreLoop));
+    } as unknown as CoreLoop; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await runCLI("improve", ".");
@@ -451,15 +451,15 @@ describe("improve subcommand — loop execution", () => {
     const mockSuggest = vi.fn().mockResolvedValue([makeSuggestion()]);
     const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: mockSuggest,
       negotiate: mockNegotiate,
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
-    vi.mocked(CoreLoop).mockImplementation(() => ({
+    vi.mocked(CoreLoop).mockImplementation(function() { return {
       run: vi.fn(),
       stop: vi.fn(),
-    } as unknown as CoreLoop));
+    } as unknown as CoreLoop; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await runCLI("improve", ".");
@@ -476,15 +476,15 @@ describe("improve subcommand — loop execution", () => {
     const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
     const mockRun = vi.fn().mockResolvedValue(makeLoopResult({ goalId: "goal-auto" }));
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: mockSuggest,
       negotiate: mockNegotiate,
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
-    vi.mocked(CoreLoop).mockImplementation(() => ({
+    vi.mocked(CoreLoop).mockImplementation(function() { return {
       run: mockRun,
       stop: vi.fn(),
-    } as unknown as CoreLoop));
+    } as unknown as CoreLoop; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const code = await runCLI("improve", ".", "--auto");
@@ -500,15 +500,15 @@ describe("improve subcommand — loop execution", () => {
     const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
     const mockRun = vi.fn().mockResolvedValue(makeLoopResult({ goalId: "goal-yes" }));
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: mockSuggest,
       negotiate: mockNegotiate,
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
-    vi.mocked(CoreLoop).mockImplementation(() => ({
+    vi.mocked(CoreLoop).mockImplementation(function() { return {
       run: mockRun,
       stop: vi.fn(),
-    } as unknown as CoreLoop));
+    } as unknown as CoreLoop; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const code = await runCLI("improve", ".", "--yes");
@@ -524,15 +524,15 @@ describe("improve subcommand — loop execution", () => {
     const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
     const mockRun = vi.fn().mockResolvedValue(makeLoopResult({ goalId: "goal-max-propagate" }));
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: mockSuggest,
       negotiate: mockNegotiate,
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
-    vi.mocked(CoreLoop).mockImplementation(() => ({
+    vi.mocked(CoreLoop).mockImplementation(function() { return {
       run: mockRun,
       stop: vi.fn(),
-    } as unknown as CoreLoop));
+    } as unknown as CoreLoop; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const code = await runCLI("improve", ".", "--max", "2", "--yes");
@@ -553,15 +553,15 @@ describe("improve subcommand — loop execution", () => {
     const mockSuggest = vi.fn().mockResolvedValue([makeSuggestion()]);
     const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: mockSuggest,
       negotiate: mockNegotiate,
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
-    vi.mocked(CoreLoop).mockImplementation(() => ({
+    vi.mocked(CoreLoop).mockImplementation(function() { return {
       run: vi.fn().mockResolvedValue(makeLoopResult({ goalId: "goal-loop-done" })),
       stop: vi.fn(),
-    } as unknown as CoreLoop));
+    } as unknown as CoreLoop; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const code = await runCLI("improve", ".", "--auto");
@@ -581,15 +581,15 @@ describe("improve subcommand — gatherProjectContext", () => {
     const mockSuggest = vi.fn().mockResolvedValue([makeSuggestion()]);
     const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: mockSuggest,
       negotiate: mockNegotiate,
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
-    vi.mocked(CoreLoop).mockImplementation(() => ({
+    vi.mocked(CoreLoop).mockImplementation(function() { return {
       run: vi.fn().mockResolvedValue(makeLoopResult()),
       stop: vi.fn(),
-    } as unknown as CoreLoop));
+    } as unknown as CoreLoop; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await runCLI("improve", ".");
@@ -609,15 +609,15 @@ describe("improve subcommand — timeout and LLM failure handling", () => {
       new SuggestTimeoutError(30_000)
     );
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: mockSuggest,
       negotiate: vi.fn(),
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
-    vi.mocked(CoreLoop).mockImplementation(() => ({
+    vi.mocked(CoreLoop).mockImplementation(function() { return {
       run: vi.fn(),
       stop: vi.fn(),
-    } as unknown as CoreLoop));
+    } as unknown as CoreLoop; });
 
     const logLines: string[] = [];
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -640,15 +640,15 @@ describe("improve subcommand — timeout and LLM failure handling", () => {
       new Error("Connection refused: API unreachable")
     );
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: mockSuggest,
       negotiate: vi.fn(),
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
-    vi.mocked(CoreLoop).mockImplementation(() => ({
+    vi.mocked(CoreLoop).mockImplementation(function() { return {
       run: vi.fn(),
       stop: vi.fn(),
-    } as unknown as CoreLoop));
+    } as unknown as CoreLoop; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});

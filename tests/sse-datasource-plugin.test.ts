@@ -64,7 +64,7 @@ const { MockEventSource, getLatestInstance } = vi.hoisted(() => {
 
   let latestInstance: MockEventSourceInstance | null = null;
 
-  const MockEventSource = vi.fn().mockImplementation(() => {
+  const MockEventSource = vi.fn().mockImplementation(function() {
     const instance = new MockEventSourceInstance();
     latestInstance = instance;
     return instance;

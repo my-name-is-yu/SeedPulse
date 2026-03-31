@@ -3,39 +3,39 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // ─── Mock heavy dependencies so no real clients are constructed ───
 
 vi.mock("../src/llm/llm-client.js", () => ({
-  LLMClient: vi.fn().mockImplementation(() => ({ _tag: "LLMClient" })),
+  LLMClient: vi.fn().mockImplementation(function() { return { _tag: "LLMClient" }; }),
 }));
 
 vi.mock("../src/llm/ollama-client.js", () => ({
-  OllamaLLMClient: vi.fn().mockImplementation(() => ({ _tag: "OllamaLLMClient" })),
+  OllamaLLMClient: vi.fn().mockImplementation(function() { return { _tag: "OllamaLLMClient" }; }),
 }));
 
 vi.mock("../src/llm/openai-client.js", () => ({
-  OpenAILLMClient: vi.fn().mockImplementation(() => ({ _tag: "OpenAILLMClient" })),
+  OpenAILLMClient: vi.fn().mockImplementation(function() { return { _tag: "OpenAILLMClient" }; }),
 }));
 
 vi.mock("../src/llm/codex-llm-client.js", () => ({
-  CodexLLMClient: vi.fn().mockImplementation(() => ({ _tag: "CodexLLMClient" })),
+  CodexLLMClient: vi.fn().mockImplementation(function() { return { _tag: "CodexLLMClient" }; }),
 }));
 
 vi.mock("../src/execution/adapter-layer.js", () => ({
-  AdapterRegistry: vi.fn().mockImplementation(() => ({ register: vi.fn() })),
+  AdapterRegistry: vi.fn().mockImplementation(function() { return { register: vi.fn() }; }),
 }));
 
 vi.mock("../src/adapters/claude-code-cli.js", () => ({
-  ClaudeCodeCLIAdapter: vi.fn().mockImplementation(() => ({})),
+  ClaudeCodeCLIAdapter: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/adapters/claude-api.js", () => ({
-  ClaudeAPIAdapter: vi.fn().mockImplementation(() => ({})),
+  ClaudeAPIAdapter: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/adapters/openai-codex.js", () => ({
-  OpenAICodexCLIAdapter: vi.fn().mockImplementation(() => ({})),
+  OpenAICodexCLIAdapter: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/adapters/github-issue.js", () => ({
-  GitHubIssueAdapter: vi.fn().mockImplementation(() => ({})),
+  GitHubIssueAdapter: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 // ─── Mock provider-config so we control what each test sees ───

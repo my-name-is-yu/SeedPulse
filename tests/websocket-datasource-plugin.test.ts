@@ -41,7 +41,7 @@ const { mockWsInstance, MockWebSocket } = vi.hoisted(() => {
   }
 
   const mockWsInstance = new MockWebSocketInstance();
-  const MockWebSocket = vi.fn().mockImplementation(() => mockWsInstance);
+  const MockWebSocket = vi.fn().mockImplementation(function() { return mockWsInstance; });
   (MockWebSocket as unknown as Record<string, number>).OPEN = MockWebSocketInstance.OPEN;
   (MockWebSocket as unknown as Record<string, number>).CLOSED = MockWebSocketInstance.CLOSED;
 

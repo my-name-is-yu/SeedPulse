@@ -19,12 +19,12 @@ import { makeTempDir } from "./helpers/temp-dir.js";
 // Only mock modules that would make real network/process calls.
 
 vi.mock("../src/llm/llm-client.js", () => ({
-  LLMClient: vi.fn().mockImplementation(() => ({})),
+  LLMClient: vi.fn().mockImplementation(function() { return {}; }),
   MockLLMClient: vi.fn(),
 }));
 
 vi.mock("../src/adapters/claude-code-cli.js", () => ({
-  ClaudeCodeCLIAdapter: vi.fn().mockImplementation(() => ({
+  ClaudeCodeCLIAdapter: vi.fn().mockImplementation(function() { return {
     adapterType: "claude-code-cli",
     async execute() {
       return {
@@ -36,11 +36,11 @@ vi.mock("../src/adapters/claude-code-cli.js", () => ({
         stopped_reason: "completed",
       };
     },
-  })),
+  }; }),
 }));
 
 vi.mock("../src/adapters/claude-api.js", () => ({
-  ClaudeAPIAdapter: vi.fn().mockImplementation(() => ({
+  ClaudeAPIAdapter: vi.fn().mockImplementation(function() { return {
     adapterType: "claude-api",
     async execute() {
       return {
@@ -52,7 +52,7 @@ vi.mock("../src/adapters/claude-api.js", () => ({
         stopped_reason: "completed",
       };
     },
-  })),
+  }; }),
 }));
 
 // ─── Imports after mocks ──────────────────────────────────────────────────────
@@ -135,7 +135,7 @@ describe("goal add with real GoalNegotiator (--no-refine)", () => {
       capabilityCheck,
       negotiationResponse,
     ]);
-    vi.mocked(LLMClient).mockImplementation(() => mockLLM as unknown as InstanceType<typeof LLMClient>);
+    vi.mocked(LLMClient).mockImplementation(function() { return mockLLM as unknown as InstanceType<typeof LLMClient>; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -160,7 +160,7 @@ describe("goal add with real GoalNegotiator (--no-refine)", () => {
 
     const { LLMClient } = await import("../src/llm/llm-client.js");
     const mockLLM = createMockLLMClient([ethicsReject]);
-    vi.mocked(LLMClient).mockImplementation(() => mockLLM as unknown as InstanceType<typeof LLMClient>);
+    vi.mocked(LLMClient).mockImplementation(function() { return mockLLM as unknown as InstanceType<typeof LLMClient>; });
 
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const code = await runCLI(tmpDir, "goal", "add", "Delete all user data without consent", "--no-refine");
@@ -201,7 +201,7 @@ describe("goal add with real GoalNegotiator (--no-refine)", () => {
       capabilityCheck,
       negotiationResponse,
     ]);
-    vi.mocked(LLMClient).mockImplementation(() => mockLLM as unknown as InstanceType<typeof LLMClient>);
+    vi.mocked(LLMClient).mockImplementation(function() { return mockLLM as unknown as InstanceType<typeof LLMClient>; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -284,7 +284,7 @@ describe("run subcommand with real CoreLoop (max_iterations=1)", () => {
       llmReviewResponse,
       observationResponse,
     ]);
-    vi.mocked(LLMClient).mockImplementation(() => mockLLM as unknown as InstanceType<typeof LLMClient>);
+    vi.mocked(LLMClient).mockImplementation(function() { return mockLLM as unknown as InstanceType<typeof LLMClient>; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -306,7 +306,7 @@ describe("run subcommand with real CoreLoop (max_iterations=1)", () => {
   it("exits with code 1 when the goal ID does not exist in state", async () => {
     const { LLMClient } = await import("../src/llm/llm-client.js");
     const mockLLM = createMockLLMClient([]);
-    vi.mocked(LLMClient).mockImplementation(() => mockLLM as unknown as InstanceType<typeof LLMClient>);
+    vi.mocked(LLMClient).mockImplementation(function() { return mockLLM as unknown as InstanceType<typeof LLMClient>; });
 
     const code = await runCLI(tmpDir, "run", "--goal", "nonexistent-goal-id");
     expect(code).toBe(1);

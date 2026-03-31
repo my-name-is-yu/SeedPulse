@@ -39,66 +39,66 @@ vi.mock("../src/goal/goal-negotiator.js", async (importOriginal) => {
 });
 
 vi.mock("../src/llm/llm-client.js", () => ({
-  LLMClient: vi.fn().mockImplementation(() => ({})),
+  LLMClient: vi.fn().mockImplementation(function() { return {}; }),
   MockLLMClient: vi.fn(),
 }));
 
 vi.mock("../src/trust-manager.js", () => ({
-  TrustManager: vi.fn().mockImplementation(() => ({})),
+  TrustManager: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/drive-system.js", () => ({
-  DriveSystem: vi.fn().mockImplementation(() => ({})),
+  DriveSystem: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/observation/observation-engine.js", () => ({
-  ObservationEngine: vi.fn().mockImplementation(() => ({})),
+  ObservationEngine: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/stall-detector.js", () => ({
-  StallDetector: vi.fn().mockImplementation(() => ({})),
+  StallDetector: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/satisficing-judge.js", () => ({
-  SatisficingJudge: vi.fn().mockImplementation(() => ({})),
+  SatisficingJudge: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/ethics-gate.js", () => ({
-  EthicsGate: vi.fn().mockImplementation(() => ({})),
+  EthicsGate: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/execution/session-manager.js", () => ({
-  SessionManager: vi.fn().mockImplementation(() => ({})),
+  SessionManager: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/strategy/strategy-manager.js", () => ({
-  StrategyManager: vi.fn().mockImplementation(() => ({})),
+  StrategyManager: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/execution/adapter-layer.js", () => ({
-  AdapterRegistry: vi.fn().mockImplementation(() => ({
+  AdapterRegistry: vi.fn().mockImplementation(function() { return {
     register: vi.fn(),
     getAdapterCapabilities: vi.fn().mockReturnValue([]),
-  })),
+  }; }),
 }));
 
 vi.mock("../src/adapters/claude-code-cli.js", () => ({
-  ClaudeCodeCLIAdapter: vi.fn().mockImplementation(() => ({})),
+  ClaudeCodeCLIAdapter: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/adapters/claude-api.js", () => ({
-  ClaudeAPIAdapter: vi.fn().mockImplementation(() => ({})),
+  ClaudeAPIAdapter: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/execution/task-lifecycle.js", () => ({
-  TaskLifecycle: vi.fn().mockImplementation(() => ({})),
+  TaskLifecycle: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
 vi.mock("../src/reporting-engine.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/reporting-engine.js")>();
   return {
     ...actual,
-    ReportingEngine: vi.fn().mockImplementation((...args) => new actual.ReportingEngine(...args)),
+    ReportingEngine: vi.fn().mockImplementation(function(...args: ConstructorParameters<typeof actual.ReportingEngine>) { return new actual.ReportingEngine(...args); }),
   };
 });
 
@@ -133,7 +133,7 @@ describe("suggest output schema", () => {
     fs.writeFileSync(path.join(tmpDir, "README.md"), "# Test Repo\n");
     vi.spyOn(process, "cwd").mockReturnValue(tmpDir);
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: vi.fn().mockResolvedValue({
         suggestions: [
           {
@@ -149,7 +149,7 @@ describe("suggest output schema", () => {
           },
         ],
       }),
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const code = await new CLIRunner(tmpDir).run(["suggest", "improve repo docs", "--path", "."]);
@@ -176,9 +176,9 @@ describe("suggest output schema", () => {
     fs.writeFileSync(path.join(tmpDir, "tests", "sample.test.ts"), "it('works', () => {})\n");
     vi.spyOn(process, "cwd").mockReturnValue(tmpDir);
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: vi.fn().mockResolvedValue([]),
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const context = [
@@ -206,7 +206,7 @@ describe("suggest output schema", () => {
   it("omits repo_context for non-software goals", async () => {
     vi.spyOn(process, "cwd").mockReturnValue(tmpDir);
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: vi.fn().mockResolvedValue({
         suggestions: [
           {
@@ -217,7 +217,7 @@ describe("suggest output schema", () => {
           },
         ],
       }),
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const code = await new CLIRunner(tmpDir).run(["suggest", "improve team communication and collaboration", "--path", "."]);
@@ -238,7 +238,7 @@ describe("suggest output schema", () => {
     fs.writeFileSync(path.join(tmpDir, "package.json"), JSON.stringify({ name: "test-pkg" }));
     vi.spyOn(process, "cwd").mockReturnValue(tmpDir);
 
-    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+    vi.mocked(GoalNegotiator).mockImplementation(function() { return {
       suggestGoals: vi.fn().mockResolvedValue({
         suggestions: [
           {
@@ -249,7 +249,7 @@ describe("suggest output schema", () => {
           },
         ],
       }),
-    } as unknown as GoalNegotiator));
+    } as unknown as GoalNegotiator; });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const code = await new CLIRunner(tmpDir).run(["suggest", "improve test coverage for src/ module", "--path", "."]);

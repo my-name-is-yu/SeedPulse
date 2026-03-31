@@ -122,12 +122,12 @@ vi.mock("../src/execution/task-generation.js", () => ({
 }));
 
 vi.mock("../src/loop/core-loop-learning.js", () => ({
-  CoreLoopLearning: vi.fn().mockImplementation(() => ({
+  CoreLoopLearning: vi.fn().mockImplementation(function() { return {
     checkPeriodicReview: vi.fn().mockResolvedValue(undefined),
     onGoalCompleted: vi.fn().mockResolvedValue(undefined),
     getCapabilityFailures: vi.fn().mockReturnValue([]),
     incrementTransferCounter: vi.fn(),
-  })),
+  }; }),
 }));
 
 describe("CoreLoop", () => {
