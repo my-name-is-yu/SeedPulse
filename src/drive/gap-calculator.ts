@@ -75,7 +75,11 @@ export function computeRawGap(
       return isTruthy(currentValue) ? 0 : 1;
     }
     case "match": {
-      // Strict equality comparison for match type
+      // When current_value is numeric (from LLM/DataSource observation), treat as 0-1 score
+      if (typeof currentValue === "number") {
+        return Math.max(0, 1 - currentValue);
+      }
+      // String/boolean: strict equality comparison
       return currentValue === threshold.value ? 0 : 1;
     }
   }
