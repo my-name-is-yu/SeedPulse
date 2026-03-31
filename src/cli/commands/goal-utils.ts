@@ -53,7 +53,7 @@ export const SHELL_DIMENSION_PATTERNS: Record<string, ShellCommandConfig> = {
   todo_count:        { argv: ["grep", "-rc", "TODO", "src/"], output_type: "number" },
   fixme_count:       { argv: ["grep", "-rc", "FIXME", "src/"], output_type: "number" },
   todo_like_marker_inventory: { argv: ["grep", "-rn", "--include=*.ts", "-E", "TODO|FIXME", "src/"], output_type: "raw" },
-  test_count:        { argv: ["grep", "-rEc", "it\\(|test\\(|describe\\(", "tests/"], output_type: "number" },
+  test_count:        { argv: ["sh", "-c", "grep -rEc 'it\\(|test\\(|describe\\(' tests/ src/ 2>/dev/null || echo 0"], output_type: "number" },
   lint_errors:       { argv: ["npx", "eslint", "src/", "--format", "compact", "--max-warnings", "9999"], output_type: "number" },
   tsc_error_count:   { argv: ["npx", "tsc", "--noEmit", "--pretty", "false"], output_type: "number" },
   test_coverage:     { argv: ["node", "scripts/measure-coverage.cjs"], output_type: "raw", timeout_ms: 180000 },
