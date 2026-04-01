@@ -83,15 +83,15 @@ export class TreeLoopOrchestrator {
    * Falls back to GoalTreeManager.decomposeGoal() if refiner is absent.
    * No-op if the goal already has children or validated dimensions.
    */
-  async ensureGoalRefined(goalId: string): Promise<void> {
+  async ensureGoalRefined(goalId: string, options?: { force?: boolean }): Promise<void> {
     const goal = await this.stateManager.loadGoal(goalId);
     if (!goal) return;
 
     // Already has children — no refinement needed
     if (goal.children_ids.length > 0) return;
 
-    // Already has validated dimensions — no refinement needed
-    if (hasValidatedDimensions(goal)) return;
+    // Already has validated dimensions — no refinement needed (skip check when forced)
+    if (!options?.force && hasValidatedDimensions(goal)) return;
 
     const defaultDecompConfig: GoalDecompositionConfig = {
       max_depth: this.config.max_depth,

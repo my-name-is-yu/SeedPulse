@@ -87,7 +87,8 @@ export async function phaseAutoDecompose(
   deps: CoreLoopDeps,
   config: ResolvedLoopConfig,
   logger: Logger | undefined,
-  decomposedGoals?: Set<string>
+  decomposedGoals?: Set<string>,
+  isFirstIteration?: boolean
 ): Promise<void> {
   if (config.autoDecompose === false) return;
   if (!deps.treeLoopOrchestrator) return;
@@ -114,10 +115,15 @@ export async function phaseAutoDecompose(
     return;
   }
 
-  logger?.info("[CoreLoop] phaseAutoDecompose: decomposing abstract goal", { goalId });
+  const force = isFirstIteration === true;
+  if (force) {
+    logger?.info("[decompose] forcing goal decomposition on first iteration", { goalId });
+  } else {
+    logger?.info("[CoreLoop] phaseAutoDecompose: decomposing abstract goal", { goalId });
+  }
   decomposedGoals?.add(goalId);
   try {
-    await deps.treeLoopOrchestrator.ensureGoalRefined(goalId);
+    await deps.treeLoopOrchestrator.ensureGoalRefined(goalId, { force });
   } catch (err) {
     logger?.warn("[CoreLoop] phaseAutoDecompose: ensureGoalRefined failed (non-fatal)", {
       goalId,

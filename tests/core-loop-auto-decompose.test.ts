@@ -349,7 +349,7 @@ describe("CoreLoop auto-decompose (issue #295)", () => {
     await loop.runOneIteration("goal-1", 0);
 
     // Specificity check is internal to ensureGoalRefined, so it is still called
-    expect(orchestratorMock.ensureGoalRefined).toHaveBeenCalledWith("goal-1");
+    expect(orchestratorMock.ensureGoalRefined).toHaveBeenCalledWith("goal-1", { force: false });
   });
 
   it("calls ensureGoalRefined when goal is abstract", async () => {
@@ -362,7 +362,7 @@ describe("CoreLoop auto-decompose (issue #295)", () => {
     const loop = new CoreLoop(deps, { maxIterations: 1, delayBetweenLoopsMs: 0 });
     await loop.runOneIteration("goal-1", 0);
 
-    expect(orchestratorMock.ensureGoalRefined).toHaveBeenCalledWith("goal-1");
+    expect(orchestratorMock.ensureGoalRefined).toHaveBeenCalledWith("goal-1", { force: false });
   });
 
   it("only decomposes on first iteration", async () => {
@@ -377,7 +377,7 @@ describe("CoreLoop auto-decompose (issue #295)", () => {
 
     // ensureGoalRefined should be called exactly once across all iterations
     expect(orchestratorMock.ensureGoalRefined).toHaveBeenCalledTimes(1);
-    expect(orchestratorMock.ensureGoalRefined).toHaveBeenCalledWith("goal-1");
+    expect(orchestratorMock.ensureGoalRefined).toHaveBeenCalledWith("goal-1", { force: true });
   });
 
   it("skips decomposition for non-root goals (decomposition_depth > 0)", async () => {
@@ -407,6 +407,6 @@ describe("CoreLoop auto-decompose (issue #295)", () => {
     const result = await loop.runOneIteration("goal-1", 0);
 
     expect(result.error).toBeNull();
-    expect(orchestratorMock.ensureGoalRefined).toHaveBeenCalledWith("goal-1");
+    expect(orchestratorMock.ensureGoalRefined).toHaveBeenCalledWith("goal-1", { force: false });
   });
 });

@@ -198,7 +198,7 @@ export class CoreLoop {
 
       const iterationResult = this.config.treeMode && this.deps.treeLoopOrchestrator
         ? await this.runTreeIteration(goalId, loopIndex, nodeConsumedMap)
-        : await this.runOneIteration(goalId, loopIndex);
+        : await this.runOneIteration(goalId, loopIndex, loopIndex === startLoopIndex);
       // Carry forward gapAggregate from the previous iteration when this one was skipped,
       // so callers always see a meaningful value rather than the default 0.
       if (iterationResult.skipped && iterations.length >= 1) {
@@ -332,7 +332,8 @@ export class CoreLoop {
    */
   async runOneIteration(
     goalId: string,
-    loopIndex: number
+    loopIndex: number,
+    isFirstIteration?: boolean
   ): Promise<LoopIterationResult> {
     const startTime = Date.now();
     const ctx: PhaseCtx = { deps: this.deps, config: this.config, logger: this.logger };
@@ -347,7 +348,7 @@ export class CoreLoop {
     if (!loadedGoal) return result;
     let goal = loadedGoal;
 
-    await phaseAutoDecompose(goalId, goal, this.deps, this.config, this.logger, this.decomposedGoals);
+    await phaseAutoDecompose(goalId, goal, this.deps, this.config, this.logger, this.decomposedGoals, isFirstIteration);
 
     // After decomposition: if children were created, reload and switch to tree mode
     // so subsequent iterations use runTreeIteration instead of runOneIteration.
@@ -427,7 +428,7 @@ export class CoreLoop {
     }
     const { gapVector, gapAggregate, skipTaskGeneration } = gapResult;
 
-    this.logger?.info(`[iter ${loopIndex}] gap: ${gapAggregate.toFixed(2)} | ${gapVector.gaps.map(g => `${g.dimension_name}=${g.normalized_weighted_gap.toFixed(2)}`).join(', ')}`);
+    this.logger?.info(`[iter ${loopIndex}] gap: ${gapAggregate.toFixed(2)} | ${(gapVector.gaps ?? []).map((g: any) => `${g.dimension_name}=${g.normalized_weighted_gap.toFixed(2)}`).join(', ')}`);
 
     // 4. Drive scoring + knowledge gap check (skip when gap=0 — no task needed)
     let driveScores: import("./types/drive.js").DriveScore[] = [];
