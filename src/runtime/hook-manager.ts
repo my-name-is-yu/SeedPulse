@@ -135,6 +135,14 @@ export class HookManager {
         reject(err);
       });
 
+      child.stdin?.on("error", (err: NodeJS.ErrnoException) => {
+        if (err.code !== "EPIPE") {
+          clearTimeout(timer);
+          reject(err);
+        }
+        // EPIPE is expected when process exits before stdin is consumed; ignore
+      });
+
       child.stdin?.write(payloadJson);
       child.stdin?.end();
     });
