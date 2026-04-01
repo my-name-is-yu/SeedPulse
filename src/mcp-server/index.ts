@@ -92,8 +92,8 @@ export async function startMCPServer(deps: MCPServerDeps): Promise<void> {
       event_type: z.string().describe("Type of event"),
       data: z.record(z.unknown()).describe("Event payload"),
     },
-    async (args: { source: string; event_type: string; data: unknown }) => {
-      return toolTrigger(deps, { ...args, data: args.data as Record<string, unknown> });
+    async (args: { source: string; event_type: string; data: Record<string, unknown> }) => {
+      return toolTrigger(deps, args);
     }
   );
 

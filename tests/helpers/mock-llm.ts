@@ -25,9 +25,11 @@ function extractJSON(text: string): string {
 class MockLLMClient implements ILLMClient {
   private readonly responses: string[];
   private _callCount: number = 0;
+  private readonly _onCall: (() => void) | undefined;
 
-  constructor(responses: string[]) {
+  constructor(responses: string[], onCall?: () => void) {
     this.responses = responses;
+    this._onCall = onCall;
   }
 
   get callCount(): number {
@@ -48,6 +50,9 @@ class MockLLMClient implements ILLMClient {
     }
 
     const content = this.responses[index]!;
+
+    // Invoke callback (e.g. to stop the daemon) after recording the call
+    this._onCall?.();
 
     return {
       content,
@@ -79,9 +84,12 @@ class MockLLMClient implements ILLMClient {
  * Create a mock ILLMClient that returns responses sequentially from the array.
  * Throws a descriptive error when responses are exhausted.
  * Exposes a `callCount` getter to track sendMessage invocations.
+ *
+ * Optional `onCall` callback is invoked after each sendMessage call (useful
+ * for stopping a daemon from within the mock to avoid real-time waits).
  */
-export function createMockLLMClient(responses: string[]): MockLLMClient {
-  return new MockLLMClient(responses);
+export function createMockLLMClient(responses: string[], onCall?: () => void): MockLLMClient {
+  return new MockLLMClient(responses, onCall);
 }
 
 /**

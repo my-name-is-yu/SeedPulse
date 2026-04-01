@@ -822,19 +822,25 @@ describe("Phase B — Hook + Trigger integration: trigger fires → hook interce
 
 describe("Phase B — EventServer lifecycle: start → requests → graceful shutdown", () => {
   let tmpDir: string;
+  let server: EventServer | null = null;
 
   beforeEach(() => {
     tmpDir = makeTempDir("phase-b-lifecycle-");
     fs.mkdirSync(path.join(tmpDir, "events"), { recursive: true });
+    server = null;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    if (server !== null) {
+      await server.stop().catch(() => undefined);
+      server = null;
+    }
     cleanupTempDir(tmpDir);
   });
 
   it("server starts and responds to GET /health", async () => {
     const mockDrive = makeMockDriveSystem(tmpDir);
-    const server = new EventServer(mockDrive as never, {
+    server = new EventServer(mockDrive as never, {
       port: 0,
       eventsDir: path.join(tmpDir, "events"),
     });
@@ -855,7 +861,7 @@ describe("Phase B — EventServer lifecycle: start → requests → graceful shu
 
   it("server assigns a random port when port 0 is given", async () => {
     const mockDrive = makeMockDriveSystem(tmpDir);
-    const server = new EventServer(mockDrive as never, {
+    server = new EventServer(mockDrive as never, {
       port: 0,
       eventsDir: path.join(tmpDir, "events"),
     });
@@ -868,7 +874,7 @@ describe("Phase B — EventServer lifecycle: start → requests → graceful shu
 
   it("server returns 404 for unknown routes", async () => {
     const mockDrive = makeMockDriveSystem(tmpDir);
-    const server = new EventServer(mockDrive as never, {
+    server = new EventServer(mockDrive as never, {
       port: 0,
       eventsDir: path.join(tmpDir, "events"),
     });
@@ -885,7 +891,7 @@ describe("Phase B — EventServer lifecycle: start → requests → graceful shu
 
   it("server handles concurrent requests without error", async () => {
     const mockDrive = makeMockDriveSystem(tmpDir);
-    const server = new EventServer(mockDrive as never, {
+    server = new EventServer(mockDrive as never, {
       port: 0,
       eventsDir: path.join(tmpDir, "events"),
     });
@@ -907,7 +913,7 @@ describe("Phase B — EventServer lifecycle: start → requests → graceful shu
 
   it("stop() is idempotent — second stop does not throw", async () => {
     const mockDrive = makeMockDriveSystem(tmpDir);
-    const server = new EventServer(mockDrive as never, {
+    server = new EventServer(mockDrive as never, {
       port: 0,
       eventsDir: path.join(tmpDir, "events"),
     });
@@ -920,7 +926,7 @@ describe("Phase B — EventServer lifecycle: start → requests → graceful shu
 
   it("POST /events dispatches a valid PulSeedEvent to driveSystem", async () => {
     const mockDrive = makeMockDriveSystem(tmpDir);
-    const server = new EventServer(mockDrive as never, {
+    server = new EventServer(mockDrive as never, {
       port: 0,
       eventsDir: path.join(tmpDir, "events"),
     });
@@ -947,7 +953,7 @@ describe("Phase B — EventServer lifecycle: start → requests → graceful shu
 
   it("POST /events returns 400 for an invalid event body", async () => {
     const mockDrive = makeMockDriveSystem(tmpDir);
-    const server = new EventServer(mockDrive as never, {
+    server = new EventServer(mockDrive as never, {
       port: 0,
       eventsDir: path.join(tmpDir, "events"),
     });

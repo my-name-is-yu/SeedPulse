@@ -111,21 +111,12 @@ function makeWeeklyLLMResponse(goalIds: string[]) {
   });
 }
 
-// ─── Test Setup ───
-
-let tmpDir: string;
-
-beforeEach(() => {
-  tmpDir = makeTempDir();
-});
-
-afterEach(() => {
-  cleanupTempDir(tmpDir);
-});
-
 // ─── 1. Morning planning → goal priorities → feeds into real StateManager ───
 
 describe("Morning planning with real StateManager", () => {
+  let tmpDir: string;
+  beforeEach(() => { tmpDir = makeTempDir(); });
+  afterEach(() => { cleanupTempDir(tmpDir); });
   it("produces goal priorities for all active goals saved in StateManager", async () => {
     const stateManager = new StateManager(tmpDir);
     await stateManager.saveGoal(makeActiveGoal("goal-a"));
@@ -222,6 +213,10 @@ describe("Morning planning with real StateManager", () => {
 // ─── 2. Evening catchup → analyzes day's progress with session history ───
 
 describe("Evening catchup with real StateManager", () => {
+  let tmpDir: string;
+  beforeEach(() => { tmpDir = makeTempDir(); });
+  afterEach(() => { cleanupTempDir(tmpDir); });
+
   it("analyzes multiple active goals and returns structured report", async () => {
     const stateManager = new StateManager(tmpDir);
     await stateManager.saveGoal(makeActiveGoal("goal-1"));
@@ -279,6 +274,10 @@ describe("Evening catchup with real StateManager", () => {
 // ─── 3. Dream consolidation → merges knowledge across sessions ───
 
 describe("Dream consolidation with real StateManager", () => {
+  let tmpDir: string;
+  beforeEach(() => { tmpDir = makeTempDir(); });
+  afterEach(() => { cleanupTempDir(tmpDir); });
+
   it("consolidates all goal IDs from real StateManager", async () => {
     const stateManager = new StateManager(tmpDir);
     await stateManager.saveGoal(makeActiveGoal("consolidate-1"));
@@ -373,6 +372,10 @@ describe("Dream consolidation with real StateManager", () => {
 // ─── 4. Weekly review → portfolio analysis with strategy scoring ───
 
 describe("Weekly review with real StateManager", () => {
+  let tmpDir: string;
+  beforeEach(() => { tmpDir = makeTempDir(); });
+  afterEach(() => { cleanupTempDir(tmpDir); });
+
   it("produces strategy effectiveness rankings for all active goals", async () => {
     const stateManager = new StateManager(tmpDir);
     await stateManager.saveGoal(makeActiveGoal("weekly-g1"));
@@ -470,6 +473,10 @@ describe("Weekly review with real StateManager", () => {
 // ─── 5. Full reflection cycle: morning → work simulation → evening → dream ───
 
 describe("Full reflection cycle: morning → evening → dream", () => {
+  let tmpDir: string;
+  beforeEach(() => { tmpDir = makeTempDir(); });
+  afterEach(() => { cleanupTempDir(tmpDir); });
+
   it("state accumulates across all three phases and each report is independently persisted", async () => {
     const stateManager = new StateManager(tmpDir);
 
@@ -617,6 +624,10 @@ describe("Full reflection cycle: morning → evening → dream", () => {
 // ─── 6. State persistence across reflection phases with real StateManager ───
 
 describe("State persistence across reflection phases", () => {
+  let tmpDir: string;
+  beforeEach(() => { tmpDir = makeTempDir(); });
+  afterEach(() => { cleanupTempDir(tmpDir); });
+
   it("goal state modified between morning and evening is reflected in evening summary", async () => {
     const stateManager = new StateManager(tmpDir);
     const goal = makeActiveGoal("persist-across-phases", {
