@@ -85,10 +85,10 @@ function isDue(task: CronTask, now: Date): boolean {
     const interval = CronExpressionParser.parse(task.cron, { currentDate: now });
     const prevFire = interval.prev();
 
-    // Apply ±5% jitter based on cron interval width
+    // Apply one-sided jitter: only moves adjustedPrev earlier, never later
     const nextFire = interval.next();
     const intervalMs = nextFire.getTime() - prevFire.getTime();
-    const jitterMs = intervalMs * JITTER_FACTOR * (Math.random() * 2 - 1);
+    const jitterMs = -(intervalMs * JITTER_FACTOR * Math.random());
     const adjustedPrev = new Date(prevFire.getTime() + jitterMs);
 
     // If never fired, task is due if the adjusted prev fire is in the past

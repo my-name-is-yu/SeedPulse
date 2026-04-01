@@ -428,7 +428,7 @@ export class EventServer {
   }
 
   /** Check if file watcher is active (internal use) */
-  private isWatching(): boolean {
+  isWatching(): boolean {
     return this.fileWatcher !== null;
   }
 
@@ -440,7 +440,7 @@ export class EventServer {
     return this.host;
   }
 
-  private getEventsDir(): string {
+  getEventsDir(): string {
     return this.eventsDir;
   }
 }
