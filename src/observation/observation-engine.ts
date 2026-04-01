@@ -518,6 +518,7 @@ export class ObservationEngine {
       });
 
       await this.applyObservation(goalId, entry);
+      this.logger?.info(`[observe] ${dim.name}=${entry.extracted_value} (confidence=${entry.confidence})`);
       void this.hookManager?.emit("PostObserve", { goal_id: goalId, dimension: dim.name, data: { value: entry.extracted_value, confidence: entry.confidence } });
     }
   }

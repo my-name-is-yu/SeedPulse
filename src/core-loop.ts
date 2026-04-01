@@ -427,6 +427,8 @@ export class CoreLoop {
     }
     const { gapVector, gapAggregate, skipTaskGeneration } = gapResult;
 
+    this.logger?.info(`[iter ${loopIndex}] gap: ${gapAggregate.toFixed(2)} | ${gapVector.gaps.map(g => `${g.dimension_name}=${g.normalized_weighted_gap.toFixed(2)}`).join(', ')}`);
+
     // 4. Drive scoring + knowledge gap check (skip when gap=0 — no task needed)
     let driveScores: import("./types/drive.js").DriveScore[] = [];
     let highDissatisfactionDimensions: string[] = [];
@@ -449,6 +451,10 @@ export class CoreLoop {
     // is_complete=false (e.g. waiting for double-confirmation), stall detection
     // must still fire so the loop can escalate rather than spin indefinitely.
     await detectStallsAndRebalance(ctx, goalId, goal, result);
+
+    if (result.stallDetected && result.stallReport) {
+      this.logger?.warn(`[iter ${loopIndex}] stall detected: ${result.stallReport.stall_type}`, { escalation: result.stallReport.escalation_level });
+    }
 
     // When gap=0, SatisficingJudge in Phase 5 is the authority on completion.
     // If it says not complete (e.g. low confidence), continue the loop normally

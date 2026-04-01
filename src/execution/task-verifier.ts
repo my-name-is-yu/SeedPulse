@@ -629,11 +629,13 @@ export async function handleFailure(
   if (updatedTask.reversibility === "reversible") {
     // Attempt revert
     const revertSuccess = await attemptRevert(deps, updatedTask);
+    deps.logger?.warn(`[task] revert attempted`, { taskId: task.id, success: revertSuccess });
     if (revertSuccess) {
       await appendTaskHistory(deps, task.goal_id, updatedTask);
       return { action: "discard", task: updatedTask };
     }
     // Revert failed — set state_integrity to "uncertain" and escalate
+    deps.logger?.error(`[task] revert FAILED`, { taskId: task.id });
     await setDimensionIntegrity(deps, task.goal_id, task.primary_dimension, "uncertain");
     await appendTaskHistory(deps, task.goal_id, updatedTask);
     return { action: "escalate", task: updatedTask };

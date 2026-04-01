@@ -314,6 +314,7 @@ export class TaskLifecycle {
       return createSkippedTaskResult(goalId, targetDimension);
     }
     void this.hookManager?.emit("PostTaskCreate", { goal_id: goalId, data: { task_id: task.id } });
+    this.logger?.info(`[task] created: ${task.work_description?.substring(0, 120)}`, { taskId: task.id });
 
     // 4. Pre-execution checks: ethics, capability, irreversible approval
     const preCheckResult = await runPreExecutionChecks(
@@ -332,6 +333,7 @@ export class TaskLifecycle {
     void this.hookManager?.emit("PreExecute", { goal_id: goalId, data: { task_id: task.id } });
     const executionResult = await this.executeTask(task, adapter, workspaceContext);
     void this.hookManager?.emit("PostExecute", { goal_id: goalId, data: { task_id: task.id, success: executionResult.success } });
+    this.logger?.info(`[task] executed: ${executionResult.success ? 'success' : 'failed'}`, { taskId: task.id });
     this.logger?.debug(`[DEBUG-TL] Execution result: success=${executionResult.success}, stopped=${executionResult.stopped_reason}, error=${executionResult.error}, output=${executionResult.output?.substring(0, 200)}`);
 
     // 4b. Post-execution health check (opt-in)
@@ -354,6 +356,7 @@ export class TaskLifecycle {
 
     // 6. Handle verdict
     const verdictResult = await this.handleVerdict(taskForVerification, verificationResult);
+    this.logger?.info(`[task] verdict: ${verdictResult.action}`, { taskId: task.id });
 
     // Save checkpoint on task completion/interruption
     const adapterType = adapter?.adapterType ?? 'unknown';
