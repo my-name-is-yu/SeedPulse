@@ -15,6 +15,23 @@ export interface LLMMessage {
 
 export type { ModelTier };
 
+export interface ToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+export interface ToolCallResult {
+  id: string;
+  function: {
+    name: string;
+    arguments: string; // JSON string
+  };
+}
+
 export interface LLMRequestOptions {
   model?: string;
   max_tokens?: number;
@@ -22,6 +39,8 @@ export interface LLMRequestOptions {
   temperature?: number;
   /** Route to light model when configured. Defaults to 'main' for backward compat. */
   model_tier?: ModelTier;
+  /** Tool definitions for function calling (tool use). */
+  tools?: ToolDefinition[];
 }
 
 export interface LLMResponse {
@@ -31,6 +50,8 @@ export interface LLMResponse {
     output_tokens: number;
   };
   stop_reason: string;
+  /** Tool call results when the model invokes tools. */
+  tool_calls?: ToolCallResult[];
 }
 
 // ─── Interface ───
@@ -119,12 +140,23 @@ export class LLMClient extends BaseLLMClient implements ILLMClient {
 
     while (normalAttempts < MAX_RETRY_ATTEMPTS) {
       try {
+        // Convert ToolDefinition[] to Anthropic SDK tool format
+        const anthropicTools = options?.tools?.map((t) => ({
+          name: t.function.name,
+          description: t.function.description,
+          input_schema: {
+            type: "object" as const,
+            ...t.function.parameters,
+          },
+        }));
+
         const response = await this.client.messages.create(
           {
             model,
             max_tokens,
             temperature,
             ...(system ? { system } : {}),
+            ...(anthropicTools?.length ? { tools: anthropicTools } : {}),
             messages: messages.map((m) => ({
               role: m.role,
               content: m.content,
@@ -133,8 +165,24 @@ export class LLMClient extends BaseLLMClient implements ILLMClient {
           { timeout: DEFAULT_LLM_TIMEOUT_MS }
         );
 
-        const block = response.content[0];
-        const content = block && block.type === "text" ? block.text : "";
+        // Extract text content from response
+        const textBlock = response.content.find((b) => b.type === "text");
+        const content = textBlock && "text" in textBlock ? textBlock.text : "";
+
+        // Extract tool_use blocks into ToolCallResult[]
+        const toolUseBlocks = response.content.filter(
+          (b) => b.type === "tool_use" && "id" in b && "name" in b && "input" in b
+        );
+        const tool_calls: ToolCallResult[] | undefined =
+          toolUseBlocks.length > 0
+            ? toolUseBlocks.map((b) => ({
+                id: (b as { id: string }).id,
+                function: {
+                  name: (b as { name: string }).name,
+                  arguments: JSON.stringify((b as { input: unknown }).input),
+                },
+              }))
+            : undefined;
 
         result = {
           content,
@@ -143,6 +191,7 @@ export class LLMClient extends BaseLLMClient implements ILLMClient {
             output_tokens: response.usage.output_tokens,
           },
           stop_reason: response.stop_reason ?? "unknown",
+          ...(tool_calls ? { tool_calls } : {}),
         };
         break;
       } catch (err) {
@@ -214,10 +263,10 @@ export class LLMClient extends BaseLLMClient implements ILLMClient {
  * Returns provided responses in order, tracking call count.
  */
 export class MockLLMClient extends BaseLLMClient implements ILLMClient {
-  private readonly responses: string[];
+  private readonly responses: (string | LLMResponse)[];
   private _callCount: number = 0;
 
-  constructor(responses: string[]) {
+  constructor(responses: (string | LLMResponse)[]) {
     super();
     this.responses = responses;
   }
@@ -239,13 +288,18 @@ export class MockLLMClient extends BaseLLMClient implements ILLMClient {
       );
     }
 
-    const content = this.responses[index]!;
+    const entry = this.responses[index]!;
+
+    // If the entry is already an LLMResponse, return it directly
+    if (typeof entry === "object") {
+      return entry;
+    }
 
     return {
-      content,
+      content: entry,
       usage: {
         input_tokens: 10,
-        output_tokens: content.length,
+        output_tokens: entry.length,
       },
       stop_reason: "end_turn",
     };
