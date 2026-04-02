@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { StateManager } from "../src/state-manager.js";
@@ -396,19 +396,26 @@ describe("StateManager", async () => {
       });
 
       it("handles 0 elapsed time without divide-by-zero", () => {
-        // created_at = now, target in the future → elapsed_ratio ≈ 0
-        const now = new Date();
-        const futureDate = new Date(now.getTime() + 100 * 24 * 60 * 60 * 1000).toISOString();
-        const milestone = makeMilestone({
-          id: "m-zero-elapsed",
-          created_at: now.toISOString(),
-          target_date: futureDate,
-        });
+        // Freeze time so created_at === Date.now() → elapsed_ratio is exactly 0
+        const frozenNow = Date.now();
+        vi.useFakeTimers();
+        vi.setSystemTime(frozenNow);
+        try {
+          const now = new Date(frozenNow);
+          const futureDate = new Date(frozenNow + 100 * 24 * 60 * 60 * 1000).toISOString();
+          const milestone = makeMilestone({
+            id: "m-zero-elapsed",
+            created_at: now.toISOString(),
+            target_date: futureDate,
+          });
 
-        const snapshot = evaluatePace(milestone, 0.0);
-        // Should not throw; pace_ratio = 1 when elapsed_ratio ≈ 0
-        expect(snapshot.status).toBe("on_track");
-        expect(snapshot.pace_ratio).toBe(1);
+          const snapshot = evaluatePace(milestone, 0.0);
+          // Should not throw; pace_ratio = 1 when elapsed_ratio === 0
+          expect(snapshot.status).toBe("on_track");
+          expect(snapshot.pace_ratio).toBe(1);
+        } finally {
+          vi.useRealTimers();
+        }
       });
 
       it("includes evaluated_at timestamp", () => {
