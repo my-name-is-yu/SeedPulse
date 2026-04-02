@@ -67,7 +67,7 @@ const NO_CHANGE_PATTERNS = ["no changes made", "no modifications", "nothing to c
 
 // ─── Exported interfaces ───
 
-export interface TaskHistoryEntry {
+export interface StallTaskHistoryEntry {
   strategy_id: string | null;
   output: string;
 }
@@ -158,7 +158,7 @@ export class StallDetector {
    * Detect repetitive patterns in task execution history.
    * Checks for: identical_actions, oscillating, no_change patterns.
    */
-  detectRepetitivePatterns(taskHistory: TaskHistoryEntry[]): RepetitivePatternResult {
+  detectRepetitivePatterns(taskHistory: StallTaskHistoryEntry[]): RepetitivePatternResult {
     if (taskHistory.length < REPETITIVE_WINDOW) {
       return { isRepetitive: false, pattern: null, confidence: 0 };
     }
