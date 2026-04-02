@@ -27,6 +27,7 @@ import {
   formatTaskResults,
 } from "./formatters.js";
 import { allocateBudget, type BudgetAllocation } from "../execution/context-budget.js";
+import type { Dimension } from "../types/goal.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -244,7 +245,7 @@ export class ContextAssembler {
 
   private buildCurrentState(goalState: any): string {
     if (!goalState?.dimensions?.length) return "";
-    const dims = ((goalState.dimensions as any[]) ?? []).map((d: any) => ({
+    const dims = ((goalState.dimensions as Dimension[]) ?? []).map((d: Dimension) => ({
       name: d.name,
       current: d.current_value,
       target: d.threshold?.value,
@@ -257,7 +258,7 @@ export class ContextAssembler {
     if (!goalState?.dimensions?.length) return "";
 
     const allHistory: Array<{ timestamp: string; score: number }> = [];
-    for (const dim of ((goalState.dimensions as any[]) ?? [])) {
+    for (const dim of ((goalState.dimensions as Dimension[]) ?? [])) {
       if (dim.history?.length) {
         for (const h of dim.history) {
           allHistory.push({ timestamp: h.timestamp, score: h.value });
@@ -410,7 +411,7 @@ export class ContextAssembler {
   private extractDimensionNames(goalState: any, dimensionName?: string): string[] {
     if (dimensionName) return [dimensionName];
     if (!goalState?.dimensions?.length) return [];
-    return ((goalState.dimensions as any[]) ?? []).map((d: any) => d.name as string);
+    return ((goalState.dimensions as Dimension[]) ?? []).map((d: Dimension) => d.name);
   }
 
   private enforceBudget(
