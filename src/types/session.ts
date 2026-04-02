@@ -7,6 +7,7 @@ export const SessionTypeEnum = z.enum([
   "observation",
   "task_review",
   "goal_review",
+  "chat_execution",
 ]);
 export type SessionType = z.infer<typeof SessionTypeEnum>;
 

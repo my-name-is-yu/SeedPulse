@@ -1,6 +1,8 @@
 import { execFile } from "child_process";
+import { accessSync } from "fs";
 import { promisify } from "util";
 import { readFile } from "fs/promises";
+import { join, dirname } from "path";
 import type { MemoryTier } from "../types/memory-lifecycle.js";
 
 const execFileAsync = promisify(execFile);
@@ -203,6 +205,39 @@ async function collectContextItems(
   }
 
   return items;
+}
+
+/**
+ * Build a lightweight context string for chat mode execution.
+ * Does not run git or test commands — returns synchronously.
+ */
+export function buildChatContext(taskDescription: string, cwd: string): string {
+  const gitRoot = resolveGitRoot(cwd);
+  const lines = [
+    `Working directory: ${cwd}`,
+    gitRoot !== cwd ? `Git root: ${gitRoot}` : null,
+    `Task: ${taskDescription}`,
+    `Session type: chat_execution`,
+  ].filter(Boolean);
+  return lines.join("\n");
+}
+
+/**
+ * Walk up from cwd until a .git directory is found.
+ * Returns cwd itself if no git root is found.
+ */
+export function resolveGitRoot(cwd: string): string {
+  let dir = cwd;
+  while (true) {
+    try {
+      accessSync(join(dir, ".git"));
+      return dir;
+    } catch {
+      const parent = dirname(dir);
+      if (parent === dir) return cwd;
+      dir = parent;
+    }
+  }
 }
 
 /**

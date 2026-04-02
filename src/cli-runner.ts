@@ -54,6 +54,7 @@ import { cmdSuggest, cmdImprove } from "./cli/commands/suggest.js";
 import { cmdSetup } from "./cli/commands/setup.js";
 import { cmdKnowledgeList, cmdKnowledgeSearch, cmdKnowledgeStats } from "./cli/commands/knowledge.js";
 import { cmdTaskList, cmdTaskShow } from "./cli/commands/task-read.js";
+import { cmdChat } from "./cli/commands/chat.js";
 import { printUsage, formatOperationError } from "./cli/utils.js";
 import { ensureProviderConfig } from "./cli/ensure-api-key.js";
 
@@ -523,6 +524,10 @@ export class CLIRunner {
       const { startMCPServer } = await import("./mcp-server/index.js");
       await startMCPServer({ stateManager: this.stateManager, baseDir: this.stateManager.getBaseDir() });
       return 0;
+    }
+
+    if (subcommand === "chat") {
+      return await cmdChat(this.stateManager, argv.slice(1));
     }
 
     if (subcommand === "tui") {
