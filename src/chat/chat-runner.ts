@@ -3,6 +3,7 @@
 // Central coordinator for 1-shot chat execution (Tier 1).
 // Bypasses TaskLifecycle — calls adapter.execute() directly.
 
+import { execFile } from "node:child_process";
 import type { StateManager } from "../state-manager.js";
 import type { IAdapter, AgentTask } from "../execution/adapter-layer.js";
 import type { ILLMClient } from "../llm/llm-client.js";
@@ -10,6 +11,7 @@ import { ChatHistory } from "./chat-history.js";
 import { buildChatContext, resolveGitRoot } from "../observation/context-provider.js";
 import type { EscalationHandler } from "./escalation.js";
 import { buildSystemPrompt } from "./grounding.js";
+import { verifyChatAction } from "./chat-verifier.js";
 
 // ─── Types ───
 
@@ -29,6 +31,7 @@ export interface ChatRunResult {
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000;
+const MAX_VERIFY_RETRIES = 2;
 
 // ─── Command help text ───
 
@@ -37,6 +40,16 @@ const COMMAND_HELP = `Available commands:
   /clear   Clear conversation history
   /exit    Exit chat mode
   /track   Promote session to Tier 2 goal pursuit (not yet implemented)`;
+
+// ─── Helpers ───
+
+function checkGitChanges(cwd: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile("git", ["diff", "HEAD", "--stat"], { cwd, timeout: 5_000 }, (err, stdout, stderr) => {
+      resolve(err ? null : (stdout + stderr).trim());
+    });
+  });
+}
 
 // ─── ChatRunner ───
 
@@ -135,7 +148,8 @@ export class ChatRunner {
    *  3. Build chat context and assemble prompt
    *  4. Persist user message BEFORE calling adapter (crash-safe)
    *  5. Execute via adapter
-   *  6. Persist assistant response (fire-and-forget)
+   *  6. Verify changes (git diff + tests); retry up to MAX_VERIFY_RETRIES if tests fail
+   *  7. Persist assistant response (fire-and-forget)
    */
   async execute(input: string, cwd: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<ChatRunResult> {
     // Intercept commands before any adapter call
@@ -178,7 +192,7 @@ export class ChatRunner {
       historyBlock = `Previous conversation:\n${lines}\n\nCurrent message:\n`;
     }
 
-    const context = buildChatContext(input, gitRoot);
+    const context = await buildChatContext(input, gitRoot);
     const basePrompt = context ? `${context}\n\n${input}` : input;
     const prompt = historyBlock ? `${historyBlock}${basePrompt}` : basePrompt;
 
@@ -190,8 +204,33 @@ export class ChatRunner {
       ...(this.cachedSystemPrompt ? { system_prompt: this.cachedSystemPrompt } : {}),
     };
     const start = Date.now();
-    const result = await this.deps.adapter.execute(task);
+    let result = await this.deps.adapter.execute(task);
     const elapsed_ms = Date.now() - start;
+
+    // Verification loop: check if git has uncommitted changes; if so, run tests
+    const gitChanges = await checkGitChanges(gitRoot);
+    if (gitChanges !== null && gitChanges !== "") {
+      let retries = 0;
+      let verification = await verifyChatAction(gitRoot);
+
+      while (!verification.passed && retries < MAX_VERIFY_RETRIES) {
+        retries++;
+        const retryPrompt = `The previous changes caused test failures. Please fix them.\n\nTest output:\n${verification.testOutput ?? verification.errors.join("\n")}`;
+        const retryTask: AgentTask = { ...task, prompt: retryPrompt };
+        result = await this.deps.adapter.execute(retryTask);
+        verification = await verifyChatAction(gitRoot);
+      }
+
+      if (!verification.passed) {
+        // Fire-and-forget: persist assistant response
+        history.appendAssistantMessage(result.output);
+        return {
+          success: false,
+          output: `Changes applied but tests are still failing after ${MAX_VERIFY_RETRIES} retries. Please intervene manually.\n\nTest output:\n${verification.testOutput ?? verification.errors.join("\n")}`,
+          elapsed_ms: Date.now() - start,
+        };
+      }
+    }
 
     // Fire-and-forget: persist assistant response after completion
     history.appendAssistantMessage(result.output);
