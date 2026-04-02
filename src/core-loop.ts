@@ -196,9 +196,22 @@ export class CoreLoop {
 
       void this.deps.hookManager?.emit("LoopCycleStart", { goal_id: goalId, data: { loopIndex } });
 
-      const iterationResult = this.config.treeMode && this.deps.treeLoopOrchestrator
-        ? await this.runTreeIteration(goalId, loopIndex, nodeConsumedMap)
-        : await this.runOneIteration(goalId, loopIndex, loopIndex === startLoopIndex);
+      let iterationResult: LoopIterationResult;
+      try {
+        iterationResult = this.config.treeMode && this.deps.treeLoopOrchestrator
+          ? await this.runTreeIteration(goalId, loopIndex, nodeConsumedMap)
+          : await this.runOneIteration(goalId, loopIndex, loopIndex === startLoopIndex);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger?.error(`[CoreLoop] unexpected error in iteration ${loopIndex}: ${msg}`);
+        consecutiveErrors++;
+        if (consecutiveErrors >= this.config.maxConsecutiveErrors) {
+          finalStatus = "error";
+          break;
+        }
+        continue;
+      }
+
       // Carry forward gapAggregate from the previous iteration when this one was skipped,
       // so callers always see a meaningful value rather than the default 0.
       if (iterationResult.skipped && iterations.length >= 1) {
