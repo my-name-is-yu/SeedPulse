@@ -470,6 +470,9 @@ export class SessionManager {
       case "goal_review":
         slots = this.buildGoalReviewContext(goalId);
         break;
+      default:
+        slots = [];
+        break;
     }
 
     if (tokenBudget !== undefined) {
