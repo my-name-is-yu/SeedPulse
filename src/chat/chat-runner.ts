@@ -64,9 +64,10 @@ export class ChatRunner {
   }
 
   private async handleCommand(input: string): Promise<ChatRunResult | null> {
-    const cmd = input.trim().toLowerCase();
-    if (!cmd.startsWith("/")) return null;
+    const trimmed = input.trim();
+    if (!trimmed.startsWith("/")) return null;
 
+    const cmd = trimmed.toLowerCase().split(/\s+/)[0];
     const start = Date.now();
 
     if (cmd === "/help") {

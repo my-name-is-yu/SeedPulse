@@ -57,18 +57,6 @@ function makeDeps(overrides: Partial<EscalationDeps> = {}): EscalationDeps {
   };
 }
 
-function makeChatHistory(stateManager: StateManager, messages: Array<{ role: "user" | "assistant"; content: string }> = []): ChatHistory {
-  const history = new ChatHistory(stateManager, "test-session", "/test");
-  for (const m of messages) {
-    if (m.role === "user") {
-      history.appendAssistantMessage(""); // placeholder to keep turn indices valid
-    }
-  }
-  // Directly push messages via appendAssistantMessage and appendUserMessage
-  // Use a real ChatHistory with a mock stateManager for simplicity
-  return history;
-}
-
 async function makeChatHistoryWithMessages(stateManager: StateManager): Promise<ChatHistory> {
   const history = new ChatHistory(stateManager, "test-session", "/test");
   await history.appendUserMessage("How can I improve test coverage?");
