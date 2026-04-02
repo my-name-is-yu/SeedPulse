@@ -70,15 +70,58 @@ export function buildGenerationPrompt(
   context: { currentGap: number; pastStrategies: Strategy[] },
   enrichment?: { templatesBlock?: string; lessonsBlock?: string }
 ): string {
-  const pastSummary =
-    context.pastStrategies.length > 0
-      ? context.pastStrategies
-          .map(
-            (s) =>
-              `- "${s.hypothesis}" (state: ${s.state}, effectiveness: ${s.effectiveness_score ?? "unknown"})`
-          )
-          .join("\n")
-      : "None";
+  // Sort all past strategies most recent first
+  const sorted = [...context.pastStrategies].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+
+  // Partition into dimension-relevant and other strategies
+  const dimensionRelevant = sorted.filter(
+    (s) =>
+      s.primary_dimension === primaryDimension ||
+      s.target_dimensions.includes(primaryDimension)
+  );
+  const otherStrategies = sorted.filter(
+    (s) =>
+      s.primary_dimension !== primaryDimension &&
+      !s.target_dimensions.includes(primaryDimension)
+  );
+
+  // Fallback: if fewer than 3 dimension-relevant, pad with other same-goal strategies
+  const MIN_RELEVANT = 3;
+  const MAX_TOTAL = 10;
+  let selectedRelevant = dimensionRelevant.slice(0, MAX_TOTAL);
+  let selectedOther: Strategy[] = [];
+  if (selectedRelevant.length < MIN_RELEVANT) {
+    const needed = Math.min(MIN_RELEVANT - selectedRelevant.length, otherStrategies.length);
+    selectedOther = otherStrategies.slice(0, needed);
+  }
+
+  // Cap total at 10
+  const totalRelevant = selectedRelevant.length;
+  const remainingCap = MAX_TOTAL - totalRelevant;
+  selectedOther = selectedOther.slice(0, remainingCap);
+
+  const formatStrategy = (s: Strategy) =>
+    `- "${s.hypothesis}" (state: ${s.state}, effectiveness: ${s.effectiveness_score ?? "unknown"})`;
+
+  let pastSummary: string;
+  if (selectedRelevant.length === 0 && selectedOther.length === 0) {
+    pastSummary = "None";
+  } else {
+    const parts: string[] = [];
+    if (selectedRelevant.length > 0) {
+      parts.push(
+        `Relevant past strategies for this dimension:\n${selectedRelevant.map(formatStrategy).join("\n")}`
+      );
+    }
+    if (selectedOther.length > 0) {
+      parts.push(
+        `Other strategies from this goal:\n${selectedOther.map(formatStrategy).join("\n")}`
+      );
+    }
+    pastSummary = parts.join("\n\n");
+  }
 
   const enrichmentSection = [
     enrichment?.templatesBlock ?? "",
