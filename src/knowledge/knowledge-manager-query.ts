@@ -310,9 +310,7 @@ export async function checkContradiction(
   Answer: ${e.answer}
   Tags: ${e.tags.join(", ")}`
     )
-    .join("
-
-");
+    .join("\n\n");
 
   const prompt = `Check whether the new knowledge entry contradicts any existing entries.
 
