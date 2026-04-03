@@ -171,7 +171,7 @@ Constraints:
   // Referenced Issue section (dynamic import — graceful when absent)
   let issueSection = "";
   try {
-    const { fetchIssueContext } = await import("./issue-context-fetcher.js");
+    const { fetchIssueContext } = await import("../context/issue-context-fetcher.js");
     const allText = [goal?.title, goal?.description, ...parentChain.map(p => `${p.title} ${p.description}`)].filter(Boolean).join(" ");
     issueSection = await fetchIssueContext(allText);
   } catch {
