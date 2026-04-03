@@ -19,7 +19,7 @@ import {
   selectNextStrategyAcrossGoals as _selectNextStrategyAcrossGoals,
   getCurrentGapForDimension as _getCurrentGapForDimension,
   calculateGapDeltaForStrategy as _calculateGapDeltaForStrategy,
-} from "./portfolio-rebalance.js";
+} from "./strategy/portfolio-rebalance.js";
 
 /**
  * PortfolioManager provides portfolio-level orchestration on top of StrategyManager.
