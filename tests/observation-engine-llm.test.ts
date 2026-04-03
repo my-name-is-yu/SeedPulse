@@ -95,7 +95,7 @@ describe("ObservationEngine LLM observation", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   // ─── Test 1: observeWithLLM returns independent_review observation ───

@@ -44,7 +44,7 @@ describe("Guard 3: Score-evidence consistency check (§4.3)", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   // ─── Test 1: No evidence + LLM returns score > 0.0 → score kept, confidence capped at 0.1 ───
@@ -173,7 +173,7 @@ describe("RC-1: Preserve previous score when no context but previousScore is kno
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("preserves previousScore with confidence=0.30 when no context and previousScore is known", async () => {
@@ -242,7 +242,7 @@ describe("RC-2: applyObservation called in no_context_existing_value skip path",
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("calls applyObservation when skipping due to no context with existing value", async () => {
@@ -315,7 +315,7 @@ describe("Root Cause B: confidence tier when sourceAvailable=false", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("uses independent_review tier (0.70) when sourceAvailable=false but context is available", async () => {
@@ -504,7 +504,7 @@ describe("readWorkspaceFiles", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("returns formatted content for readable files", async () => {
@@ -568,7 +568,7 @@ describe("Workspace file fallback: reads files when git diff is empty", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("uses workspace files as context when git diff is empty and workspacePath is provided", async () => {

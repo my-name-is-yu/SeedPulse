@@ -38,7 +38,7 @@ describe("autoRegisterShellDataSources", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("creates a shell datasource config for todo_count dimension", async () => {
@@ -254,7 +254,7 @@ describe("autoRegisterFileExistenceDataSources — dedup", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("does not create a duplicate file_existence datasource for the same dimension, path, and goalId", async () => {

@@ -24,7 +24,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  fs.rmSync(tempDir, { recursive: true, force: true });
+  fs.rmSync(tempDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
 });
 
 // ─── checkDimensionStall ───
@@ -611,7 +611,7 @@ describe("StallDetector CharacterConfig integration", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tempDir2, { recursive: true, force: true });
+    fs.rmSync(tempDir2, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("constructor without characterConfig is backwards compatible (no error)", () => {
@@ -912,7 +912,7 @@ describe("StallDetector with ProgressPredictor", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("works as before (no predictor) — no regression for normal stall detection", () => {

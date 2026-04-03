@@ -76,7 +76,7 @@ describe("Cross-validation confidence penalty on LLM hallucination", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("applies confidence penalty when LLM claims 1.0 but mechanical returns 0", async () => {
@@ -249,7 +249,7 @@ describe("observation-apply value bounds validation", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("clamps present-type dimension values to [0, 1]", async () => {

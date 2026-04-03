@@ -96,7 +96,7 @@ describe("observeWithLLM prompt quality", () => {
     const promptContent = mockLLM.capturedMessages[0]!.content;
     expect(promptContent).toContain("FEW-SHOT CALIBRATION");
 
-    fs.rmSync(tmpDir, { recursive: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
   it("prompt contains CRITICAL RULES section", async () => {
@@ -122,7 +122,7 @@ describe("observeWithLLM prompt quality", () => {
     const promptContent = mockLLM.capturedMessages[0]!.content;
     expect(promptContent).toContain("CRITICAL RULES");
 
-    fs.rmSync(tmpDir, { recursive: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
   it("when workspace context is absent, prompt contains Score MUST be 0.0 warning", async () => {
@@ -151,7 +151,7 @@ describe("observeWithLLM prompt quality", () => {
     const promptContent = mockLLM.capturedMessages[0]!.content;
     expect(promptContent).toContain("Score MUST be 0.0");
 
-    fs.rmSync(tmpDir, { recursive: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
   it("when workspace context is present, prompt contains the context content", async () => {
@@ -179,7 +179,7 @@ describe("observeWithLLM prompt quality", () => {
     const promptContent = mockLLM.capturedMessages[0]!.content;
     expect(promptContent).toContain(workspaceContent);
 
-    fs.rmSync(tmpDir, { recursive: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
   it("prompt contains previous score value when provided", async () => {
@@ -205,7 +205,7 @@ describe("observeWithLLM prompt quality", () => {
     const promptContent = mockLLM.capturedMessages[0]!.content;
     expect(promptContent).toContain("0.42");
 
-    fs.rmSync(tmpDir, { recursive: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
   it("prompt contains Previous score: none when no previous score", async () => {
@@ -231,7 +231,7 @@ describe("observeWithLLM prompt quality", () => {
     const promptContent = mockLLM.capturedMessages[0]!.content;
     expect(promptContent).toContain("Previous score: none");
 
-    fs.rmSync(tmpDir, { recursive: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
   it("prompt does NOT contain Japanese characters", async () => {
@@ -258,7 +258,7 @@ describe("observeWithLLM prompt quality", () => {
     // Japanese Unicode block: U+3000-U+9FFF
     expect(promptContent).not.toMatch(/[\u3000-\u9FFF]/);
 
-    fs.rmSync(tmpDir, { recursive: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
   it("mock LLM returning score 0.0 produces extracted value 0.0 for min threshold value 0", async () => {
@@ -284,7 +284,7 @@ describe("observeWithLLM prompt quality", () => {
 
     expect(entry.extracted_value).toBe(0.0);
 
-    fs.rmSync(tmpDir, { recursive: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
   it("mock LLM returning score 1.0 produces extracted value matching target threshold for min threshold > 1", async () => {
@@ -344,6 +344,6 @@ describe("observeWithLLM prompt quality", () => {
     // score=1.0 * threshold.value=100 => 100
     expect(entry.extracted_value).toBe(100);
 
-    fs.rmSync(tmpDir, { recursive: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 });

@@ -251,7 +251,7 @@ describe("CoreLoop orchestrator regression", async () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("handles score override ordering in live execution and records the emitted task cycle", async () => {

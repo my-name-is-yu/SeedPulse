@@ -148,7 +148,7 @@ describe("P0 Guard 2: progress-verdict contradiction", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   async function setupGoalState(
@@ -413,7 +413,7 @@ describe("§4.6: runLLMReview Zod validation", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("valid JSON with enum verdict 'pass' — parsed correctly via Zod", async () => {
@@ -512,7 +512,7 @@ describe("§4.7: handleVerdict failure context save/clear", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   async function setupGoalState(dimName: string, currentValue: number): Promise<void> {
@@ -642,7 +642,7 @@ describe("RC-3: handleVerdict updates confidence and last_observed_layer on dime
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   async function setupGoalWithDim(dimName: string, currentValue: number): Promise<void> {
@@ -741,7 +741,7 @@ describe("Root Cause C: dimension_updates scaling", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("min threshold: delta is scaled by threshold.value — pass verdict adds 0.2 * value", async () => {

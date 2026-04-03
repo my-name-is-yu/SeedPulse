@@ -48,7 +48,7 @@ describe("GoalNegotiator lightweight unit coverage", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   async function negotiateGoal(args: {

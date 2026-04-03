@@ -27,7 +27,7 @@ describe("ShellDataSourceAdapter", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   // 1. observe() with output_type "number" via echo
@@ -233,6 +233,6 @@ describe("ShellDataSourceAdapter", () => {
     expect(entry.goal_id).toBe(goal.id);
     expect(entry.dimension_name).toBe("todo_count");
 
-    fs.rmSync(stateDir, { recursive: true, force: true });
+    fs.rmSync(stateDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 });

@@ -46,7 +46,7 @@ import { makeTempDir } from "../helpers/temp-dir.js";
 const fakeGitContextFetcher = () => "File: README.md\n# Project\nInstallation guide and usage examples.";
 
 function removeTempDir(dir: string): void {
-  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(dir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
 }
 
 // ─── Observation method config ───

@@ -32,7 +32,7 @@ describe("ObservationEngine dimension name dedup normalization", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   // Access the private method via casting for unit tests

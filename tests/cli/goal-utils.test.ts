@@ -20,7 +20,7 @@ describe("autoRegisterFileExistenceDataSources — dedup by path and scope_goal_
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   function writeDatasource(filename: string, cfg: Record<string, unknown>): void {

@@ -72,7 +72,7 @@ beforeEach(() => {
 
 afterEach(() => {
   server.stopFileWatcher();
-  fs.rmSync(tmpDir, { recursive: true, force: true });
+  fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
 });
 
 // ─── isWatching() ───

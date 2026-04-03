@@ -33,7 +33,7 @@ describe("EthicsGate", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   // ─── JSON parse failure — conservative fallback ───

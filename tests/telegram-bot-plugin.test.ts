@@ -44,7 +44,7 @@ describe("config — loadConfig", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("loads valid config successfully", () => {
@@ -500,7 +500,7 @@ describe("TelegramBotPlugin", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
     vi.unstubAllGlobals();
   });
 

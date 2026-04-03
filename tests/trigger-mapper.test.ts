@@ -32,14 +32,14 @@ describe("TriggerMapper.loadMappings", () => {
     expect(result.action).toBe("observe");
     expect(result.goal_id).toBe("g1");
     expect(result.source).toBe("mapping");
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("does not throw when mappings file is missing", async () => {
     const tmpDir = makeTempDir();
     const mapper = new TriggerMapper(tmpDir);
     await expect(mapper.loadMappings()).resolves.toBeUndefined();
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 });
 
@@ -64,7 +64,7 @@ describe("TriggerMapper.resolve — explicit mapping match", () => {
     expect(result.action).toBe("create_task");
     expect(result.goal_id).toBe("g-ci");
     expect(result.source).toBe("mapping");
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 });
 
@@ -79,7 +79,7 @@ describe("TriggerMapper.resolve — trigger.goal_id fallback", () => {
     );
     expect(result.action).toBe("observe");
     expect(result.goal_id).toBe("goal-fallback");
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 });
 
@@ -98,7 +98,7 @@ describe("TriggerMapper.resolve — LLM fallback", () => {
     expect(result.source).toBe("llm");
     expect(result.goal_id).toBe("g-llm");
     expect(result.action).toBe("observe");
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("does not call LLM on second resolve with same source/event_type (cache hit)", async () => {
@@ -116,7 +116,7 @@ describe("TriggerMapper.resolve — LLM fallback", () => {
     await mapper.resolve(trigger, goals); // second call — should hit cache
 
     expect(mockLLM.callCount).toBe(1);
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 });
 
@@ -132,7 +132,7 @@ describe("TriggerMapper.resolve — no mapping, no LLM", () => {
     expect(result.action).toBe("none");
     expect(result.goal_id).toBeNull();
     expect(result.source).toBe("default");
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 });
 
@@ -151,6 +151,6 @@ describe("TriggerMapper.clearCache", () => {
     expect(mapper.getCacheSize()).toBe(1);
     mapper.clearCache();
     expect(mapper.getCacheSize()).toBe(0);
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 });

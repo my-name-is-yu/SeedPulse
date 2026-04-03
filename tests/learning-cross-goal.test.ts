@@ -77,7 +77,7 @@ describe("LearningPipeline — extractCrossGoalPatterns", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("should identify patterns across 2+ goals with similar delta values", async () => {
@@ -260,7 +260,7 @@ describe("LearningPipeline — sharePatternsAcrossGoals", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("should apply matching patterns to target goals", async () => {
@@ -412,7 +412,7 @@ describe("KnowledgeTransfer — storePattern / retrievePatterns", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("should roundtrip: stored pattern is returned by retrievePatterns", () => {

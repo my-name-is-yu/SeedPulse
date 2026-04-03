@@ -44,7 +44,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  fs.rmSync(tempDir, { recursive: true, force: true });
+  fs.rmSync(tempDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
 });
 
 // ─── isDimensionSatisfied ───

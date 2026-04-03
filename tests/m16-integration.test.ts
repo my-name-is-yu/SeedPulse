@@ -100,7 +100,7 @@ describe("Flow 1: KnowledgeTransfer end-to-end pipeline", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("detects candidates, applies transfer, evaluates effect, and updates trust", async () => {
@@ -288,7 +288,7 @@ describe("Flow 4: updateMetaPatternsIncremental", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("processes new patterns only and updates lastAggregatedAt", async () => {

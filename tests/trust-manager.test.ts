@@ -27,7 +27,7 @@ describe("TrustManager", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   // ─── getBalance ───
@@ -471,7 +471,7 @@ describe("plugin trust", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("recordPluginSuccess increases trust_score by 3 and increments counts", async () => {

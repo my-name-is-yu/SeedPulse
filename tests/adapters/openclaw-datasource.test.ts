@@ -33,7 +33,7 @@ describe("OpenClawDataSourceAdapter", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(sessionDir, { recursive: true, force: true });
+    fs.rmSync(sessionDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   // ─── connect / disconnect / healthCheck ───

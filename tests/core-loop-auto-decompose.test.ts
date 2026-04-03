@@ -294,7 +294,7 @@ describe("CoreLoop auto-decompose (issue #295)", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("skips decomposition when autoDecompose is false", async () => {

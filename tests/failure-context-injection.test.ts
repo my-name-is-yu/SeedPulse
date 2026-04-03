@@ -24,7 +24,7 @@ describe("buildTaskGenerationPrompt — failure context injection (§4.7)", () =
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("does not include failure context when no last-failure-context.json exists", async () => {
@@ -149,7 +149,7 @@ describe("§4.7 round-trip: handleVerdict writes, buildTaskGenerationPrompt read
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   function makeTask(overrides: Partial<Task> = {}): Task {

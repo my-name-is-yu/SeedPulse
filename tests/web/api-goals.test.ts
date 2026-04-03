@@ -75,7 +75,7 @@ describe('GET /api/goals', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it('returns array of goals', async () => {
@@ -114,7 +114,7 @@ describe('GET /api/goals/:id', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it('returns a single goal by id', async () => {
@@ -143,7 +143,7 @@ describe('GET /api/goals/:id/gap-history', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it('returns gap history array', async () => {
@@ -161,7 +161,7 @@ describe('GET /api/goals/:id/tasks', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it('returns empty tasks when directory does not exist', async () => {

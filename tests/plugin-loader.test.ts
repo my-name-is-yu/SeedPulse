@@ -484,7 +484,7 @@ describe("PluginLoader.getPluginState and updatePluginState", () => {
   });
 
   afterEach(() => {
-    fsSync.rmSync(tmpDir, { recursive: true, force: true });
+    fsSync.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("getPluginState returns null for unknown plugin", () => {

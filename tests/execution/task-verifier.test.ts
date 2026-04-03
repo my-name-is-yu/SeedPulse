@@ -55,7 +55,7 @@ describe("Task verifier malformed JSON regression", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("logs malformed JSON, falls back to fail, and continues with a later valid response", async () => {

@@ -19,7 +19,7 @@ import { createMockLLMClient } from "./helpers/mock-llm.js";
 import { makeTempDir } from "./helpers/temp-dir.js";
 
 function removeDir(dir: string): void {
-  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(dir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
 }
 
 // Extreme character configs for boundary testing

@@ -47,7 +47,7 @@ function makeDeps(llmResponses: string[]) {
 }
 
 function cleanup(tmpDir: string) {
-  fs.rmSync(tmpDir, { recursive: true, force: true });
+  fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
 }
 
 // ─── Tests ───

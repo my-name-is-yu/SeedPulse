@@ -89,7 +89,7 @@ describe("generateTask — duplicate guard (§4.2)", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   function makeDeps(llmClient: ReturnType<typeof createMockLLMClient>) {

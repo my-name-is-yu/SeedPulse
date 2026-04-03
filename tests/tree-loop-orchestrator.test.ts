@@ -80,7 +80,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* ignore cleanup race */ }
+  try { fs.rmSync(tempDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 }); } catch { /* ignore cleanup race */ }
 });
 
 // ─── Helper: save a goal and return it ───

@@ -57,7 +57,7 @@ vi.setConfig({ testTimeout: 15000 });
 const fakeGitContextFetcher = () => "File: src/main.ts\nconst quality = 0.85; // measured";
 
 function removeTempDir(dir: string): void {
-  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(dir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
 }
 
 // ─── Mock DataSource (marks dimensions as observable so LLM gets independent_review confidence) ───

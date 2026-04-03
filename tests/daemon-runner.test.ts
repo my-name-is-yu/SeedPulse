@@ -105,7 +105,7 @@ describe("DaemonRunner", () => {
       await currentStartPromise.catch(() => {});
       currentStartPromise = null;
     }
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
     // Remove any process signal listeners that may have been registered
     process.removeAllListeners("SIGINT");
     process.removeAllListeners("SIGTERM");

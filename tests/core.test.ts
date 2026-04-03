@@ -121,7 +121,7 @@ describe("core functionality", () => {
       expect(observationLog?.entries[0]?.layer).toBe("self_report");
       expect(observationLog?.entries[0]?.extracted_value).toBe(2);
     } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
     }
   });
 
@@ -235,7 +235,7 @@ describe("core functionality", () => {
       expect(persisted?.work_description).toBe("Add unit tests for coverage scoring");
       expect(persisted?.status).toBe("pending");
     } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
     }
   });
 
@@ -358,7 +358,7 @@ After`;
 
       expect(judge.applyProgressCeiling(0.95, 0.6)).toBe(0.85);
     } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
     }
   });
 });

@@ -118,7 +118,7 @@ describe("LearningPipeline", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   // ─── 2. フィードバック生成（generateFeedback）───

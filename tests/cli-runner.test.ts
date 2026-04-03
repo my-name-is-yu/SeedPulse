@@ -229,7 +229,7 @@ afterEach(() => {
   }
   delete process.env.PULSEED_LLM_PROVIDER;
 
-  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ENOTEMPTY on Node 20 CI — ignore */ }
+  try { fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 }); } catch { /* ENOTEMPTY on Node 20 CI — ignore */ }
   vi.clearAllMocks();
 });
 
@@ -1116,7 +1116,7 @@ describe("directory initialisation", () => {
       expect(fs.existsSync(path.join(freshDir, "reports"))).toBe(true);
       expect(fs.existsSync(path.join(freshDir, "events"))).toBe(true);
     } finally {
-      fs.rmSync(freshDir, { recursive: true, force: true });
+      fs.rmSync(freshDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
     }
   });
 });

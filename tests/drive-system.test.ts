@@ -243,7 +243,7 @@ describe("DriveSystem", () => {
         const result = await anotherDs.readEventQueue();
         expect(result).toEqual([]);
       } finally {
-        fs.rmSync(anotherTmp, { recursive: true, force: true });
+        fs.rmSync(anotherTmp, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
       }
     });
   });
@@ -268,7 +268,7 @@ describe("DriveSystem", () => {
       const eventsDir = path.join(tmpDir, "events");
       const archiveDir = path.join(eventsDir, "archive");
       // Remove archive dir
-      fs.rmSync(archiveDir, { recursive: true, force: true });
+      fs.rmSync(archiveDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
 
       writeEventFile(eventsDir, "evt.json", makeEvent());
       await driveSystem.archiveEvent("evt.json");
@@ -398,7 +398,7 @@ describe("DriveSystem", () => {
 
     it("creates schedule directory if it does not exist", async () => {
       const scheduleDir = path.join(tmpDir, "schedule");
-      fs.rmSync(scheduleDir, { recursive: true, force: true });
+      fs.rmSync(scheduleDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
 
       const goalId = randomUUID();
       const schedule = driveSystem.createDefaultSchedule(goalId, 1);

@@ -116,7 +116,7 @@ afterEach(async () => {
   if (server.isRunning()) {
     await server.stop();
   }
-  fs.rmSync(tmpDir, { recursive: true, force: true });
+  fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
 });
 
 // ─── start / stop ───

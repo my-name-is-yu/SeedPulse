@@ -62,7 +62,7 @@ describe("gatherNegotiationContext", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("returns workspace info for a real directory with TypeScript files", async () => {
@@ -158,7 +158,7 @@ describe("negotiate() with workspaceContext", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("passes workspaceContext to the LLM decomposition call", async () => {

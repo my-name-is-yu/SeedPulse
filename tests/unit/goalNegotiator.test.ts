@@ -162,7 +162,7 @@ describe("GoalNegotiator helper coverage", () => {
 
   afterEach(() => {
     for (const dir of tempDirs) {
-      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
     }
   });
 

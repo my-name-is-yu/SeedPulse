@@ -65,7 +65,7 @@ class MockAdapter implements IAdapter {
 const fakeGitContextFetcher = () => "File: tests/e2e-test.ts\n// e2e test passing with full coverage";
 
 function removeTempDir(dir: string): void {
-  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(dir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
 }
 
 function makeFileExistenceConfig(

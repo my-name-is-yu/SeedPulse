@@ -61,7 +61,7 @@ describe("createWorkspaceContextProvider", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("returns workspace context with keyword-matched files", async () => {
@@ -165,7 +165,7 @@ describe("ObservationEngine contextProvider integration", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("contextProvider receives goalId and dimensionName", async () => {

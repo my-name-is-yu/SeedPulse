@@ -307,7 +307,7 @@ describe("CoreLoop tree mode (14B)", async () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   const mockStateAggregator = {
@@ -513,7 +513,7 @@ describe("CoreLoop tree mode (14C)", async () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   function createTreeLoopOrchestratorMock(nodeId = "node-id-1") {

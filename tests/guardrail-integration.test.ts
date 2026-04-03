@@ -210,7 +210,7 @@ describe("TaskLifecycle guardrail integration", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   // Default mock execFileSyncFn: simulates a changed file so the post-execution

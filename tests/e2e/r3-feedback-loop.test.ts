@@ -274,7 +274,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true });
+  fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
 });
 
 // ─── R3-1: verifyTask dimension_updates applied via handleVerdict ───

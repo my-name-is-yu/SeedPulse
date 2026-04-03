@@ -260,7 +260,7 @@ describe("CoreLoop §4.8 checkpoint", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   // ─── 1. Checkpoint saved after successful verify cycle ───

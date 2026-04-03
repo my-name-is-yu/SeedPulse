@@ -57,7 +57,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  fs.rmSync(tempDir, { recursive: true, force: true });
+  fs.rmSync(tempDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
 });
 
 // ─── detectGoalCapabilityGap ───
@@ -257,7 +257,7 @@ describe("matchPluginsForGoal", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   function makePluginLoader(pluginStates: Array<{

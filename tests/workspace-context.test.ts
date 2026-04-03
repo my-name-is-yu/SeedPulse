@@ -27,7 +27,7 @@ describe("createWorkspaceContextProvider — external file reading", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(workDir, { recursive: true, force: true });
+    fs.rmSync(workDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("reads a /tmp/ file mentioned in goal description", async () => {
@@ -170,7 +170,7 @@ describe("createWorkspaceContextProvider — relative path exact match", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpWorkDir, { recursive: true, force: true });
+    fs.rmSync(tmpWorkDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("includes src/index.ts when mentioned in goal description", async () => {
@@ -229,7 +229,7 @@ describe("createWorkspaceContextProvider — small workspace fast path", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpWorkDir, { recursive: true, force: true });
+    fs.rmSync(tmpWorkDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("includes all files when workspace has a single file (hello.ts)", async () => {
@@ -313,8 +313,8 @@ describe("createWorkspaceContextProvider — dynamic workDir from goal constrain
   });
 
   afterEach(() => {
-    fs.rmSync(defaultWorkDir, { recursive: true, force: true });
-    fs.rmSync(goalWorkDir, { recursive: true, force: true });
+    fs.rmSync(defaultWorkDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
+    fs.rmSync(goalWorkDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("uses default workDir when no getGoalConstraints is provided", async () => {
@@ -390,7 +390,7 @@ describe("createWorkspaceContextProvider — Phase 3 grep content match", () => 
   });
 
   afterEach(() => {
-    fs.rmSync(tmpWorkDir, { recursive: true, force: true });
+    fs.rmSync(tmpWorkDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("finds a file by content when its name does not match any keyword", async () => {
@@ -423,7 +423,7 @@ describe("createWorkspaceContextProvider — existing workspace behavior unchang
   });
 
   afterEach(() => {
-    fs.rmSync(tmpWorkDir, { recursive: true, force: true });
+    fs.rmSync(tmpWorkDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("includes README.md and package.json in output", async () => {

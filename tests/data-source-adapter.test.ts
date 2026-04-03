@@ -80,7 +80,7 @@ describe("FileDataSourceAdapter", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("reads JSON file and extracts value by expression", async () => {

@@ -68,7 +68,7 @@ describe("json parse failure regressions", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it("drive-system watcher skips malformed JSON and still delivers later valid events", async () => {

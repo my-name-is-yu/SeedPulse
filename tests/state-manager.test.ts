@@ -25,7 +25,7 @@ describe("StateManager", async () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   describe("directory structure", () => {
@@ -127,7 +127,7 @@ describe("StateManager", async () => {
     it("listGoalIds re-throws non-ENOENT errors", async () => {
       // Remove the goals dir and replace it with a file to cause ENOTDIR
       const goalsDir = path.join(tmpDir, "goals");
-      fs.rmSync(goalsDir, { recursive: true, force: true });
+      fs.rmSync(goalsDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
       fs.writeFileSync(goalsDir, "not a directory");
 
       await expect(manager.listGoalIds()).rejects.toThrow();
@@ -156,14 +156,14 @@ describe("StateManager", async () => {
       await expect(manager.deleteGoalTree("bad-id")).rejects.toThrow();
 
       // Restore for afterEach cleanup
-      fs.rmSync(treeDir, { recursive: true, force: true });
+      fs.rmSync(treeDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
     });
 
     it("goalExists re-throws non-ENOENT errors (ENOTDIR via file as dir)", async () => {
       // Make goals/<goalId> a regular file — then fsp.access(goals/<goalId>/goal.json)
       // fails with ENOTDIR because it tries to traverse into a non-directory
       const goalEntry = path.join(tmpDir, "goals", "badgoal-exists");
-      fs.rmSync(goalEntry, { recursive: true, force: true });
+      fs.rmSync(goalEntry, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
       fs.writeFileSync(goalEntry, "not a dir");
 
       await expect(manager.goalExists("badgoal-exists")).rejects.toThrow();
@@ -961,7 +961,7 @@ describe("StateManager", async () => {
     it("listGoalIds propagates non-ENOENT errors", async () => {
       // Remove the goals directory then replace it with a file — readdir will fail with ENOTDIR
       const goalsDir = path.join(tmpDir, "goals");
-      fs.rmSync(goalsDir, { recursive: true, force: true });
+      fs.rmSync(goalsDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
       fs.writeFileSync(goalsDir, "not-a-directory");
 
       await expect(manager.listGoalIds()).rejects.toThrow();

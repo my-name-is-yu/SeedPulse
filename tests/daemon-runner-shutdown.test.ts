@@ -94,7 +94,7 @@ describe("DaemonRunner — Graceful Shutdown + Crash Recovery", () => {
       await currentStartPromise.catch(() => {});
       currentStartPromise = null;
     }
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
     process.removeAllListeners("SIGINT");
     process.removeAllListeners("SIGTERM");
   });

@@ -69,7 +69,7 @@ class MockAdapter implements IAdapter {
 // ─── Helpers ───
 
 function removeTempDir(dir: string): void {
-  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(dir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
 }
 
 const llmMethod: ObservationMethod = {

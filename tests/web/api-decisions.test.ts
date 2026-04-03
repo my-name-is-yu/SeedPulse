@@ -41,7 +41,7 @@ describe('GET /api/decisions', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
   });
 
   it('returns empty array when decisions directory does not exist', async () => {
