@@ -11,7 +11,7 @@ import type { StateAggregator } from "../goal/state-aggregator.js";
 import type { TreeLoopOrchestrator } from "../goal/tree-loop-orchestrator.js";
 import type { StateManager } from "../state-manager.js";
 import type { ObservationEngine } from "../observation/observation-engine.js";
-import type { TaskLifecycle, TaskCycleResult } from "../execution/task-lifecycle.js";
+import type { TaskLifecycle, TaskCycleResult } from "../execution/task/task-lifecycle.js";
 import type { SatisficingJudge } from "../drive/satisficing-judge.js";
 import type { StallDetector } from "../drive/stall-detector.js";
 import type { StrategyManager } from "../strategy/strategy-manager.js";

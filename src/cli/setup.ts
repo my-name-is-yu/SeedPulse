@@ -26,7 +26,7 @@ import { EthicsGate } from "../traits/ethics-gate.js";
 import { SessionManager } from "../execution/session-manager.js";
 import { StrategyManager } from "../strategy/strategy-manager.js";
 import { GoalNegotiator } from "../goal/goal-negotiator.js";
-import { TaskLifecycle } from "../execution/task-lifecycle.js";
+import { TaskLifecycle } from "../execution/task/task-lifecycle.js";
 import { ReportingEngine } from "../reporting-engine.js";
 import { CoreLoop } from "../core-loop.js";
 import { TreeLoopOrchestrator } from "../goal/tree-loop-orchestrator.js";

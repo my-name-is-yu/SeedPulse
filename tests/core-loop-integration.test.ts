@@ -14,7 +14,7 @@ import * as fs from "node:fs";
 // ─── Real implementations ───
 import { StateManager } from "../src/state-manager.js";
 import { ObservationEngine } from "../src/observation/observation-engine.js";
-import { TaskLifecycle } from "../src/execution/task-lifecycle.js";
+import { TaskLifecycle } from "../src/execution/task/task-lifecycle.js";
 import { SatisficingJudge } from "../src/drive/satisficing-judge.js";
 import { StallDetector } from "../src/drive/stall-detector.js";
 import { StrategyManager } from "../src/strategy/strategy-manager.js";

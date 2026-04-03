@@ -22,7 +22,7 @@ import * as path from "node:path";
 import { StateManager } from "../../src/state-manager.js";
 import { ObservationEngine } from "../../src/observation/observation-engine.js";
 import { SatisficingJudge } from "../../src/drive/satisficing-judge.js";
-import { TaskLifecycle } from "../../src/execution/task-lifecycle.js";
+import { TaskLifecycle } from "../../src/execution/task/task-lifecycle.js";
 import { StallDetector } from "../../src/drive/stall-detector.js";
 import { StrategyManager } from "../../src/strategy/strategy-manager.js";
 import { ReportingEngine } from "../../src/reporting-engine.js";

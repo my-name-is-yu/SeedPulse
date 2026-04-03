@@ -24,7 +24,7 @@ import type { IDriveScorer } from "../../src/knowledge/memory/memory-lifecycle.j
 import { SessionManager } from "../../src/execution/session-manager.js";
 import { GoalDependencyGraph } from "../../src/goal/goal-dependency-graph.js";
 import { ObservationEngine } from "../../src/observation/observation-engine.js";
-import { TaskLifecycle } from "../../src/execution/task-lifecycle.js";
+import { TaskLifecycle } from "../../src/execution/task/task-lifecycle.js";
 import { SatisficingJudge } from "../../src/drive/satisficing-judge.js";
 import { StallDetector } from "../../src/drive/stall-detector.js";
 import { StrategyManager } from "../../src/strategy/strategy-manager.js";

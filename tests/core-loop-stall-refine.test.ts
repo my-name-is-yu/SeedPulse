@@ -23,7 +23,7 @@ import {
 import { detectStallsAndRebalance } from "../src/loop/core-loop-phases-b.js";
 import { StateManager } from "../src/state-manager.js";
 import type { ObservationEngine } from "../src/observation/observation-engine.js";
-import type { TaskLifecycle } from "../src/execution/task-lifecycle.js";
+import type { TaskLifecycle } from "../src/execution/task/task-lifecycle.js";
 import type { SatisficingJudge } from "../src/drive/satisficing-judge.js";
 import type { StallDetector } from "../src/drive/stall-detector.js";
 import type { StrategyManager } from "../src/strategy/strategy-manager.js";

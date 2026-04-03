@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { ToolsetLock } from "../src/execution/toolset-lock.js";
-import { executeTask } from "../src/execution/task-executor.js";
+import { executeTask } from "../src/execution/task/task-executor.js";
 import type { AgentTask, AgentResult } from "../src/execution/adapter-layer.js";
-import type { TaskExecutorDeps } from "../src/execution/task-executor.js";
+import type { TaskExecutorDeps } from "../src/execution/task/task-executor.js";
 import type { Strategy } from "../src/types/strategy.js";
 
 // ─── ToolsetLock ───

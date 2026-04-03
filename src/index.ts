@@ -54,7 +54,7 @@ export { CodexLLMClient } from "./llm/codex-llm-client.js";
 export type { CodexLLMClientConfig } from "./llm/codex-llm-client.js";
 export { loadProviderConfig, saveProviderConfig, DEFAULT_PROVIDER_CONFIG, migrateProviderConfig, validateProviderConfig, MODEL_REGISTRY } from "./llm/provider-config.js";
 export type { ProviderConfig, ValidationResult } from "./llm/provider-config.js";
-export { TaskLifecycle } from "./execution/task-lifecycle.js";
+export { TaskLifecycle } from "./execution/task/task-lifecycle.js";
 export { ReportingEngine } from "./reporting-engine.js";
 export { KnowledgeManager } from "./knowledge/knowledge-manager.js";
 export { CapabilityDetector } from "./observation/capability-detector.js";

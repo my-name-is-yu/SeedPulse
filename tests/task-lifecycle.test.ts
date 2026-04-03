@@ -1,7 +1,7 @@
 /**
  * tests/task-lifecycle.test.ts
  *
- * Targets uncovered branches in src/execution/task-lifecycle.ts:
+ * Targets uncovered branches in src/execution/task/task-lifecycle.ts:
  * - executeTask with guardrailRunner (before_tool blocked, after_tool blocked, allowed paths)
  * - runTaskCycle with knowledgeTransfer enrichment (snippets present, empty, throws)
  * - runTaskCycle with knowledgeManager reflections (present, empty, throws)
@@ -18,7 +18,7 @@ import { SessionManager } from "../src/execution/session-manager.js";
 import { TrustManager } from "../src/traits/trust-manager.js";
 import { StrategyManager } from "../src/strategy/strategy-manager.js";
 import { StallDetector } from "../src/drive/stall-detector.js";
-import { TaskLifecycle } from "../src/execution/task-lifecycle.js";
+import { TaskLifecycle } from "../src/execution/task/task-lifecycle.js";
 import { GuardrailRunner } from "../src/guardrail-runner.js";
 import type { Task } from "../src/types/task.js";
 import type { GapVector } from "../src/types/gap.js";
@@ -110,12 +110,12 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 }
 
 function createMockAdapter(
-  results: Array<Partial<import("../src/execution/task-lifecycle.js").AgentResult>>
-): import("../src/execution/task-lifecycle.js").IAdapter {
+  results: Array<Partial<import("../src/execution/task/task-lifecycle.js").AgentResult>>
+): import("../src/execution/task/task-lifecycle.js").IAdapter {
   let callIndex = 0;
   return {
     adapterType: "mock",
-    async execute(): Promise<import("../src/execution/task-lifecycle.js").AgentResult> {
+    async execute(): Promise<import("../src/execution/task/task-lifecycle.js").AgentResult> {
       const r = results[callIndex++] ?? {};
       return {
         success: true,
@@ -157,7 +157,7 @@ describe("TaskLifecycle — uncovered branches", () => {
     options?: {
       approvalFn?: (task: Task) => Promise<boolean>;
       logger?: import("../src/runtime/logger.js").Logger;
-      adapterRegistry?: import("../src/execution/task-lifecycle.js").AdapterRegistry;
+      adapterRegistry?: import("../src/execution/task/task-lifecycle.js").AdapterRegistry;
       execFileSyncFn?: (cmd: string, args: string[], opts: { cwd: string; encoding: "utf-8" }) => string;
       healthCheckEnabled?: boolean;
       guardrailRunner?: import("../src/guardrail-runner.js").GuardrailRunner;
@@ -202,7 +202,7 @@ describe("TaskLifecycle — uncovered branches", () => {
       const lifecycle = createLifecycle(llm, { guardrailRunner });
 
       let adapterCalled = false;
-      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute() {
           adapterCalled = true;

@@ -116,7 +116,7 @@ vi.mock("../src/loop/tree-loop-runner.js", () => ({
   runMultiGoalIteration: vi.fn(),
 }));
 
-vi.mock("../src/execution/task-generation.js", () => ({
+vi.mock("../src/execution/task/task-generation.js", () => ({
   evaluateTaskComplexity: vi.fn(),
   generateTaskGroup: vi.fn(),
 }));

@@ -6,7 +6,7 @@ import { SessionManager } from "../src/execution/session-manager.js";
 import { TrustManager } from "../src/traits/trust-manager.js";
 import { StrategyManager } from "../src/strategy/strategy-manager.js";
 import { StallDetector } from "../src/drive/stall-detector.js";
-import { TaskLifecycle } from "../src/execution/task-lifecycle.js";
+import { TaskLifecycle } from "../src/execution/task/task-lifecycle.js";
 import type { Task } from "../src/types/task.js";
 import type { GapVector } from "../src/types/gap.js";
 import type { DriveContext } from "../src/types/drive.js";
@@ -195,14 +195,14 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 }
 
 function createMockAdapter(
-  results: Array<Partial<import("../src/execution/task-lifecycle.js").AgentResult>>
-): import("../src/execution/task-lifecycle.js").IAdapter {
+  results: Array<Partial<import("../src/execution/task/task-lifecycle.js").AgentResult>>
+): import("../src/execution/task/task-lifecycle.js").IAdapter {
   let callIndex = 0;
   return {
     adapterType: "mock",
     async execute(
-      _task: import("../src/execution/task-lifecycle.js").AgentTask
-    ): Promise<import("../src/execution/task-lifecycle.js").AgentResult> {
+      _task: import("../src/execution/task/task-lifecycle.js").AgentTask
+    ): Promise<import("../src/execution/task/task-lifecycle.js").AgentResult> {
       const r = results[callIndex++] ?? {};
       return {
         success: true,
@@ -244,7 +244,7 @@ describe("TaskLifecycle", async () => {
     options?: {
       approvalFn?: (task: Task) => Promise<boolean>;
       logger?: import("../src/runtime/logger.js").Logger;
-      adapterRegistry?: import("../src/execution/task-lifecycle.js").AdapterRegistry;
+      adapterRegistry?: import("../src/execution/task/task-lifecycle.js").AdapterRegistry;
       execFileSyncFn?: (cmd: string, args: string[], opts: { cwd: string; encoding: "utf-8" }) => string;
     }
   ): TaskLifecycle {
@@ -400,7 +400,7 @@ describe("TaskLifecycle", async () => {
       const llm = createMockLLMClient([LLM_REVIEW_PASS]);
       const lifecycle = createLifecycle(llm);
       const task = makeTask({ id: "task-persist-test" });
-      const result: import("../src/execution/task-lifecycle.js").AgentResult = {
+      const result: import("../src/execution/task/task-lifecycle.js").AgentResult = {
         success: true,
         output: "done",
         error: null,
@@ -493,7 +493,7 @@ describe("TaskLifecycle", async () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
       let statusDuringExecution = "";
-      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute() {
           // Check status during execution
@@ -740,7 +740,7 @@ describe("TaskLifecycle", async () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
 
-      const timeoutAdapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+      const timeoutAdapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
         adapterType: "mock-timeout",
         async execute() {
           throw new Error("Adapter execution timed out after 30000ms");
@@ -766,7 +766,7 @@ describe("TaskLifecycle", async () => {
       ]);
       const lifecycle = createLifecycle(llm);
 
-      const timeoutAdapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+      const timeoutAdapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
         adapterType: "mock-timeout",
         async execute() {
           throw new Error("Connection timeout");
@@ -796,7 +796,7 @@ describe("TaskLifecycle", async () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
 
-      const badAdapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+      const badAdapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
         adapterType: "mock-bad",
         async execute() {
           // eslint-disable-next-line @typescript-eslint/no-throw-literal

@@ -8,7 +8,7 @@ import { SessionManager } from "../src/execution/session-manager.js";
 import { TrustManager } from "../src/traits/trust-manager.js";
 import { StrategyManager } from "../src/strategy/strategy-manager.js";
 import { StallDetector } from "../src/drive/stall-detector.js";
-import { TaskLifecycle } from "../src/execution/task-lifecycle.js";
+import { TaskLifecycle } from "../src/execution/task/task-lifecycle.js";
 import type {
   ILLMClient,
   LLMMessage,
@@ -99,13 +99,13 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 }
 
 function createMockAdapter(
-  result: Partial<import("../src/execution/task-lifecycle.js").AgentResult> = {}
-): import("../src/execution/task-lifecycle.js").IAdapter {
+  result: Partial<import("../src/execution/task/task-lifecycle.js").AgentResult> = {}
+): import("../src/execution/task/task-lifecycle.js").IAdapter {
   return {
     adapterType: "mock",
     async execute(
-      _task: import("../src/execution/task-lifecycle.js").AgentTask
-    ): Promise<import("../src/execution/task-lifecycle.js").AgentResult> {
+      _task: import("../src/execution/task/task-lifecycle.js").AgentTask
+    ): Promise<import("../src/execution/task/task-lifecycle.js").AgentResult> {
       return {
         success: true,
         output: "Task completed successfully",

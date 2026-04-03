@@ -6,7 +6,7 @@ import { SessionManager } from "../src/execution/session-manager.js";
 import { TrustManager } from "../src/traits/trust-manager.js";
 import { StrategyManager } from "../src/strategy/strategy-manager.js";
 import { StallDetector } from "../src/drive/stall-detector.js";
-import { TaskLifecycle } from "../src/execution/task-lifecycle.js";
+import { TaskLifecycle } from "../src/execution/task/task-lifecycle.js";
 import type { Task } from "../src/types/task.js";
 import type {
   ILLMClient,
@@ -86,14 +86,14 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 }
 
 function createMockAdapter(
-  results: Array<Partial<import("../src/execution/task-lifecycle.js").AgentResult>>
-): import("../src/execution/task-lifecycle.js").IAdapter {
+  results: Array<Partial<import("../src/execution/task/task-lifecycle.js").AgentResult>>
+): import("../src/execution/task/task-lifecycle.js").IAdapter {
   let callIndex = 0;
   return {
     adapterType: "mock",
     async execute(
-      _task: import("../src/execution/task-lifecycle.js").AgentTask
-    ): Promise<import("../src/execution/task-lifecycle.js").AgentResult> {
+      _task: import("../src/execution/task/task-lifecycle.js").AgentTask
+    ): Promise<import("../src/execution/task/task-lifecycle.js").AgentResult> {
       const r = results[callIndex++] ?? {};
       return {
         success: true,
@@ -139,7 +139,7 @@ describe("TaskLifecycle", async () => {
     options?: {
       approvalFn?: (task: Task) => Promise<boolean>;
       logger?: import("../src/runtime/logger.js").Logger;
-      adapterRegistry?: import("../src/execution/task-lifecycle.js").AdapterRegistry;
+      adapterRegistry?: import("../src/execution/task/task-lifecycle.js").AdapterRegistry;
       execFileSyncFn?: (cmd: string, args: string[], opts: { cwd: string; encoding: "utf-8" }) => string;
     }
   ): TaskLifecycle {
@@ -178,7 +178,7 @@ describe("TaskLifecycle", async () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
       let executeCalled = false;
-      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute() {
           executeCalled = true;
@@ -290,7 +290,7 @@ describe("TaskLifecycle", async () => {
     it("handles adapter throwing an error", async () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
-      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute() {
           throw new Error("Adapter crashed");
@@ -308,7 +308,7 @@ describe("TaskLifecycle", async () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
       let receivedPrompt = "";
-      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute(agentTask) {
           receivedPrompt = agentTask.prompt;
@@ -329,7 +329,7 @@ describe("TaskLifecycle", async () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
       let receivedPrompt = "";
-      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
         adapterType: "github_issue",
         formatPrompt(t: Task) {
           const titleLine = t.work_description.split("\n")[0]?.trim() ?? t.work_description;
@@ -360,7 +360,7 @@ describe("TaskLifecycle", async () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
       let receivedPrompt = "";
-      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
         adapterType: "github_issue",
         formatPrompt(t: Task) {
           const titleLine = t.work_description.split("\n")[0]?.trim() ?? t.work_description;
@@ -390,7 +390,7 @@ describe("TaskLifecycle", async () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
       let receivedTimeout = 0;
-      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute(agentTask) {
           receivedTimeout = agentTask.timeout_ms;
@@ -410,7 +410,7 @@ describe("TaskLifecycle", async () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
       let receivedTimeout = 0;
-      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute(agentTask) {
           receivedTimeout = agentTask.timeout_ms;
@@ -430,7 +430,7 @@ describe("TaskLifecycle", async () => {
       const llm = createMockLLMClient([]);
       const lifecycle = createLifecycle(llm);
       let receivedType = "";
-      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
         adapterType: "claude_api",
         async execute(agentTask) {
           receivedType = agentTask.adapter_type;

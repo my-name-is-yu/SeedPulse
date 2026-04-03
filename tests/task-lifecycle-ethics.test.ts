@@ -6,7 +6,7 @@ import { SessionManager } from "../src/execution/session-manager.js";
 import { TrustManager } from "../src/traits/trust-manager.js";
 import { StrategyManager } from "../src/strategy/strategy-manager.js";
 import { StallDetector } from "../src/drive/stall-detector.js";
-import { TaskLifecycle } from "../src/execution/task-lifecycle.js";
+import { TaskLifecycle } from "../src/execution/task/task-lifecycle.js";
 import type { Task } from "../src/types/task.js";
 import type { GapVector } from "../src/types/gap.js";
 import type { DriveContext } from "../src/types/drive.js";
@@ -113,14 +113,14 @@ function makeDriveContext(
 }
 
 function createMockAdapter(
-  results: Array<Partial<import("../src/execution/task-lifecycle.js").AgentResult>>
-): import("../src/execution/task-lifecycle.js").IAdapter {
+  results: Array<Partial<import("../src/execution/task/task-lifecycle.js").AgentResult>>
+): import("../src/execution/task/task-lifecycle.js").IAdapter {
   let callIndex = 0;
   return {
     adapterType: "mock",
     async execute(
-      _task: import("../src/execution/task-lifecycle.js").AgentTask
-    ): Promise<import("../src/execution/task-lifecycle.js").AgentResult> {
+      _task: import("../src/execution/task/task-lifecycle.js").AgentTask
+    ): Promise<import("../src/execution/task/task-lifecycle.js").AgentResult> {
       const r = results[callIndex++] ?? {};
       return {
         success: true,
@@ -162,7 +162,7 @@ describe("TaskLifecycle", async () => {
     options?: {
       approvalFn?: (task: Task) => Promise<boolean>;
       logger?: import("../src/runtime/logger.js").Logger;
-      adapterRegistry?: import("../src/execution/task-lifecycle.js").AdapterRegistry;
+      adapterRegistry?: import("../src/execution/task/task-lifecycle.js").AdapterRegistry;
       execFileSyncFn?: (cmd: string, args: string[], opts: { cwd: string; encoding: "utf-8" }) => string;
       ethicsGate?: import("../src/ethics-gate.js").EthicsGate;
       capabilityDetector?: import("../src/observation/capability-detector.js").CapabilityDetector;
@@ -209,7 +209,7 @@ describe("TaskLifecycle", async () => {
       const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
       const context = makeDriveContext(["coverage"]);
       let adapterExecuteCalled = false;
-      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute() {
           adapterExecuteCalled = true;
@@ -240,7 +240,7 @@ describe("TaskLifecycle", async () => {
       const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
       const context = makeDriveContext(["coverage"]);
       let adapterExecuteCalled = false;
-      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute() {
           adapterExecuteCalled = true;
@@ -272,7 +272,7 @@ describe("TaskLifecycle", async () => {
       const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
       const context = makeDriveContext(["coverage"]);
       const adapterExecute = vi.fn();
-      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute() {
           adapterExecute();
@@ -324,7 +324,7 @@ describe("TaskLifecycle", async () => {
       const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
       const context = makeDriveContext(["coverage"]);
       let adapterExecuteCalled = false;
-      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute() {
           adapterExecuteCalled = true;
@@ -356,7 +356,7 @@ describe("TaskLifecycle", async () => {
       const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
       const context = makeDriveContext(["coverage"]);
       const adapterExecute = vi.fn();
-      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute() {
           adapterExecute();
@@ -526,7 +526,7 @@ describe("TaskLifecycle", async () => {
       });
       const gapVector = makeGapVector("goal-1", [{ name: "dim", gap: 0.5 }]);
       const context = makeDriveContext(["dim"]);
-      const adapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+      const adapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
         adapterType: "mock",
         async execute() {
           callOrder.push("adapterExecute");

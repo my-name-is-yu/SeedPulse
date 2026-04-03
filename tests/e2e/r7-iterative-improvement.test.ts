@@ -20,7 +20,7 @@ import * as path from "node:path";
 // ─── Real implementations ───
 import { StateManager } from "../../src/state-manager.js";
 import { ObservationEngine } from "../../src/observation/observation-engine.js";
-import { TaskLifecycle } from "../../src/execution/task-lifecycle.js";
+import { TaskLifecycle } from "../../src/execution/task/task-lifecycle.js";
 import { SatisficingJudge } from "../../src/drive/satisficing-judge.js";
 import { StallDetector } from "../../src/drive/stall-detector.js";
 import { StrategyManager } from "../../src/strategy/strategy-manager.js";
@@ -44,7 +44,7 @@ import type { ZodSchema } from "zod";
 import type { CompletionJudgment } from "../../src/types/satisficing.js";
 import type { GapVector } from "../../src/types/gap.js";
 import type { DriveScore } from "../../src/types/drive.js";
-import type { TaskCycleResult } from "../../src/execution/task-lifecycle.js";
+import type { TaskCycleResult } from "../../src/execution/task/task-lifecycle.js";
 import type { IDataSourceAdapter } from "../../src/observation/data-source-adapter.js";
 import type { DataSourceConfig, DataSourceResult, DataSourceQuery } from "../../src/types/data-source.js";
 import { makeTempDir } from "../helpers/temp-dir.js";

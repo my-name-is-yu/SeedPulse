@@ -4,8 +4,8 @@ import { StateManager } from "../src/state-manager.js";
 import { SessionManager } from "../src/execution/session-manager.js";
 import { TrustManager } from "../src/traits/trust-manager.js";
 import { StallDetector } from "../src/drive/stall-detector.js";
-import { clampDimensionUpdate, handleVerdict, checkDimensionDirection } from "../src/execution/task-verifier.js";
-import type { VerifierDeps } from "../src/execution/task-verifier.js";
+import { clampDimensionUpdate, handleVerdict, checkDimensionDirection } from "../src/execution/task/task-verifier.js";
+import type { VerifierDeps } from "../src/execution/task/task-verifier.js";
 import type { Task, VerificationResult } from "../src/types/task.js";
 import type { Logger } from "../src/runtime/logger.js";
 import { createMockLLMClient } from "./helpers/mock-llm.js";
@@ -417,7 +417,7 @@ describe("§4.6: runLLMReview Zod validation", () => {
   });
 
   it("valid JSON with enum verdict 'pass' — parsed correctly via Zod", async () => {
-    const { verifyTask } = await import("../src/execution/task-verifier.js");
+    const { verifyTask } = await import("../src/execution/task/task-verifier.js");
     const llmResponse = JSON.stringify({ verdict: "pass", reasoning: "All good", criteria_met: 3, criteria_total: 3 });
     const llmClient = createMockLLMClient([llmResponse]);
 
@@ -441,7 +441,7 @@ describe("§4.6: runLLMReview Zod validation", () => {
   });
 
   it("invalid enum value (e.g. 'exact') — falls back to default 'fail'", async () => {
-    const { verifyTask } = await import("../src/execution/task-verifier.js");
+    const { verifyTask } = await import("../src/execution/task/task-verifier.js");
     // 'exact' is not in the enum, Zod should coerce to default "fail"
     const llmResponse = JSON.stringify({ verdict: "unknown_value", reasoning: "weird" });
     const mockLogger = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as Logger;
@@ -469,7 +469,7 @@ describe("§4.6: runLLMReview Zod validation", () => {
   });
 
   it("malformed JSON — logs warn and falls back to fail confidence 0.3", async () => {
-    const { verifyTask } = await import("../src/execution/task-verifier.js");
+    const { verifyTask } = await import("../src/execution/task/task-verifier.js");
     const llmClient = createMockLLMClient(["not-json{{{bad"]);
     const mockLogger = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as Logger;
 
@@ -745,7 +745,7 @@ describe("Root Cause C: dimension_updates scaling", () => {
   });
 
   it("min threshold: delta is scaled by threshold.value — pass verdict adds 0.2 * value", async () => {
-    const { verifyTask } = await import("../src/execution/task-verifier.js");
+    const { verifyTask } = await import("../src/execution/task/task-verifier.js");
     // threshold value=5, current_value=2 → pass delta = 0.2 * 5 = 1.0 → new_value = 3.0
     await stateManager.writeRaw("goals/goal-1/goal.json", {
       id: "goal-1", title: "Test", status: "active",
@@ -777,7 +777,7 @@ describe("Root Cause C: dimension_updates scaling", () => {
   });
 
   it("max threshold: delta is scaled by threshold.value — pass verdict adds 0.2 * value", async () => {
-    const { verifyTask } = await import("../src/execution/task-verifier.js");
+    const { verifyTask } = await import("../src/execution/task/task-verifier.js");
     // threshold value=10, current_value=8 → pass delta = 0.2 * 10 = 2.0 → new_value = 6.0
     // For max-type (reduce bug count), delta is subtracted implicitly by being negative direction
     // but the scaling logic just multiplies by value: 0.2 * 10 = 2.0 → new_value = 8 + 2.0 = 10
@@ -813,7 +813,7 @@ describe("Root Cause C: dimension_updates scaling", () => {
   });
 
   it("range threshold: delta is scaled by (high - low)", async () => {
-    const { verifyTask } = await import("../src/execution/task-verifier.js");
+    const { verifyTask } = await import("../src/execution/task/task-verifier.js");
     // range low=0, high=100, current_value=20 → pass delta = 0.2 * (100 - 0) = 20 → new_value = 40
     await stateManager.writeRaw("goals/goal-1/goal.json", {
       id: "goal-1", title: "Test", status: "active",
@@ -846,7 +846,7 @@ describe("Root Cause C: dimension_updates scaling", () => {
   });
 
   it("partial verdict: delta is 0.15 scaled by threshold value", async () => {
-    const { verifyTask } = await import("../src/execution/task-verifier.js");
+    const { verifyTask } = await import("../src/execution/task/task-verifier.js");
     // threshold value=10, current_value=3 → partial delta = 0.15 * 10 = 1.5 → new_value = 4.5
     await stateManager.writeRaw("goals/goal-1/goal.json", {
       id: "goal-1", title: "Test", status: "active",

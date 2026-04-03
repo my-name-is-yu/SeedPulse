@@ -6,7 +6,7 @@ import {
   selectWithinBudget,
   trimToBudget,
   type BudgetAllocation,
-} from "../src/execution/context-budget.js";
+} from "../src/execution/context/context-budget.js";
 import { VectorIndex } from "../src/knowledge/vector-index.js";
 import type { IEmbeddingClient } from "../src/knowledge/embedding-client.js";
 

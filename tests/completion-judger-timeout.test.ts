@@ -14,7 +14,7 @@ import { StateManager } from "../src/state-manager.js";
 import { SessionManager } from "../src/execution/session-manager.js";
 import { TrustManager } from "../src/traits/trust-manager.js";
 import { StallDetector } from "../src/drive/stall-detector.js";
-import { verifyTask, type VerifierDeps } from "../src/execution/task-verifier.js";
+import { verifyTask, type VerifierDeps } from "../src/execution/task/task-verifier.js";
 import type { Task } from "../src/types/task.js";
 import type { AgentResult } from "../src/execution/adapter-layer.js";
 import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../src/llm/llm-client.js";

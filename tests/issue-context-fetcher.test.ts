@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { extractIssueNumbers, fetchIssueContext } from "../src/execution/issue-context-fetcher.js";
+import { extractIssueNumbers, fetchIssueContext } from "../src/execution/context/issue-context-fetcher.js";
 
 // ─── Mock execFileNoThrow ───
 vi.mock("../src/utils/execFileNoThrow.js", () => ({

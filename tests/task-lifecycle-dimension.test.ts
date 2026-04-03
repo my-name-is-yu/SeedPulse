@@ -6,7 +6,7 @@ import { SessionManager } from "../src/execution/session-manager.js";
 import { TrustManager } from "../src/traits/trust-manager.js";
 import { StrategyManager } from "../src/strategy/strategy-manager.js";
 import { StallDetector } from "../src/drive/stall-detector.js";
-import { TaskLifecycle } from "../src/execution/task-lifecycle.js";
+import { TaskLifecycle } from "../src/execution/task/task-lifecycle.js";
 import type { GapVector } from "../src/types/gap.js";
 import type { DriveContext } from "../src/types/drive.js";
 import type {
@@ -135,7 +135,7 @@ describe("TaskLifecycle", async () => {
     options?: {
       approvalFn?: (task: import("../src/types/task.js").Task) => Promise<boolean>;
       logger?: import("../src/runtime/logger.js").Logger;
-      adapterRegistry?: import("../src/execution/task-lifecycle.js").AdapterRegistry;
+      adapterRegistry?: import("../src/execution/task/task-lifecycle.js").AdapterRegistry;
       execFileSyncFn?: (cmd: string, args: string[], opts: { cwd: string; encoding: "utf-8" }) => string;
     }
   ): TaskLifecycle {

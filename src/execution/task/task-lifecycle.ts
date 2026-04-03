@@ -6,11 +6,11 @@ import {
 } from "./task-health-check.js";
 import { StateManager } from "../state-manager.js";
 import type { ILLMClient } from "../llm/llm-client.js";
-import { SessionManager } from "./session-manager.js";
+import { SessionManager } from "../session-manager.js";
 import { TrustManager } from "../traits/trust-manager.js";
 import { StrategyManager } from "../strategy/strategy-manager.js";
 import { StallDetector } from "../drive/stall-detector.js";
-import { selectTargetDimension as _selectTargetDimension } from "./dimension-selector.js";
+import { selectTargetDimension as _selectTargetDimension } from "../context/dimension-selector.js";
 import type { Task, VerificationResult } from "../types/task.js";
 import type { GapVector } from "../types/gap.js";
 import type { DriveContext } from "../types/drive.js";
@@ -32,8 +32,8 @@ export type {
   FailureResult,
 } from "./task-verifier.js";
 
-import type { AgentTask, AgentResult, IAdapter } from "./adapter-layer.js";
-import { AdapterRegistry } from "./adapter-layer.js";
+import type { AgentTask, AgentResult, IAdapter } from "../adapter-layer.js";
+import { AdapterRegistry } from "../adapter-layer.js";
 export type { AgentTask, AgentResult, IAdapter };
 export { AdapterRegistry };
 
@@ -48,7 +48,7 @@ import { checkIrreversibleApproval as _checkIrreversibleApproval } from "./task-
 import { runPipelineTaskCycle as runPipelineTaskCycleFn } from "./task-pipeline-cycle.js";
 import type { KnowledgeTransfer } from "../knowledge/transfer/knowledge-transfer.js";
 import type { KnowledgeManager } from "../knowledge/knowledge-manager.js";
-import { generateReflection, saveReflectionAsKnowledge, getReflectionsForGoal, formatReflectionsForPrompt } from "./reflection-generator.js";
+import { generateReflection, saveReflectionAsKnowledge, getReflectionsForGoal, formatReflectionsForPrompt } from "../reflection-generator.js";
 import { GuardrailRunner } from "../guardrail-runner.js";
 import type { HookManager } from "../runtime/hook-manager.js";
 

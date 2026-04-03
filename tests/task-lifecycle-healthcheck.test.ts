@@ -7,7 +7,7 @@ import { SessionManager } from "../src/execution/session-manager.js";
 import { TrustManager } from "../src/traits/trust-manager.js";
 import { StrategyManager } from "../src/strategy/strategy-manager.js";
 import { StallDetector } from "../src/drive/stall-detector.js";
-import { TaskLifecycle } from "../src/execution/task-lifecycle.js";
+import { TaskLifecycle } from "../src/execution/task/task-lifecycle.js";
 import type { Task } from "../src/types/task.js";
 import type {
   ILLMClient,
@@ -74,10 +74,10 @@ function makeMinimalTask(goalId: string, overrides: Partial<Task> = {}): Task {
   };
 }
 
-function makeMockAdapter(): import("../src/execution/task-lifecycle.js").IAdapter {
+function makeMockAdapter(): import("../src/execution/task/task-lifecycle.js").IAdapter {
   return {
     adapterType: "mock",
-    async execute(): Promise<import("../src/execution/task-lifecycle.js").AgentResult> {
+    async execute(): Promise<import("../src/execution/task/task-lifecycle.js").AgentResult> {
       return {
         success: true,
         output: "Task completed successfully",
@@ -335,9 +335,9 @@ describe("TaskLifecycle — post-execution health check", () => {
   it("health check does NOT run when adapter execution fails", async () => {
     const lifecycle = createLifecycle({ healthCheckEnabled: true });
 
-    const failingAdapter: import("../src/execution/task-lifecycle.js").IAdapter = {
+    const failingAdapter: import("../src/execution/task/task-lifecycle.js").IAdapter = {
       adapterType: "mock",
-      async execute(): Promise<import("../src/execution/task-lifecycle.js").AgentResult> {
+      async execute(): Promise<import("../src/execution/task/task-lifecycle.js").AgentResult> {
         return {
           success: false,
           output: "",

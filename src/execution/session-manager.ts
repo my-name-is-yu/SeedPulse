@@ -15,7 +15,7 @@ import {
   injectSemanticKnowledgeContext as _injectSemanticKnowledgeContext,
   injectLearningFeedback as _injectLearningFeedback,
   DEFAULT_CONTEXT_BUDGET,
-} from './context-builder.js';
+} from './context/context-builder.js';
 
 // ─── Types ───
 

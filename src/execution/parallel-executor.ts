@@ -10,7 +10,7 @@ import type { TaskGroup } from "../types/index.js";
 import type { AgentTask } from "./adapter-layer.js";
 import type { PipelineExecutor } from "./pipeline-executor.js";
 import { reconcileResults } from "./result-reconciler.js";
-import { durationToMs } from "./task-executor.js";
+import { durationToMs } from "./task/task-executor.js";
 
 // ─── Result Types ───
 

@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { buildTaskGenerationPrompt } from "../src/execution/task-prompt-builder.js";
+import { buildTaskGenerationPrompt } from "../src/execution/task/task-prompt-builder.js";
 import type { StateManager } from "../src/state-manager.js";
 
 // Mock issue-context-fetcher so dynamic import in buildTaskGenerationPrompt is controlled
-vi.mock("../src/execution/issue-context-fetcher.js", () => ({
+vi.mock("../src/execution/context/issue-context-fetcher.js", () => ({
   fetchIssueContext: vi.fn(async () => ""),
 }));
 
-import { fetchIssueContext } from "../src/execution/issue-context-fetcher.js";
+import { fetchIssueContext } from "../src/execution/context/issue-context-fetcher.js";
 const mockFetchIssueContext = vi.mocked(fetchIssueContext);
 
 // Minimal Goal shape used in tests

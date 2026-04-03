@@ -14,7 +14,7 @@ import {
   selectWithinBudget,
   trimToBudget,
   type BudgetAllocation,
-} from "../src/execution/context-budget.js";
+} from "../src/execution/context/context-budget.js";
 import { createMockLLMClient } from "./helpers/mock-llm.js";
 import type { LearnedPattern } from "../src/types/learning.js";
 

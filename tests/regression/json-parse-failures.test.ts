@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { StateManager } from "../../src/state-manager.js";
 import { DriveSystem } from "../../src/drive/drive-system.js";
 import { observeWithLLM } from "../../src/observation/observation-llm.js";
-import { verifyTask, type VerifierDeps } from "../../src/execution/task-verifier.js";
+import { verifyTask, type VerifierDeps } from "../../src/execution/task/task-verifier.js";
 import { SessionManager } from "../../src/execution/session-manager.js";
 import { TrustManager } from "../../src/traits/trust-manager.js";
 import { StallDetector } from "../../src/drive/stall-detector.js";

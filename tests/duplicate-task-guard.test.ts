@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import { StateManager } from "../src/state-manager.js";
 import { StrategyManager } from "../src/strategy/strategy-manager.js";
-import { trigramSimilarity, generateTask } from "../src/execution/task-generation.js";
+import { trigramSimilarity, generateTask } from "../src/execution/task/task-generation.js";
 import { createMockLLMClient } from "./helpers/mock-llm.js";
 import { makeTempDir } from "./helpers/temp-dir.js";
 

@@ -25,7 +25,7 @@ import type { Goal } from "../../src/types/goal.js";
 import type { CompletionJudgment } from "../../src/types/satisficing.js";
 import type { GapVector } from "../../src/types/gap.js";
 import type { DriveScore } from "../../src/types/drive.js";
-import type { TaskCycleResult } from "../../src/execution/task-lifecycle.js";
+import type { TaskCycleResult } from "../../src/execution/task/task-lifecycle.js";
 import { makeTempDir } from "../helpers/temp-dir.js";
 
 // ─── Helpers ───

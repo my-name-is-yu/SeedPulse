@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import { StateManager } from "../src/state-manager.js";
-import { buildTaskGenerationPrompt } from "../src/execution/task-prompt-builder.js";
-import { handleVerdict } from "../src/execution/task-verifier.js";
-import type { VerifierDeps } from "../src/execution/task-verifier.js";
+import { buildTaskGenerationPrompt } from "../src/execution/task/task-prompt-builder.js";
+import { handleVerdict } from "../src/execution/task/task-verifier.js";
+import type { VerifierDeps } from "../src/execution/task/task-verifier.js";
 import type { Task, VerificationResult } from "../src/types/task.js";
 import { SessionManager } from "../src/execution/session-manager.js";
 import { TrustManager } from "../src/traits/trust-manager.js";
