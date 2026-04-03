@@ -8,7 +8,7 @@ import {
   classifyTier,
   sortByTier,
   filterByTierBudget,
-} from "../src/knowledge/memory-tier.js";
+} from "../src/knowledge/memory/memory-tier.js";
 import { allocateTierBudget } from "../src/execution/context-budget.js";
 import {
   selectByTier,

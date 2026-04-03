@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { classifyTier, sortByTier, filterByTierBudget, computeDynamicBudget, llmClassifyTier } from "../src/knowledge/memory-tier.js";
+import { classifyTier, sortByTier, filterByTierBudget, computeDynamicBudget, llmClassifyTier } from "../src/knowledge/memory/memory-tier.js";
 import type { ShortTermEntry, MemoryIndexEntry } from "../src/types/memory-lifecycle.js";
 
 // ─── Helpers ───

@@ -161,7 +161,7 @@ describe("TaskLifecycle — uncovered branches", () => {
       execFileSyncFn?: (cmd: string, args: string[], opts: { cwd: string; encoding: "utf-8" }) => string;
       healthCheckEnabled?: boolean;
       guardrailRunner?: import("../src/guardrail-runner.js").GuardrailRunner;
-      knowledgeTransfer?: import("../src/knowledge/knowledge-transfer.js").KnowledgeTransfer;
+      knowledgeTransfer?: import("../src/knowledge/transfer/knowledge-transfer.js").KnowledgeTransfer;
       knowledgeManager?: import("../src/knowledge/knowledge-manager.js").KnowledgeManager;
     }
   ): TaskLifecycle {
@@ -350,7 +350,7 @@ describe("TaskLifecycle — uncovered branches", () => {
 
       const lifecycle = createLifecycle(llm, {
         approvalFn: async () => true,
-        knowledgeTransfer: knowledgeTransfer as unknown as import("../src/knowledge/knowledge-transfer.js").KnowledgeTransfer,
+        knowledgeTransfer: knowledgeTransfer as unknown as import("../src/knowledge/transfer/knowledge-transfer.js").KnowledgeTransfer,
       });
 
       const gapVector = makeGapVector("goal-kt", [{ name: "coverage", gap: 0.5 }]);
@@ -377,7 +377,7 @@ describe("TaskLifecycle — uncovered branches", () => {
 
       const lifecycle = createLifecycle(llm, {
         approvalFn: async () => true,
-        knowledgeTransfer: knowledgeTransfer as unknown as import("../src/knowledge/knowledge-transfer.js").KnowledgeTransfer,
+        knowledgeTransfer: knowledgeTransfer as unknown as import("../src/knowledge/transfer/knowledge-transfer.js").KnowledgeTransfer,
       });
 
       const gapVector = makeGapVector("goal-kt2", [{ name: "dim", gap: 0.5 }]);
@@ -398,7 +398,7 @@ describe("TaskLifecycle — uncovered branches", () => {
 
       const lifecycle = createLifecycle(llm, {
         approvalFn: async () => true,
-        knowledgeTransfer: knowledgeTransfer as unknown as import("../src/knowledge/knowledge-transfer.js").KnowledgeTransfer,
+        knowledgeTransfer: knowledgeTransfer as unknown as import("../src/knowledge/transfer/knowledge-transfer.js").KnowledgeTransfer,
       });
 
       const gapVector = makeGapVector("goal-kt3", [{ name: "dim", gap: 0.5 }]);
@@ -423,7 +423,7 @@ describe("TaskLifecycle — uncovered branches", () => {
 
       const lifecycle = createLifecycle(llm, {
         approvalFn: async () => true,
-        knowledgeTransfer: knowledgeTransfer as unknown as import("../src/knowledge/knowledge-transfer.js").KnowledgeTransfer,
+        knowledgeTransfer: knowledgeTransfer as unknown as import("../src/knowledge/transfer/knowledge-transfer.js").KnowledgeTransfer,
       });
 
       const gapVector = makeGapVector("goal-kt4", [{ name: "dim", gap: 0.5 }]);
