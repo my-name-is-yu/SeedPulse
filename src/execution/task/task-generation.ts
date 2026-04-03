@@ -11,7 +11,7 @@ import { TaskGroupSchema } from "../../types/index.js";
 import type { TaskGroup } from "../../types/index.js";
 import type { TaskPipeline } from "../../types/pipeline.js";
 import { wrapXmlTag, formatReflections, formatLessons } from "../../prompt/formatters.js";
-import { getReflectionsForGoal } from "./reflection-generator.js";
+import { getReflectionsForGoal } from "../reflection-generator.js";
 import type { KnowledgeManager } from "../../knowledge/knowledge-manager.js";
 import type { IPromptGateway } from "../../prompt/gateway.js";
 

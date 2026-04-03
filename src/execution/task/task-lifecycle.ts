@@ -48,8 +48,8 @@ import { checkIrreversibleApproval as _checkIrreversibleApproval } from "./task-
 import { runPipelineTaskCycle as runPipelineTaskCycleFn } from "./task-pipeline-cycle.js";
 import type { KnowledgeTransfer } from "../../knowledge/transfer/knowledge-transfer.js";
 import type { KnowledgeManager } from "../../knowledge/knowledge-manager.js";
-import { generateReflection, saveReflectionAsKnowledge, getReflectionsForGoal, formatReflectionsForPrompt } from "../../reflection-generator.js";
-import { GuardrailRunner } from "../guardrail-runner.js";
+import { generateReflection, saveReflectionAsKnowledge, getReflectionsForGoal, formatReflectionsForPrompt } from "../reflection-generator.js";
+import { GuardrailRunner } from "../../guardrail-runner.js";
 import type { HookManager } from "../../runtime/hook-manager.js";
 
 export type { TaskCycleResult } from "./task-execution-types.js";
