@@ -12,7 +12,7 @@ import type {
   AcquisitionContext,
 } from "../../types/capability.js";
 import type { AgentResult } from "../../execution/adapter-layer.js";
-import { createMockLLMClient } from "./helpers/mock-llm.js";
+import { createMockLLMClient } from "../../../tests/helpers/mock-llm.js";
 
 // ─── Fixtures ───
 

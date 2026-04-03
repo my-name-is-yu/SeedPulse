@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import { DriveScoreAdapter, MemoryLifecycleManager } from "../../knowledge/memory/memory-lifecycle.js";
-import { createMockLLMClient } from "./helpers/mock-llm.js";
-import { makeTempDir } from "./helpers/temp-dir.js";
+import { createMockLLMClient } from "../../../tests/helpers/mock-llm.js";
+import { makeTempDir } from "../../../tests/helpers/temp-dir.js";
 
 let tmpDir: string;
 
