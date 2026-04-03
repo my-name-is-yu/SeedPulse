@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { StateManager } from "../../src/state/state-manager.js";
+import { StateManager } from "../../src/base/state/state-manager.js";
 import { GoalTreeManager } from "../../src/goal/goal-tree-manager.js";
 import { scoreConcreteness, evaluateDecompositionQuality } from "../../src/goal/goal-tree-quality.js";
 import { GoalDependencyGraph } from "../../src/goal/goal-dependency-graph.js";
@@ -27,7 +27,7 @@ import { StateAggregator } from "../../src/goal/state-aggregator.js";
 import { VectorIndex } from "../../src/knowledge/vector-index.js";
 import { MockEmbeddingClient } from "../../src/knowledge/embedding-client.js";
 import { SatisficingJudge } from "../../src/drive/satisficing-judge.js";
-import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../../src/llm/llm-client.js";
+import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../../src/base/llm/llm-client.js";
 import type { ZodSchema } from "zod";
 import type { Goal } from "../../src/types/goal.js";
 import { makeTempDir } from "../helpers/temp-dir.js";

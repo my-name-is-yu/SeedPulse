@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { StateManager } from "../../src/state/state-manager.js";
+import { StateManager } from "../../src/base/state/state-manager.js";
 import { DriveSystem } from "../../src/drive/drive-system.js";
 import { DaemonRunner } from "../../src/runtime/daemon-runner.js";
 import { PIDManager } from "../../src/runtime/pid-manager.js";

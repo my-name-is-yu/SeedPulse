@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { StateManager } from "../../src/state/state-manager.js";
+import { StateManager } from "../../src/base/state/state-manager.js";
 import { TaskLifecycle } from "../../src/execution/task/task-lifecycle.js";
 import { TrustManager } from "../../src/traits/trust-manager.js";
 import { SessionManager } from "../../src/execution/session-manager.js";
@@ -27,7 +27,7 @@ import type { GapVector } from "../../src/types/gap.js";
 import type { DriveScore } from "../../src/types/drive.js";
 import type { CompletionJudgment } from "../../src/types/satisficing.js";
 import type { TaskCycleResult } from "../../src/execution/task/task-lifecycle.js";
-import type { ILLMClient } from "../../src/llm/llm-client.js";
+import type { ILLMClient } from "../../src/base/llm/llm-client.js";
 import { makeTempDir } from "../helpers/temp-dir.js";
 
 // ─── Helpers ───

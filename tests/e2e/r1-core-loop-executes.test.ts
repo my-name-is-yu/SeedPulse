@@ -19,7 +19,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { CoreLoop, type CoreLoopDeps } from "../../src/loop/core-loop.js";
-import { StateManager } from "../../src/state/state-manager.js";
+import { StateManager } from "../../src/base/state/state-manager.js";
 import type { IAdapter, AgentTask, AgentResult } from "../../src/execution/adapter-layer.js";
 import type { Goal } from "../../src/types/goal.js";
 import type { CompletionJudgment } from "../../src/types/satisficing.js";

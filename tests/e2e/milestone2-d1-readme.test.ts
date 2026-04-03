@@ -15,7 +15,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 // ─── Real implementations ───
-import { StateManager } from "../../src/state/state-manager.js";
+import { StateManager } from "../../src/base/state/state-manager.js";
 import { ObservationEngine } from "../../src/observation/observation-engine.js";
 import { TaskLifecycle } from "../../src/execution/task/task-lifecycle.js";
 import { SatisficingJudge } from "../../src/drive/satisficing-judge.js";
@@ -36,7 +36,7 @@ import * as DriveScorer from "../../src/drive/drive-scorer.js";
 // ─── Types ───
 import type { Goal } from "../../src/types/goal.js";
 import type { ObservationMethod } from "../../src/types/core.js";
-import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../../src/llm/llm-client.js";
+import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../../src/base/llm/llm-client.js";
 import type { ZodSchema } from "zod";
 
 // ─── Helpers ───

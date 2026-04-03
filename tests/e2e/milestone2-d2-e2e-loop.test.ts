@@ -13,7 +13,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 // ─── Real implementations ───
-import { StateManager } from "../../src/state/state-manager.js";
+import { StateManager } from "../../src/base/state/state-manager.js";
 import { ObservationEngine } from "../../src/observation/observation-engine.js";
 import { TaskLifecycle } from "../../src/execution/task/task-lifecycle.js";
 import { SatisficingJudge } from "../../src/drive/satisficing-judge.js";
@@ -39,7 +39,7 @@ import { makeTempDir } from "../helpers/temp-dir.js";
 // ─── Types ───
 import type { Goal } from "../../src/types/goal.js";
 import type { DataSourceConfig } from "../../src/types/data-source.js";
-import type { ILLMClient } from "../../src/llm/llm-client.js";
+import type { ILLMClient } from "../../src/base/llm/llm-client.js";
 import type { IDataSourceAdapter } from "../../src/observation/data-source-adapter.js";
 
 // ─── MockAdapter ───

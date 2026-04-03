@@ -15,7 +15,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 // ─── Real implementations ───
-import { StateManager } from "../../src/state/state-manager.js";
+import { StateManager } from "../../src/base/state/state-manager.js";
 import { KnowledgeManager } from "../../src/knowledge/knowledge-manager.js";
 import { VectorIndex } from "../../src/knowledge/vector-index.js";
 import { MockEmbeddingClient } from "../../src/knowledge/embedding-client.js";
@@ -40,7 +40,7 @@ import * as DriveScorer from "../../src/drive/drive-scorer.js";
 // ─── Types ───
 import type { Goal } from "../../src/types/goal.js";
 import type { KnowledgeEntry } from "../../src/types/knowledge.js";
-import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../../src/llm/llm-client.js";
+import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../../src/base/llm/llm-client.js";
 import type { ZodSchema } from "zod";
 import { makeTempDir } from "../helpers/temp-dir.js";
 
