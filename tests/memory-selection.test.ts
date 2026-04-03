@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { selectForWorkingMemory, relevanceScore } from "../src/knowledge/memory-selection.js";
+import { selectForWorkingMemory, relevanceScore } from "../src/knowledge/memory/memory-selection.js";
 import { makeTempDir } from "./helpers/temp-dir.js";
 import type { MemoryIndexEntry, ShortTermEntry } from "../src/types/memory-lifecycle.js";
 import type { VectorIndex } from "../src/knowledge/vector-index.js";

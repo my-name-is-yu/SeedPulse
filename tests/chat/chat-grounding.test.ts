@@ -33,10 +33,10 @@ vi.mock("../../src/adapters/spawn-helper.js", () => ({
 
 // ─── Module imports (after mocks) ───
 import { buildSystemPrompt } from "../../src/chat/grounding.js";
-import { ClaudeAPIAdapter } from "../../src/adapters/claude-api.js";
-import { ClaudeCodeCLIAdapter } from "../../src/adapters/claude-code-cli.js";
-import { OpenAICodexCLIAdapter } from "../../src/adapters/openai-codex.js";
-import { BrowserUseCLIAdapter } from "../../src/adapters/browser-use-cli.js";
+import { ClaudeAPIAdapter } from "../../src/adapters/agents/claude-api.js";
+import { ClaudeCodeCLIAdapter } from "../../src/adapters/agents/claude-code-cli.js";
+import { OpenAICodexCLIAdapter } from "../../src/adapters/agents/openai-codex.js";
+import { BrowserUseCLIAdapter } from "../../src/adapters/agents/browser-use-cli.js";
 import { ChatRunner } from "../../src/chat/chat-runner.js";
 import type { ChatRunnerDeps } from "../../src/chat/chat-runner.js";
 import type { IAdapter, AgentResult } from "../../src/execution/adapter-layer.js";

@@ -19,7 +19,7 @@ import * as path from "node:path";
 
 import { NotificationBatcher } from "../../src/runtime/notification-batcher.js";
 import { NotificationDispatcher } from "../../src/runtime/notification-dispatcher.js";
-import { AgentProfileLoader } from "../../src/adapters/agent-profile-loader.js";
+import { AgentProfileLoader } from "../../src/adapters/agents/agent-profile-loader.js";
 import { TriggerMapper } from "../../src/runtime/trigger-mapper.js";
 import { runWeeklyReview } from "../../src/reflection/weekly-review.js";
 import { StateManager } from "../../src/state-manager.js";

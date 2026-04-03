@@ -19,7 +19,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { OpenAICodexCLIAdapter } from "../../src/adapters/openai-codex.js";
+import { OpenAICodexCLIAdapter } from "../../src/adapters/agents/openai-codex.js";
 import type { AgentTask } from "../../src/execution/adapter-layer.js";
 
 // ─── Skip guard ───────────────────────────────────────────────────────────────

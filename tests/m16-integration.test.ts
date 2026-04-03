@@ -3,8 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { StateManager } from "../src/state-manager.js";
-import { KnowledgeTransfer } from "../src/knowledge/knowledge-transfer.js";
-import { TransferTrustManager } from "../src/knowledge/transfer-trust.js";
+import { KnowledgeTransfer } from "../src/knowledge/transfer/knowledge-transfer.js";
+import { TransferTrustManager } from "../src/knowledge/transfer/transfer-trust.js";
 import { VectorIndex } from "../src/knowledge/vector-index.js";
 import { MockEmbeddingClient } from "../src/knowledge/embedding-client.js";
 import { CheckpointManager } from "../src/execution/checkpoint-manager.js";
@@ -50,7 +50,7 @@ function makeMockEthicsGate(verdict: "pass" | "flag" | "reject" = "pass") {
 function makeMockLearningPipeline(patternsPerGoal: Record<string, LearnedPattern[]> = {}) {
   return {
     getPatterns: vi.fn((goalId: string) => patternsPerGoal[goalId] ?? []),
-  } as unknown as import("../src/knowledge/learning-pipeline.js").LearningPipeline;
+  } as unknown as import("../src/knowledge/learning/learning-pipeline.js").LearningPipeline;
 }
 
 function makeStoreBacked() {

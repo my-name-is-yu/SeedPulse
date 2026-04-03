@@ -19,8 +19,8 @@ import { scoreConcreteness, evaluateDecompositionQuality } from "../../src/goal/
 import { GoalDependencyGraph } from "../../src/goal/goal-dependency-graph.js";
 import { EthicsGate } from "../../src/traits/ethics-gate.js";
 import { CrossGoalPortfolio } from "../../src/strategy/cross-goal-portfolio.js";
-import { LearningPipeline } from "../../src/knowledge/learning-pipeline.js";
-import { KnowledgeTransfer } from "../../src/knowledge/knowledge-transfer.js";
+import { LearningPipeline } from "../../src/knowledge/learning/learning-pipeline.js";
+import { KnowledgeTransfer } from "../../src/knowledge/transfer/knowledge-transfer.js";
 import { StrategyTemplateRegistry } from "../../src/strategy/strategy-template-registry.js";
 import { TreeLoopOrchestrator } from "../../src/goal/tree-loop-orchestrator.js";
 import { StateAggregator } from "../../src/goal/state-aggregator.js";

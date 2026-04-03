@@ -65,11 +65,11 @@ vi.mock("../src/execution/adapter-layer.js", () => ({
   })),
 }));
 
-vi.mock("../src/adapters/claude-code-cli.js", () => ({
+vi.mock("../src/adapters/agents/claude-code-cli.js", () => ({
   ClaudeCodeCLIAdapter: vi.fn().mockImplementation(() => ({})),
 }));
 
-vi.mock("../src/adapters/claude-api.js", () => ({
+vi.mock("../src/adapters/agents/claude-api.js", () => ({
   ClaudeAPIAdapter: vi.fn().mockImplementation(() => ({})),
 }));
 

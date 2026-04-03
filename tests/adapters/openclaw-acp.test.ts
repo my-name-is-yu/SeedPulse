@@ -14,7 +14,7 @@ vi.mock("node:child_process", () => ({
   spawn: mockSpawn,
 }));
 
-import { OpenClawACPAdapter } from "../../src/adapters/openclaw-acp.js";
+import { OpenClawACPAdapter } from "../../src/adapters/agents/openclaw-acp.js";
 import type { AgentTask } from "../../src/execution/adapter-layer.js";
 
 // ─── Helpers ───

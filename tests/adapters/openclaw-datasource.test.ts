@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { OpenClawDataSourceAdapter } from "../../src/adapters/openclaw-datasource.js";
+import { OpenClawDataSourceAdapter } from "../../src/adapters/datasources/openclaw-datasource.js";
 import { makeTempDir } from "../helpers/temp-dir.js";
 import type { DataSourceConfig } from "../../src/types/data-source.js";
 

@@ -23,7 +23,7 @@ vi.mock("../src/llm/llm-client.js", () => ({
   MockLLMClient: vi.fn(),
 }));
 
-vi.mock("../src/adapters/claude-code-cli.js", () => ({
+vi.mock("../src/adapters/agents/claude-code-cli.js", () => ({
   ClaudeCodeCLIAdapter: vi.fn().mockImplementation(function() { return {
     adapterType: "claude-code-cli",
     async execute() {
@@ -39,7 +39,7 @@ vi.mock("../src/adapters/claude-code-cli.js", () => ({
   }; }),
 }));
 
-vi.mock("../src/adapters/claude-api.js", () => ({
+vi.mock("../src/adapters/agents/claude-api.js", () => ({
   ClaudeAPIAdapter: vi.fn().mockImplementation(function() { return {
     adapterType: "claude-api",
     async execute() {

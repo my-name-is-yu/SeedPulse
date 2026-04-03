@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { A2AClient } from "../src/adapters/a2a-client.js";
+import { A2AClient } from "../src/adapters/agents/a2a-client.js";
 
 // ─── Helpers ───
 

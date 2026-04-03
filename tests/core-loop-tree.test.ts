@@ -742,7 +742,7 @@ describe("CoreLoop tree mode (14C)", async () => {
       const memoryLifecycleManager = {
         onGoalClose: vi.fn().mockResolvedValue(undefined),
       };
-      deps.memoryLifecycleManager = memoryLifecycleManager as unknown as import("../src/knowledge/memory-lifecycle.js").MemoryLifecycleManager;
+      deps.memoryLifecycleManager = memoryLifecycleManager as unknown as import("../src/knowledge/memory/memory-lifecycle.js").MemoryLifecycleManager;
 
       const loop = new CoreLoop(deps, { maxIterations: 10, delayBetweenLoopsMs: 0 });
       const result = await loop.run("goal-1");

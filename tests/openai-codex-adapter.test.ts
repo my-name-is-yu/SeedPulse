@@ -15,7 +15,7 @@ vi.mock("node:child_process", () => ({
   spawn: mockSpawn,
 }));
 
-import { OpenAICodexCLIAdapter } from "../src/adapters/openai-codex.js";
+import { OpenAICodexCLIAdapter } from "../src/adapters/agents/openai-codex.js";
 import type { AgentTask } from "../src/execution/adapter-layer.js";
 
 // ─── Helpers ───

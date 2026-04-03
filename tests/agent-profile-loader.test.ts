@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { AgentProfileLoader } from "../src/adapters/agent-profile-loader.js";
+import { AgentProfileLoader } from "../src/adapters/agents/agent-profile-loader.js";
 import { makeTempDir, cleanupTempDir } from "./helpers/temp-dir.js";
 
 const VALID_MD = `---

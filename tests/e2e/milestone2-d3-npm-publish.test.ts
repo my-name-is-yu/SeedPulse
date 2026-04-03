@@ -31,7 +31,7 @@ import { SessionManager } from "../../src/execution/session-manager.js";
 import { TrustManager } from "../../src/traits/trust-manager.js";
 import { CoreLoop } from "../../src/core-loop.js";
 import { AdapterRegistry } from "../../src/execution/adapter-layer.js";
-import { FileExistenceDataSourceAdapter } from "../../src/adapters/file-existence-datasource.js";
+import { FileExistenceDataSourceAdapter } from "../../src/adapters/datasources/file-existence-datasource.js";
 import type { IAdapter, AgentTask, AgentResult } from "../../src/execution/adapter-layer.js";
 
 // ─── Pure function modules ───

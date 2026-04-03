@@ -15,7 +15,7 @@ vi.mock("node:child_process", () => ({
   spawn: mockSpawn,
 }));
 
-import { BrowserUseCLIAdapter } from "../src/adapters/browser-use-cli.js";
+import { BrowserUseCLIAdapter } from "../src/adapters/agents/browser-use-cli.js";
 import type { AgentTask } from "../src/execution/adapter-layer.js";
 
 // ─── Helpers ───

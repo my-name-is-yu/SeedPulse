@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { A2AAdapter } from "../src/adapters/a2a-adapter.js";
-import { A2AClient } from "../src/adapters/a2a-client.js";
+import { A2AAdapter } from "../src/adapters/agents/a2a-adapter.js";
+import { A2AClient } from "../src/adapters/agents/a2a-client.js";
 import { AdapterRegistry } from "../src/execution/adapter-layer.js";
 import type { AgentTask } from "../src/execution/adapter-layer.js";
 import type { A2ATask, A2AAgentCard } from "../src/types/a2a.js";
 
 // ─── Mock A2AClient ───
 
-vi.mock("../src/adapters/a2a-client.js", () => {
+vi.mock("../src/adapters/agents/a2a-client.js", () => {
   const A2AClient = vi.fn();
   A2AClient.prototype.fetchAgentCard = vi.fn();
   A2AClient.prototype.sendMessage = vi.fn();

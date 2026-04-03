@@ -15,7 +15,7 @@ vi.mock("node:child_process", () => ({
   spawn: mockSpawn,
 }));
 
-import { ClaudeCodeCLIAdapter } from "../src/adapters/claude-code-cli.js";
+import { ClaudeCodeCLIAdapter } from "../src/adapters/agents/claude-code-cli.js";
 import type { AgentTask } from "../src/execution/adapter-layer.js";
 
 // ─── Helpers ───

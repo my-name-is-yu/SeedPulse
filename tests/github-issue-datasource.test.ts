@@ -15,7 +15,7 @@ vi.mock("node:child_process", () => ({
   spawn: mockSpawn,
 }));
 
-import { GitHubIssueDataSourceAdapter } from "../src/adapters/github-issue-datasource.js";
+import { GitHubIssueDataSourceAdapter } from "../src/adapters/datasources/github-issue-datasource.js";
 import type { DataSourceConfig, DataSourceQuery } from "../src/types/data-source.js";
 
 // ─── Helpers ───
