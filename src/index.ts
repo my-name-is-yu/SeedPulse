@@ -159,3 +159,21 @@ export { PluginLoader } from "./runtime/plugin-loader.js";
 // --- Iteration budget ---
 export { IterationBudget } from "./orchestrator/loop/iteration-budget.js";
 export type { IterationBudgetData } from "./orchestrator/loop/iteration-budget.js";
+
+// Tools
+export {
+  ToolRegistry,
+  ToolExecutor,
+  ToolPermissionManager,
+  ConcurrencyController,
+  createBuiltinTools,
+} from "./tools/index.js";
+export type {
+  ITool,
+  ToolResult,
+  ToolCallContext,
+  ContextFilter,
+  AssembledPool,
+  ToolExecutorDeps,
+  PermissionRule,
+} from "./tools/index.js";
