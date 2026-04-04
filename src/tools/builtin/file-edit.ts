@@ -60,6 +60,15 @@ export class FileEditTool implements ITool<FileEditInput, FileEditOutput> {
     }
     const { resolved } = validation;
 
+    if (context.dryRun) {
+      return {
+        success: true,
+        data: { path: resolved, matchesReplaced: 0, bytesWritten: 0 },
+        summary: `dry-run: would edit ${resolved}`,
+        durationMs: Date.now() - startTime,
+      };
+    }
+
     let content: string;
     try {
       content = await fs.readFile(resolved, "utf-8");
