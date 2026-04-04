@@ -177,3 +177,15 @@ export type {
   ToolExecutorDeps,
   PermissionRule,
 } from "./tools/index.js";
+
+// --- Builtin tool classes ---
+export { GitLogTool } from "./tools/builtin/git-log.js";
+export { ListDirTool } from "./tools/builtin/list-dir.js";
+export { ProcessStatusTool } from "./tools/builtin/process-status.js";
+export { TestRunnerTool } from "./tools/builtin/test-runner.js";
+export { GoalStateTool } from "./tools/builtin/goal-state.js";
+export { TrustStateTool } from "./tools/builtin/trust-state.js";
+export { SessionHistoryTool } from "./tools/builtin/session-history.js";
+export { KnowledgeQueryTool } from "./tools/builtin/knowledge-query.js";
+export { ProgressHistoryTool } from "./tools/builtin/progress-history.js";
+export type { BuiltinToolDeps } from "./tools/builtin/index.js";
