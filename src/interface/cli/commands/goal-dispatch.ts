@@ -5,8 +5,8 @@
 
 import { parseArgs } from "node:util";
 
-import { StateManager } from "../../base/state/state-manager.js";
-import { CharacterConfigManager } from "../../platform/traits/character-config.js";
+import { StateManager } from "../../../base/state/state-manager.js";
+import { CharacterConfigManager } from "../../../platform/traits/character-config.js";
 import { getCliLogger } from "../cli-logger.js";
 import { formatOperationError } from "../utils.js";
 import {
@@ -87,7 +87,7 @@ export async function dispatchGoalCommand(
     // Auto-infer mode: title provided, no --dim, no --negotiate, no --no-refine
     const inferTitle = addValues.title || description;
     if (inferTitle && rawDimensions.length === 0 && !addValues.negotiate && !addValues["no-refine"]) {
-      const { buildLLMClient } = await import("../../base/llm/provider-factory.js");
+      const { buildLLMClient } = await import("../../../base/llm/provider-factory.js");
       const { inferDimensionsFromTitle, formatInferredDimensions } = await import("./goal-infer.js");
 
       let llmClient;

@@ -1,4 +1,4 @@
-import { loadProviderConfig, saveProviderConfig } from "../base/llm/provider-config.js";
+import { loadProviderConfig, saveProviderConfig } from "../../base/llm/provider-config.js";
 
 export type { ApprovalLevel, MutationToolDeps } from "./mutation-tool-defs.js";
 export { getMutationToolDefinitions } from "./mutation-tool-defs.js";

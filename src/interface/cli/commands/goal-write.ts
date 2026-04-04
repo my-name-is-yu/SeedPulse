@@ -2,14 +2,14 @@
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import { getReportsDir, getDatasourcesDir } from "../../base/utils/paths.js";
-import { readJsonFile } from "../../base/utils/json-io.js";
+import { getReportsDir, getDatasourcesDir } from "../../../base/utils/paths.js";
+import { readJsonFile } from "../../../base/utils/json-io.js";
 
-import { StateManager } from "../../base/state/state-manager.js";
-import { CharacterConfigManager } from "../../platform/traits/character-config.js";
+import { StateManager } from "../../../base/state/state-manager.js";
+import { CharacterConfigManager } from "../../../platform/traits/character-config.js";
 import { ensureProviderConfig } from "../ensure-api-key.js";
-import { EthicsRejectedError } from "../../orchestrator/goal/goal-negotiator.js";
-import { collectLeafGoalIds } from "../../orchestrator/goal/goal-refiner.js";
+import { EthicsRejectedError } from "../../../orchestrator/goal/goal-negotiator.js";
+import { collectLeafGoalIds } from "../../../orchestrator/goal/goal-refiner.js";
 import { buildDeps } from "../setup.js";
 import { formatOperationError } from "../utils.js";
 import { getCliLogger } from "../cli-logger.js";
@@ -18,7 +18,7 @@ import {
   autoRegisterShellDataSources,
 } from "./goal-utils.js";
 import { cmdDatasourceDedup } from "./config.js";
-import type { RefineResult } from "../../base/types/goal-refiner.js";
+import type { RefineResult } from "../../../base/types/goal-refiner.js";
 
 // ─── Display helpers ───
 
@@ -164,11 +164,11 @@ export async function cmdGoalAdd(
 
 async function cmdGoalAddLegacyNegotiate(
   stateManager: StateManager,
-  goalNegotiator: import("../../orchestrator/goal/goal-negotiator.js").GoalNegotiator,
+  goalNegotiator: import("../../../orchestrator/goal/goal-negotiator.js").GoalNegotiator,
   description: string,
   opts: { deadline?: string; constraints?: string[]; yes?: boolean }
 ): Promise<number> {
-  const { gatherNegotiationContext } = await import("../../orchestrator/goal/goal-negotiator.js");
+  const { gatherNegotiationContext } = await import("../../../orchestrator/goal/goal-negotiator.js");
 
   console.log(`Negotiating goal (legacy): "${description}"`);
   if (opts.deadline) console.log(`Deadline: ${opts.deadline}`);

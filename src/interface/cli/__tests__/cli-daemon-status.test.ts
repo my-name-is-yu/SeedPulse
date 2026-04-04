@@ -8,15 +8,15 @@ import { makeTempDir, cleanupTempDir } from "../../../tests/helpers/temp-dir.js"
 // We test the command by importing it and mocking paths.getPulseedDirPath
 // so it points to a temp directory we control.
 
-vi.mock("../../base/utils/paths.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../base/utils/paths.js")>();
+vi.mock("../../../base/utils/paths.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../base/utils/paths.js")>();
   return {
     ...actual,
     getPulseedDirPath: vi.fn(() => "/tmp/pulseed-test-placeholder"),
   };
 });
 
-import { getPulseedDirPath } from "../../base/utils/paths.js";
+import { getPulseedDirPath } from "../../../base/utils/paths.js";
 import { cmdDaemonStatus } from "../commands/daemon.js";
 
 describe("cmdDaemonStatus", () => {

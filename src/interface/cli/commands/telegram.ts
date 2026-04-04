@@ -12,7 +12,7 @@ import * as readline from "node:readline";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { getPulseedDirPath } from "../../base/utils/paths.js";
+import { getPulseedDirPath } from "../../../base/utils/paths.js";
 
 // ─── Readline helpers ───
 

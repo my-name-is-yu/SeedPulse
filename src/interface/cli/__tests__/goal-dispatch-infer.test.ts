@@ -9,8 +9,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { StateManager } from "../../base/state/state-manager.js";
-import type { CharacterConfigManager } from "../../platform/traits/character-config.js";
+import type { StateManager } from "../../../base/state/state-manager.js";
+import type { CharacterConfigManager } from "../../../platform/traits/character-config.js";
 
 // ─── Module-level mocks ───
 // Note: vi.mock factories are hoisted — DO NOT reference outer variables inside them.
@@ -27,7 +27,7 @@ vi.mock("../commands/goal.js", () => ({
   cmdGoalArchive: vi.fn().mockResolvedValue(0),
 }));
 
-vi.mock("../../base/llm/provider-factory.js", () => ({
+vi.mock("../../../base/llm/provider-factory.js", () => ({
   buildLLMClient: vi.fn().mockResolvedValue({ sendMessage: vi.fn(), parseJSON: vi.fn() }),
 }));
 
@@ -46,7 +46,7 @@ vi.mock("../utils.js", () => ({
 import { dispatchGoalCommand } from "../commands/goal-dispatch.js";
 import * as goalRaw from "../commands/goal-raw.js";
 import * as goal from "../commands/goal.js";
-import * as providerFactory from "../../base/llm/provider-factory.js";
+import * as providerFactory from "../../../base/llm/provider-factory.js";
 import * as goalInfer from "../commands/goal-infer.js";
 import * as cliUtils from "../utils.js";
 

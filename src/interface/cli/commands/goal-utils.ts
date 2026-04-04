@@ -2,9 +2,9 @@
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import { getDatasourcesDir } from "../../base/utils/paths.js";
-import { writeJsonFile } from "../../base/utils/json-io.js";
-import { StateManager } from "../../base/state/state-manager.js";
+import { getDatasourcesDir } from "../../../base/utils/paths.js";
+import { writeJsonFile } from "../../../base/utils/json-io.js";
+import { StateManager } from "../../../base/state/state-manager.js";
 import { getCliLogger } from "../cli-logger.js";
 import { formatOperationError } from "../utils.js";
 

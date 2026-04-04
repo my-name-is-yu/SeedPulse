@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import type { StateManager } from "../../base/state/state-manager.js";
-import type { TrustManager } from "../../platform/traits/trust-manager.js";
-import type { PluginLoader } from "../../runtime/plugin-loader.js";
+import type { StateManager } from "../../../base/state/state-manager.js";
+import type { TrustManager } from "../../../platform/traits/trust-manager.js";
+import type { PluginLoader } from "../../../runtime/plugin-loader.js";
 
 import {
   getMutationToolDefinitions,
@@ -11,7 +11,7 @@ import type { MutationToolDeps } from "../self-knowledge-mutation-tools.js";
 
 // ─── Module mocks for update_config ───
 
-vi.mock("../../base/llm/provider-config.js", () => ({
+vi.mock("../../../base/llm/provider-config.js", () => ({
   loadProviderConfig: vi.fn().mockResolvedValue({ provider: "openai", model: "gpt-4o", api_key: "sk-test" }),
   saveProviderConfig: vi.fn().mockResolvedValue(undefined),
 }));

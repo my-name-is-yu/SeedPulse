@@ -248,7 +248,7 @@ describe("ensureProviderConfig", () => {
 
     // Mock loadProviderConfig to read from the correct tmpDir path,
     // since the module-level PROVIDER_CONFIG_PATH may be stale from prior tests
-    const providerConfigMod = await import("../../base/llm/provider-config.js");
+    const providerConfigMod = await import("../../../base/llm/provider-config.js");
     const loadSpy = vi.spyOn(providerConfigMod, "loadProviderConfig").mockImplementation(async () => {
       const raw = await fsp.readFile(configPath, "utf-8");
       const parsed = JSON.parse(raw) as Record<string, unknown>;

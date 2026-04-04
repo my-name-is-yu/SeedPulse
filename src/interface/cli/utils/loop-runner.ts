@@ -1,9 +1,9 @@
 // ─── Shared loop utilities for CLI commands ───
 
-import { getLogsDir } from "../../base/utils/paths.js";
-import { Logger } from "../../runtime/logger.js";
-import type { CoreLoop, LoopResult, ProgressEvent } from "../../orchestrator/loop/core-loop.js";
-import type { Task } from "../../base/types/task.js";
+import { getLogsDir } from "../../../base/utils/paths.js";
+import { Logger } from "../../../runtime/logger.js";
+import type { CoreLoop, LoopResult, ProgressEvent } from "../../../orchestrator/loop/core-loop.js";
+import type { Task } from "../../../base/types/task.js";
 
 export function buildAutoApprovalFn(): (task: Task) => Promise<boolean> {
   return async (task: Task): Promise<boolean> => {

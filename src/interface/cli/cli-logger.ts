@@ -1,5 +1,5 @@
-import { Logger } from "../runtime/logger.js";
-import { getLogsDir } from "../base/utils/paths.js";
+import { Logger } from "../../runtime/logger.js";
+import { getLogsDir } from "../../base/utils/paths.js";
 
 // Shared Logger instance for all CLI commands
 // Logs to ~/.pulseed/logs/ (same dir used by daemon/run commands)

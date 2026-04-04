@@ -13,7 +13,7 @@ import * as fs from "node:fs";
 
 // ─── Module mocks ────────────────────────────────────────────────────────────
 
-vi.mock("../../base/llm/provider-factory.js", () => ({
+vi.mock("../../../base/llm/provider-factory.js", () => ({
   buildLLMClient: vi.fn().mockResolvedValue({
     sendMessage: vi.fn(),
     parseJSON: vi.fn(),
@@ -33,23 +33,23 @@ vi.mock("../ensure-api-key.js", () => ({
   }),
 }));
 
-vi.mock("../../orchestrator/loop/core-loop.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../orchestrator/loop/core-loop.js")>();
+vi.mock("../../../orchestrator/loop/core-loop.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../orchestrator/loop/core-loop.js")>();
   return {
     ...actual,
     CoreLoop: vi.fn(),
   };
 });
 
-vi.mock("../../orchestrator/goal/goal-negotiator.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../orchestrator/goal/goal-negotiator.js")>();
+vi.mock("../../../orchestrator/goal/goal-negotiator.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../orchestrator/goal/goal-negotiator.js")>();
   return {
     ...actual,
     GoalNegotiator: vi.fn(),
   };
 });
 
-vi.mock("../../base/llm/llm-client.js", () => ({
+vi.mock("../../../base/llm/llm-client.js", () => ({
   LLMClient: vi.fn().mockImplementation(function() { return {}; }),
   MockLLMClient: vi.fn(),
 }));
@@ -62,7 +62,7 @@ vi.mock("../src/drive-system.js", () => ({
   DriveSystem: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
-vi.mock("../../platform/observation/observation-engine.js", () => ({
+vi.mock("../../../platform/observation/observation-engine.js", () => ({
   ObservationEngine: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
@@ -78,35 +78,35 @@ vi.mock("../src/ethics-gate.js", () => ({
   EthicsGate: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
-vi.mock("../../orchestrator/execution/session-manager.js", () => ({
+vi.mock("../../../orchestrator/execution/session-manager.js", () => ({
   SessionManager: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
-vi.mock("../../orchestrator/strategy/strategy-manager.js", () => ({
+vi.mock("../../../orchestrator/strategy/strategy-manager.js", () => ({
   StrategyManager: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
-vi.mock("../../orchestrator/execution/adapter-layer.js", () => ({
+vi.mock("../../../orchestrator/execution/adapter-layer.js", () => ({
   AdapterRegistry: vi.fn().mockImplementation(function() { return {
     register: vi.fn(),
     getAdapterCapabilities: vi.fn().mockReturnValue([]),
   }; }),
 }));
 
-vi.mock("../../adapters/agents/claude-code-cli.js", () => ({
+vi.mock("../../../adapters/agents/claude-code-cli.js", () => ({
   ClaudeCodeCLIAdapter: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
-vi.mock("../../adapters/agents/claude-api.js", () => ({
+vi.mock("../../../adapters/agents/claude-api.js", () => ({
   ClaudeAPIAdapter: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
-vi.mock("../../orchestrator/execution/task/task-lifecycle.js", () => ({
+vi.mock("../../../orchestrator/execution/task/task-lifecycle.js", () => ({
   TaskLifecycle: vi.fn().mockImplementation(function() { return {}; }),
 }));
 
-vi.mock("../../reporting/reporting-engine.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../reporting/reporting-engine.js")>();
+vi.mock("../../../reporting/reporting-engine.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../reporting/reporting-engine.js")>();
   return {
     ...actual,
     ReportingEngine: vi.fn().mockImplementation(function(...args: ConstructorParameters<typeof actual.ReportingEngine>) { return new actual.ReportingEngine(...args); }),
@@ -116,15 +116,15 @@ vi.mock("../../reporting/reporting-engine.js", async (importOriginal) => {
 // ─── Imports after mocks ──────────────────────────────────────────────────────
 
 import { CLIRunner } from "../cli-runner.js";
-import { StateManager } from "../../base/state/state-manager.js";
-import { CoreLoop } from "../../orchestrator/loop/core-loop.js";
-import { GoalNegotiator } from "../../orchestrator/goal/goal-negotiator.js";
+import { StateManager } from "../../../base/state/state-manager.js";
+import { CoreLoop } from "../../../orchestrator/loop/core-loop.js";
+import { GoalNegotiator } from "../../../orchestrator/goal/goal-negotiator.js";
 import { ensureProviderConfig } from "../ensure-api-key.js";
-import type { Goal } from "../../base/types/goal.js";
-import type { LoopResult } from "../../orchestrator/loop/core-loop.js";
+import type { Goal } from "../../../base/types/goal.js";
+import type { LoopResult } from "../../../orchestrator/loop/core-loop.js";
 import { makeTempDir } from "../../../tests/helpers/temp-dir.js";
 import { makeGoal } from "../../../tests/helpers/fixtures.js";
-import { SuggestTimeoutError } from "../../orchestrator/goal/goal-suggest.js";
+import { SuggestTimeoutError } from "../../../orchestrator/goal/goal-suggest.js";
 
 function makeLoopResult(overrides: Partial<LoopResult> = {}): LoopResult {
   const now = new Date().toISOString();

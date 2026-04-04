@@ -4,49 +4,49 @@
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import { getPulseedDirPath, getDatasourcesDir } from "../base/utils/paths.js";
-import { readJsonFile } from "../base/utils/json-io.js";
+import { getPulseedDirPath, getDatasourcesDir } from "../../base/utils/paths.js";
+import { readJsonFile } from "../../base/utils/json-io.js";
 
-import { StateManager } from "../base/state/state-manager.js";
-import type { DataSourceConfig } from "../base/types/data-source.js";
-import type { IDataSourceAdapter } from "../platform/observation/data-source-adapter.js";
-import { FileDataSourceAdapter, HttpApiDataSourceAdapter } from "../platform/observation/data-source-adapter.js";
-import { GitHubIssueDataSourceAdapter } from "../adapters/datasources/github-issue-datasource.js";
-import { FileExistenceDataSourceAdapter } from "../adapters/datasources/file-existence-datasource.js";
-import { ShellDataSourceAdapter } from "../adapters/datasources/shell-datasource.js";
-import { createWorkspaceContextProvider } from "../platform/observation/workspace-context.js";
-import { buildLLMClient, buildAdapterRegistry } from "../base/llm/provider-factory.js";
-import { TrustManager } from "../platform/traits/trust-manager.js";
-import { DriveSystem } from "../platform/drive/drive-system.js";
-import { ObservationEngine } from "../platform/observation/observation-engine.js";
-import { StallDetector } from "../platform/drive/stall-detector.js";
-import { ProgressPredictor } from "../platform/drive/progress-predictor.js";
-import { SatisficingJudge } from "../platform/drive/satisficing-judge.js";
-import { EthicsGate } from "../platform/traits/ethics-gate.js";
-import { SessionManager } from "../orchestrator/execution/session-manager.js";
-import { StrategyManager } from "../orchestrator/strategy/strategy-manager.js";
-import { GoalNegotiator } from "../orchestrator/goal/goal-negotiator.js";
-import { TaskLifecycle } from "../orchestrator/execution/task/task-lifecycle.js";
-import { ReportingEngine } from "../reporting/reporting-engine.js";
-import { CoreLoop } from "../orchestrator/loop/core-loop.js";
-import { TreeLoopOrchestrator } from "../orchestrator/goal/tree-loop-orchestrator.js";
-import { GoalTreeManager } from "../orchestrator/goal/goal-tree-manager.js";
-import { StateAggregator } from "../orchestrator/goal/state-aggregator.js";
-import { GoalDependencyGraph } from "../orchestrator/goal/goal-dependency-graph.js";
-import { GoalRefiner } from "../orchestrator/goal/goal-refiner.js";
-import { MemoryLifecycleManager, DriveScoreAdapter } from "../platform/knowledge/memory/memory-lifecycle.js";
-import { KnowledgeManager } from "../platform/knowledge/knowledge-manager.js";
-import { VectorIndex } from "../platform/knowledge/vector-index.js";
-import { OpenAIEmbeddingClient, MockEmbeddingClient } from "../platform/knowledge/embedding-client.js";
-import type { IEmbeddingClient } from "../platform/knowledge/embedding-client.js";
-import { CharacterConfigManager } from "../platform/traits/character-config.js";
-import * as GapCalculator from "../platform/drive/gap-calculator.js";
-import * as DriveScorer from "../platform/drive/drive-scorer.js";
-import type { GapCalculatorModule, DriveScorerModule, LoopConfig } from "../orchestrator/loop/core-loop.js";
-import type { Task } from "../base/types/task.js";
-import type { ProgressEvent } from "../orchestrator/loop/core-loop.js";
-import { Logger } from "../runtime/logger.js";
-import { HookManager } from "../runtime/hook-manager.js";
+import { StateManager } from "../../base/state/state-manager.js";
+import type { DataSourceConfig } from "../../base/types/data-source.js";
+import type { IDataSourceAdapter } from "../../platform/observation/data-source-adapter.js";
+import { FileDataSourceAdapter, HttpApiDataSourceAdapter } from "../../platform/observation/data-source-adapter.js";
+import { GitHubIssueDataSourceAdapter } from "../../adapters/datasources/github-issue-datasource.js";
+import { FileExistenceDataSourceAdapter } from "../../adapters/datasources/file-existence-datasource.js";
+import { ShellDataSourceAdapter } from "../../adapters/datasources/shell-datasource.js";
+import { createWorkspaceContextProvider } from "../../platform/observation/workspace-context.js";
+import { buildLLMClient, buildAdapterRegistry } from "../../base/llm/provider-factory.js";
+import { TrustManager } from "../../platform/traits/trust-manager.js";
+import { DriveSystem } from "../../platform/drive/drive-system.js";
+import { ObservationEngine } from "../../platform/observation/observation-engine.js";
+import { StallDetector } from "../../platform/drive/stall-detector.js";
+import { ProgressPredictor } from "../../platform/drive/progress-predictor.js";
+import { SatisficingJudge } from "../../platform/drive/satisficing-judge.js";
+import { EthicsGate } from "../../platform/traits/ethics-gate.js";
+import { SessionManager } from "../../orchestrator/execution/session-manager.js";
+import { StrategyManager } from "../../orchestrator/strategy/strategy-manager.js";
+import { GoalNegotiator } from "../../orchestrator/goal/goal-negotiator.js";
+import { TaskLifecycle } from "../../orchestrator/execution/task/task-lifecycle.js";
+import { ReportingEngine } from "../../reporting/reporting-engine.js";
+import { CoreLoop } from "../../orchestrator/loop/core-loop.js";
+import { TreeLoopOrchestrator } from "../../orchestrator/goal/tree-loop-orchestrator.js";
+import { GoalTreeManager } from "../../orchestrator/goal/goal-tree-manager.js";
+import { StateAggregator } from "../../orchestrator/goal/state-aggregator.js";
+import { GoalDependencyGraph } from "../../orchestrator/goal/goal-dependency-graph.js";
+import { GoalRefiner } from "../../orchestrator/goal/goal-refiner.js";
+import { MemoryLifecycleManager, DriveScoreAdapter } from "../../platform/knowledge/memory/memory-lifecycle.js";
+import { KnowledgeManager } from "../../platform/knowledge/knowledge-manager.js";
+import { VectorIndex } from "../../platform/knowledge/vector-index.js";
+import { OpenAIEmbeddingClient, MockEmbeddingClient } from "../../platform/knowledge/embedding-client.js";
+import type { IEmbeddingClient } from "../../platform/knowledge/embedding-client.js";
+import { CharacterConfigManager } from "../../platform/traits/character-config.js";
+import * as GapCalculator from "../../platform/drive/gap-calculator.js";
+import * as DriveScorer from "../../platform/drive/drive-scorer.js";
+import type { GapCalculatorModule, DriveScorerModule, LoopConfig } from "../../orchestrator/loop/core-loop.js";
+import type { Task } from "../../base/types/task.js";
+import type { ProgressEvent } from "../../orchestrator/loop/core-loop.js";
+import { Logger } from "../../runtime/logger.js";
+import { HookManager } from "../../runtime/hook-manager.js";
 import { getCliLogger } from "./cli-logger.js";
 import { formatOperationError } from "./utils.js";
 
@@ -85,7 +85,7 @@ export async function buildDeps(
         } else if (cfg.type === 'shell') {
           const adapter = new ShellDataSourceAdapter(
             cfg.id,
-            (cfg.connection.commands ?? {}) as Record<string, import("../adapters/datasources/shell-datasource.js").ShellCommandSpec>,
+            (cfg.connection.commands ?? {}) as Record<string, import("../../adapters/datasources/shell-datasource.js").ShellCommandSpec>,
             cfg.connection?.path ?? process.cwd()
           );
           // Propagate scope_goal_id from datasource config for dimension matching

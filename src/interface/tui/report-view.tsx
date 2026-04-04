@@ -8,7 +8,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { renderMarkdownLines } from "./markdown-renderer.js";
-import type { Report } from "../base/types/report.js";
+import type { Report } from "../../base/types/report.js";
 import { reportColor } from "./theme.js";
 
 function reportIcon(reportType: Report["report_type"]): string {

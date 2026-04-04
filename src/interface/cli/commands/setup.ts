@@ -10,9 +10,9 @@ import {
   saveProviderConfig,
   validateProviderConfig,
   MODEL_REGISTRY,
-} from "../../base/llm/provider-config.js";
-import type { ProviderConfig } from "../../base/llm/provider-config.js";
-import { getPulseedDirPath } from "../../base/utils/paths.js";
+} from "../../../base/llm/provider-config.js";
+import type { ProviderConfig } from "../../../base/llm/provider-config.js";
+import { getPulseedDirPath } from "../../../base/utils/paths.js";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 

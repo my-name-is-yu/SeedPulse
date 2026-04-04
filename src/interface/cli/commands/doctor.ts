@@ -2,8 +2,8 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getPulseedDirPath, getLogsDir, getGoalsDir } from "../../base/utils/paths.js";
-import { execFileNoThrow } from "../../base/utils/execFileNoThrow.js";
+import { getPulseedDirPath, getLogsDir, getGoalsDir } from "../../../base/utils/paths.js";
+import { execFileNoThrow } from "../../../base/utils/execFileNoThrow.js";
 
 // ─── Types ───
 

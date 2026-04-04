@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
-import type { StateManager } from "../../base/state/state-manager.js";
+import type { StateManager } from "../../../base/state/state-manager.js";
 
 // ─── Module imports ───
 import {

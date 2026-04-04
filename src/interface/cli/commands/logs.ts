@@ -6,7 +6,7 @@
 import { parseArgs } from "node:util";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getLogsDir } from "../../base/utils/paths.js";
+import { getLogsDir } from "../../../base/utils/paths.js";
 
 type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR";
 

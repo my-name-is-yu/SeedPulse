@@ -4,7 +4,7 @@
 // Based on docs/design/personality/brand.md hex values.
 // seedy-art.ts already uses hex directly and is excluded from this system.
 
-import type { Report } from "../base/types/report.js";
+import type { Report } from "../../base/types/report.js";
 
 // ─── Semantic theme object ───
 

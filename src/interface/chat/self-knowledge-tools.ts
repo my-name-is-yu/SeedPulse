@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
-import type { StateManager } from "../base/state/state-manager.js";
-import type { ToolDefinition } from "../base/llm/llm-client.js";
+import type { StateManager } from "../../base/state/state-manager.js";
+import type { ToolDefinition } from "../../base/llm/llm-client.js";
 export type { ToolDefinition };
 
 // ─── Dependencies ───

@@ -6,7 +6,7 @@
 
 import React from "react";
 import { Box, Text, useInput } from "ink";
-import type { Task } from "../base/types/task.js";
+import type { Task } from "../../base/types/task.js";
 import { theme } from "./theme.js";
 
 interface ApprovalOverlayProps {

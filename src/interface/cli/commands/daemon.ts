@@ -4,26 +4,26 @@ import { parseArgs } from "node:util";
 import { spawn } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
-import { readJsonFileOrNull } from "../../base/utils/json-io.js";
-import { DaemonStateSchema, DaemonConfigSchema } from "../../base/types/daemon.js";
-import type { DaemonState, DaemonConfig } from "../../base/types/daemon.js";
+import { readJsonFileOrNull } from "../../../base/utils/json-io.js";
+import { DaemonStateSchema, DaemonConfigSchema } from "../../../base/types/daemon.js";
+import type { DaemonState, DaemonConfig } from "../../../base/types/daemon.js";
 
-import { StateManager } from "../../base/state/state-manager.js";
-import { CharacterConfigManager } from "../../platform/traits/character-config.js";
-import { Logger } from "../../runtime/logger.js";
-import { DaemonRunner } from "../../runtime/daemon-runner.js";
-import { PIDManager } from "../../runtime/pid-manager.js";
-import { EventServer } from "../../runtime/event-server.js";
-import { CronScheduler } from "../../runtime/cron-scheduler.js";
-import { PluginLoader } from "../../runtime/plugin-loader.js";
-import { NotifierRegistry } from "../../runtime/notifier-registry.js";
-import { NotificationDispatcher } from "../../runtime/notification-dispatcher.js";
-import { AdapterRegistry } from "../../orchestrator/execution/adapter-layer.js";
-import { DataSourceRegistry } from "../../platform/observation/data-source-adapter.js";
+import { StateManager } from "../../../base/state/state-manager.js";
+import { CharacterConfigManager } from "../../../platform/traits/character-config.js";
+import { Logger } from "../../../runtime/logger.js";
+import { DaemonRunner } from "../../../runtime/daemon-runner.js";
+import { PIDManager } from "../../../runtime/pid-manager.js";
+import { EventServer } from "../../../runtime/event-server.js";
+import { CronScheduler } from "../../../runtime/cron-scheduler.js";
+import { PluginLoader } from "../../../runtime/plugin-loader.js";
+import { NotifierRegistry } from "../../../runtime/notifier-registry.js";
+import { NotificationDispatcher } from "../../../runtime/notification-dispatcher.js";
+import { AdapterRegistry } from "../../../orchestrator/execution/adapter-layer.js";
+import { DataSourceRegistry } from "../../../platform/observation/data-source-adapter.js";
 import { buildDeps } from "../setup.js";
 import { formatOperationError } from "../utils.js";
 import { getCliLogger } from "../cli-logger.js";
-import { getPulseedDirPath, getLogsDir } from "../../base/utils/paths.js";
+import { getPulseedDirPath, getLogsDir } from "../../../base/utils/paths.js";
 
 export async function cmdStart(
   stateManager: StateManager,

@@ -6,8 +6,8 @@
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import * as tty from "node:tty";
-import { loadProviderConfig, type ProviderConfig } from "../base/llm/provider-config.js";
-import { getPulseedDirPath } from "../base/utils/paths.js";
+import { loadProviderConfig, type ProviderConfig } from "../../base/llm/provider-config.js";
+import { getPulseedDirPath } from "../../base/utils/paths.js";
 
 /**
  * Load provider config and verify that the required API key is present for

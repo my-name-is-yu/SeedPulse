@@ -4,17 +4,17 @@ import React, { useState, useCallback, useEffect } from "react";
 import { render, useApp } from "ink";
 import { parseArgs } from "node:util";
 
-import { StateManager } from "../../base/state/state-manager.js";
+import { StateManager } from "../../../base/state/state-manager.js";
 import { ensureProviderConfig } from "../ensure-api-key.js";
-import { buildLLMClient, buildAdapterRegistry } from "../../base/llm/provider-factory.js";
-import { loadProviderConfig } from "../../base/llm/provider-config.js";
+import { buildLLMClient, buildAdapterRegistry } from "../../../base/llm/provider-factory.js";
+import { loadProviderConfig } from "../../../base/llm/provider-config.js";
 import { formatOperationError } from "../utils.js";
 import { getCliLogger } from "../cli-logger.js";
 import type { ChatRunner } from "../../chat/chat-runner.js";
 import { Chat, type ChatMessage } from "../../tui/chat.js";
-import { EthicsGate } from "../../platform/traits/ethics-gate.js";
-import { ObservationEngine } from "../../platform/observation/observation-engine.js";
-import { GoalNegotiator } from "../../orchestrator/goal/goal-negotiator.js";
+import { EthicsGate } from "../../../platform/traits/ethics-gate.js";
+import { ObservationEngine } from "../../../platform/observation/observation-engine.js";
+import { GoalNegotiator } from "../../../orchestrator/goal/goal-negotiator.js";
 import { EscalationHandler } from "../../chat/escalation.js";
 
 const logger = getCliLogger();

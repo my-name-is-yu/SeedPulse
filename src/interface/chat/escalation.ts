@@ -4,9 +4,9 @@
 // Phase 1c: creates the Goal but does NOT auto-start CoreLoop.
 // User runs `pulseed run --goal <id>` to start the loop.
 
-import type { StateManager } from "../base/state/state-manager.js";
-import type { ILLMClient } from "../base/llm/llm-client.js";
-import type { GoalNegotiator } from "../orchestrator/goal/goal-negotiator.js";
+import type { StateManager } from "../../base/state/state-manager.js";
+import type { ILLMClient } from "../../base/llm/llm-client.js";
+import type { GoalNegotiator } from "../../orchestrator/goal/goal-negotiator.js";
 import type { ChatHistory } from "./chat-history.js";
 
 // ─── Types ───

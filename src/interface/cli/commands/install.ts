@@ -5,7 +5,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { fileURLToPath } from "node:url";
-import { execFileNoThrow } from "../../base/utils/execFileNoThrow.js";
+import { execFileNoThrow } from "../../../base/utils/execFileNoThrow.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

@@ -2,11 +2,11 @@
 
 import * as readline from "node:readline";
 
-import { StateManager } from "../../base/state/state-manager.js";
-import { CharacterConfigManager } from "../../platform/traits/character-config.js";
+import { StateManager } from "../../../base/state/state-manager.js";
+import { CharacterConfigManager } from "../../../platform/traits/character-config.js";
 import { ensureProviderConfig } from "../ensure-api-key.js";
-import type { LoopConfig } from "../../orchestrator/loop/core-loop.js";
-import type { Task } from "../../base/types/task.js";
+import type { LoopConfig } from "../../../orchestrator/loop/core-loop.js";
+import type { Task } from "../../../base/types/task.js";
 import { buildDeps } from "../setup.js";
 import { formatOperationError } from "../utils.js";
 import { getCliLogger } from "../cli-logger.js";
@@ -41,7 +41,7 @@ export async function cmdRun(
   loopConfig?: LoopConfig,
   autoApprove?: boolean,
   verbose?: boolean,
-  activeCoreLoopRef?: { value: import("../../orchestrator/loop/core-loop.js").CoreLoop | null },
+  activeCoreLoopRef?: { value: import("../../../orchestrator/loop/core-loop.js").CoreLoop | null },
   workspacePath?: string,
 ): Promise<number> {
   try {

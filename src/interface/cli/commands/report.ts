@@ -1,7 +1,7 @@
 // ─── pulseed report command ───
 
-import { StateManager } from "../../base/state/state-manager.js";
-import { ReportingEngine } from "../../reporting/reporting-engine.js";
+import { StateManager } from "../../../base/state/state-manager.js";
+import { ReportingEngine } from "../../../reporting/reporting-engine.js";
 import { getCliLogger } from "../cli-logger.js";
 
 export async function cmdReport(stateManager: StateManager, goalId: string): Promise<number> {

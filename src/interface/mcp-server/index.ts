@@ -3,7 +3,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { StateManager } from "../base/state/state-manager.js";
+import { StateManager } from "../../base/state/state-manager.js";
 import type { MCPServerDeps } from "./tools.js";
 import {
   toolGoalList,

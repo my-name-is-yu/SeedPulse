@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ActionHandler } from "../actions.js";
 import type { ActionDeps } from "../actions.js";
 import type { RecognizedIntent } from "../intent-recognizer.js";
-import type { Goal } from "../../base/types/goal.js";
+import type { Goal } from "../../../base/types/goal.js";
 import { makeGoal } from "../../../tests/helpers/fixtures.js";
 
 function makeReport() {

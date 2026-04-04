@@ -13,17 +13,17 @@ import * as yaml from "js-yaml";
 
 // ─── Module mocks (must precede imports of mocked modules) ───────────────────
 
-vi.mock("../../orchestrator/loop/core-loop.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../orchestrator/loop/core-loop.js")>();
+vi.mock("../../../orchestrator/loop/core-loop.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../orchestrator/loop/core-loop.js")>();
   return { ...actual, CoreLoop: vi.fn() };
 });
 
-vi.mock("../../orchestrator/goal/goal-negotiator.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../orchestrator/goal/goal-negotiator.js")>();
+vi.mock("../../../orchestrator/goal/goal-negotiator.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../orchestrator/goal/goal-negotiator.js")>();
   return { ...actual, GoalNegotiator: vi.fn() };
 });
 
-vi.mock("../../base/llm/llm-client.js", () => ({
+vi.mock("../../../base/llm/llm-client.js", () => ({
   LLMClient: vi.fn().mockImplementation(() => ({})),
   MockLLMClient: vi.fn(),
 }));
@@ -36,7 +36,7 @@ vi.mock("../src/drive-system.js", () => ({
   DriveSystem: vi.fn().mockImplementation(() => ({})),
 }));
 
-vi.mock("../../platform/observation/observation-engine.js", () => ({
+vi.mock("../../../platform/observation/observation-engine.js", () => ({
   ObservationEngine: vi.fn().mockImplementation(() => ({})),
 }));
 
@@ -52,43 +52,43 @@ vi.mock("../src/ethics-gate.js", () => ({
   EthicsGate: vi.fn().mockImplementation(() => ({})),
 }));
 
-vi.mock("../../orchestrator/execution/session-manager.js", () => ({
+vi.mock("../../../orchestrator/execution/session-manager.js", () => ({
   SessionManager: vi.fn().mockImplementation(() => ({})),
 }));
 
-vi.mock("../../orchestrator/strategy/strategy-manager.js", () => ({
+vi.mock("../../../orchestrator/strategy/strategy-manager.js", () => ({
   StrategyManager: vi.fn().mockImplementation(() => ({})),
 }));
 
-vi.mock("../../orchestrator/execution/adapter-layer.js", () => ({
+vi.mock("../../../orchestrator/execution/adapter-layer.js", () => ({
   AdapterRegistry: vi.fn().mockImplementation(() => ({
     register: vi.fn(),
     getAdapterCapabilities: vi.fn().mockReturnValue([]),
   })),
 }));
 
-vi.mock("../../adapters/agents/claude-code-cli.js", () => ({
+vi.mock("../../../adapters/agents/claude-code-cli.js", () => ({
   ClaudeCodeCLIAdapter: vi.fn().mockImplementation(() => ({})),
 }));
 
-vi.mock("../../adapters/agents/claude-api.js", () => ({
+vi.mock("../../../adapters/agents/claude-api.js", () => ({
   ClaudeAPIAdapter: vi.fn().mockImplementation(() => ({})),
 }));
 
-vi.mock("../../orchestrator/execution/task/task-lifecycle.js", () => ({
+vi.mock("../../../orchestrator/execution/task/task-lifecycle.js", () => ({
   TaskLifecycle: vi.fn().mockImplementation(() => ({})),
 }));
 
-vi.mock("../../reporting/reporting-engine.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../reporting/reporting-engine.js")>();
+vi.mock("../../../reporting/reporting-engine.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../reporting/reporting-engine.js")>();
   return {
     ...actual,
     ReportingEngine: vi.fn().mockImplementation(function(...args: ConstructorParameters<typeof actual.ReportingEngine>) { return new actual.ReportingEngine(...args); }),
   };
 });
 
-vi.mock("../../base/llm/provider-factory.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../base/llm/provider-factory.js")>();
+vi.mock("../../../base/llm/provider-factory.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../base/llm/provider-factory.js")>();
   return {
     ...actual,
     buildLLMClient: vi.fn().mockReturnValue({}),

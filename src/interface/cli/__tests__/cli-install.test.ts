@@ -13,14 +13,14 @@ vi.mock("node:fs", async (importOriginal) => {
   };
 });
 
-vi.mock("../../base/utils/execFileNoThrow.js", () => ({
+vi.mock("../../../base/utils/execFileNoThrow.js", () => ({
   execFileNoThrow: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })),
 }));
 
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { execFileNoThrow } from "../../base/utils/execFileNoThrow.js";
+import { execFileNoThrow } from "../../../base/utils/execFileNoThrow.js";
 import { buildPlist, cmdInstall, cmdUninstall } from "../commands/install.js";
 
 const PLIST_PATH = path.join(

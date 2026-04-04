@@ -1,4 +1,4 @@
-import type { ToolDefinition } from "../base/llm/llm-client.js";
+import type { ToolDefinition } from "../../base/llm/llm-client.js";
 
 // ─── Approval ───
 
@@ -16,9 +16,9 @@ export const DEFAULT_APPROVAL: Record<string, ApprovalLevel> = {
 
 // ─── Dependencies ───
 
-import type { StateManager } from "../base/state/state-manager.js";
-import type { TrustManager } from "../platform/traits/trust-manager.js";
-import type { PluginLoader } from "../runtime/plugin-loader.js";
+import type { StateManager } from "../../base/state/state-manager.js";
+import type { TrustManager } from "../../platform/traits/trust-manager.js";
+import type { PluginLoader } from "../../runtime/plugin-loader.js";
 
 export interface MutationToolDeps {
   stateManager: StateManager;
