@@ -32,8 +32,7 @@ export class HttpFetchTool implements ITool<HttpFetchInput, HttpFetchOutput> {
       const response = await fetch(input.url, { method: input.method, headers: input.headers, signal: controller.signal });
       clearTimeout(timeout);
       const body = input.method === "HEAD" ? "" : await response.text();
-      const truncatedBody = body.length > input.maxResponseBytes ? body.slice(0, input.maxResponseBytes) + "
-[truncated]" : body;
+      const truncatedBody = body.length > input.maxResponseBytes ? body.slice(0, input.maxResponseBytes) + "\n[truncated]" : body;
       const output: HttpFetchOutput = { statusCode: response.status, headers: Object.fromEntries(response.headers.entries()), body: truncatedBody, ok: response.ok };
       return {
         success: response.ok, data: output,
