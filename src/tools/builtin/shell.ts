@@ -54,20 +54,20 @@ export class ShellTool implements ITool<ShellInput, ShellOutput> {
   async checkPermissions(input: ShellInput): Promise<PermissionCheckResult> {
     const cmd = input.command.trim();
     const SAFE_PATTERNS = [
-      /^(cat|head|tail|wc|ls|pwd|echo|date|hostname|which|type|file)/,
-      /^git\s+(status|log|diff|show|branch|rev-parse|rev-list|describe|tag\s+-l)/,
-      /^npm\s+(ls|list|view|info|outdated|audit)/,
+      /^(cat|head|tail|wc|ls|pwd|echo|date|hostname|which|type|file)/,
+      /^git\s+(status|log|diff|show|branch|rev-parse|rev-list|describe|tag\s+-l)/,
+      /^npm\s+(ls|list|view|info|outdated|audit)/,
       /^npx\s+vitest\s+(run|list|--reporter)/,
       /^npx\s+tsc\s+--noEmit/,
       /^rg\s/, /^find\s/, /^du\s/, /^df\s/, /^tree\s/,
     ];
     const DENY_PATTERNS = [
-      /rm\s/, /mv\s/, /cp\s/, /mkdir\s/, /touch\s/, /chmod\s/, /chown\s/,
-      /git\s+(push|commit|merge|rebase|reset|checkout|clean|stash)/,
-      /npm\s+(install|uninstall|publish|run|exec)/,
-      /curl\s.*(-X\s*(POST|PUT|DELETE|PATCH)|-d\s)/,
-      /wget\s/, /sudo\s/, /mkfs/, /dd\s+if=/, /shutdown/, /reboot/,
-      />/, /\|.*(tee|dd|rm|mv)/,
+      /rm\s/, /mv\s/, /cp\s/, /mkdir\s/, /touch\s/, /chmod\s/, /chown\s/,
+      /git\s+(push|commit|merge|rebase|reset|checkout|clean|stash)/,
+      /npm\s+(install|uninstall|publish|run|exec)/,
+      /curl\s.*(-X\s*(POST|PUT|DELETE|PATCH)|-d\s)/,
+      /wget\s/, /sudo\s/, /mkfs/, /dd\s+if=/, /shutdown/, /reboot/,
+      />/, /\|.*(tee|dd|rm|mv)/,
     ];
     const segments = cmd.split(/\s*(?:&&|\|\||;)\s*/);
     for (const segment of segments) {
@@ -90,8 +90,8 @@ export class ShellTool implements ITool<ShellInput, ShellOutput> {
   isConcurrencySafe(input: ShellInput): boolean {
     const cmd = input.command.trim();
     const readOnlyPatterns = [
-      /^(cat|head|tail|wc|ls|pwd|echo|date)/,
-      /^git\s+(status|log|diff|show|branch)/,
+      /^(cat|head|tail|wc|ls|pwd|echo|date)/,
+      /^git\s+(status|log|diff|show|branch)/,
       /^rg\s/, /^find\s/,
     ];
     return readOnlyPatterns.some((re) => re.test(cmd));

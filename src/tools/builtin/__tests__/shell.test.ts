@@ -131,7 +131,7 @@ describe("ShellTool", () => {
     it("uses cwd from input when provided", async () => {
       const result = await tool.call({ command: "pwd", cwd: "/tmp", timeoutMs: 5_000 }, makeContext("/usr"));
       expect(result.success).toBe(true);
-      expect((result.data as { stdout: string }).stdout.trim()).toBe("/tmp");
+      expect((result.data as { stdout: string }).stdout.trim()).toMatch(/^(\/private)?\/tmp$/);
     });
   });
 
