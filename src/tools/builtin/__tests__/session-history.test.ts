@@ -6,6 +6,20 @@ import { SessionHistoryTool } from "../session-history.js";
 import type { ToolCallContext } from "../../types.js";
 import type { StateManager } from "../../../base/state/state-manager.js";
 
+/** Minimal readRaw that mimics StateManager path-traversal protection */
+async function fakeReadRaw(baseDir: string, relativePath: string): Promise<unknown | null> {
+  const resolved = path.resolve(baseDir, relativePath);
+  if (!resolved.startsWith(path.resolve(baseDir) + path.sep)) {
+    throw new Error(`Path traversal detected: ${relativePath}`);
+  }
+  if (!fs.existsSync(resolved)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(resolved, "utf-8")) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 function makeContext(): ToolCallContext {
   return {
     cwd: "/tmp",
@@ -40,6 +54,7 @@ describe("SessionHistoryTool", () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-history-test-"));
     stateManager = {
       getBaseDir: vi.fn().mockReturnValue(tmpDir),
+      readRaw: vi.fn().mockImplementation((rel: string) => fakeReadRaw(tmpDir, rel)),
     } as unknown as StateManager;
     tool = new SessionHistoryTool(stateManager);
   });
