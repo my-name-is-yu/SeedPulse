@@ -18,6 +18,9 @@ export type { ISearchClient, SearchResult } from "./web-search.js";
 export { ToolSearchTool } from "./tool-search.js";
 export { EnvTool } from "./env.js";
 export { GitDiffTool } from "./git-diff.js";
+export { FileWriteTool } from "./file-write.js";
+export { FileEditTool } from "./file-edit.js";
+export { validateFilePath } from "./file-validation.js";
 
 import { GlobTool } from "./glob.js";
 import { GrepTool } from "./grep.js";
@@ -38,6 +41,8 @@ import { WebSearchTool, createWebSearchClient } from "./web-search.js";
 import { ToolSearchTool } from "./tool-search.js";
 import { EnvTool } from "./env.js";
 import { GitDiffTool } from "./git-diff.js";
+import { FileWriteTool } from "./file-write.js";
+import { FileEditTool } from "./file-edit.js";
 import type { ITool } from "../types.js";
 import type { StateManager } from "../../base/state/state-manager.js";
 import type { KnowledgeManager } from "../../platform/knowledge/knowledge-manager.js";
@@ -53,6 +58,8 @@ export interface BuiltinToolDeps {
 export function createBuiltinTools(deps?: BuiltinToolDeps): ITool[] {
   const tools: ITool[] = [
     new EnvTool(),
+    new FileEditTool(),
+    new FileWriteTool(),
     new GitDiffTool(),
     new GitLogTool(),
     new GlobTool(),
