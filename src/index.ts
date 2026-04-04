@@ -180,6 +180,8 @@ export type {
 
 // --- Builtin tool classes ---
 export { GitLogTool } from "./tools/builtin/git-log.js";
+export { EnvTool } from "./tools/builtin/env.js";
+export { GitDiffTool } from "./tools/builtin/git-diff.js";
 export { ListDirTool } from "./tools/builtin/list-dir.js";
 export { ProcessStatusTool } from "./tools/builtin/process-status.js";
 export { TestRunnerTool } from "./tools/builtin/test-runner.js";
@@ -191,4 +193,7 @@ export { ProgressHistoryTool } from "./tools/builtin/progress-history.js";
 export { WebSearchTool, createWebSearchClient } from "./tools/builtin/web-search.js";
 export type { ISearchClient, SearchResult } from "./tools/builtin/web-search.js";
 export { ToolSearchTool } from "./tools/builtin/tool-search.js";
+export { FileWriteTool } from "./tools/builtin/file-write.js";
+export { FileEditTool } from "./tools/builtin/file-edit.js";
+export { validateFilePath } from "./tools/builtin/file-validation.js";
 export type { BuiltinToolDeps } from "./tools/builtin/index.js";

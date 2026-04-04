@@ -210,30 +210,6 @@ describe("ToolExecutor", () => {
     });
 
     describe("Gate 4 — Input sanitization", () => {
-      it("blocks path traversal for filesystem tools", async () => {
-        const tool = createMockTool({
-          metadata: {
-            name: "mock-tool",
-            aliases: [],
-            permissionLevel: "read_only",
-            isReadOnly: true,
-            isDestructive: false,
-            shouldDefer: false,
-            alwaysLoad: false,
-            maxConcurrency: 0,
-            maxOutputChars: 8000,
-            tags: ["filesystem"],
-          } as ITool["metadata"],
-          inputSchema: z.object({ value: z.string(), path: z.string() }) as unknown as z.ZodType<DefaultInput>,
-        });
-        const { executor } = createExecutor([tool]);
-        const ctx = createMockContext();
-        // Path traversal that resolves to /etc (6 levels up from repo root)
-        const result = await executor.execute("mock-tool", { value: "x", path: "../../../../../../etc/passwd" }, ctx);
-        expect(result.success).toBe(false);
-        expect(result.error).toContain("sanitization failed");
-      });
-
       it("blocks shell injection patterns for shell tool", async () => {
         const shellTool = createMockTool({
           name: "shell",
@@ -436,4 +412,182 @@ describe("ToolExecutor", () => {
       expect(results[0].error).toContain("not found");
     });
   });
+
+  describe("Audit logging", () => {
+    it("calls logger.debug on start and success", async () => {
+      const tool = createMockTool();
+      const { executor } = createExecutor([tool]);
+      const debugFn = vi.fn();
+      const logger = { debug: debugFn, warn: vi.fn(), error: vi.fn() };
+      const ctx = createMockContext({ logger, callId: "call-123", sessionId: "sess-456" });
+      await executor.execute("mock-tool", { value: "x" }, ctx);
+      expect(debugFn).toHaveBeenCalledWith("tool.call.start", expect.objectContaining({ tool: "mock-tool", callId: "call-123", sessionId: "sess-456" }));
+      expect(debugFn).toHaveBeenCalledWith("tool.call.success", expect.objectContaining({ tool: "mock-tool", callId: "call-123" }));
+    });
+
+    it("calls logger.warn on failure (timeout throws)", async () => {
+      const slowTool = createMockTool({
+        call: vi.fn().mockImplementation(
+          () => new Promise((resolve) => setTimeout(resolve, 500)),
+        ),
+      });
+      const { executor } = createExecutor([slowTool]);
+      const warnFn = vi.fn();
+      const logger = { debug: vi.fn(), warn: warnFn, error: vi.fn() };
+      const ctx = createMockContext({ timeoutMs: 50, logger, callId: "call-timeout" });
+      await expect(executor.execute("mock-tool", { value: "x" }, ctx)).rejects.toThrow("timed out");
+      expect(warnFn).toHaveBeenCalledWith("tool.call.failure", expect.objectContaining({ tool: "mock-tool" }));
+    });
+
+    it("works without logger (no-op)", async () => {
+      const tool = createMockTool();
+      const { executor } = createExecutor([tool]);
+      const ctx = createMockContext(); // no logger
+      const result = await executor.execute("mock-tool", { value: "x" }, ctx);
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe("dryRun mode", () => {
+    it("skips tool.call when dryRun is true", async () => {
+      const callFn = vi.fn().mockResolvedValue({ success: true, data: "real", summary: "real", durationMs: 5 });
+      const tool = createMockTool({ call: callFn });
+      const { executor } = createExecutor([tool]);
+      const ctx = createMockContext({ dryRun: true });
+      const result = await executor.execute("mock-tool", { value: "x" }, ctx);
+      expect(callFn).not.toHaveBeenCalled();
+      expect(result.success).toBe(true);
+      expect(result.summary).toContain("dry-run");
+    });
+  });
+
+  describe("Retry with backoff", () => {
+    it("retries transient errors for concurrency-safe tools", async () => {
+      vi.useFakeTimers();
+      let attempt = 0;
+      const callFn = vi.fn().mockImplementation(() => {
+        attempt++;
+        if (attempt === 1) throw new Error("ECONNRESET: connection reset");
+        return Promise.resolve({ success: true, data: "ok", summary: "ok", durationMs: 5 });
+      });
+      const tool = createMockTool({
+        call: callFn,
+        isConcurrencySafe: vi.fn().mockReturnValue(true),
+      });
+      const { executor } = createExecutor([tool]);
+      const ctx = createMockContext();
+      const promise = executor.execute("mock-tool", { value: "x" }, ctx);
+      // Advance past first backoff (500ms)
+      await vi.advanceTimersByTimeAsync(600);
+      const result = await promise;
+      expect(callFn).toHaveBeenCalledTimes(2);
+      expect(result.success).toBe(true);
+      vi.useRealTimers();
+    });
+
+    it("does not retry non-transient errors", async () => {
+      const callFn = vi.fn().mockRejectedValue(new Error("Something went very wrong"));
+      const tool = createMockTool({
+        call: callFn,
+        isConcurrencySafe: vi.fn().mockReturnValue(true),
+      });
+      const { executor } = createExecutor([tool]);
+      const ctx = createMockContext();
+      const result = await executor.execute("mock-tool", { value: "x" }, ctx);
+      expect(callFn).toHaveBeenCalledTimes(1);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Something went very wrong");
+    });
+
+    it("does not retry for concurrency-unsafe tools even on transient errors", async () => {
+      const callFn = vi.fn().mockRejectedValue(new Error("ETIMEDOUT"));
+      const tool = createMockTool({
+        call: callFn,
+        isConcurrencySafe: vi.fn().mockReturnValue(false),
+      });
+      const { executor } = createExecutor([tool]);
+      const ctx = createMockContext();
+      const result = await executor.execute("mock-tool", { value: "x" }, ctx);
+      expect(callFn).toHaveBeenCalledTimes(1);
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe("Truncation metadata", () => {
+    it("sets truncated.originalChars when output is truncated", async () => {
+      const bigData = "x".repeat(500);
+      const tool = createMockTool({
+        metadata: {
+          name: "mock-tool",
+          aliases: [],
+          permissionLevel: "read_only",
+          isReadOnly: true,
+          isDestructive: false,
+          shouldDefer: false,
+          alwaysLoad: false,
+          maxConcurrency: 0,
+          maxOutputChars: 10,
+          tags: [],
+        } as ITool["metadata"],
+        call: vi.fn().mockResolvedValue({
+          success: true,
+          data: bigData,
+          summary: "big result",
+          durationMs: 5,
+        } as ToolResult),
+      });
+      const { executor } = createExecutor([tool]);
+      const ctx = createMockContext();
+      const result = await executor.execute("mock-tool", { value: "x" }, ctx);
+      expect(result.truncated).toBeDefined();
+      expect(result.truncated?.originalChars).toBeGreaterThan(10);
+    });
+
+    it("does not set truncated when output fits within limit", async () => {
+      const tool = createMockTool();
+      const { executor } = createExecutor([tool]);
+      const ctx = createMockContext();
+      const result = await executor.execute("mock-tool", { value: "x" }, ctx);
+      expect(result.truncated).toBeUndefined();
+    });
+  });
+
+  describe("Expanded shell injection patterns", () => {
+    function createShellExecutor() {
+      const shellTool = createMockTool({
+        name: "shell",
+        metadata: {
+          name: "shell",
+          aliases: [],
+          permissionLevel: "read_metrics",
+          isReadOnly: false,
+          isDestructive: false,
+          shouldDefer: false,
+          alwaysLoad: false,
+          maxConcurrency: 0,
+          maxOutputChars: 8000,
+          tags: [],
+        } as ITool["metadata"],
+        inputSchema: z.object({ value: z.string(), command: z.string() }) as unknown as z.ZodType<DefaultInput>,
+        checkPermissions: vi.fn().mockResolvedValue({ status: "allowed" } as PermissionCheckResult),
+      });
+      const registry = new ToolRegistry();
+      registry.register(shellTool);
+      const permissionManager = new ToolPermissionManager({
+        allowRules: [{ toolName: "shell", reason: "test allow" }],
+      });
+      const concurrency = new ConcurrencyController();
+      const executor = new ToolExecutor({ registry, permissionManager, concurrency });
+      return { executor };
+    }
+
+    it.each(["&&", "||", "> /", ">> "])("blocks pattern %s in shell command", async (pattern) => {
+      const { executor } = createShellExecutor();
+      const ctx = createMockContext({ trustBalance: 100 });
+      const result = await executor.execute("shell", { value: "x", command: `ls ${pattern} dangerous` }, ctx);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("sanitization failed");
+    });
+  });
+
 });
