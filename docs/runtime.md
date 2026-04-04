@@ -31,6 +31,10 @@ PulSeed does not trust an executor's self-report. This is not suspicion — it i
 
 Performing execution and verification in the same session makes self-evaluation bias unavoidable. The structure of "evaluating your own work" tends toward optimism in humans and AI alike. That's why execution and verification are structurally separated.
 
+The separation is now: **PulSeed (with read-only tools for perception) vs. agents (for mutations and complex work)**. PulSeed itself can directly observe the world — reading files, running queries, fetching HTTP responses — but all state mutations, code execution with side effects, and complex multi-step work are delegated to agents.
+
+**Tool execution in the runtime model**: Tool invocations are synchronous within the CoreLoop iteration. Read-only tools execute in-process with configurable concurrency (max 10 parallel). Tool results are cached per-iteration to avoid redundant calls.
+
 Verification is performed in three layers.
 
 **Mechanical verification**: Test results, file existence, build success, API response status codes. Evidence that cannot lie. This is the most trustworthy.

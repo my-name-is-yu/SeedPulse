@@ -49,6 +49,8 @@ Mechanical observations run automatically. No human intervention or judgment is 
 
 **Layer 1 constraint**: Dimensions for which mechanical observation cannot be configured fall back to Layer 2 or Layer 3. It is not always possible to configure mechanical observation for every dimension (e.g., qualitative quality assessments, human emotions).
 
+**Direct tool invocation**: Layer 1 is enhanced by PulSeed's built-in read-only tools (Glob, Grep, Read, Shell, HttpFetch, JsonQuery). Tool-based observation belongs to the same confidence tier as mechanical observation (0.85–1.0) but operates with dramatically lower latency and cost — no agent session startup, no delegation round-trip. When tools are available, the ObservationEngine attempts tool-based observation first. If the tool result is sufficient (confidence >= threshold), agent delegation is skipped entirely.
+
 ### Layer 2: Independent Review Session
 
 **Trust level: Medium (0.50–0.84)**
@@ -222,6 +224,16 @@ Field descriptions:
 | Field | Type | Description |
 |-------|------|-------------|
 | `type` | enum | How the observation is executed. `mechanical` (automated script), `llm_review` (independent LLM session), `api_query` (HTTP request to external API), `file_check` (filesystem check), `manual` (human input) |
+
+**Tool mapping per `type`**:
+
+| `type` value | Tool used |
+|---|---|
+| `"file_check"` | GlobTool + ReadTool |
+| `"mechanical"` | ShellTool |
+| `"api_query"` | HttpFetchTool |
+
+> Note: When tools are available, the ObservationEngine attempts tool-based observation first. If the tool result is sufficient (confidence >= threshold), agent delegation is skipped entirely.
 | `source` | string | Identifier for the observation source. Used for logging, debugging, and fallback resolution |
 | `schedule` | string or null | Cron expression (e.g., `"0 23 * * *"` = daily at 23:00). `null` for event-driven or manual |
 | `endpoint` | string or null | API URL or local file path. `null` for `manual` or `llm_review` |

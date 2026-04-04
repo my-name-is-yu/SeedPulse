@@ -128,6 +128,8 @@ To pursue goals, PulSeed uses every available agent. Instructions to AI agents, 
 
 PulSeed is always the orchestrator. As a partner that keeps pursuing goals, it continually decides "what to delegate, to whom, and when." The execution itself is always carried out by the delegatee.
 
+**Perception Tool Layer**: PulSeed now includes a perception tool layer beneath the delegation layer. Read-only tools (Glob, Grep, Read, Shell, HttpFetch, JsonQuery) enable direct observation of the workspace, codebase, and external APIs without spawning agent sessions. This dramatically reduces latency and cost for mechanical observation, simple knowledge acquisition, and verification tasks. The delegation layer remains for mutations, complex reasoning, and multi-step execution.
+
 ### 5.9 The Big Picture
 
 ```

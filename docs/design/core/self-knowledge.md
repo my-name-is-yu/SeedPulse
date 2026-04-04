@@ -85,7 +85,7 @@ Returns the current trust state and its governing rules.
 | delta_failure | -10 per failed verification |
 | high_trust_threshold | +20 (above this, some approvals are skipped) |
 | ethics_gate_level | Current ethics gate level (e.g., L1) |
-| execution_boundary | "PulSeed always delegates; direct actions are LLM calls and state read/write only" |
+| execution_boundary | "PulSeed orchestrates goal pursuit. It perceives the world directly through read-only tools (Glob, Grep, Read, Shell, HttpFetch, JsonQuery) and delegates all mutations and complex multi-step work to agents." |
 
 **Data source**: TrustManager + static definitions
 
@@ -127,7 +127,7 @@ Returns a static description of PulSeed's architecture and capabilities.
 **Content** (hardcoded string):
 - Layer structure (Layer 0-15) with module names
 - Module responsibilities summary
-- Execution boundary: "PulSeed always delegates. Direct actions are LLM calls (for thinking) and state read/write only."
+- Execution boundary: "PulSeed orchestrates goal pursuit. It perceives the world directly through read-only tools (Glob, Grep, Read, Shell, HttpFetch, JsonQuery) and delegates all mutations and complex multi-step work to agents."
 - Core loop: observe -> gap -> score -> task -> execute -> verify (NEVER STOP)
 - 4-element model: Goal -> Current State -> Gap -> Constraints
 
