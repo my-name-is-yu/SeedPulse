@@ -22,7 +22,7 @@ import { EventServer } from "../../src/runtime/event-server.js";
 import type { DaemonDeps } from "../../src/runtime/daemon-runner.js";
 import type { DaemonState } from "../../src/base/types/daemon.js";
 import { DaemonStateSchema } from "../../src/base/types/daemon.js";
-import type { LoopResult } from "../../src/loop/core-loop.js";
+import type { LoopResult } from "../../src/orchestrator/loop/core-loop.js";
 import { makeTempDir } from "../helpers/temp-dir.js";
 
 // ─── Helpers ───
@@ -60,7 +60,7 @@ function buildDaemonRunner(
   const coreLoop = coreLoopOverride ?? makeMockCoreLoop();
 
   const deps: DaemonDeps = {
-    coreLoop: coreLoop as unknown as import("../../src/loop/core-loop.js").CoreLoop,
+    coreLoop: coreLoop as unknown as import("../../src/orchestrator/loop/core-loop.js").CoreLoop,
     driveSystem,
     stateManager,
     pidManager,

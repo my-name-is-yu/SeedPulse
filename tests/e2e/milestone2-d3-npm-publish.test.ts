@@ -22,17 +22,17 @@ import * as path from "node:path";
 import { StateManager } from "../../src/base/state/state-manager.js";
 import { ObservationEngine } from "../../src/platform/observation/observation-engine.js";
 import { SatisficingJudge } from "../../src/platform/drive/satisficing-judge.js";
-import { TaskLifecycle } from "../../src/execution/task/task-lifecycle.js";
+import { TaskLifecycle } from "../../src/orchestrator/execution/task/task-lifecycle.js";
 import { StallDetector } from "../../src/platform/drive/stall-detector.js";
-import { StrategyManager } from "../../src/strategy/strategy-manager.js";
+import { StrategyManager } from "../../src/orchestrator/strategy/strategy-manager.js";
 import { ReportingEngine } from "../../src/reporting/reporting-engine.js";
 import { DriveSystem } from "../../src/platform/drive/drive-system.js";
-import { SessionManager } from "../../src/execution/session-manager.js";
+import { SessionManager } from "../../src/orchestrator/execution/session-manager.js";
 import { TrustManager } from "../../src/platform/traits/trust-manager.js";
-import { CoreLoop } from "../../src/loop/core-loop.js";
-import { AdapterRegistry } from "../../src/execution/adapter-layer.js";
+import { CoreLoop } from "../../src/orchestrator/loop/core-loop.js";
+import { AdapterRegistry } from "../../src/orchestrator/execution/adapter-layer.js";
 import { FileExistenceDataSourceAdapter } from "../../src/adapters/datasources/file-existence-datasource.js";
-import type { IAdapter, AgentTask, AgentResult } from "../../src/execution/adapter-layer.js";
+import type { IAdapter, AgentTask, AgentResult } from "../../src/orchestrator/execution/adapter-layer.js";
 
 // ─── Pure function modules ───
 import * as GapCalculator from "../../src/platform/drive/gap-calculator.js";

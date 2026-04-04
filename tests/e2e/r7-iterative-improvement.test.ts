@@ -20,17 +20,17 @@ import * as path from "node:path";
 // ─── Real implementations ───
 import { StateManager } from "../../src/base/state/state-manager.js";
 import { ObservationEngine } from "../../src/platform/observation/observation-engine.js";
-import { TaskLifecycle } from "../../src/execution/task/task-lifecycle.js";
+import { TaskLifecycle } from "../../src/orchestrator/execution/task/task-lifecycle.js";
 import { SatisficingJudge } from "../../src/platform/drive/satisficing-judge.js";
 import { StallDetector } from "../../src/platform/drive/stall-detector.js";
-import { StrategyManager } from "../../src/strategy/strategy-manager.js";
+import { StrategyManager } from "../../src/orchestrator/strategy/strategy-manager.js";
 import { ReportingEngine } from "../../src/reporting/reporting-engine.js";
 import { DriveSystem } from "../../src/platform/drive/drive-system.js";
-import { SessionManager } from "../../src/execution/session-manager.js";
+import { SessionManager } from "../../src/orchestrator/execution/session-manager.js";
 import { TrustManager } from "../../src/platform/traits/trust-manager.js";
-import { CoreLoop, type CoreLoopDeps } from "../../src/loop/core-loop.js";
-import { AdapterRegistry } from "../../src/execution/adapter-layer.js";
-import type { IAdapter, AgentTask, AgentResult } from "../../src/execution/adapter-layer.js";
+import { CoreLoop, type CoreLoopDeps } from "../../src/orchestrator/loop/core-loop.js";
+import { AdapterRegistry } from "../../src/orchestrator/execution/adapter-layer.js";
+import type { IAdapter, AgentTask, AgentResult } from "../../src/orchestrator/execution/adapter-layer.js";
 
 // ─── Pure function modules ───
 import * as GapCalculator from "../../src/platform/drive/gap-calculator.js";
@@ -44,7 +44,7 @@ import type { ZodSchema } from "zod";
 import type { CompletionJudgment } from "../../src/base/types/satisficing.js";
 import type { GapVector } from "../../src/base/types/gap.js";
 import type { DriveScore } from "../../src/base/types/drive.js";
-import type { TaskCycleResult } from "../../src/execution/task/task-lifecycle.js";
+import type { TaskCycleResult } from "../../src/orchestrator/execution/task/task-lifecycle.js";
 import type { IDataSourceAdapter } from "../../src/platform/observation/data-source-adapter.js";
 import type { DataSourceConfig, DataSourceResult, DataSourceQuery } from "../../src/base/types/data-source.js";
 import { makeTempDir } from "../helpers/temp-dir.js";

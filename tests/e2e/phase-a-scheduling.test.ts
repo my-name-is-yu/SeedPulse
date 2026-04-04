@@ -21,7 +21,7 @@ import { DriveSystem } from "../../src/platform/drive/drive-system.js";
 import { PIDManager } from "../../src/runtime/pid-manager.js";
 import { Logger } from "../../src/runtime/logger.js";
 import type { DaemonDeps } from "../../src/runtime/daemon-runner.js";
-import type { LoopResult } from "../../src/loop/core-loop.js";
+import type { LoopResult } from "../../src/orchestrator/loop/core-loop.js";
 import { makeTempDir, cleanupTempDir } from "../helpers/temp-dir.js";
 import { createMockLLMClient } from "../helpers/mock-llm.js";
 import { makeGoal } from "../helpers/fixtures.js";
@@ -53,7 +53,7 @@ function buildDaemonRunner(
   };
 
   const deps: DaemonDeps = {
-    coreLoop: coreLoop as unknown as import("../../src/loop/core-loop.js").CoreLoop,
+    coreLoop: coreLoop as unknown as import("../../src/orchestrator/loop/core-loop.js").CoreLoop,
     driveSystem,
     stateManager,
     pidManager,
@@ -391,7 +391,7 @@ describe("Phase A — DaemonRunner proactive tick", () => {
           startedAt: new Date().toISOString(),
           completedAt: new Date().toISOString(),
         }),
-      } as unknown as import("../../src/loop/core-loop.js").CoreLoop,
+      } as unknown as import("../../src/orchestrator/loop/core-loop.js").CoreLoop,
       driveSystem,
       stateManager,
       pidManager,

@@ -10,7 +10,7 @@ import {
   buildThreshold,
   deduplicateDimensionKeys,
   findBestDimensionMatch,
-} from "../../src/goal/goal-validation.js";
+} from "../../src/orchestrator/goal/goal-validation.js";
 
 describe("test_example", () => {
   describe("buildThreshold", () => {

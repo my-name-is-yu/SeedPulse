@@ -14,19 +14,19 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { StateManager } from "../../src/base/state/state-manager.js";
-import { TaskLifecycle } from "../../src/execution/task/task-lifecycle.js";
+import { TaskLifecycle } from "../../src/orchestrator/execution/task/task-lifecycle.js";
 import { TrustManager } from "../../src/platform/traits/trust-manager.js";
-import { SessionManager } from "../../src/execution/session-manager.js";
-import { StrategyManager } from "../../src/strategy/strategy-manager.js";
+import { SessionManager } from "../../src/orchestrator/execution/session-manager.js";
+import { StrategyManager } from "../../src/orchestrator/strategy/strategy-manager.js";
 import { StallDetector } from "../../src/platform/drive/stall-detector.js";
-import { CoreLoop, type CoreLoopDeps } from "../../src/loop/core-loop.js";
+import { CoreLoop, type CoreLoopDeps } from "../../src/orchestrator/loop/core-loop.js";
 import type { Goal } from "../../src/base/types/goal.js";
 import type { Task, VerificationResult } from "../../src/base/types/task.js";
-import type { IAdapter, AgentTask, AgentResult } from "../../src/execution/adapter-layer.js";
+import type { IAdapter, AgentTask, AgentResult } from "../../src/orchestrator/execution/adapter-layer.js";
 import type { GapVector } from "../../src/base/types/gap.js";
 import type { DriveScore } from "../../src/base/types/drive.js";
 import type { CompletionJudgment } from "../../src/base/types/satisficing.js";
-import type { TaskCycleResult } from "../../src/execution/task/task-lifecycle.js";
+import type { TaskCycleResult } from "../../src/orchestrator/execution/task/task-lifecycle.js";
 import type { ILLMClient } from "../../src/base/llm/llm-client.js";
 import { makeTempDir } from "../helpers/temp-dir.js";
 
