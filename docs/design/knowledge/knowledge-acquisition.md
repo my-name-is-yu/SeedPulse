@@ -149,7 +149,18 @@ Investigation tasks tend to sprawl. They can expand indefinitely in the directio
 
 ## 4. Means of Knowledge Acquisition
 
-Execution of knowledge acquisition tasks is fully delegated to agents, in accordance with `execution-boundary.md`. PulSeed does not conduct investigations itself.
+Execution of knowledge acquisition tasks follows a **tool-first, then delegate** approach. For questions answerable from local files or simple HTTP requests, PulSeed uses its built-in read-only tools directly, without spawning an agent session. Agent delegation is the fallback for questions requiring multi-step reasoning, web search, or human interaction — in accordance with `execution-boundary.md`.
+
+**Tool-first research (before agent delegation)**:
+
+| Tool | What it answers |
+|------|----------------|
+| Grep | Search codebase for patterns, function definitions, imports |
+| Read | Read specific files (design docs, READMEs, configs) |
+| Glob | Discover file structure and find relevant files by name pattern |
+| HttpFetch | Fetch external documentation (GET/HEAD only — read-only, no side effects) |
+
+When tools are insufficient — e.g., the answer requires multi-step reasoning, synthesising across many sources, web search, or human judgment — PulSeed falls back to generating an investigation task and delegating it to a research agent (the existing path described in §3).
 
 ### 4.1 Delegatable Investigation Methods
 
