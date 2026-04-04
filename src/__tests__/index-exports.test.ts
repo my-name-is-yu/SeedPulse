@@ -4,7 +4,7 @@ describe("src/index.ts exports", () => {
   it("re-exports core symbols from their source modules", async () => {
     const barrel = await import("../index.js");
     const llmModule = await import("../base/llm/llm-client.js");
-    const ethicsModule = await import("../traits/ethics-gate.js");
+    const ethicsModule = await import("../platform/traits/ethics-gate.js");
     const stateModule = await import("../base/state/state-manager.js");
 
     expect(barrel.LLMClient).toBe(llmModule.LLMClient);

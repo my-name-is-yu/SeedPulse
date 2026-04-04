@@ -328,7 +328,7 @@ export async function selectForWorkingMemory(
 
 async function loadShortTermEntry(
   deps: Pick<MemorySelectionDeps, "memoryDir">,
-  idxEntry: import("../../base/types/memory-lifecycle.js").MemoryIndexEntry
+  idxEntry: import("../../../base/types/memory-lifecycle.js").MemoryIndexEntry
 ): Promise<ShortTermEntry | undefined> {
   const dataFilePath = path.join(
     deps.memoryDir,
@@ -357,7 +357,7 @@ export async function searchCrossGoalLessons(
   query: string,
   topK = 5
 ): Promise<LessonEntry[]> {
-  const { LessonEntrySchema } = await import("../../base/types/memory-lifecycle.js");
+  const { LessonEntrySchema } = await import("../../../base/types/memory-lifecycle.js");
 
   if (deps.vectorIndex) {
     // Semantic search in vector index
@@ -396,7 +396,7 @@ export async function searchCrossGoalLessons(
   }
 
   // Fallback: tag-based global search
-  const { LessonEntrySchema: LessonSchema } = await import("../../base/types/memory-lifecycle.js");
+  const { LessonEntrySchema: LessonSchema } = await import("../../../base/types/memory-lifecycle.js");
   const globalPath = path.join(
     deps.memoryDir,
     "long-term",
