@@ -188,4 +188,6 @@ export { TrustStateTool } from "./tools/builtin/trust-state.js";
 export { SessionHistoryTool } from "./tools/builtin/session-history.js";
 export { KnowledgeQueryTool } from "./tools/builtin/knowledge-query.js";
 export { ProgressHistoryTool } from "./tools/builtin/progress-history.js";
+export { WebSearchTool, createWebSearchClient } from "./tools/builtin/web-search.js";
+export type { ISearchClient, SearchResult } from "./tools/builtin/web-search.js";
 export type { BuiltinToolDeps } from "./tools/builtin/index.js";
