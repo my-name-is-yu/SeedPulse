@@ -1,2 +1,2 @@
 // Re-export from new location for backward compatibility
-export * from "../strategy/types/portfolio.js";
+export * from "../../strategy/types/portfolio.js";

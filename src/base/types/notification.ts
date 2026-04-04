@@ -1,2 +1,2 @@
 // Re-export from new location for backward compatibility
-export * from "../runtime/types/notification.js";
+export * from "../../runtime/types/notification.js";

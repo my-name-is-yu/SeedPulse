@@ -30,8 +30,8 @@ vi.mock("../../loop/core-loop.js", async (importOriginal) => {
   };
 });
 
-vi.mock("../../goal/goal-negotiator.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../goal/goal-negotiator.js")>();
+vi.mock("../../../goal/goal-negotiator.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../goal/goal-negotiator.js")>();
   return {
     ...actual,
     GoalNegotiator: vi.fn(),
@@ -102,8 +102,8 @@ vi.mock("../../reporting/reporting-engine.js", async (importOriginal) => {
   };
 });
 
-import { CLIRunner } from "../../cli/cli-runner.js";
-import { GoalNegotiator } from "../../goal/goal-negotiator.js";
+import { CLIRunner } from "../../../cli/cli-runner.js";
+import { GoalNegotiator } from "../../../goal/goal-negotiator.js";
 import { SuggestOutputSchema } from "../suggest.js";
 import { makeTempDir } from "../../../tests/helpers/temp-dir.js";
 
