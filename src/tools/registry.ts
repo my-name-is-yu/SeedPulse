@@ -53,6 +53,24 @@ export class ToolRegistry {
     return [...this.baseCatalog.values()];
   }
 
+  searchTools(query: string, category?: string): Array<{ name: string; description: string; category: string; tags: string[] }> {
+    const keywords = query.toLowerCase().split(/\s+/).filter(Boolean);
+    return this.listAll()
+      .filter((tool) => {
+        if (category && !tool.metadata.tags.includes(category)) return false;
+        const name = tool.metadata.name.toLowerCase();
+        const desc = tool.description().toLowerCase();
+        const tags = tool.metadata.tags.map((t) => t.toLowerCase());
+        return keywords.some((kw) => name.includes(kw) || desc.includes(kw) || tags.some((t) => t.includes(kw)));
+      })
+      .map((tool) => ({
+        name: tool.metadata.name,
+        description: tool.description(),
+        category: tool.metadata.tags[0] ?? "",
+        tags: tool.metadata.tags,
+      }));
+  }
+
   // --- Tier 2: Context Filtering ---
 
   filterByContext(filter: ContextFilter): ITool[] {

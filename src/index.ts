@@ -190,4 +190,5 @@ export { KnowledgeQueryTool } from "./tools/builtin/knowledge-query.js";
 export { ProgressHistoryTool } from "./tools/builtin/progress-history.js";
 export { WebSearchTool, createWebSearchClient } from "./tools/builtin/web-search.js";
 export type { ISearchClient, SearchResult } from "./tools/builtin/web-search.js";
+export { ToolSearchTool } from "./tools/builtin/tool-search.js";
 export type { BuiltinToolDeps } from "./tools/builtin/index.js";
