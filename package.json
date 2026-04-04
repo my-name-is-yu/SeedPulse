@@ -46,7 +46,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "test": "vitest run --exclude tests/e2e",
     "test:all": "vitest run",
     "test:e2e": "vitest run tests/e2e",
