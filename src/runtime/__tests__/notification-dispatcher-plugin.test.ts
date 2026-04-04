@@ -128,7 +128,7 @@ describe("NotificationDispatcher — NotifierRegistry integration", () => {
     const notifier = makeNotifier("catch-all", ["goal_complete", "stall_detected", "approval_needed"]);
     registry.register("catch-all", notifier);
 
-    await dispatcher.dispatch(makeReport({ report_type: "unknown_custom_type" }));
+    await dispatcher.dispatch(makeReport({ report_type: "unknown_custom_type" as any }));
 
     expect(notifier.notify).not.toHaveBeenCalled();
   });

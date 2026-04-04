@@ -138,8 +138,8 @@ describe("file watcher — detects new JSON files", () => {
 
     for (let i = 0; i < 3; i++) {
       writeEventFile(eventsDir, `event_00${i}.json`, { ...validEvent, data: { index: i } });
-      // Small delay to avoid rename collisions on some OSes
-      await new Promise((r) => setTimeout(r, 30));
+      // Delay to allow fs.watch to settle between files (macOS double-fires, 60ms+ per file)
+      await new Promise((r) => setTimeout(r, 150));
     }
 
     await waitFor(() => mockDriveSystem.writeEvent.mock.calls.length >= 3, 8000);

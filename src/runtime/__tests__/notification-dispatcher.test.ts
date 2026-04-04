@@ -109,6 +109,7 @@ describe("dispatch() — Slack channel", () => {
         {
           type: "slack",
           webhook_url: `http://127.0.0.1:${port}/slack`,
+          report_types: [] as string[],
           format: "compact",
         },
       ],
@@ -128,6 +129,7 @@ describe("dispatch() — Slack channel", () => {
         {
           type: "slack",
           webhook_url: `http://127.0.0.1:${port}/slack`,
+          report_types: [] as string[],
           format: "compact",
         },
       ],
@@ -149,6 +151,7 @@ describe("dispatch() — Slack channel", () => {
         {
           type: "slack",
           webhook_url: `http://127.0.0.1:${port}/slack`,
+          report_types: [] as string[],
           format: "full",
         },
       ],
@@ -182,6 +185,7 @@ describe("dispatch() — Slack channel", () => {
           {
             type: "slack",
             webhook_url: `http://127.0.0.1:${errPort}/slack`,
+          report_types: [] as string[],
             format: "compact",
           },
         ],
@@ -217,6 +221,8 @@ describe("dispatch() — Webhook channel", () => {
         {
           type: "webhook",
           url: `http://127.0.0.1:${port}/hook`,
+          report_types: [] as string[],
+          format: "json",
         },
       ],
     });
@@ -234,6 +240,8 @@ describe("dispatch() — Webhook channel", () => {
         {
           type: "webhook",
           url: `http://127.0.0.1:${port}/hook`,
+          report_types: [] as string[],
+          format: "json",
         },
       ],
     });
@@ -262,7 +270,9 @@ describe("dispatch() — Webhook channel", () => {
         {
           type: "webhook",
           url: `http://127.0.0.1:${port}/hook`,
+          report_types: [] as string[],
           headers: { "X-Custom-Header": "test-value" },
+          format: "json",
         },
       ],
     });
@@ -279,6 +289,8 @@ describe("dispatch() — Webhook channel", () => {
         {
           type: "webhook",
           url: "http://127.0.0.1:1/nonexistent",
+          report_types: [] as string[],
+          format: "json",
         },
       ],
     });
@@ -304,6 +316,8 @@ describe("dispatch() — Email channel", () => {
             secure: true,
             auth: { user: "user", pass: "pass" },
           },
+        report_types: [] as string[],
+        format: "full" as const,
         },
       ],
     });
@@ -340,6 +354,8 @@ describe("dispatch() — DND suppression", () => {
             secure: true,
             auth: { user: "u", pass: "p" },
           },
+        report_types: [] as string[],
+        format: "full" as const,
         },
       ],
       do_not_disturb: {
@@ -372,6 +388,8 @@ describe("dispatch() — DND suppression", () => {
             secure: true,
             auth: { user: "u", pass: "p" },
           },
+        report_types: [] as string[],
+        format: "full" as const,
         },
       ],
       do_not_disturb: {
@@ -404,6 +422,8 @@ describe("dispatch() — DND suppression", () => {
             secure: true,
             auth: { user: "u", pass: "p" },
           },
+        report_types: [] as string[],
+        format: "full" as const,
         },
       ],
       do_not_disturb: {
@@ -436,6 +456,8 @@ describe("dispatch() — DND suppression", () => {
             secure: true,
             auth: { user: "u", pass: "p" },
           },
+        report_types: [] as string[],
+        format: "full" as const,
         },
       ],
       do_not_disturb: {
@@ -502,6 +524,8 @@ describe("dispatch() — DND suppression", () => {
             secure: true,
             auth: { user: "u", pass: "p" },
           },
+        report_types: [] as string[],
+        format: "full" as const,
         },
       ],
       do_not_disturb: {
@@ -541,11 +565,13 @@ describe("dispatch() — Cooldown", () => {
         {
           type: "webhook",
           url: `http://127.0.0.1:${port}/hook`,
+          report_types: [] as string[],
+          format: "json",
         },
       ],
       cooldown: {
         stall_escalation: 60, // 60-minute cooldown
-      },
+      } as any,
     });
 
     const report = createMockReport({ report_type: "stall_escalation" });
@@ -569,11 +595,13 @@ describe("dispatch() — Cooldown", () => {
         {
           type: "webhook",
           url: `http://127.0.0.1:${port}/hook`,
+          report_types: [] as string[],
+          format: "json",
         },
       ],
       cooldown: {
         stall_escalation: 1, // 1-minute cooldown
-      },
+      } as any,
     });
 
     const report = createMockReport({ report_type: "stall_escalation" });
@@ -594,11 +622,13 @@ describe("dispatch() — Cooldown", () => {
         {
           type: "webhook",
           url: `http://127.0.0.1:${port}/hook`,
+          report_types: [] as string[],
+          format: "json",
         },
       ],
       cooldown: {
         urgent_alert: 0,
-      },
+      } as any,
     });
 
     const report = createMockReport({ report_type: "urgent_alert" });
@@ -631,6 +661,7 @@ describe("dispatch() — report type filtering", () => {
           type: "webhook",
           url: `http://127.0.0.1:${port}/hook`,
           report_types: ["urgent_alert"],
+          format: "json",
         },
       ],
     });
@@ -650,6 +681,7 @@ describe("dispatch() — report type filtering", () => {
           type: "webhook",
           url: `http://127.0.0.1:${port}/hook`,
           report_types: ["urgent_alert"],
+          format: "json",
         },
       ],
     });
@@ -667,7 +699,8 @@ describe("dispatch() — report type filtering", () => {
         {
           type: "webhook",
           url: `http://127.0.0.1:${port}/hook`,
-          report_types: [],
+          report_types: [] as string[],
+          format: "json",
         },
       ],
     });
@@ -686,6 +719,7 @@ describe("dispatch() — report type filtering", () => {
           type: "webhook",
           url: `http://127.0.0.1:${port}/hook`,
           report_types: ["urgent_alert"],
+          format: "json",
         },
         {
           type: "email",
@@ -697,7 +731,8 @@ describe("dispatch() — report type filtering", () => {
             auth: { user: "u", pass: "p" },
           },
           report_types: ["execution_summary"],
-        },
+          format: "full" as const,
+          },
       ],
     });
 
@@ -727,6 +762,8 @@ describe("dispatch() — Email SMTP implementation", () => {
       secure: true,
       auth: { user: "sender@example.com", pass: "secret" },
     },
+    report_types: [] as string[],
+    format: "full" as const,
   };
 
   beforeEach(() => {
@@ -812,6 +849,8 @@ describe("dispatch() — per-goal overrides", () => {
             secure: true,
             auth: { user: "u", pass: "p" },
           },
+        report_types: [] as string[],
+        format: "full" as const,
         },
       ],
       goal_overrides: [
@@ -821,7 +860,9 @@ describe("dispatch() — per-goal overrides", () => {
             {
               type: "webhook",
               url: `http://127.0.0.1:${port}/hook`,
-            },
+          report_types: [] as string[],
+              format: "json",
+        },
           ],
         },
       ],
@@ -844,6 +885,8 @@ describe("dispatch() — per-goal overrides", () => {
         {
           type: "webhook",
           url: `http://127.0.0.1:${port}/hook`,
+          report_types: [] as string[],
+          format: "json",
         },
       ],
       goal_overrides: [
@@ -859,6 +902,8 @@ describe("dispatch() — per-goal overrides", () => {
                 secure: true,
                 auth: { user: "u", pass: "p" },
               },
+        report_types: [] as string[],
+        format: "full" as const,
             },
           ],
         },
@@ -881,6 +926,8 @@ describe("dispatch() — per-goal overrides", () => {
         {
           type: "webhook",
           url: `http://127.0.0.1:${port}/hook`,
+          report_types: [] as string[],
+          format: "json",
         },
       ],
       goal_overrides: [
@@ -896,6 +943,8 @@ describe("dispatch() — per-goal overrides", () => {
                 secure: true,
                 auth: { user: "u", pass: "p" },
               },
+        report_types: [] as string[],
+        format: "full" as const,
             },
           ],
         },

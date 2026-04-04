@@ -524,6 +524,7 @@ describe("Phase A — DaemonRunner adaptive sleep (calculateAdaptiveInterval)", 
 
   afterEach(async () => {
     await daemonLogger.close();
+    await new Promise((r) => setTimeout(r, 50)); // ensure file handles are released
     cleanupTempDir(tempDir);
     vi.useRealTimers();
   });
@@ -531,16 +532,25 @@ describe("Phase A — DaemonRunner adaptive sleep (calculateAdaptiveInterval)", 
   // ── Test 12: Adaptive sleep disabled — returns base interval unchanged ──
 
   it("returns baseInterval unchanged when adaptive_sleep is disabled", () => {
-    const stateManager = new StateManager(tempDir);
-    const { runner: d } = buildDaemonRunner(tempDir, stateManager, {
-      configOverride: {
-        adaptive_sleep: { enabled: false },
-        check_interval_ms: 300_000,
-      },
-    });
+    // Use a separate tempDir2 to avoid Logger file-handle contention with the outer beforeEach runner
+    const tempDir2 = makeTempDir("pulseed-adaptive-disabled-test-");
+    let logger2: Logger | undefined;
+    try {
+      const stateManager2 = new StateManager(tempDir2);
+      let d: DaemonRunner;
+      ({ runner: d, logger: logger2 } = buildDaemonRunner(tempDir2, stateManager2, {
+        configOverride: {
+          adaptive_sleep: { enabled: false },
+          check_interval_ms: 300_000,
+        },
+      }));
 
-    const result = d.calculateAdaptiveInterval(300_000, 0, 0, 0);
-    expect(result).toBe(300_000);
+      const result = d.calculateAdaptiveInterval(300_000, 0, 0, 0);
+      expect(result).toBe(300_000);
+    } finally {
+      void logger2?.close();
+      cleanupTempDir(tempDir2);
+    }
   });
 
   // ── Test 13: Night-time multiplier doubles the interval ──

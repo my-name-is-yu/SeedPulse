@@ -78,13 +78,26 @@ describe("json parse failure regressions", () => {
     driveSystem.startWatcher((event) => {
       received.push(event);
     });
-    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Poll until the watcher is actually active (avoids fixed-timeout flakiness)
+    {
+      const deadline = Date.now() + 2000;
+      while (!(driveSystem as unknown as { watcher: unknown }).watcher && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 20));
+      }
+    }
 
     const eventsDir = path.join(tmpDir, "events");
     fs.writeFileSync(path.join(eventsDir, "bad.json"), "{ not valid json", "utf-8");
     fs.writeFileSync(path.join(eventsDir, "good.json"), JSON.stringify(makeEvent()), "utf-8");
 
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    // Poll until the valid event arrives (avoids fixed-timeout flakiness on slow disks)
+    {
+      const deadline = Date.now() + 2000;
+      while (received.length < 1 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    }
 
     expect(received).toHaveLength(1);
     expect(received[0]?.source).toBe("regression-test");
