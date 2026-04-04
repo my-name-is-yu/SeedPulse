@@ -228,8 +228,8 @@ describe("ToolExecutor", () => {
         });
         const { executor } = createExecutor([tool]);
         const ctx = createMockContext();
-        // Path traversal pointing to /etc
-        const result = await executor.execute("mock-tool", { value: "x", path: "../../etc/passwd" }, ctx);
+        // Path traversal that resolves to /etc (6 levels up from repo root)
+        const result = await executor.execute("mock-tool", { value: "x", path: "../../../../../../etc/passwd" }, ctx);
         expect(result.success).toBe(false);
         expect(result.error).toContain("sanitization failed");
       });
