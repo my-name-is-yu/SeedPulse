@@ -41,6 +41,11 @@ export class ToolExecutor {
     }
 
     const startTime = Date.now();
+    const logger = context.logger;
+    const callId = context.callId;
+    const sessionId = context.sessionId;
+
+    logger?.debug("tool.call.start", { tool: toolName, callId, sessionId });
 
     // --- Gate 1: Input Validation (Zod) ---
     const parseResult = tool.inputSchema.safeParse(rawInput);
@@ -99,30 +104,50 @@ export class ToolExecutor {
     }
 
     // --- Gate 5: Concurrency Control ---
-    const result = await this.concurrency.run(
-      tool,
-      input,
-      async () => {
-        if (context.timeoutMs) {
-          return this.withTimeout(
-            () => tool.call(input, context),
-            context.timeoutMs,
-          );
-        }
-        return tool.call(input, context);
-      },
-    );
+    let result: ToolResult;
+    try {
+      result = await this.concurrency.run(
+        tool,
+        input,
+        async () => {
+          if (context.dryRun) {
+            return {
+              success: true,
+              data: null,
+              summary: "dry-run: skipped",
+              durationMs: 0,
+            };
+          }
+          const callFn = () => tool.call(input, context);
+          const isSafe = tool.isConcurrencySafe(input);
+          if (context.timeoutMs) {
+            return this.withTimeout(
+              () => this.callWithRetry(callFn, tool.metadata.name, isSafe),
+              context.timeoutMs,
+            );
+          }
+          return this.callWithRetry(callFn, tool.metadata.name, isSafe);
+        },
+      );
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      logger?.warn("tool.call.failure", { tool: toolName, callId, error });
+      throw err;
+    }
 
     // --- Output Truncation ---
     if (result.data) {
       const serialized = JSON.stringify(result.data);
       if (serialized.length > tool.metadata.maxOutputChars) {
-        const truncated = serialized.slice(0, tool.metadata.maxOutputChars);
-        result.data = truncated;
-        result.summary = `${result.summary} [truncated: ${serialized.length - tool.metadata.maxOutputChars} chars omitted]`;
+        const originalLength = serialized.length;
+        const truncatedStr = serialized.slice(0, tool.metadata.maxOutputChars);
+        result.data = truncatedStr;
+        result.summary = `${result.summary} [truncated: ${originalLength - tool.metadata.maxOutputChars} chars omitted]`;
+        result.truncated = { originalChars: originalLength };
       }
     }
 
+    logger?.debug("tool.call.success", { tool: toolName, callId, durationMs: Date.now() - startTime });
     return result;
   }
 
@@ -214,6 +239,59 @@ export class ToolExecutor {
         ),
       ),
     ]);
+  }
+
+  /**
+   * Retry a tool call for transient network/IO errors.
+   * Only retries if the tool is concurrency-safe (idempotent).
+   * Backoff: 500ms, 1000ms.
+   */
+  private async callWithRetry(
+    fn: () => Promise<ToolResult>,
+    toolName: string,
+    isSafe: boolean,
+  ): Promise<ToolResult> {
+    const TRANSIENT_PATTERNS = [
+      "ECONNRESET",
+      "ETIMEDOUT",
+      "ENOTFOUND",
+      "fetch failed",
+      "socket hang up",
+    ];
+    const BACKOFFS = [500, 1000];
+
+    const isTransient = (err: unknown): boolean => {
+      const msg = err instanceof Error ? err.message : String(err);
+      return TRANSIENT_PATTERNS.some((p) => msg.includes(p));
+    };
+
+    const attempts = isSafe ? BACKOFFS.length + 1 : 1;
+
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        if (!isSafe || !isTransient(err) || attempt >= BACKOFFS.length) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          return {
+            success: false,
+            data: null,
+            summary: `Tool ${toolName} failed: ${errMsg}`,
+            error: errMsg,
+            durationMs: 0,
+          };
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, BACKOFFS[attempt]));
+      }
+    }
+
+    return {
+      success: false,
+      data: null,
+      summary: `Tool ${toolName} failed after retries`,
+      error: `Tool ${toolName} failed after retries`,
+      durationMs: 0,
+    };
   }
 
   private failResult(error: string, durationMs: number): ToolResult {
