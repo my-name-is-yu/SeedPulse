@@ -33,14 +33,14 @@ export async function fetchGitDiffContext(options: ObservationEngineOptions, max
     return options.gitContextFetcher(maxChars);
   }
 
-  // Use ToolExecutor + GitDiffTool when available (preferred path)
+  // Use ToolExecutor + GitDiffTool when available (preferred path, falls through to execFile on failure)
   if (toolExecutor) {
     const ctx: ToolCallContext = {
       cwd: cwd ?? process.cwd(),
       goalId: "observation",
       trustBalance: 0,
       preApproved: true,
-      approvalFn: async () => false,
+      approvalFn: async () => true,
       sessionId: "observation",
       callId: "obs-git-context",
     };
@@ -56,9 +56,8 @@ export async function fetchGitDiffContext(options: ObservationEngineOptions, max
         return "[git diff]\n\n" + truncated.trim();
       }
     } catch {
-      // fall through to execFile fallback
+      // fall through to execFile fallback below
     }
-    return "";
   }
 
   const execOptions = { timeout: 10000, encoding: "utf8" as const, ...(cwd ? { cwd } : {}) };
