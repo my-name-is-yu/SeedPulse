@@ -8,7 +8,11 @@ import React, { useState } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
 import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
-import { renderMarkdownLines, type MarkdownLine, type MarkdownSegment } from "./markdown-renderer.js";
+import {
+  renderMarkdownLines,
+  type MarkdownLine,
+  type MarkdownSegment,
+} from "./markdown-renderer.js";
 import { fuzzyMatch, fuzzyFilter } from "./fuzzy.js";
 import { theme, getMessageTypeColor } from "./theme.js";
 import { pickSpinnerVerb } from "./spinner-verbs.js";
@@ -31,7 +35,6 @@ interface ChatProps {
   goalNames?: string[];
 }
 
-
 function formatTime(date: Date): string {
   return date.toLocaleTimeString("en-US", {
     hour12: false,
@@ -41,15 +44,33 @@ function formatTime(date: Date): string {
 }
 
 /** Render a single inline segment with its formatting */
-function SegmentComponent({ seg, baseColor }: { seg: MarkdownSegment; baseColor?: string }) {
+function SegmentComponent({
+  seg,
+  baseColor,
+}: {
+  seg: MarkdownSegment;
+  baseColor?: string;
+}) {
   if (seg.bold && seg.italic) {
-    return <Text bold italic color={seg.color ?? baseColor}>{seg.text}</Text>;
+    return (
+      <Text bold italic color={seg.color ?? baseColor}>
+        {seg.text}
+      </Text>
+    );
   }
   if (seg.bold) {
-    return <Text bold color={seg.color ?? baseColor}>{seg.text}</Text>;
+    return (
+      <Text bold color={seg.color ?? baseColor}>
+        {seg.text}
+      </Text>
+    );
   }
   if (seg.italic) {
-    return <Text italic color={seg.color ?? baseColor}>{seg.text}</Text>;
+    return (
+      <Text italic color={seg.color ?? baseColor}>
+        {seg.text}
+      </Text>
+    );
   }
   if (seg.code) {
     return <Text color={theme.codeInline}>{seg.text}</Text>;
@@ -93,12 +114,18 @@ function MarkdownLineComponent({
 }
 
 /** Memoized message row — prevents spinner re-renders from flickering messages */
-const MessageRow = React.memo(function MessageRow({ msg }: { msg: ChatMessage }) {
+const MessageRow = React.memo(function MessageRow({
+  msg,
+}: {
+  msg: ChatMessage;
+}) {
   if (msg.role === "user") {
     return (
-      <Box marginBottom={0}>
+      <Box marginBottom={1}>
         <Box paddingX={1}>
-          <Text color="#1A1A1A" backgroundColor="#D9D9D9">◉ {msg.text}</Text>
+          <Text color="#1A1A1A" backgroundColor="#D9D9D9">
+            ◉ {msg.text}
+          </Text>
         </Box>
       </Box>
     );
@@ -109,11 +136,7 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: ChatMessage })
     <Box flexDirection="column" marginBottom={1} marginLeft={2}>
       <Box flexDirection="column">
         {mdLines.map((line, j) => (
-          <MarkdownLineComponent
-            key={j}
-            line={line}
-            color={typeColor}
-          />
+          <MarkdownLineComponent key={j} line={line} color={typeColor} />
         ))}
       </Box>
     </Box>
@@ -128,19 +151,57 @@ type Suggestion = {
 };
 
 const COMMANDS: Suggestion[] = [
-  { name: "/run", aliases: ["/start"], description: "Start the goal loop", type: "command" },
-  { name: "/stop", aliases: ["/quit"], description: "Stop the running loop", type: "command" },
-  { name: "/status", aliases: [], description: "Show current progress", type: "command" },
-  { name: "/report", aliases: [], description: "Generate a summary report", type: "command" },
-  { name: "/goals", aliases: [], description: "List all goals", type: "command" },
-  { name: "/help", aliases: ["?"], description: "Show help overlay", type: "command" },
-  { name: "/dashboard", aliases: [], description: "Toggle dashboard sidebar", type: "command" as const },
+  {
+    name: "/run",
+    aliases: ["/start"],
+    description: "Start the goal loop",
+    type: "command",
+  },
+  {
+    name: "/stop",
+    aliases: ["/quit"],
+    description: "Stop the running loop",
+    type: "command",
+  },
+  {
+    name: "/status",
+    aliases: [],
+    description: "Show current progress",
+    type: "command",
+  },
+  {
+    name: "/report",
+    aliases: [],
+    description: "Generate a summary report",
+    type: "command",
+  },
+  {
+    name: "/goals",
+    aliases: [],
+    description: "List all goals",
+    type: "command",
+  },
+  {
+    name: "/help",
+    aliases: ["?"],
+    description: "Show help overlay",
+    type: "command",
+  },
+  {
+    name: "/dashboard",
+    aliases: [],
+    description: "Toggle dashboard sidebar",
+    type: "command" as const,
+  },
 ];
 
 /** Commands that accept a goal name as argument */
 const GOAL_ARG_COMMANDS = ["/run ", "/start "];
 
-function getMatchingSuggestions(input: string, goalNames: string[]): Suggestion[] {
+function getMatchingSuggestions(
+  input: string,
+  goalNames: string[],
+): Suggestion[] {
   if (!input.startsWith("/")) return [];
 
   // Check if user typed a command that expects a goal name argument
@@ -162,7 +223,7 @@ function getMatchingSuggestions(input: string, goalNames: string[]): Suggestion[
 
   // Show all commands when query is empty (just "/")
   if (!query) {
-    return COMMANDS.map(cmd => ({ ...cmd }));
+    return COMMANDS.map((cmd) => ({ ...cmd }));
   }
 
   const scored: Array<{ cmd: Suggestion; score: number }> = [];
@@ -172,15 +233,16 @@ function getMatchingSuggestions(input: string, goalNames: string[]): Suggestion[
     const nameScore = fuzzyMatch(query, cmd.name.slice(1));
     // Try matching against aliases
     const aliasScores = cmd.aliases.map((a) =>
-      a.startsWith("/") ? fuzzyMatch(query, a.slice(1)) : fuzzyMatch(query, a)
+      a.startsWith("/") ? fuzzyMatch(query, a.slice(1)) : fuzzyMatch(query, a),
     );
     const bestAlias = aliasScores.reduce<number | null>(
       (best, s) => (s !== null && (best === null || s > best) ? s : best),
-      null
+      null,
     );
-    const best = nameScore !== null && (bestAlias === null || nameScore >= bestAlias)
-      ? nameScore
-      : bestAlias;
+    const best =
+      nameScore !== null && (bestAlias === null || nameScore >= bestAlias)
+        ? nameScore
+        : bestAlias;
 
     if (best !== null) {
       scored.push({ cmd, score: best });
@@ -191,7 +253,13 @@ function getMatchingSuggestions(input: string, goalNames: string[]): Suggestion[
   return scored.slice(0, 6).map((s) => s.cmd);
 }
 
-export function Chat({ messages, onSubmit, onClear, isProcessing, goalNames = [] }: ChatProps) {
+export function Chat({
+  messages,
+  onSubmit,
+  onClear,
+  isProcessing,
+  goalNames = [],
+}: ChatProps) {
   const [input, setInput] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(0);
   // Tracks whether a suggestion was just selected so getMatchingSuggestions
@@ -205,7 +273,9 @@ export function Chat({ messages, onSubmit, onClear, isProcessing, goalNames = []
 
   // ── Empty-enter hint ──
   const [emptyHint, setEmptyHint] = React.useState(false);
-  const emptyHintTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const emptyHintTimer = React.useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   // ── Scroll offset for chat scroll ──
   const [scrollOffset, setScrollOffset] = React.useState(0);
@@ -221,7 +291,9 @@ export function Chat({ messages, onSubmit, onClear, isProcessing, goalNames = []
     return () => clearInterval(interval);
   }, [isProcessing]);
 
-  const matches = justSelected.current ? [] : getMatchingSuggestions(input, goalNames);
+  const matches = justSelected.current
+    ? []
+    : getMatchingSuggestions(input, goalNames);
   const hasMatches = matches.length > 0;
 
   // Scroll-slicing: clip messages to visible terminal height
@@ -241,78 +313,89 @@ export function Chat({ messages, onSubmit, onClear, isProcessing, goalNames = []
 
   const endIdx = messages.length - scrollOffset;
   const startIdx = Math.max(0, endIdx - maxVisible);
-  const visibleMessages = messages.slice(startIdx, endIdx > 0 ? endIdx : undefined);
+  const visibleMessages = messages.slice(
+    startIdx,
+    endIdx > 0 ? endIdx : undefined,
+  );
   const hiddenAbove = startIdx;
   const hiddenBelow = scrollOffset;
 
-  useInput((inputChar, key) => {
-    // ── Scroll: Shift+↑/↓ or PageUp/PageDown ──
-    if (key.upArrow && key.shift) {
-      setScrollOffset((prev) => Math.min(prev + 3, Math.max(0, messages.length - 1)));
-      return;
-    }
-    if (key.downArrow && key.shift) {
-      setScrollOffset((prev) => Math.max(0, prev - 3));
-      return;
-    }
-    // PageUp/PageDown via escape sequences
-    if (inputChar === "[5~") {
-      setScrollOffset((prev) => Math.min(prev + 5, Math.max(0, messages.length - 1)));
-      return;
-    }
-    if (inputChar === "[6~") {
-      setScrollOffset((prev) => Math.max(0, prev - 5));
-      return;
-    }
+  useInput(
+    (inputChar, key) => {
+      // ── Scroll: Shift+↑/↓ or PageUp/PageDown ──
+      if (key.upArrow && key.shift) {
+        setScrollOffset((prev) =>
+          Math.min(prev + 3, Math.max(0, messages.length - 1)),
+        );
+        return;
+      }
+      if (key.downArrow && key.shift) {
+        setScrollOffset((prev) => Math.max(0, prev - 3));
+        return;
+      }
+      // PageUp/PageDown via escape sequences
+      if (inputChar === "[5~") {
+        setScrollOffset((prev) =>
+          Math.min(prev + 5, Math.max(0, messages.length - 1)),
+        );
+        return;
+      }
+      if (inputChar === "[6~") {
+        setScrollOffset((prev) => Math.max(0, prev - 5));
+        return;
+      }
 
-    if (hasMatches) {
-      if (key.upArrow) {
-        setSelectedIdx((prev) => (prev <= 0 ? matches.length - 1 : prev - 1));
-      } else if (key.downArrow) {
-        setSelectedIdx((prev) => (prev >= matches.length - 1 ? 0 : prev + 1));
-    } else if (key.tab || key.return) {
-      const selected = matches[selectedIdx];
-      if (selected) {
-        // Insert suggestion into input (don't submit)
-        const value = selected.type === "goal"
-          ? `${selected.name} ${selected.description}`
-          : selected.name;
-        setInput(value);
-        setSelectedIdx(0);
-        justSelected.current = true;
-      }
-    } else if (key.escape) {
-        setSelectedIdx(0);
-        setInput("");
-      }
-    } else {
-      // ── Input history: ↑↓ when no suggestions ──
-      if (key.upArrow && history.length > 0) {
-        if (historyIdx === -1) {
-          setDraft(input);
-          const idx = history.length - 1;
-          setHistoryIdx(idx);
-          setInput(history[idx]);
-        } else if (historyIdx > 0) {
-          const idx = historyIdx - 1;
-          setHistoryIdx(idx);
-          setInput(history[idx]);
+      if (hasMatches) {
+        if (key.upArrow) {
+          setSelectedIdx((prev) => (prev <= 0 ? matches.length - 1 : prev - 1));
+        } else if (key.downArrow) {
+          setSelectedIdx((prev) => (prev >= matches.length - 1 ? 0 : prev + 1));
+        } else if (key.tab || key.return) {
+          const selected = matches[selectedIdx];
+          if (selected) {
+            // Insert suggestion into input (don't submit)
+            const value =
+              selected.type === "goal"
+                ? `${selected.name} ${selected.description}`
+                : selected.name;
+            setInput(value);
+            setSelectedIdx(0);
+            justSelected.current = true;
+          }
+        } else if (key.escape) {
+          setSelectedIdx(0);
+          setInput("");
         }
-      } else if (key.downArrow && historyIdx !== -1) {
-        if (historyIdx < history.length - 1) {
-          const idx = historyIdx + 1;
-          setHistoryIdx(idx);
-          setInput(history[idx]);
-        } else {
-          setHistoryIdx(-1);
-          setInput(draft);
+      } else {
+        // ── Input history: ↑↓ when no suggestions ──
+        if (key.upArrow && history.length > 0) {
+          if (historyIdx === -1) {
+            setDraft(input);
+            const idx = history.length - 1;
+            setHistoryIdx(idx);
+            setInput(history[idx]);
+          } else if (historyIdx > 0) {
+            const idx = historyIdx - 1;
+            setHistoryIdx(idx);
+            setInput(history[idx]);
+          }
+        } else if (key.downArrow && historyIdx !== -1) {
+          if (historyIdx < history.length - 1) {
+            const idx = historyIdx + 1;
+            setHistoryIdx(idx);
+            setInput(history[idx]);
+          } else {
+            setHistoryIdx(-1);
+            setInput(draft);
+          }
         }
       }
-    }
-  }, { isActive: !isProcessing });
+    },
+    { isActive: !isProcessing },
+  );
 
   // Reset selected index when matches change
-  const matchKey = matches.map(m => m.name).join(",");
+  const matchKey = matches.map((m) => m.name).join(",");
   React.useEffect(() => {
     setSelectedIdx(0);
   }, [matchKey]);
@@ -327,8 +410,12 @@ export function Chat({ messages, onSubmit, onClear, isProcessing, goalNames = []
   // Refs for stdout intercept to access current state without re-renders
   const inputRef = React.useRef(input);
   const isProcessingRef = React.useRef(isProcessing);
-  React.useEffect(() => { inputRef.current = input; }, [input]);
-  React.useEffect(() => { isProcessingRef.current = isProcessing; }, [isProcessing]);
+  React.useEffect(() => {
+    inputRef.current = input;
+  }, [input]);
+  React.useEffect(() => {
+    isProcessingRef.current = isProcessing;
+  }, [isProcessing]);
 
   // Stdout intercept: capture frame AND position cursor via direct ANSI injection
   React.useEffect(() => {
@@ -336,13 +423,19 @@ export function Chat({ messages, onSubmit, onClear, isProcessing, goalNames = []
     const patched = function (chunk: any, ...args: any[]) {
       const result = (original as any)(chunk, ...args);
       // Only process full Ink frames (not small escape sequences)
-      if (typeof chunk === "string" && chunk.length > 50 && !isProcessingRef.current) {
+      if (
+        typeof chunk === "string" &&
+        chunk.length > 50 &&
+        !isProcessingRef.current
+      ) {
         positionCursorInFrame(chunk, inputRef.current, original);
       }
       return result;
     } as typeof process.stdout.write;
     process.stdout.write = patched;
-    return () => { process.stdout.write = original; };
+    return () => {
+      process.stdout.write = original;
+    };
   }, []);
 
   // Hide cursor during AI processing
@@ -383,7 +476,11 @@ export function Chat({ messages, onSubmit, onClear, isProcessing, goalNames = []
   return (
     <Box flexDirection="column" flexGrow={1} overflow="hidden">
       {/* Scroll indicator for older messages */}
-      {hiddenAbove > 0 && <Text dimColor>{"↑"} {hiddenAbove} earlier messages</Text>}
+      {hiddenAbove > 0 && (
+        <Text dimColor>
+          {"↑"} {hiddenAbove} earlier messages
+        </Text>
+      )}
 
       {/* All visible messages rendered with memoized rows to prevent flicker */}
       <Box flexDirection="column" flexGrow={1} justifyContent="flex-end">
@@ -406,39 +503,68 @@ export function Chat({ messages, onSubmit, onClear, isProcessing, goalNames = []
         )}
 
         {/* Scroll-down indicator */}
-        {hiddenBelow > 0 && <Text dimColor>{"↓"} {hiddenBelow} newer messages</Text>}
+        {hiddenBelow > 0 && (
+          <Text dimColor>
+            {"↓"} {hiddenBelow} newer messages
+          </Text>
+        )}
 
         {/* Input area with borders — always at bottom */}
         <Box flexDirection="column">
-          <Box borderStyle="single" borderColor={theme.border} borderBottom={false} borderLeft={false} borderRight={false} />
+          <Box
+            borderStyle="single"
+            borderColor={theme.border}
+            borderBottom={false}
+            borderLeft={false}
+            borderRight={false}
+          />
           <Box>
             <Text color={theme.userPrompt} bold>
               {"​◉ "}
             </Text>
             <TextInput
               value={input}
-              onChange={(val) => { justSelected.current = false; setInput(val); }}
+              onChange={(val) => {
+                justSelected.current = false;
+                setInput(val);
+              }}
               onSubmit={handleSubmit}
               placeholder="/ for commands"
             />
           </Box>
-          <Box borderStyle="single" borderColor={theme.border} borderTop={false} borderLeft={false} borderRight={false} />
-          {emptyHint && <Text dimColor>  Type a message or /help for commands</Text>}
+          <Box
+            borderStyle="single"
+            borderColor={theme.border}
+            borderTop={false}
+            borderLeft={false}
+            borderRight={false}
+          />
+          {emptyHint && (
+            <Text dimColor> Type a message or /help for commands</Text>
+          )}
           {hasMatches && (
             <Box flexDirection="column">
               {matches.map((suggestion, idx) => {
                 const isSelected = idx === selectedIdx;
-                const label = suggestion.type === "goal"
-                  ? `  ${suggestion.name} ${suggestion.description.padEnd(20)}  [goal]`
-                  : `  ${suggestion.name.padEnd(20)}${suggestion.description}`;
+                const label =
+                  suggestion.type === "goal"
+                    ? `  ${suggestion.name} ${suggestion.description.padEnd(20)}  [goal]`
+                    : `  ${suggestion.name.padEnd(20)}${suggestion.description}`;
                 const key = `${suggestion.type}-${suggestion.name}-${suggestion.description}`;
                 return isSelected ? (
-                  <Text key={key} bold color={theme.selected}>{label}</Text>
+                  <Text key={key} bold color={theme.selected}>
+                    {label}
+                  </Text>
                 ) : (
-                  <Text key={key} dimColor>{label}</Text>
+                  <Text key={key} dimColor>
+                    {label}
+                  </Text>
                 );
               })}
-              <Text dimColor>  arrows to navigate, tab/enter to select, esc to dismiss</Text>
+              <Text dimColor>
+                {" "}
+                arrows to navigate, tab/enter to select, esc to dismiss
+              </Text>
             </Box>
           )}
         </Box>
