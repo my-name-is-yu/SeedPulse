@@ -5,7 +5,7 @@
 // styled user/AI distinction, spinner, timestamps, and color-coded message types.
 
 import React, { useState } from "react";
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, Static } from "ink";
 import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
 import { renderMarkdownLines, type MarkdownLine, type MarkdownSegment } from "./markdown-renderer.js";
@@ -13,6 +13,7 @@ import { fuzzyMatch, fuzzyFilter } from "./fuzzy.js";
 import { theme, getMessageTypeColor } from "./theme.js";
 
 export interface ChatMessage {
+  id: string;
   role: "user" | "pulseed";
   text: string;
   timestamp: Date;
@@ -204,31 +205,21 @@ export function Chat({ messages, onSubmit, isProcessing, goalNames = [] }: ChatP
     setInput("");
   };
 
-  // Cap visible messages based on terminal height
-  const termRows = process.stdout.rows || 40;
-  const visibleCount = Math.max(termRows - 12, 8);
-  const startIdx = Math.max(messages.length - visibleCount, 0);
-  const visibleMessages = messages.slice(startIdx);
+  const confirmedMessages = isProcessing ? messages.slice(0, -1) : messages;
+  const activeMessage = isProcessing ? messages[messages.length - 1] : null;
 
   return (
     <Box flexDirection="column" flexGrow={1} overflow="hidden">
-      {/* Scroll indicator */}
-      {startIdx > 0 && (
-        <Text dimColor>{"\u2191"} {startIdx} earlier messages</Text>
-      )}
-
-      {/* Message log */}
-      <Box flexDirection="column" flexGrow={1}>
-        {visibleMessages.map((msg, i) => {
+      {/* Confirmed messages rendered once, no flicker */}
+      <Static items={confirmedMessages}>
+        {(msg) => {
           const timeStr = formatTime(msg.timestamp ?? new Date());
-          const absoluteIdx = startIdx + i;
-
           if (msg.role === "user") {
             return (
-              <Box key={absoluteIdx} flexDirection="column" marginBottom={2}>
+              <Box key={msg.id} flexDirection="column" marginBottom={2}>
                 <Box>
                   <Text color={theme.userPrefix} bold>
-                    {"\u276F "}
+                    {"❯ "}
                   </Text>
                   <Text>{msg.text}</Text>
                   <Text dimColor> {timeStr}</Text>
@@ -236,13 +227,10 @@ export function Chat({ messages, onSubmit, isProcessing, goalNames = [] }: ChatP
               </Box>
             );
           }
-
-          // PulSeed message — render markdown lines individually
           const typeColor = getMessageTypeColor(msg.messageType);
           const mdLines = renderMarkdownLines(msg.text);
-
           return (
-            <Box key={absoluteIdx} flexDirection="column" marginBottom={1} marginLeft={2}>
+            <Box key={msg.id} flexDirection="column" marginBottom={1} marginLeft={2}>
               <Box justifyContent="space-between">
                 <Text color={theme.brand} bold>
                   PulSeed
@@ -260,14 +248,43 @@ export function Chat({ messages, onSubmit, isProcessing, goalNames = [] }: ChatP
               </Box>
             </Box>
           );
-        })}
+        }}
+      </Static>
 
-        {/* Thinking spinner */}
+      {/* Dynamic area: active message + spinner */}
+      <Box flexDirection="column">
+        {activeMessage && (() => {
+          const timeStr = formatTime(activeMessage.timestamp ?? new Date());
+          if (activeMessage.role === "user") {
+            return (
+              <Box flexDirection="column" marginBottom={2}>
+                <Box>
+                  <Text color={theme.userPrefix} bold>{"❯ "}</Text>
+                  <Text>{activeMessage.text}</Text>
+                  <Text dimColor> {timeStr}</Text>
+                </Box>
+              </Box>
+            );
+          }
+          const typeColor = getMessageTypeColor(activeMessage.messageType);
+          const mdLines = renderMarkdownLines(activeMessage.text);
+          return (
+            <Box flexDirection="column" marginBottom={1} marginLeft={2}>
+              <Box justifyContent="space-between">
+                <Text color={theme.brand} bold>PulSeed</Text>
+                <Text dimColor>{timeStr}</Text>
+              </Box>
+              <Box flexDirection="column">
+                {mdLines.map((line, j) => (
+                  <MarkdownLineComponent key={j} line={line} color={typeColor} />
+                ))}
+              </Box>
+            </Box>
+          );
+        })()}
         {isProcessing && (
           <Box>
-            <Text color={theme.warning}>
-              <Spinner type="dots" />
-            </Text>
+            <Spinner type="dots" />
             <Text color={theme.warning}> Thinking...</Text>
           </Box>
         )}
