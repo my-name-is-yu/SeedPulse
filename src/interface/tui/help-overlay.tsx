@@ -77,6 +77,10 @@ export function HelpOverlay({ onDismiss }: HelpOverlayProps) {
             <Text>View and toggle config</Text>
           </Box>
           <Box>
+            <Box width={20}><Text color={theme.command} bold>/flicker</Text></Box>
+            <Text>Toggle no-flicker mode</Text>
+          </Box>
+          <Box>
             <Box width={20}><Text dimColor>{"<anything else>"}</Text></Box>
             <Text>Chat with PulSeed</Text>
           </Box>
