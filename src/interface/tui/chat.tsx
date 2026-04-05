@@ -569,22 +569,22 @@ export function Chat({
           </Text>
         )}
 
+        {/* Copy toast — above input area */}
+        {copyToast && (
+          <Box justifyContent="flex-end">
+            <Text color="cyan">{copyToast}</Text>
+          </Box>
+        )}
+
         {/* Input area with borders — always at bottom */}
         <Box flexDirection="column">
-          {copyToast ? (
-            <Box>
-              <Text dimColor>{"─".repeat(Math.max(0, termCols - copyToast.length - 1))}</Text>
-              <Text color="cyan">{copyToast}</Text>
-            </Box>
-          ) : (
-            <Box
-              borderStyle="single"
-              borderColor={theme.border}
-              borderBottom={false}
-              borderLeft={false}
-              borderRight={false}
-            />
-          )}
+          <Box
+            borderStyle="single"
+            borderColor={theme.border}
+            borderBottom={false}
+            borderLeft={false}
+            borderRight={false}
+          />
           <Box>
             <Text color={theme.userPrompt} bold>
               {"​◉ "}
