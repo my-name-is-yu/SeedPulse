@@ -259,7 +259,7 @@ export function App({
         setIsProcessing(false);
       }
     },
-    [intentRecognizer, actionHandler, chatRunner, start, stop]
+    [intentRecognizer, actionHandler, chatRunner, start, stop, isProcessing, reportToShow]
   );
 
   // Expose controller for SIGINT shutdown in entry.ts
