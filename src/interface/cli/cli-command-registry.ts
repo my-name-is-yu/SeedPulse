@@ -20,6 +20,9 @@ import { cmdReport } from "./commands/report.js";
 import {
   cmdProvider,
   cmdConfigCharacter,
+  cmdConfigShow,
+  cmdConfigSet,
+  cmdConfigGet,
   cmdDatasourceAdd,
   cmdDatasourceList,
   cmdDatasourceRemove,
@@ -386,8 +389,20 @@ export async function dispatchCommand(
     const configSubcommand = argv[1];
 
     if (!configSubcommand) {
-      logger.error("Error: config subcommand required. Available: config character");
+      logger.error("Error: config subcommand required. Available: config show, config set, config get, config character");
       return 1;
+    }
+
+    if (configSubcommand === "show") {
+      return cmdConfigShow();
+    }
+
+    if (configSubcommand === "set") {
+      return cmdConfigSet(argv.slice(2));
+    }
+
+    if (configSubcommand === "get") {
+      return cmdConfigGet(argv.slice(2));
     }
 
     if (configSubcommand === "character") {
@@ -395,7 +410,7 @@ export async function dispatchCommand(
     }
 
     logger.error(`Unknown config subcommand: "${configSubcommand}"`);
-    logger.error("Available: config character");
+    logger.error("Available: config show, config set, config get, config character");
     return 1;
   }
 

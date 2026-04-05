@@ -518,3 +518,58 @@ export async function cmdCapabilityRemove(
     return 1;
   }
 }
+
+// ─── Global config commands ───
+
+export async function cmdConfigShow(): Promise<number> {
+  const { loadGlobalConfig } = await import("../../../base/config/global-config.js");
+  const config = await loadGlobalConfig();
+  console.log(JSON.stringify(config, null, 2));
+  return 0;
+}
+
+export async function cmdConfigSet(args: string[]): Promise<number> {
+  if (args.length < 2) {
+    console.error("Usage: pulseed config set <key> <value>");
+    console.error("Available keys: daemon_mode");
+    return 1;
+  }
+  const [key, rawValue] = args;
+  const { updateGlobalConfig, getConfigKeys } = await import("../../../base/config/global-config.js");
+
+  const validKeys = getConfigKeys();
+  if (!validKeys.includes(key)) {
+    console.error(`Unknown config key: "${key}". Available: ${validKeys.join(", ")}`);
+    return 1;
+  }
+
+  // Parse value based on type
+  let value: unknown;
+  if (rawValue === "true") value = true;
+  else if (rawValue === "false") value = false;
+  else if (!isNaN(Number(rawValue))) value = Number(rawValue);
+  else value = rawValue;
+
+  const updated = await updateGlobalConfig({ [key]: value });
+  console.log(`Set ${key} = ${JSON.stringify((updated as Record<string, unknown>)[key])}`);
+  return 0;
+}
+
+export async function cmdConfigGet(args: string[]): Promise<number> {
+  if (args.length < 1) {
+    console.error("Usage: pulseed config get <key>");
+    return 1;
+  }
+  const [key] = args;
+  const { loadGlobalConfig, getConfigKeys } = await import("../../../base/config/global-config.js");
+
+  const validKeys = getConfigKeys();
+  if (!validKeys.includes(key)) {
+    console.error(`Unknown config key: "${key}". Available: ${validKeys.join(", ")}`);
+    return 1;
+  }
+
+  const config = await loadGlobalConfig();
+  console.log((config as Record<string, unknown>)[key]);
+  return 0;
+}
