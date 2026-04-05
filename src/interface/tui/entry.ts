@@ -270,18 +270,9 @@ export async function startTUI(): Promise<void> {
   });
   const intentRecognizer = new IntentRecognizer(llmClient);
 
-  // 4. Handle SIGINT/SIGTERM gracefully before rendering.
-  // Require two Ctrl-C presses to exit (prevent accidental quit).
-  let sigintPending = false;
-  const handleSigint = () => {
-    if (sigintPending) {
-      coreLoop.stop();
-      process.exit(0);
-    }
-    sigintPending = true;
-    process.stderr.write("\n(Press Ctrl-C once more to quit)\n");
-  };
-  process.on("SIGINT", handleSigint);
+  // 4. Handle SIGTERM gracefully before rendering.
+  // Note: SIGINT (Ctrl-C) is handled via useInput in app.tsx because Ink
+  // holds the terminal in raw mode and SIGINT does not fire.
   process.on("SIGTERM", () => { coreLoop.stop(); process.exit(0); });
 
   // 5. Compute breadcrumb context for the header
