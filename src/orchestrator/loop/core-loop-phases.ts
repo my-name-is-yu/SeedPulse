@@ -137,10 +137,37 @@ export async function phaseAutoDecompose(
   logger?.info("[CoreLoop] phaseAutoDecompose: decomposition complete", { goalId });
 }
 
+// ─── Phase 2 helpers ───
+
+/** Build a ToolCallContext from PhaseCtx for CoreLoop autonomous tool calls. */
+export async function buildLoopToolContext(
+  ctx: PhaseCtx,
+  goalId: string
+): Promise<import("../../tools/types.js").ToolCallContext> {
+  let trustBalance = 0;
+  if (ctx.deps.trustManager) {
+    try {
+      const balance = await ctx.deps.trustManager.getBalance(goalId);
+      trustBalance = balance.balance;
+    } catch {
+      // Non-fatal — default to 0
+    }
+  }
+  return {
+    cwd: process.cwd(),
+    goalId,
+    trustBalance,
+    preApproved: true,
+    approvalFn: async () => false,
+  };
+}
+
 // ─── Phase 2 ───
 
 /** Run observation engine, reload goal after observation.
- * Observation failure is non-fatal — returns current goal state. */
+ * Observation failure is non-fatal — returns current goal state.
+ * When ctx.toolExecutor is present, routes through the observe-goal tool first
+ * and falls back to direct engine.observe() on tool failure. */
 export async function observeAndReload(
   ctx: PhaseCtx,
   goalId: string,
@@ -152,6 +179,24 @@ export async function observeAndReload(
     maxIterations: ctx.config.maxIterations,
     phase: "Observing...",
   });
+
+  // Tool path: route through ToolExecutor when available
+  if (ctx.toolExecutor) {
+    try {
+      const toolCtx = await buildLoopToolContext(ctx, goalId);
+      const toolResult = await ctx.toolExecutor.execute("observe-goal", { goal_id: goalId }, toolCtx);
+      if (toolResult.success) {
+        const reloaded = await ctx.deps.stateManager.loadGoal(goalId);
+        if (reloaded) return reloaded;
+        return goal;
+      }
+      ctx.logger?.warn(`CoreLoop: observe-goal tool failed: ${toolResult.error}, falling back to direct call`);
+    } catch (err) {
+      ctx.logger?.warn("CoreLoop: observe-goal tool threw (falling back to direct call)", { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  // Direct path: fallback (or when toolExecutor is absent)
   try {
     const engine = ctx.deps.observationEngine;
 

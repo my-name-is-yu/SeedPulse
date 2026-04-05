@@ -201,6 +201,39 @@ export class TaskLifecycle {
       }
     }
 
+    // Route through run-adapter tool when ToolExecutor is available
+    if (this.toolExecutor) {
+      try {
+        let trustBalance = 0;
+        try {
+          const balance = await this.stateManager.loadGoal(task.goal_id);
+          void balance; // goal_id is enough; trust fetched below if needed
+        } catch { /* non-fatal */ }
+        const toolCtx = {
+          cwd: process.cwd(),
+          goalId: task.goal_id,
+          trustBalance,
+          preApproved: true,
+          approvalFn: async () => false,
+        };
+        const toolResult = await this.toolExecutor.execute(
+          "run-adapter",
+          {
+            adapter_id: adapter.adapterType,
+            task_description: task.work_description ?? "",
+            goal_id: task.goal_id,
+          },
+          toolCtx
+        );
+        if (toolResult.success && toolResult.data != null) {
+          return toolResult.data as AgentResult;
+        }
+        this.logger?.warn?.(`[TaskLifecycle] run-adapter tool failed, falling back to direct call: ${toolResult.error ?? "unknown"}`);
+      } catch (err) {
+        this.logger?.warn?.(`[TaskLifecycle] run-adapter tool threw, falling back to direct call: ${(err as Error).message}`);
+      }
+    }
+
     const result = await _executeTask(
       {
         stateManager: this.stateManager,
