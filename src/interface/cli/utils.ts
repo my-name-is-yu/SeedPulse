@@ -46,6 +46,9 @@ Usage:
   pulseed stop                         Stop the running daemon
   pulseed daemon status                Show running daemon status
   pulseed cron --goal <id>             Print crontab entry for a goal
+  pulseed config show                  Show current configuration
+  pulseed config set <key> <value>     Set a configuration value
+  pulseed config get <key>             Get a configuration value
   pulseed config character             Show or update character configuration
   pulseed datasource add <type>        Register a new data source (file | http_api)
   pulseed datasource list              List all registered data sources
