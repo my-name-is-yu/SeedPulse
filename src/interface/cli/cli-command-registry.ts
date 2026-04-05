@@ -61,8 +61,9 @@ export async function dispatchCommand(
 ): Promise<number> {
   if (argv.length === 0) {
     await ensureProviderConfig();
-    printUsage();
-    return 1;
+    const { startTUI } = await import("../tui/entry.js");
+    await startTUI();
+    return 0;
   }
 
   const subcommand = argv[0];
