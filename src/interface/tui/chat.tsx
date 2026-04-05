@@ -94,15 +94,11 @@ function MarkdownLineComponent({
 
 /** Memoized message row — prevents spinner re-renders from flickering messages */
 const MessageRow = React.memo(function MessageRow({ msg }: { msg: ChatMessage }) {
-  const timeStr = formatTime(msg.timestamp ?? new Date());
   if (msg.role === "user") {
     return (
-      <Box flexDirection="column" marginBottom={1}>
-        <Box>
-          <Text backgroundColor="#D9D9D9" color="#1A1A1A">
-            {" ◉ "}{msg.text}{" "}
-          </Text>
-          <Text dimColor> {timeStr}</Text>
+      <Box marginBottom={1}>
+        <Box paddingX={1}>
+          <Text color="#1A1A1A" backgroundColor="#D9D9D9">◉ {msg.text}</Text>
         </Box>
       </Box>
     );
@@ -111,9 +107,6 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: ChatMessage })
   const mdLines = renderMarkdownLines(msg.text);
   return (
     <Box flexDirection="column" marginBottom={1} marginLeft={2}>
-      <Box justifyContent="flex-end">
-        <Text dimColor>{timeStr}</Text>
-      </Box>
       <Box flexDirection="column">
         {mdLines.map((line, j) => (
           <MarkdownLineComponent
@@ -397,10 +390,8 @@ export function Chat({ messages, onSubmit, onClear, isProcessing, goalNames = []
         {visibleMessages.map((msg, idx) => {
           // Turn separator: show between last AI message and next user message
           const prevMsg = idx > 0 ? visibleMessages[idx - 1] : null;
-          const showSeparator = prevMsg !== null && prevMsg.role === "pulseed" && msg.role === "user";
           return (
             <React.Fragment key={msg.id}>
-              {showSeparator && <Text dimColor>{"─".repeat(40)}</Text>}
               <MessageRow msg={msg} />
             </React.Fragment>
           );
