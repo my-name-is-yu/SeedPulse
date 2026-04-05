@@ -24,6 +24,7 @@ export function printUsage(): void {
 PulSeed — AI agent orchestrator
 
 Usage:
+  pulseed                                               Launch interactive TUI (default)
   pulseed run --goal <id>              Run CoreLoop for a goal
   pulseed improve [path]               Analyze path, suggest goals, and optionally run improvement loop
   pulseed suggest "<context>"          Suggest improvement goals for a project context
