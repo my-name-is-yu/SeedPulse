@@ -145,10 +145,7 @@ async function handleDeleteGoal(
     return JSON.stringify({ error: "goal_id is required" });
   }
 
-  const approval = await checkApproval("delete_goal", `Permanently delete goal: ${goalId}`, deps);
-  if (!approval.approved) {
-    return JSON.stringify({ error: approval.error });
-  }
+  // No checkApproval — LLM handles confirmation conversationally (approvalLevel: "none")
 
   try {
     const deleted = await deps.stateManager.deleteGoal(goalId);
