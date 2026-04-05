@@ -40,7 +40,7 @@ export const theme = {
   overlayHeader: "#FFB74D",
 
   // Code syntax highlighting
-  codeInline: "#A5D6A7",
+  codeInline: "#4CAF50",
   codeKeyword: "#42A5F5",
   codeString: "#4CAF50",
   codeNumber: "#FFB74D",
