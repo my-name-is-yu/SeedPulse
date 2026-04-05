@@ -18,6 +18,10 @@ export interface FrameWriter {
  */
 export function createFrameWriter(stream: NodeJS.WriteStream): FrameWriter {
   const syncSupported = isSynchronizedOutputSupported();
+  // Capture raw write BEFORE any monkey-patching to avoid infinite recursion:
+  // entry.ts patches process.stdout.write -> frameWriter.write -> stream.write
+  // If stream.write is the patched version, it loops forever.
+  const rawWrite = stream.write.bind(stream) as (s: string) => boolean;
   let needsErase = false;
   let destroyed = false;
 
@@ -35,8 +39,8 @@ export function createFrameWriter(stream: NodeJS.WriteStream): FrameWriter {
       const erase = needsErase ? ERASE_SCREEN : "";
       const park = parkCursor(rows);
 
-      // Single write() call for atomicity
-      stream.write(prefix + erase + CURSOR_HOME + frame + park + suffix);
+      // Single rawWrite() call for atomicity — bypasses any stdout patches
+      rawWrite(prefix + erase + CURSOR_HOME + frame + park + suffix);
 
       needsErase = false;
     },
