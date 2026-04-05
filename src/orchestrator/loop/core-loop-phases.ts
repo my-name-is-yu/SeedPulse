@@ -235,26 +235,31 @@ export async function calculateGapOrComplete(
     // Refresh stale dimensions via tool measurement before gap calculation
     if (ctx.toolExecutor && goal.dimensions) {
       const { needsDirectMeasurement, measureDirectly } = await import("../../platform/drive/gap-calculator-tools.js");
-      let anyRefreshed = false;
-      for (const dim of goal.dimensions) {
-        if (needsDirectMeasurement(dim)) {
+      const measurableDims = goal.dimensions.filter((dim) => needsDirectMeasurement(dim));
+      const measurementResults = await Promise.all(
+        measurableDims.map(async (dim) => {
           try {
-            const refreshed = await measureDirectly(dim, ctx.toolExecutor, {
+            const refreshed = await measureDirectly(dim, ctx.toolExecutor!, {
               cwd: process.cwd(),
               goalId,
               trustBalance: 0,
               preApproved: true,
               approvalFn: async () => false,
             });
-            if (refreshed !== null) {
-              dim.current_value = refreshed.value;
-              dim.confidence = refreshed.confidence;
-              anyRefreshed = true;
-              ctx.logger?.debug(`[GapRefresh] Refreshed stale dimension ${dim.name}: confidence ${dim.confidence}`);
-            }
+            return { dim, refreshed };
           } catch (err) {
             ctx.logger?.warn(`[GapRefresh] Failed to refresh ${dim.name}: ${err instanceof Error ? err.message : String(err)}`);
+            return { dim, refreshed: null };
           }
+        })
+      );
+      let anyRefreshed = false;
+      for (const { dim, refreshed } of measurementResults) {
+        if (refreshed !== null) {
+          dim.current_value = refreshed.value;
+          dim.confidence = refreshed.confidence;
+          anyRefreshed = true;
+          ctx.logger?.debug(`[GapRefresh] Refreshed stale dimension ${dim.name}: confidence ${dim.confidence}`);
         }
       }
       // Persist refreshed dimension values to avoid re-measuring on the next iteration
