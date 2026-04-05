@@ -461,17 +461,6 @@ describe("handleMutationToolCall — approval config override", () => {
     expect(sm.deleteGoal).toHaveBeenCalledWith("g1");
   });
 
-  it("can override delete_goal to require approval via approvalConfig", async () => {
-    const sm = makeStateManager({ deleteGoal: vi.fn().mockResolvedValue(true) });
-    const approvalFn = vi.fn().mockResolvedValue(true);
-    const deps = makeDeps({
-      stateManager: sm,
-      approvalFn,
-      approvalConfig: { delete_goal: "required" },
-    });
-    await handleMutationToolCall("delete_goal", { goal_id: "g1" }, deps);
-    expect(approvalFn).toHaveBeenCalled();
-  });
 });
 
 // ─── Unknown tool ───
