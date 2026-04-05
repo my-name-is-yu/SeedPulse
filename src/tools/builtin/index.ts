@@ -13,6 +13,9 @@ export { TrustStateTool } from "../state/trust-state.js";
 export { SessionHistoryTool } from "../state/session-history.js";
 export { KnowledgeQueryTool } from "../state/knowledge-query.js";
 export { ProgressHistoryTool } from "../state/progress-history.js";
+export { ConfigTool } from "../state/config-tool.js";
+export { PluginStateTool } from "../state/plugin-state-tool.js";
+export { ArchitectureTool } from "../state/architecture-tool.js";
 export { WebSearchTool, createWebSearchClient } from "../network/web-search.js";
 export type { ISearchClient, SearchResult } from "../network/web-search.js";
 export { ToolSearchTool } from "../meta/tool-search.js";
@@ -38,6 +41,9 @@ import { TrustStateTool } from "../state/trust-state.js";
 import { SessionHistoryTool } from "../state/session-history.js";
 import { KnowledgeQueryTool } from "../state/knowledge-query.js";
 import { ProgressHistoryTool } from "../state/progress-history.js";
+import { ConfigTool } from "../state/config-tool.js";
+import { PluginStateTool } from "../state/plugin-state-tool.js";
+import { ArchitectureTool } from "../state/architecture-tool.js";
 import { WebSearchTool, createWebSearchClient } from "../network/web-search.js";
 import { ToolSearchTool } from "../meta/tool-search.js";
 import { EnvTool } from "../system/env.js";
@@ -49,11 +55,13 @@ import type { ITool } from "../types.js";
 import type { StateManager } from "../../base/state/state-manager.js";
 import type { KnowledgeManager } from "../../platform/knowledge/knowledge-manager.js";
 import type { ToolRegistry } from "../registry.js";
+import type { PluginLoader } from "../../runtime/plugin-loader.js";
 
 export interface BuiltinToolDeps {
   stateManager?: StateManager;
   knowledgeManager?: KnowledgeManager;
   registry?: ToolRegistry;
+  pluginLoader?: PluginLoader;
 }
 
 /** All built-in tools, sorted alphabetically by name. */
@@ -87,6 +95,12 @@ export function createBuiltinTools(deps?: BuiltinToolDeps): ITool[] {
 
   if (deps?.knowledgeManager) {
     tools.push(new KnowledgeQueryTool(deps.knowledgeManager));
+  }
+
+  tools.push(new ConfigTool(), new ArchitectureTool());
+
+  if (deps?.pluginLoader) {
+    tools.push(new PluginStateTool(deps.pluginLoader));
   }
 
   const searchClient = createWebSearchClient();
