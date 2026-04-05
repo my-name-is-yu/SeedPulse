@@ -261,7 +261,7 @@ export function Chat({ messages, onSubmit, isProcessing, goalNames = [] }: ChatP
         {isProcessing && (
           <Box>
             <Spinner type="dots" />
-            <Text color={theme.warning}> Thinking...</Text>
+            <Text color={theme.brandLight}> Thinking...</Text>
           </Box>
         )}
 
