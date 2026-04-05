@@ -17,7 +17,7 @@ import { fuzzyMatch, fuzzyFilter } from "./fuzzy.js";
 import { theme, getMessageTypeColor } from "./theme.js";
 import { pickSpinnerVerb } from "./spinner-verbs.js";
 import { ShimmerText } from "./shimmer-text.js";
-import { positionCursorInFrame } from "./cursor-tracker.js";
+import { positionCursorInFrame, buildCursorEscape } from "./cursor-tracker.js";
 
 export interface ChatMessage {
   id: string;
@@ -33,6 +33,7 @@ interface ChatProps {
   onClear?: () => void;
   isProcessing: boolean; // show "thinking..." indicator
   goalNames?: string[];
+  noFlicker?: boolean;
 }
 
 function formatTime(date: Date): string {
@@ -265,6 +266,7 @@ export function Chat({
   onClear,
   isProcessing,
   goalNames = [],
+  noFlicker,
 }: ChatProps) {
   const [input, setInput] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -427,16 +429,24 @@ export function Chat({
   React.useEffect(() => {
     const original = process.stdout.write.bind(process.stdout);
     const patched = function (chunk: any, ...args: any[]) {
-      const result = (original as any)(chunk, ...args);
       // Only process full Ink frames (not small escape sequences)
       if (
         typeof chunk === "string" &&
         chunk.length > 50 &&
         !isProcessingRef.current
       ) {
+        if (noFlicker) {
+          // No-flicker mode: concatenate cursor escape INTO the frame
+          // so it lands inside the BSU/ESU atomic block
+          const cursorEsc = buildCursorEscape(chunk, inputRef.current);
+          return (original as any)(chunk + (cursorEsc ?? ""), ...args);
+        }
+        // Standard mode: write frame, then position cursor separately
+        const result = (original as any)(chunk, ...args);
         positionCursorInFrame(chunk, inputRef.current, original);
+        return result;
       }
-      return result;
+      return (original as any)(chunk, ...args);
     } as typeof process.stdout.write;
     process.stdout.write = patched;
     return () => {
