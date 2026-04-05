@@ -8,6 +8,8 @@ import { TrustManager } from "../../../platform/traits/trust-manager.js";
 import { StrategyManager } from "../../strategy/strategy-manager.js";
 import { StallDetector } from "../../../platform/drive/stall-detector.js";
 import { TaskLifecycle } from "../task/task-lifecycle.js";
+import type { ToolExecutor } from "../../../tools/executor.js";
+import { runPostExecutionHealthCheck } from "../task/task-health-check.js";
 import type { Task } from "../../../base/types/task.js";
 import type {
   ILLMClient,
@@ -424,5 +426,76 @@ describe("TaskLifecycle — post-execution health check", () => {
     );
 
     expect(result.success).toBe(false);
+  });
+
+  // ─────────────────────────────────────────────
+  // 9. runPostExecutionHealthCheck uses ToolExecutor when provided
+  // ─────────────────────────────────────────────
+
+  it("runPostExecutionHealthCheck uses ToolExecutor.execute(shell) when provided", async () => {
+    const executeCalls: Array<{ toolName: string; input: unknown }> = [];
+    const mockExecutor: ToolExecutor = {
+      execute: vi.fn().mockImplementation((toolName: string, input: unknown) => {
+        executeCalls.push({ toolName, input });
+        return Promise.resolve({
+          success: true,
+          data: { stdout: "Build OK", stderr: "" },
+          summary: "ok",
+          durationMs: 10,
+        });
+      }),
+    } as unknown as ToolExecutor;
+
+    // Call the standalone function directly with a toolExecutor
+    const result = await runPostExecutionHealthCheck(
+      async () => { throw new Error("should not be called"); },
+      mockExecutor,
+    );
+
+    expect(result.healthy).toBe(true);
+    // Both build and test commands routed via shell tool
+    expect(executeCalls.length).toBe(2);
+    expect(executeCalls[0]!.toolName).toBe("shell");
+    expect(executeCalls[1]!.toolName).toBe("shell");
+    // trusted=true is set in context (checked via the execute mock receiving it)
+    const firstCtx = (mockExecutor.execute as ReturnType<typeof vi.fn>).mock.calls[0]![2];
+    expect(firstCtx.trusted).toBe(true);
+  });
+
+  // ─────────────────────────────────────────────
+  // 10. ToolExecutor build failure propagates healthy=false
+  // ─────────────────────────────────────────────
+
+  it("ToolExecutor build failure causes healthy=false", async () => {
+    const mockExecutor: ToolExecutor = {
+      execute: vi.fn().mockResolvedValueOnce({
+        success: false,
+        data: null,
+        summary: "build failed",
+        error: "TypeScript error TS2322",
+        durationMs: 5,
+      }),
+    } as unknown as ToolExecutor;
+
+    const result = await runPostExecutionHealthCheck(
+      async () => { throw new Error("should not be called"); },
+      mockExecutor,
+    );
+
+    expect(result.healthy).toBe(false);
+    expect(result.output).toContain("Build failed");
+  });
+
+  // ─────────────────────────────────────────────
+  // 11. Falls back to runShellCommandFn when no ToolExecutor
+  // ─────────────────────────────────────────────
+
+  it("falls back to runShellCommandFn when no ToolExecutor provided", async () => {
+    const mockFn = vi.fn().mockResolvedValue({ success: true, stdout: "", stderr: "" });
+
+    const result = await runPostExecutionHealthCheck(mockFn);
+
+    expect(result.healthy).toBe(true);
+    expect(mockFn).toHaveBeenCalledTimes(2); // build + tests
   });
 });

@@ -7,6 +7,7 @@ import { StallDetector } from "../../../platform/drive/stall-detector.js";
 import { AdapterRegistry } from "../adapter-layer.js";
 import type { Logger } from "../../../runtime/logger.js";
 import type { IPromptGateway } from "../../../prompt/gateway.js";
+import type { ToolExecutor } from "../../../tools/executor.js";
 
 // ─── Re-exported types used by consumers ───
 
@@ -71,4 +72,7 @@ export interface VerifierDeps {
   /** Enable post-verification impact analysis (default: false). Disabled by default to avoid
    *  consuming extra LLM calls in contexts that only care about verification. */
   enableImpactAnalysis?: boolean;
+  /** Optional ToolExecutor for internal shell operations (e.g. git restore in attemptRevert).
+   *  When provided, used instead of raw child_process. */
+  toolExecutor?: ToolExecutor;
 }

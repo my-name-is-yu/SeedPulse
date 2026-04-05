@@ -482,6 +482,7 @@ export class TaskLifecycle {
       onTaskComplete: this.onTaskComplete,
       durationToMs: durationToMs,
       completionJudgerConfig: this.completionJudgerConfig,
+      toolExecutor: this.toolExecutor,
     };
   }
 
@@ -527,6 +528,7 @@ export class TaskLifecycle {
   async runPostExecutionHealthCheck(): Promise<{ healthy: boolean; output: string }> {
     return _runPostExecutionHealthCheck(
       this.runShellCommand.bind(this),
+      this.toolExecutor,
     );
   }
 
