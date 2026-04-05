@@ -338,7 +338,7 @@ export class CoreLoop {
     isFirstIteration?: boolean
   ): Promise<LoopIterationResult> {
     const startTime = Date.now();
-    const ctx: PhaseCtx = { deps: this.deps, config: this.config, logger: this.logger };
+    const ctx: PhaseCtx = { deps: this.deps, config: this.config, logger: this.logger, toolExecutor: this.deps.toolExecutor };
 
     // Default result (filled in progressively)
     const result: LoopIterationResult = makeEmptyIterationResult(goalId, loopIndex);
