@@ -51,3 +51,65 @@ describe("Observation LLM malformed JSON regression", () => {
     );
   });
 });
+
+describe("fetchGitDiffContext with ToolExecutor", () => {
+  it("uses toolExecutor when provided and gitContextFetcher is not set", async () => {
+    const { fetchGitDiffContext } = await import("../observation-llm.js");
+
+    const mockExecute = vi.fn().mockResolvedValue({
+      success: true,
+      data: "diff --git a/foo.ts b/foo.ts\n+added line",
+      summary: "git diff (unstaged): 2 lines",
+      durationMs: 5,
+    });
+    const mockToolExecutor = { execute: mockExecute } as any;
+
+    const result = await fetchGitDiffContext({}, 3000, "/tmp/workspace", mockToolExecutor);
+
+    expect(mockExecute).toHaveBeenCalledWith(
+      "git_diff",
+      { target: "unstaged", maxLines: 200 },
+      expect.objectContaining({ cwd: "/tmp/workspace", goalId: "observation" })
+    );
+    expect(result).toContain("[git diff]");
+    expect(result).toContain("added line");
+  });
+
+  it("returns empty string when toolExecutor returns no diff", async () => {
+    const { fetchGitDiffContext } = await import("../observation-llm.js");
+
+    const mockExecute = vi.fn().mockResolvedValue({
+      success: true,
+      data: "",
+      summary: "No changes found",
+      durationMs: 3,
+    });
+    const mockToolExecutor = { execute: mockExecute } as any;
+
+    const result = await fetchGitDiffContext({}, 3000, "/tmp/workspace", mockToolExecutor);
+    expect(result).toBe("");
+  });
+
+  it("falls through to empty string when toolExecutor throws", async () => {
+    const { fetchGitDiffContext } = await import("../observation-llm.js");
+
+    const mockExecute = vi.fn().mockRejectedValue(new Error("executor error"));
+    const mockToolExecutor = { execute: mockExecute } as any;
+
+    const result = await fetchGitDiffContext({}, 3000, "/tmp/workspace", mockToolExecutor);
+    expect(result).toBe("");
+  });
+
+  it("gitContextFetcher override takes priority over toolExecutor", async () => {
+    const { fetchGitDiffContext } = await import("../observation-llm.js");
+
+    const mockExecute = vi.fn();
+    const mockToolExecutor = { execute: mockExecute } as any;
+    const gitContextFetcher = vi.fn().mockReturnValue("override context");
+
+    const result = await fetchGitDiffContext({ gitContextFetcher }, 3000, "/tmp/workspace", mockToolExecutor);
+
+    expect(result).toBe("override context");
+    expect(mockExecute).not.toHaveBeenCalled();
+  });
+});
