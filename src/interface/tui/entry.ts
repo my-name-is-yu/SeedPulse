@@ -293,7 +293,7 @@ async function startTUIStandaloneMode(): Promise<void> {
   const { render } = await import("ink");
   const React = await import("react");
 
-  const noFlicker = isNoFlickerEnabled();
+  const noFlicker = await isNoFlickerEnabled();
   let frameWriter: FrameWriter | undefined;
 
   if (noFlicker) {
@@ -376,7 +376,7 @@ async function startTUIDaemonMode(): Promise<void> {
   const { render } = await import("ink");
   const React = await import("react");
 
-  const noFlicker = isNoFlickerEnabled();
+  const noFlicker = await isNoFlickerEnabled();
   let frameWriter: FrameWriter | undefined;
 
   if (noFlicker) {
