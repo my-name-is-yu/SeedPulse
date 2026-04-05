@@ -144,15 +144,20 @@ export function getMutationToolDefinitions(): ToolDefinition[] {
       type: "function",
       function: {
         name: "update_config",
-        description: "Update provider configuration (provider, model, or api_key). Requires user approval.",
+        description: "Update a PulSeed configuration setting. Always requires user confirmation. Available settings: daemon_mode (boolean) - whether to run CoreLoop as a background daemon process.",
         parameters: {
           type: "object",
           properties: {
-            provider: { type: "string" },
-            model: { type: "string" },
-            api_key: { type: "string" },
+            key: {
+              type: "string",
+              description: "The config key to update",
+              enum: ["daemon_mode"],
+            },
+            value: {
+              description: "The new value for the config key",
+            },
           },
-          required: [],
+          required: ["key", "value"],
         },
       },
     },

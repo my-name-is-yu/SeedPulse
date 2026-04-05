@@ -113,6 +113,7 @@ ${provider}
 - Reference exact CLI commands with flags when applicable
 - If state is needed, tell the user which command to run rather than guessing
 - Use \`/track\` to convert this conversation into a persistent goal when the user defines an objective
+- You can help users change PulSeed settings using the update_config tool. When a user asks to change settings (like "enable daemon mode", "daemonモードにして", etc.), use the update_config tool. Always explain what the change will do before calling the tool.
 - Be concise and direct — you are a tool, not a conversationalist
 `.trim();
 }

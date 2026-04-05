@@ -1,4 +1,4 @@
-import { loadProviderConfig, saveProviderConfig } from "../../base/llm/provider-config.js";
+import { getConfigKeys, updateGlobalConfig } from "../../base/config/global-config.js";
 
 export type { ApprovalLevel, MutationToolDeps } from "./mutation-tool-defs.js";
 export { getMutationToolDefinitions } from "./mutation-tool-defs.js";
@@ -194,52 +194,47 @@ async function handleUpdateConfig(
   args: Record<string, unknown>,
   deps: MutationToolDeps
 ): Promise<string> {
-  const hasAnyField =
-    typeof args.provider === "string" ||
-    typeof args.model === "string" ||
-    typeof args.api_key === "string";
+  const key = args.key;
+  const value = args.value;
 
-  if (!hasAnyField) {
-    return JSON.stringify({ error: "At least one field (provider, model, api_key) is required" });
+  if (typeof key !== "string" || !key.trim()) {
+    return JSON.stringify({ error: "key is required" });
+  }
+  if (value === undefined) {
+    return JSON.stringify({ error: "value is required" });
   }
 
-  const approval = await checkApproval(
-    "update_config",
-    "Update provider configuration",
-    deps
-  );
+  // Validate key against known config keys
+  const validKeys = getConfigKeys();
+  if (!validKeys.includes(key)) {
+    return JSON.stringify({
+      error: `Unknown config key: "${key}". Available: ${validKeys.join(", ")}`,
+    });
+  }
+
+  // Build human-readable description for approval
+  const descriptions: Record<string, string> = {
+    daemon_mode: value
+      ? "daemon_modeをONに変更します。次のセッションからCoreLoopがバックグラウンドdaemonとして動作し、TUIを閉じてもループが継続するようになります。"
+      : "daemon_modeをOFFに変更します。次のセッションからCoreLoopはTUI内で直接実行され、TUIを閉じるとループも停止します。",
+  };
+  const description =
+    descriptions[key] ?? `${key}を${JSON.stringify(value)}に変更します。次のセッションから適用されます。`;
+
+  const approval = await checkApproval("update_config", description, deps);
   if (!approval.approved) {
-    return JSON.stringify({ error: approval.error });
+    return JSON.stringify({ error: approval.error ?? "設定変更がキャンセルされました。" });
   }
 
   try {
-    const current = await loadProviderConfig();
-    const updated = { ...current };
-
-    if (typeof args.provider === "string") {
-      const validProviders = ["openai", "anthropic", "ollama"];
-      if (!validProviders.includes(args.provider)) {
-        return JSON.stringify({
-          error: `Invalid provider: ${args.provider}. Must be one of: ${validProviders.join(", ")}`,
-        });
-      }
-      updated.provider = args.provider as typeof updated.provider;
-    }
-    if (typeof args.model === "string") {
-      updated.model = args.model;
-    }
-    if (typeof args.api_key === "string") {
-      updated.api_key = args.api_key;
-    }
-
-    await saveProviderConfig(updated);
-
-    const changed: Record<string, string> = {};
-    if (typeof args.provider === "string") changed.provider = args.provider;
-    if (typeof args.model === "string") changed.model = args.model;
-    if (typeof args.api_key === "string") changed.api_key_updated = "true";
-
-    return JSON.stringify({ success: true, updated_fields: changed, message: "Provider configuration updated." });
+    const updated = await updateGlobalConfig({ [key]: value });
+    const newValue = (updated as Record<string, unknown>)[key];
+    return JSON.stringify({
+      success: true,
+      key,
+      value: newValue,
+      message: `${key}を${JSON.stringify(newValue)}に変更しました。次回起動時から適用されます。`,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return JSON.stringify({ error: `Failed to update config: ${message}` });

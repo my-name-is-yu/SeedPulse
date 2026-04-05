@@ -299,43 +299,42 @@ describe("handleMutationToolCall — toggle_plugin", () => {
 // ─── update_config ───
 
 describe("handleMutationToolCall — update_config", () => {
-  it("returns error when no fields are provided", async () => {
+  it("returns error when key is missing", async () => {
     const deps = makeDeps({ approvalFn: vi.fn().mockResolvedValue(true) });
     const result = await handleMutationToolCall("update_config", {}, deps);
     const parsed = JSON.parse(result) as { error: string };
     expect(parsed.error).toContain("required");
   });
 
+  it("returns error when value is missing", async () => {
+    const deps = makeDeps({ approvalFn: vi.fn().mockResolvedValue(true) });
+    const result = await handleMutationToolCall("update_config", { key: "daemon_mode" }, deps);
+    const parsed = JSON.parse(result) as { error: string };
+    expect(parsed.error).toContain("required");
+  });
+
+  it("returns error for unknown config key", async () => {
+    const deps = makeDeps({ approvalFn: vi.fn().mockResolvedValue(true) });
+    const result = await handleMutationToolCall("update_config", { key: "unknown_key", value: true }, deps);
+    const parsed = JSON.parse(result) as { error: string };
+    expect(parsed.error).toContain("Unknown config key");
+  });
+
   it("returns error when user denies approval", async () => {
     const deps = makeDeps({ approvalFn: vi.fn().mockResolvedValue(false) });
-    const result = await handleMutationToolCall("update_config", { model: "gpt-4o" }, deps);
+    const result = await handleMutationToolCall("update_config", { key: "daemon_mode", value: true }, deps);
     const parsed = JSON.parse(result) as { error: string };
-    expect(parsed.error).toContain("denied");
+    expect(parsed.error).toBeDefined();
   });
 
-  it("returns error for invalid provider value", async () => {
+  it("succeeds and reports updated key/value (daemon_mode)", async () => {
     const deps = makeDeps({ approvalFn: vi.fn().mockResolvedValue(true) });
-    const result = await handleMutationToolCall("update_config", { provider: "invalid-llm" }, deps);
-    const parsed = JSON.parse(result) as { error: string };
-    expect(parsed.error).toContain("Invalid provider");
-  });
-
-  it("succeeds and reports updated fields (model update)", async () => {
-    const deps = makeDeps({ approvalFn: vi.fn().mockResolvedValue(true) });
-    const result = await handleMutationToolCall("update_config", { model: "gpt-4o-mini" }, deps);
-    const parsed = JSON.parse(result) as { success: boolean; updated_fields: Record<string, string>; message: string };
+    const result = await handleMutationToolCall("update_config", { key: "daemon_mode", value: true }, deps);
+    const parsed = JSON.parse(result) as { success: boolean; key: string; value: unknown; message: string };
     expect(parsed.success).toBe(true);
-    expect(parsed.updated_fields.model).toBe("gpt-4o-mini");
-    expect(parsed.message).toContain("updated");
-  });
-
-  it("does not echo api_key value in updated_fields", async () => {
-    const deps = makeDeps({ approvalFn: vi.fn().mockResolvedValue(true) });
-    const result = await handleMutationToolCall("update_config", { api_key: "sk-secret" }, deps);
-    const parsed = JSON.parse(result) as { success: boolean; updated_fields: Record<string, string> };
-    expect(parsed.success).toBe(true);
-    expect(parsed.updated_fields.api_key_updated).toBe("true");
-    expect(JSON.stringify(parsed)).not.toContain("sk-secret");
+    expect(parsed.key).toBe("daemon_mode");
+    expect(parsed.value).toBe(true);
+    expect(parsed.message).toContain("daemon_mode");
   });
 });
 
