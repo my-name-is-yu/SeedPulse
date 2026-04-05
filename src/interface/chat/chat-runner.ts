@@ -34,6 +34,8 @@ export interface ChatRunnerDeps {
   pluginLoader?: { loadAll(): Promise<Array<{ name: string; type?: string; enabled?: boolean }>> };
   /** Optional: approval handler for mutation tools. */
   approvalFn?: (description: string) => Promise<boolean>;
+  /** Optional: goal ID to associate with tool calls made in this session. */
+  goalId?: string;
   /** Optional: per-tool approval level overrides. */
   approvalConfig?: Record<string, ApprovalLevel>;
   /** Optional: tool executor for post-change verification (git diff + tests). */
@@ -359,6 +361,26 @@ export class ChatRunner {
       if (!parsed.success) {
         return JSON.stringify({ error: `Invalid input: ${parsed.error.message}` });
       }
+
+      // Gate: check permissions before execution
+      const permResult = await tool.checkPermissions(parsed.data, context);
+      if (permResult.status === "denied") {
+        return `Tool ${name} denied: ${permResult.reason}`;
+      }
+      if (permResult.status === "needs_approval") {
+        const approved = await context.approvalFn({
+          toolName: name,
+          input: parsed.data,
+          reason: permResult.reason,
+          permissionLevel: tool.metadata.permissionLevel,
+          isDestructive: tool.metadata.isDestructive,
+          reversibility: "unknown",
+        });
+        if (!approved) {
+          return `Tool ${name} not approved: ${permResult.reason}`;
+        }
+      }
+
       this.deps.onToolStart?.(name, args);
       const result = await tool.call(parsed.data, context);
       const durationMs = Date.now() - startTime;
@@ -375,7 +397,7 @@ export class ChatRunner {
   private buildToolCallContext(): ToolCallContext {
     return {
       cwd: this.sessionCwd ?? process.cwd(),
-      goalId: "",
+      goalId: this.deps.goalId ?? "",
       trustBalance: 0,
       preApproved: false,
       approvalFn: async (req) => {
