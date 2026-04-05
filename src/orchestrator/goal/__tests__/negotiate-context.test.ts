@@ -9,6 +9,7 @@ import { ObservationEngine } from "../../../platform/observation/observation-eng
 import { createMockLLMClient } from "../../../../tests/helpers/mock-llm.js";
 import { makeTempDir } from "../../../../tests/helpers/temp-dir.js";
 import { PASS_VERDICT_SIMPLE_JSON as PASS_VERDICT } from "../../../../tests/helpers/ethics-fixtures.js";
+import type { ToolExecutor } from "../../../tools/executor.js";
 
 // ─── Helpers ───
 
@@ -79,7 +80,7 @@ describe("gatherNegotiationContext", () => {
     makeSrcWithTodos(tmpDir);
 
     const result = await gatherNegotiationContext(
-      "TODOとFIXMEを解消する",
+      "TODO\u3068FIXME\u3092\u89e3\u6d88\u3059\u308b",
       tmpDir
     );
 
@@ -141,6 +142,69 @@ describe("gatherNegotiationContext", () => {
     // Should NOT have sample TODO matches section (no TODO keyword in goal)
     expect(result).not.toContain("Sample TODO matches");
     expect(result).not.toContain("Sample FIXME matches");
+  });
+
+  // ─── ToolExecutor integration tests ───
+
+  it("uses ToolExecutor glob when provided", async () => {
+    const mockExecutor = {
+      execute: vi.fn(async (toolName: string) => {
+        if (toolName === "glob") {
+          return { success: true, data: [tmpDir + "/src/core.ts", tmpDir + "/src/utils.ts", tmpDir + "/src/index.ts"], summary: "3 files", durationMs: 5 };
+        }
+        return { success: true, data: "", summary: "no matches", durationMs: 5 };
+      }),
+    } as unknown as ToolExecutor;
+
+    const result = await gatherNegotiationContext("improve code quality", tmpDir, undefined, mockExecutor);
+
+    expect(result).toContain("=== Workspace Context ===");
+    expect(result).toContain("TypeScript files in src/");
+    expect(mockExecutor.execute).toHaveBeenCalledWith("glob", expect.objectContaining({ pattern: "src/**/*.ts" }), expect.anything());
+  });
+
+  it("uses ToolExecutor grep count when provided", async () => {
+    const mockExecutor = {
+      execute: vi.fn(async (toolName: string, input: unknown) => {
+        if (toolName === "glob") {
+          return { success: true, data: [tmpDir + "/src/core.ts", tmpDir + "/src/utils.ts"], summary: "2 files", durationMs: 5 };
+        }
+        const inp = input as { outputMode?: string };
+        if (toolName === "grep" && inp.outputMode === "count") {
+          return { success: true, data: "src/core.ts:5\nsrc/utils.ts:3", summary: "8 matches", durationMs: 5 };
+        }
+        return { success: true, data: "", summary: "no matches", durationMs: 5 };
+      }),
+    } as unknown as ToolExecutor;
+
+    const result = await gatherNegotiationContext("improve test coverage", tmpDir, undefined, mockExecutor);
+
+    expect(result).toContain("8 occurrences across 2 files");
+    expect(result).toContain("Keywords found:");
+  });
+
+  it("uses ToolExecutor grep content for TODO markers", async () => {
+    const mockExecutor = {
+      execute: vi.fn(async (toolName: string, input: unknown) => {
+        if (toolName === "glob") {
+          return { success: true, data: [tmpDir + "/src/core.ts"], summary: "1 file", durationMs: 5 };
+        }
+        const inp = input as { outputMode?: string };
+        if (toolName === "grep" && inp.outputMode === "count") {
+          return { success: true, data: "src/core.ts:1", summary: "1 match", durationMs: 5 };
+        }
+        if (toolName === "grep" && inp.outputMode === "content") {
+          return { success: true, data: "src/core.ts:10:// TODO: add retry logic", summary: "1 match", durationMs: 5 };
+        }
+        return { success: true, data: "", summary: "no matches", durationMs: 5 };
+      }),
+    } as unknown as ToolExecutor;
+
+    const result = await gatherNegotiationContext("fix all TODO items", tmpDir, undefined, mockExecutor);
+
+    expect(result).toContain("TODO");
+    expect(result).toContain("occurrences");
+    expect(result).toContain("1 occurrences across 1 files");
   });
 });
 
