@@ -31,6 +31,9 @@ export class EventServer {
   private readonly stateManager?: StateManager;
   private readonly triggerMapper?: TriggerMapper;
   private triggerMappingsCache: TriggerMappingsConfig | null = null;
+  private sseClients: Set<http.ServerResponse> = new Set();
+  private eventIdCounter = 0;
+  private approvalQueue: Map<string, { resolve: (approved: boolean) => void; timer: ReturnType<typeof setTimeout> }> = new Map();
 
   constructor(driveSystem: DriveSystem, config?: EventServerConfig, logger?: Logger) {
     this.driveSystem = driveSystem;
@@ -64,6 +67,11 @@ export class EventServer {
   /** Stop HTTP server */
   async stop(): Promise<void> {
     this.stopFileWatcher();
+    // Close all SSE connections
+    for (const client of this.sseClients) {
+      try { client.end(); } catch { /* ignore */ }
+    }
+    this.sseClients.clear();
     return new Promise((resolve) => {
       if (!this.server) {
         resolve();
@@ -170,6 +178,45 @@ export class EventServer {
     }
   }
 
+  /** Broadcast an SSE event to all connected clients */
+  broadcast(eventType: string, data: unknown): void {
+    this.eventIdCounter++;
+    const id = String(this.eventIdCounter);
+    const payload = `id: ${id}\nevent: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
+    for (const client of this.sseClients) {
+      try {
+        client.write(payload);
+      } catch {
+        this.sseClients.delete(client);
+      }
+    }
+  }
+
+  /** Request human approval and wait for response (5 min timeout) */
+  async requestApproval(goalId: string, task: { id: string; description: string; action: string }): Promise<boolean> {
+    const requestId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    return new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        this.approvalQueue.delete(requestId);
+        this.broadcast("approval_resolved", { requestId, approved: false, reason: "timeout" });
+        resolve(false);
+      }, 5 * 60 * 1000);
+      this.approvalQueue.set(requestId, { resolve, timer });
+      this.broadcast("approval_required", { requestId, goalId, task });
+    });
+  }
+
+  /** Resolve a pending approval request */
+  resolveApproval(requestId: string, approved: boolean): boolean {
+    const entry = this.approvalQueue.get(requestId);
+    if (!entry) return false;
+    clearTimeout(entry.timer);
+    this.approvalQueue.delete(requestId);
+    entry.resolve(approved);
+    this.broadcast("approval_resolved", { requestId, approved });
+    return true;
+  }
+
   /** Handle incoming HTTP request */
   private handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
     const urlPath = req.url?.split("?")[0] ?? "/";
@@ -203,6 +250,74 @@ export class EventServer {
     const goalsMatch = /^\/goals\/([^/]+)$/.exec(urlPath);
     if (req.method === "GET" && goalsMatch) {
       void this.handleGetGoalById(res, goalsMatch[1]!);
+      return;
+    }
+
+    // GET /stream — SSE event stream
+    if (req.method === "GET" && urlPath === "/stream") {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.write(`event: connected\ndata: ${JSON.stringify({ timestamp: new Date().toISOString() })}\n\n`);
+      this.sseClients.add(res);
+      req.on("close", () => { this.sseClients.delete(res); });
+      const keepAlive = setInterval(() => {
+        try { res.write(": keepalive\n\n"); } catch { clearInterval(keepAlive); this.sseClients.delete(res); }
+      }, 30_000);
+      req.on("close", () => clearInterval(keepAlive));
+      return;
+    }
+
+    // GET /daemon/status
+    if (req.method === "GET" && urlPath === "/daemon/status") {
+      void (async () => {
+        const statePath = path.join(this.eventsDir.replace("/events", ""), "daemon-state.json");
+        try {
+          const raw = await fsp.readFile(statePath, "utf-8");
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(raw);
+        } catch {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "daemon state not found" }));
+        }
+      })();
+      return;
+    }
+
+    // POST /goals/:id/start|stop|approve|chat
+    const goalActionMatch = /^\/goals\/([^/]+)\/([^/]+)$/.exec(urlPath);
+    if (req.method === "POST" && goalActionMatch) {
+      const goalId = goalActionMatch[1]!;
+      const action = goalActionMatch[2]!;
+      void (async () => {
+        if (action === "start") {
+          this.broadcast("goal_start_requested", { goalId });
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, goalId }));
+        } else if (action === "stop") {
+          this.broadcast("goal_stop_requested", { goalId });
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, goalId }));
+        } else if (action === "approve") {
+          const body = await readBody(req);
+          const { requestId, approved } = JSON.parse(body) as { requestId: string; approved: boolean };
+          const resolved = this.resolveApproval(requestId, approved);
+          res.writeHead(resolved ? 200 : 404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: resolved }));
+        } else if (action === "chat") {
+          const body = await readBody(req);
+          const { message } = JSON.parse(body) as { message: string };
+          this.broadcast("chat_message_received", { goalId, message });
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        } else {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Not found" }));
+        }
+      })();
       return;
     }
 
@@ -452,4 +567,20 @@ export class EventServer {
   getEventsDir(): string {
     return this.eventsDir;
   }
+}
+
+/** Read the full request body as a string (max 1 MB). */
+function readBody(req: http.IncomingMessage): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const MAX = 1_048_576;
+    let body = "";
+    let bytes = 0;
+    req.on("data", (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes > MAX) { reject(new Error("Payload too large")); req.destroy(); return; }
+      body += chunk;
+    });
+    req.on("end", () => resolve(body));
+    req.on("error", reject);
+  });
 }
