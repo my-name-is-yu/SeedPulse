@@ -14,6 +14,7 @@ import {
   type MarkdownSegment,
 } from "./markdown-renderer.js";
 import { fuzzyMatch, fuzzyFilter } from "./fuzzy.js";
+import { getClipboardContent } from "./clipboard.js";
 import { theme, getMessageTypeColor } from "./theme.js";
 import { pickSpinnerVerb } from "./spinner-verbs.js";
 import { ShimmerText } from "./shimmer-text.js";
@@ -287,6 +288,9 @@ export function Chat({
 
   // ── Empty-enter hint ──
   const [emptyHint, setEmptyHint] = React.useState(false);
+
+  // ── Copy toast (shown when clipboard changes) ──
+  const [copyToast, setCopyToast] = useState<string | null>(null);
   const emptyHintTimer = React.useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -294,6 +298,34 @@ export function Chat({
   // ── Scroll offset for chat scroll ──
   const [scrollOffset, setScrollOffset] = React.useState(0);
   const prevMsgCount = React.useRef(messages.length);
+
+  // ── Clipboard change detection — poll every 500ms ──
+  React.useEffect(() => {
+    let lastClipboard = "";
+    let mounted = true;
+
+    // Get initial clipboard content (don't toast on startup)
+    getClipboardContent().then(content => {
+      if (mounted) lastClipboard = content;
+    });
+
+    const interval = setInterval(async () => {
+      if (!mounted) return;
+      const current = await getClipboardContent();
+      if (current !== lastClipboard && current.length > 0) {
+        lastClipboard = current;
+        setCopyToast(`copied ${current.length} chars to clipboard`);
+        setTimeout(() => {
+          if (mounted) setCopyToast(null);
+        }, 2000);
+      }
+    }, 500);
+
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   const [spinnerVerb, setSpinnerVerb] = React.useState(() => pickSpinnerVerb());
 
@@ -313,6 +345,7 @@ export function Chat({
   // Scroll-slicing: clip messages to visible terminal height
   const { stdout } = useStdout();
   const termRows = stdout?.rows ?? 24;
+  const termCols = stdout?.columns ?? 80;
   const maxVisible = Math.max(1, termRows - 8); // reserve rows for header, input, status bar
 
   // Auto-scroll to bottom when new messages arrive and we're at the bottom
@@ -382,16 +415,18 @@ export function Chat({
         }
       } else {
         // ── Input history: ↑↓ when no suggestions ──
-        if (key.upArrow && history.length > 0) {
-          if (historyIdx === -1) {
-            setDraft(input);
-            const idx = history.length - 1;
-            setHistoryIdx(idx);
-            setInput(history[idx]);
-          } else if (historyIdx > 0) {
-            const idx = historyIdx - 1;
-            setHistoryIdx(idx);
-            setInput(history[idx]);
+        if (key.upArrow) {
+          if (history.length > 0) {
+            if (historyIdx === -1) {
+              setDraft(input);
+              const idx = history.length - 1;
+              setHistoryIdx(idx);
+              setInput(history[idx]);
+            } else if (historyIdx > 0) {
+              const idx = historyIdx - 1;
+              setHistoryIdx(idx);
+              setInput(history[idx]);
+            }
           }
         } else if (key.downArrow && historyIdx !== -1) {
           if (historyIdx < history.length - 1) {
@@ -442,10 +477,15 @@ export function Chat({
         !isProcessingRef.current
       ) {
         if (noFlicker) {
-          // No-flicker mode: concatenate cursor escape INTO the frame
-          // so it lands inside the BSU/ESU atomic block
+          // No-flicker mode: write frame first (goes through frame-writer BSU/ESU),
+          // then write cursor escape AFTER — parkCursor in frame-writer would
+          // overwrite cursor position if we concatenated it into the frame.
+          const result = (original as any)(chunk, ...args);
           const cursorEsc = buildCursorEscape(chunk, inputRef.current);
-          return (original as any)(chunk + (cursorEsc ?? ""), ...args);
+          if (cursorEsc) {
+            (original as any)(cursorEsc);
+          }
+          return result;
         }
         // Standard mode: write frame, then position cursor separately
         const result = (original as any)(chunk, ...args);
@@ -506,9 +546,7 @@ export function Chat({
 
       {/* All visible messages rendered with memoized rows to prevent flicker */}
       <Box flexDirection="column" flexGrow={1} justifyContent="flex-end">
-        {visibleMessages.map((msg, idx) => {
-          // Turn separator: show between last AI message and next user message
-          const prevMsg = idx > 0 ? visibleMessages[idx - 1] : null;
+        {visibleMessages.map((msg) => {
           return (
             <React.Fragment key={msg.id}>
               <MessageRow msg={msg} />
@@ -529,6 +567,13 @@ export function Chat({
           <Text dimColor>
             {"↓"} {hiddenBelow} newer messages
           </Text>
+        )}
+
+        {/* Copy toast — above input area */}
+        {copyToast && (
+          <Box justifyContent="flex-end">
+            <Text color="cyan">{copyToast}</Text>
+          </Box>
         )}
 
         {/* Input area with borders — always at bottom */}

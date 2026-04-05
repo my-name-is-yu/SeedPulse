@@ -100,6 +100,7 @@ export function HelpOverlay({ onDismiss }: HelpOverlayProps) {
             <Box width={20}><Text color={theme.shortcut} bold>Ctrl-C ×2</Text></Box>
             <Text>Quit PulSeed (press twice)</Text>
           </Box>
+
         </Box>
       </Box>
 
