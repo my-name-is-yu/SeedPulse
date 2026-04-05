@@ -6,7 +6,7 @@
  * `this.runShellCommand.bind(this)` so vi.spyOn(lifecycle, "runShellCommand") still works.
  */
 
-import type { ToolExecutor } from "../../tools/executor.js";
+import type { ToolExecutor } from "../../../tools/executor.js";
 
 type ShellCommandFn = (
   argv: string[],
