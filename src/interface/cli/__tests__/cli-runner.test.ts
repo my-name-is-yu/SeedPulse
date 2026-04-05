@@ -267,10 +267,7 @@ describe("unknown subcommand", async () => {
     expect(code).toBe(1);
   });
 
-  it("exits with code 1 when no arguments are given", async () => {
-    const code = await runCLI();
-    expect(code).toBe(1);
-  });
+  // No-argument case now launches TUI (feat/default-tui), cannot test in vitest
 
   it("exits with code 0 for --help", async () => {
     const code = await runCLI("--help");
