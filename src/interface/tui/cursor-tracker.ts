@@ -48,3 +48,18 @@ export function positionCursorInFrame(
   // ANSI CSI: move to row;col (1-indexed) and show cursor
   write(`\x1b[${row + 1};${x + 1}H\x1b[?25h`);
 }
+
+/**
+ * Build the cursor-positioning escape sequence as a string.
+ * Used by chat.tsx in no-flicker mode to concatenate cursor positioning
+ * into the frame before the frame writer processes it (inside BSU/ESU block).
+ */
+export function buildCursorEscape(
+  frame: string,
+  inputText: string,
+): string | null {
+  const row = findCursorRow(frame);
+  if (row === null) return null;
+  const x = computeCursorX(inputText);
+  return `[${row + 1};${x + 1}H[?25h`;
+}
