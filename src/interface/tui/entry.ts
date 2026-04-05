@@ -303,7 +303,8 @@ export async function startTUI(): Promise<void> {
       chatRunner,
       onApprovalReady: setRequestApproval,
       ...breadcrumb,
-    })
+    }),
+    { exitOnCtrlC: false }
   );
 
   await waitUntilExit();
