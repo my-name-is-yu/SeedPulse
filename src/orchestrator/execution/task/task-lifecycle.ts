@@ -527,6 +527,7 @@ export class TaskLifecycle {
   async runPostExecutionHealthCheck(): Promise<{ healthy: boolean; output: string }> {
     return _runPostExecutionHealthCheck(
       this.runShellCommand.bind(this),
+      this.toolExecutor,
     );
   }
 
