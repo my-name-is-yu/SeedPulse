@@ -96,7 +96,7 @@ function MarkdownLineComponent({
 const MessageRow = React.memo(function MessageRow({ msg }: { msg: ChatMessage }) {
   if (msg.role === "user") {
     return (
-      <Box marginBottom={1}>
+      <Box marginBottom={0}>
         <Box paddingX={1}>
           <Text color="#1A1A1A" backgroundColor="#D9D9D9">◉ {msg.text}</Text>
         </Box>
