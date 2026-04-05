@@ -290,6 +290,26 @@ export function App({
       setIsProcessing(true);
 
       try {
+        // Local-only commands — no LLM round-trip needed
+        const trimmedInput = input.trim().toLowerCase();
+        if (trimmedInput === "/flicker") {
+          const { loadGlobalConfig, updateGlobalConfig } = await import("../../base/config/global-config.js");
+          const config = await loadGlobalConfig();
+          const newValue = !config.no_flicker;
+          await updateGlobalConfig({ no_flicker: newValue });
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: randomUUID(),
+              role: "pulseed" as const,
+              text: `No-flicker mode ${newValue ? "enabled" : "disabled"}. Takes effect on next TUI launch.`,
+              timestamp: new Date(),
+              messageType: "success" as const,
+            },
+          ].slice(-MAX_MESSAGES));
+          return;
+        }
+
         // Slash commands go through IntentRecognizer -> ActionHandler (standalone)
         // or through daemon REST API (daemon mode)
         if (input.startsWith("/") && intentRecognizer && actionHandler) {
@@ -301,25 +321,6 @@ export function App({
             return;
           }
 
-          // Handle /settings command
-          const trimmedInput = input.trim().toLowerCase();
-          if (trimmedInput === "/flicker") {
-            const { loadGlobalConfig, updateGlobalConfig } = await import("../../base/config/global-config.js");
-            const config = await loadGlobalConfig();
-            const newValue = !config.no_flicker;
-            await updateGlobalConfig({ no_flicker: newValue });
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: randomUUID(),
-                role: "pulseed" as const,
-                text: `No-flicker mode ${newValue ? "enabled" : "disabled"}. Takes effect on next TUI launch.`,
-                timestamp: new Date(),
-                messageType: "success" as const,
-              },
-            ].slice(-MAX_MESSAGES));
-            return;
-          }
           if (trimmedInput === "/settings" || trimmedInput === "/config") {
             setShowSettings(true);
             return;
