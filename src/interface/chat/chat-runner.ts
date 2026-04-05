@@ -12,12 +12,10 @@ import { buildChatContext, resolveGitRoot } from "../../platform/observation/con
 import type { EscalationHandler } from "./escalation.js";
 import { buildSystemPrompt } from "./grounding.js";
 import { verifyChatAction } from "./chat-verifier.js";
-import { getSelfKnowledgeToolDefinitions, handleSelfKnowledgeToolCall } from "./self-knowledge-tools.js";
-import type { SelfKnowledgeDeps } from "./self-knowledge-tools.js";
-import { getMutationToolDefinitions, handleMutationToolCall } from "./self-knowledge-mutation-tools.js";
-import type { MutationToolDeps, ApprovalLevel } from "./self-knowledge-mutation-tools.js";
-import type { TrustManager } from "../../platform/traits/trust-manager.js";
-import type { PluginLoader } from "../../runtime/plugin-loader.js";
+import type { ApprovalLevel } from "./self-knowledge-mutation-tools.js";
+import type { ToolRegistry } from "../../tools/registry.js";
+import { toToolDefinitions } from "../../tools/tool-definition-adapter.js";
+import type { ToolCallContext } from "../../tools/types.js";
 import type { ToolExecutor } from "../../tools/executor.js";
 import type { LLMMessage, LLMResponse } from "../../base/llm/llm-client.js";
 
@@ -40,6 +38,8 @@ export interface ChatRunnerDeps {
   approvalConfig?: Record<string, ApprovalLevel>;
   /** Optional: tool executor for post-change verification (git diff + tests). */
   toolExecutor?: ToolExecutor;
+  /** Optional: tool registry providing unified tool catalog. */
+  registry?: ToolRegistry;
 }
 
 export interface ChatRunResult {
@@ -341,28 +341,41 @@ export class ChatRunner {
     return lastAssistant?.content || "I was unable to complete the request within the allowed tool call limit.";
   }
 
-  /** Build SelfKnowledgeDeps from ChatRunnerDeps. */
-  private buildSelfKnowledgeDeps(): SelfKnowledgeDeps {
-    return {
-      stateManager: this.deps.stateManager,
-      trustManager: this.deps.trustManager,
-      pluginLoader: this.deps.pluginLoader as SelfKnowledgeDeps["pluginLoader"],
-      homeDir: process.env.HOME ?? process.env.USERPROFILE ?? "/tmp",
-    };
+  /** Dispatch a tool call through the registry. */
+  private async dispatchToolCall(
+    name: string,
+    args: Record<string, unknown>,
+    context: ToolCallContext,
+  ): Promise<string> {
+    if (!this.deps.registry) {
+      return JSON.stringify({ error: `No tool registry configured` });
+    }
+    const tool = this.deps.registry.get(name);
+    if (!tool) {
+      return JSON.stringify({ error: `Unknown tool: ${name}` });
+    }
+    try {
+      const result = await tool.call(args, context);
+      return result.summary || JSON.stringify(result.data);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return JSON.stringify({ error: `Tool ${name} failed: ${message}` });
+    }
   }
 
-  /** Build MutationToolDeps from ChatRunnerDeps. */
-  private buildMutationToolDeps(): MutationToolDeps {
-    const tm = this.deps.trustManager;
-    const pl = this.deps.pluginLoader;
+  /** Build a ToolCallContext from ChatRunnerDeps for tool dispatch. */
+  private buildToolCallContext(): ToolCallContext {
     return {
-      stateManager: this.deps.stateManager,
-      trustManager: tm && "setOverride" in tm ? (tm as TrustManager) : undefined,
-      pluginLoader: pl && "getPluginState" in pl && "updatePluginState" in pl
-        ? (pl as PluginLoader)
-        : undefined,
-      approvalFn: this.deps.approvalFn,
-      approvalConfig: this.deps.approvalConfig,
+      cwd: this.sessionCwd ?? process.cwd(),
+      goalId: "",
+      trustBalance: 0,
+      preApproved: false,
+      approvalFn: async (req) => {
+        if (this.deps.approvalFn) {
+          return this.deps.approvalFn(req.reason);
+        }
+        return false;
+      },
     };
   }
 }
