@@ -203,7 +203,6 @@ export async function calculateGapOrComplete(
             if (refreshed !== null) {
               dim.current_value = refreshed.value;
               dim.confidence = refreshed.confidence;
-              dim.last_observed = new Date().toISOString();
               ctx.logger?.debug(`[GapRefresh] Refreshed stale dimension ${dim.name}: confidence ${dim.confidence}`);
             }
           } catch (err) {
