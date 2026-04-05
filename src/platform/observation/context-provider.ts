@@ -253,6 +253,8 @@ async function collectContextItems(
     // 2. Git diff / log (recent changes) — recall tier
     try {
       if (toolExecutor) {
+        // NOTE: Tool path uses git log --oneline (commit summaries) vs fallback's git diff --stat (file change stats).
+        // Both serve as "recent changes" context for LLM consumption — the semantic difference is intentional.
         const result = await toolExecutor.execute(
           "git_log",
           { maxCount: 10, format: "oneline" },
@@ -294,9 +296,15 @@ async function collectContextItems(
           { command: "npx vitest run --reporter=dot", timeout: 30000 },
           ctx
         );
-        if (result.success && result.data) {
+        if (result.success && result.data && typeof result.data === "object" && "rawOutput" in result.data) {
           const testData = result.data as { rawOutput: string };
           const lastLines = testData.rawOutput.split("\n").slice(-10).join("\n");
+          const label = "[Test status]";
+          cumulativeChars += label.length + lastLines.length;
+          items.push({ label, content: lastLines, memory_tier: classifyTier(label) });
+        } else if (result.success && typeof result.data === "string") {
+          // Truncated output — use raw string directly
+          const lastLines = result.data.split("\n").slice(-10).join("\n");
           const label = "[Test status]";
           cumulativeChars += label.length + lastLines.length;
           items.push({ label, content: lastLines, memory_tier: classifyTier(label) });
@@ -369,9 +377,11 @@ export async function buildChatContext(
   // 1. git log --oneline (via tool) or git diff HEAD --stat (via execFile)
   try {
     if (toolExecutor) {
+      // NOTE: Tool path uses git log --oneline (commit summaries) vs fallback's git diff --stat (file change stats).
+      // Both serve as "recent changes" context for LLM consumption — the semantic difference is intentional.
       const result = await toolExecutor.execute(
         "git_log",
-        { maxCount: 10, format: "oneline" },
+        { maxCount: 10, format: "oneline", cwd: gitRoot },
         ctx
       );
       if (result.success && result.data) {
@@ -403,9 +413,15 @@ export async function buildChatContext(
         { command: "npx vitest run --reporter=dot", timeout: 30000 },
         ctx
       );
-      if (result.success && result.data) {
+      if (result.success && result.data && typeof result.data === "object" && "rawOutput" in result.data) {
         const testData = result.data as { rawOutput: string };
         const lastLines = testData.rawOutput.split("\n").slice(-20).join("\n");
+        if (lastLines.trim()) {
+          parts.push(`[Test status]\n${lastLines}`);
+        }
+      } else if (result.success && typeof result.data === "string") {
+        // Truncated output — use raw string directly
+        const lastLines = result.data.split("\n").slice(-20).join("\n");
         if (lastLines.trim()) {
           parts.push(`[Test status]\n${lastLines}`);
         }
