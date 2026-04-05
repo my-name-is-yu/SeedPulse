@@ -626,19 +626,19 @@ export function Chat({
 
         {/* Input area with borders — always at bottom */}
         <Box flexDirection="column">
-          <Box flexDirection="row">
+          {copyToast ? (
+            <Box justifyContent="flex-end">
+              <Text color="cyan">{copyToast}</Text>
+            </Box>
+          ) : (
             <Box
               borderStyle="single"
               borderColor={theme.border}
               borderBottom={false}
               borderLeft={false}
               borderRight={false}
-              flexGrow={1}
             />
-            {copyToast && (
-              <Text color="cyan" dimColor>{` ${copyToast} `}</Text>
-            )}
-          </Box>
+          )}
           <Box>
             <Text color={theme.userPrompt} bold>
               {"​◉ "}
