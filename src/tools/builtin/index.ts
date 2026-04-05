@@ -25,6 +25,13 @@ export { GitDiffTool } from "../git/git-diff.js";
 export { FileWriteTool } from "../filesystem/file-write.js";
 export { FileEditTool } from "../filesystem/file-edit.js";
 export { validateFilePath } from "../filesystem/file-validation.js";
+export { SetGoalTool } from "../state/set-goal-tool.js";
+export { UpdateGoalTool } from "../state/update-goal-tool.js";
+export { ArchiveGoalTool } from "../state/archive-goal-tool.js";
+export { DeleteGoalTool } from "../state/delete-goal-tool.js";
+export { TogglePluginTool } from "../state/toggle-plugin-tool.js";
+export { UpdateConfigTool } from "../state/update-config-tool.js";
+export { ResetTrustTool } from "../state/reset-trust-tool.js";
 
 import { GlobTool } from "../filesystem/glob.js";
 import { GrepTool } from "../filesystem/grep.js";
@@ -51,17 +58,26 @@ import { SleepTool } from "../system/sleep.js";
 import { GitDiffTool } from "../git/git-diff.js";
 import { FileWriteTool } from "../filesystem/file-write.js";
 import { FileEditTool } from "../filesystem/file-edit.js";
+import { SetGoalTool } from "../state/set-goal-tool.js";
+import { UpdateGoalTool } from "../state/update-goal-tool.js";
+import { ArchiveGoalTool } from "../state/archive-goal-tool.js";
+import { DeleteGoalTool } from "../state/delete-goal-tool.js";
+import { TogglePluginTool } from "../state/toggle-plugin-tool.js";
+import { UpdateConfigTool } from "../state/update-config-tool.js";
+import { ResetTrustTool } from "../state/reset-trust-tool.js";
 import type { ITool } from "../types.js";
 import type { StateManager } from "../../base/state/state-manager.js";
 import type { KnowledgeManager } from "../../platform/knowledge/knowledge-manager.js";
 import type { ToolRegistry } from "../registry.js";
 import type { PluginLoader } from "../../runtime/plugin-loader.js";
+import type { TrustManager } from "../../platform/traits/trust-manager.js";
 
 export interface BuiltinToolDeps {
   stateManager?: StateManager;
   knowledgeManager?: KnowledgeManager;
   registry?: ToolRegistry;
   pluginLoader?: PluginLoader;
+  trustManager?: TrustManager;
 }
 
 /** All built-in tools, sorted alphabetically by name. */
@@ -101,6 +117,23 @@ export function createBuiltinTools(deps?: BuiltinToolDeps): ITool[] {
 
   if (deps?.pluginLoader) {
     tools.push(new PluginStateTool(deps.pluginLoader));
+  }
+
+
+  // Mutation tools (require stateManager, trustManager, etc.)
+  if (deps?.stateManager) {
+    tools.push(
+      new SetGoalTool(deps.stateManager),
+      new UpdateGoalTool(deps.stateManager),
+      new ArchiveGoalTool(deps.stateManager),
+      new DeleteGoalTool(deps.stateManager),
+    );
+  }
+
+  tools.push(new TogglePluginTool(), new UpdateConfigTool());
+
+  if (deps?.trustManager) {
+    tools.push(new ResetTrustTool(deps.trustManager));
   }
 
   const searchClient = createWebSearchClient();
