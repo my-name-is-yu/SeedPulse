@@ -194,15 +194,7 @@ describe("calculateGapOrComplete — dimension refresh persistence", () => {
 
     await calculateGapOrComplete(ctx, "goal-1", goal, 0, result, Date.now());
 
-    // saveGoal is still called because toolExecutor is set and dimensions exist,
-    // but the dimension values remain unchanged (no refresh happened)
-    // The persist call happens regardless of whether any dimension was actually updated,
-    // which is acceptable — it writes the same data. Verify it was called:
-    expect(ctx.deps.stateManager.saveGoal).toHaveBeenCalledTimes(1);
-    // And dimension values are unchanged
-    const savedGoal = (ctx.deps.stateManager.saveGoal as ReturnType<typeof vi.fn>).mock.calls[0][0] as Goal;
-    const dim = savedGoal.dimensions![0];
-    expect(dim.current_value).toBe(50); // original value unchanged
-    expect(dim.confidence).toBe(0.3); // original confidence unchanged
+    // saveGoal is NOT called because no dimension was actually refreshed (anyRefreshed=false).
+    expect(ctx.deps.stateManager.saveGoal).not.toHaveBeenCalled();
   });
 });

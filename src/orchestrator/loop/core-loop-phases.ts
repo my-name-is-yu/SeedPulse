@@ -190,6 +190,7 @@ export async function calculateGapOrComplete(
     // Refresh stale dimensions via tool measurement before gap calculation
     if (ctx.toolExecutor && goal.dimensions) {
       const { needsDirectMeasurement, measureDirectly } = await import("../../platform/drive/gap-calculator-tools.js");
+      let anyRefreshed = false;
       for (const dim of goal.dimensions) {
         if (needsDirectMeasurement(dim)) {
           try {
@@ -203,6 +204,7 @@ export async function calculateGapOrComplete(
             if (refreshed !== null) {
               dim.current_value = refreshed.value;
               dim.confidence = refreshed.confidence;
+              anyRefreshed = true;
               ctx.logger?.debug(`[GapRefresh] Refreshed stale dimension ${dim.name}: confidence ${dim.confidence}`);
             }
           } catch (err) {
@@ -210,11 +212,15 @@ export async function calculateGapOrComplete(
           }
         }
       }
-    }
-    // Persist refreshed dimension values to avoid re-measuring on the next iteration
-    if (ctx.toolExecutor && goal.dimensions) {
-      await ctx.deps.stateManager.saveGoal(goal);
-      ctx.logger?.debug('[GapRefresh] Persisted refreshed dimensions for goal ' + goalId);
+      // Persist refreshed dimension values to avoid re-measuring on the next iteration
+      if (anyRefreshed) {
+        try {
+          await ctx.deps.stateManager.saveGoal(goal);
+          ctx.logger?.debug('[GapRefresh] Persisted refreshed dimensions for goal ' + goalId);
+        } catch (err) {
+          ctx.logger?.warn?.('[GapRefresh] Failed to persist refreshed dimensions: ' + String(err));
+        }
+      }
     }
     gapVector = ctx.deps.gapCalculator.calculateGapVector(
       goalId,
