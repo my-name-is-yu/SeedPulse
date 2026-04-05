@@ -38,6 +38,7 @@ export const StrategyArraySchema = z.array(
       llm_calls: z.number().nullable().default(null),
     }),
     allocation: z.number().min(0).max(1).default(0),
+    required_tools: z.array(z.string()).default([]),
   })
 );
 
@@ -151,7 +152,8 @@ Return a JSON array of strategies. Each strategy must follow this schema:
     "duration": { "value": number, "unit": "hours"|"days"|"weeks"|"minutes" },
     "llm_calls": number|null
   },
-  "allocation": number (0-1)
+  "allocation": number (0-1),
+  "required_tools": ["tool-name-1", "tool-name-2"]  // list tool names this strategy needs (empty array if none)
 }
 
 Do not repeat strategies that have already been tried. Respond with only the JSON array inside a markdown code block.`;

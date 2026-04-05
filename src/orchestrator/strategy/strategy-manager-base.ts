@@ -12,6 +12,7 @@ import type { StrategyTemplateRegistry } from "./strategy-template-registry.js";
 import type { Logger } from "../../runtime/logger.js";
 import type { ToolExecutor } from "../../tools/executor.js";
 import type { ToolCallContext } from "../../tools/types.js";
+import type { ToolRegistry } from "../../tools/registry.js";
 import { WorkspaceContextCache, formatWorkspaceContext } from "./strategy-workspace.js";
 import type { WorkspaceContext } from "./strategy-workspace.js";
 import {
@@ -45,6 +46,9 @@ export class StrategyManagerBase {
   /** Optional ToolExecutor for workspace context gathering (Phase 4-B). */
   protected toolExecutor?: ToolExecutor;
 
+  /** Optional ToolRegistry for scoring candidates by tool availability (Issue #476). */
+  protected toolRegistry?: ToolRegistry;
+
   /** Per-iteration workspace context cache (Phase 4-B). */
   protected readonly workspaceCache: WorkspaceContextCache = new WorkspaceContextCache();
 
@@ -69,6 +73,11 @@ export class StrategyManagerBase {
   /** Inject ToolExecutor for workspace context gathering (Phase 4-B). */
   setToolExecutor(executor: ToolExecutor): void {
     this.toolExecutor = executor;
+  }
+
+  /** Inject ToolRegistry for tool-availability scoring in activateBestCandidate (Issue #476). */
+  setToolRegistry(registry: ToolRegistry): void {
+    this.toolRegistry = registry;
   }
 
   // ─── Core Lifecycle Methods ───
@@ -200,8 +209,21 @@ export class StrategyManagerBase {
       );
     }
 
-    // Select first candidate (top of list)
-    const best = candidates[0];
+    // Score candidates by tool availability when registry is present
+    let best: typeof candidates[0];
+    if (this.toolRegistry && candidates.some((c) => c.required_tools.length > 0)) {
+      const availableNames = new Set(this.toolRegistry.listAll().map((t) => t.metadata.name));
+      const scored = candidates.map((c) => {
+        const missing = c.required_tools.filter((name) => !availableNames.has(name)).length;
+        return { candidate: c, score: -missing };
+      });
+      // Stable sort: higher score (fewer missing tools) first
+      scored.sort((a, b) => b.score - a.score);
+      best = scored[0]!.candidate;
+    } else {
+      // Fallback: pick first candidate
+      best = candidates[0]!;
+    }
     const now = new Date().toISOString();
 
     const activated = StrategySchema.parse({
