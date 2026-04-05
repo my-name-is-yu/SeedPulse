@@ -93,12 +93,11 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: ChatMessage })
   const timeStr = formatTime(msg.timestamp ?? new Date());
   if (msg.role === "user") {
     return (
-      <Box flexDirection="column" marginBottom={2}>
+      <Box flexDirection="column" marginBottom={1}>
         <Box>
-          <Text color={theme.userPrefix} bold>
-            {"❧ "}
+          <Text backgroundColor="#2D2D2D">
+            {" ❧ "}{msg.text}{" "}
           </Text>
-          <Text>{msg.text}</Text>
           <Text dimColor> {timeStr}</Text>
         </Box>
       </Box>
@@ -108,10 +107,7 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: ChatMessage })
   const mdLines = renderMarkdownLines(msg.text);
   return (
     <Box flexDirection="column" marginBottom={1} marginLeft={2}>
-      <Box justifyContent="space-between">
-        <Text color={theme.brand} bold>
-          PulSeed
-        </Text>
+      <Box justifyContent="flex-end">
         <Text dimColor>{timeStr}</Text>
       </Box>
       <Box flexDirection="column">
