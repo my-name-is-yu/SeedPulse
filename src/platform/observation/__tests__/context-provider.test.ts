@@ -530,7 +530,7 @@ describe("buildChatContext with toolExecutor", () => {
     vi.clearAllMocks();
   });
 
-  it("calls grep/read/git_log/test-runner for chat context", async () => {
+  it("calls grep/read/git_log for chat context (no test-runner)", async () => {
     const executor = createMockExecutor();
     const executeFn = executor.execute as ReturnType<typeof vi.fn>;
 
@@ -541,7 +541,7 @@ describe("buildChatContext with toolExecutor", () => {
     expect(typeof result).toBe("string");
     const calledTools = executeFn.mock.calls.map((c: unknown[]) => c[0]);
     expect(calledTools).toContain("git_log");
-    expect(calledTools).toContain("test-runner");
+    expect(calledTools).not.toContain("test-runner");
     expect(calledTools).toContain("grep");
     expect(calledTools).toContain("read");
   });
