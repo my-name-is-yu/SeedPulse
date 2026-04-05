@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { promises as fs } from "node:fs";
 import type { ITool, ToolResult, ToolCallContext, PermissionCheckResult, ToolMetadata } from "../../types.js";
-import { validateFilePath } from "../../filesystem/file-validation.js";
+import { validateFilePath } from "../FileValidationTool/FileValidationTool.js";
 import { DESCRIPTION } from "./prompt.js";
 import { TAGS, PERMISSION_LEVEL, MAX_OUTPUT_CHARS } from "./constants.js";
 
