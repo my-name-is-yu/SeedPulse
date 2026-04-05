@@ -123,7 +123,6 @@ export function getMessageTypeColor(
     case "success":
       return theme.success;
     case "info":
-      return theme.info;
     default:
       return undefined;
   }
