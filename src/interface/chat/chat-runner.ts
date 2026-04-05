@@ -40,6 +40,10 @@ export interface ChatRunnerDeps {
   toolExecutor?: ToolExecutor;
   /** Optional: tool registry providing unified tool catalog. */
   registry?: ToolRegistry;
+  /** Optional: called before each tool execution with tool name and args. */
+  onToolStart?: (toolName: string, args: Record<string, unknown>) => void;
+  /** Optional: called after each tool execution with result summary and duration. */
+  onToolEnd?: (toolName: string, result: { success: boolean; summary: string; durationMs: number }) => void;
 }
 
 export interface ChatRunResult {
@@ -349,15 +353,20 @@ export class ChatRunner {
     if (!tool) {
       return JSON.stringify({ error: `Unknown tool: ${name}` });
     }
+    const startTime = Date.now();
     try {
       const parsed = tool.inputSchema.safeParse(args);
       if (!parsed.success) {
         return JSON.stringify({ error: `Invalid input: ${parsed.error.message}` });
       }
+      this.deps.onToolStart?.(name, args);
       const result = await tool.call(parsed.data, context);
+      const durationMs = Date.now() - startTime;
+      this.deps.onToolEnd?.(name, { success: result.success, summary: result.summary || '...', durationMs });
       return result.summary || JSON.stringify(result.data);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      this.deps.onToolEnd?.(name, { success: false, summary: message, durationMs: Date.now() - startTime });
       return JSON.stringify({ error: `Tool ${name} failed: ${message}` });
     }
   }
