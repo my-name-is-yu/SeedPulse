@@ -4,6 +4,8 @@ import { promisify } from "node:util";
 import { readFile } from "fs/promises";
 import { join, dirname } from "path";
 import type { MemoryTier } from "../../base/types/memory-lifecycle.js";
+import type { ToolExecutor } from "../../tools/executor.js";
+import type { ToolCallContext } from "../../tools/types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -101,6 +103,8 @@ export async function buildWorkspaceContext(
     cwd?: string;
     maxFileContentLines?: number; // default: 100
     maxTotalChars?: number; // default: WORKSPACE_CONTEXT_MAX_CHARS
+    toolExecutor?: ToolExecutor;
+    toolContext?: Partial<ToolCallContext>;
   }
 ): Promise<string> {
   const maxTotalChars = options?.maxTotalChars ?? WORKSPACE_CONTEXT_MAX_CHARS;
@@ -123,6 +127,8 @@ export async function buildWorkspaceContextItems(
     maxFileContentLines?: number;
     maxItems?: number; // default: unlimited
     maxTotalChars?: number; // default: WORKSPACE_CONTEXT_MAX_CHARS
+    toolExecutor?: ToolExecutor;
+    toolContext?: Partial<ToolCallContext>;
   }
 ): Promise<ContextItem[]> {
   const maxTotalChars = options?.maxTotalChars ?? WORKSPACE_CONTEXT_MAX_CHARS;
@@ -132,18 +138,32 @@ export async function buildWorkspaceContextItems(
 }
 
 async function collectContextItems(
-  _goalId: string,
+  goalId: string,
   dimensionName: string,
   options?: {
     cwd?: string;
     maxFileContentLines?: number;
     maxTotalChars?: number;
+    toolExecutor?: ToolExecutor;
+    toolContext?: Partial<ToolCallContext>;
   }
 ): Promise<ContextItem[]> {
   const cwd = options?.cwd || process.cwd();
   const maxTotalChars = options?.maxTotalChars ?? WORKSPACE_CONTEXT_MAX_CHARS;
+  const toolExecutor = options?.toolExecutor;
+  const toolContext = options?.toolContext;
   let cumulativeChars = 0;
   const items: ContextItem[] = [];
+
+  // Build ToolCallContext when toolExecutor is provided
+  const ctx: ToolCallContext = {
+    cwd,
+    goalId: goalId ?? "context-provider",
+    trustBalance: 0,
+    preApproved: true, // all reads are safe
+    approvalFn: async () => true,
+    ...(toolContext ?? {}),
+  };
 
   // Determine per-file line limit based on half-budget threshold
   const effectiveMaxLines = (): number => {
@@ -160,16 +180,25 @@ async function collectContextItems(
   for (const term of searchTerms) {
     if (cumulativeChars >= maxTotalChars) break;
     try {
-      const { stdout } = await execFileAsync(
-        "grep",
-        ["-rn", "--include=*.ts", "--include=*.js", "-l", term, cwd],
-        { timeout: 10000 }
-      );
-      const files = stdout
-        .trim()
-        .split("\n")
-        .filter(Boolean)
-        .slice(0, 5);
+      let files: string[] = [];
+
+      if (toolExecutor) {
+        const result = await toolExecutor.execute(
+          "grep",
+          { pattern: term, path: cwd, glob: "*.{ts,js}", outputMode: "files_with_matches", limit: 5 },
+          ctx
+        );
+        if (result.success) {
+          files = (result.data as string).split("\n").filter(Boolean).slice(0, 5);
+        }
+      } else {
+        const { stdout } = await execFileAsync(
+          "grep",
+          ["-rn", "--include=*.ts", "--include=*.js", "-l", term, cwd],
+          { timeout: 10000 }
+        );
+        files = stdout.trim().split("\n").filter(Boolean).slice(0, 5);
+      }
 
       if (files.length > 0) {
         const label = `[grep "${term}" — ${files.length} files matched]`;
@@ -179,12 +208,29 @@ async function collectContextItems(
         for (const filePath of files.slice(0, 3)) {
           if (cumulativeChars >= maxTotalChars) break;
           try {
-            const content = await readFile(filePath, "utf-8");
             const maxLines = effectiveMaxLines();
-            const lines = content.split("\n").slice(0, maxLines);
-            const relativePath = filePath.replace(cwd + "/", "");
-            contentParts.push(`[File: ${relativePath} (${lines.length} lines)]`);
-            contentParts.push(lines.join("\n"));
+            let lines: string[] = [];
+
+            if (toolExecutor) {
+              const result = await toolExecutor.execute(
+                "read",
+                { file_path: filePath, limit: maxLines },
+                ctx
+              );
+              if (result.success) {
+                const rawContent = (result.data as string).replace(/^\d+\t/gm, "");
+                lines = rawContent.split("\n").slice(0, maxLines);
+              }
+            } else {
+              const content = await readFile(filePath, "utf-8");
+              lines = content.split("\n").slice(0, maxLines);
+            }
+
+            if (lines.length > 0) {
+              const relativePath = filePath.replace(cwd + "/", "");
+              contentParts.push(`[File: ${relativePath} (${lines.length} lines)]`);
+              contentParts.push(lines.join("\n"));
+            }
           } catch {
             // skip unreadable files
           }
@@ -204,18 +250,37 @@ async function collectContextItems(
   }
 
   if (cumulativeChars < maxTotalChars) {
-    // 2. Git diff (recent changes) — recall tier
+    // 2. Git diff / log (recent changes) — recall tier
     try {
-      const { stdout } = await execFileAsync(
-        "git",
-        ["diff", "HEAD~1", "--stat"],
-        { cwd, timeout: 10000 }
-      );
-      if (stdout.trim()) {
-        const label = `[Recent changes: git diff HEAD~1 --stat]`;
-        const content = stdout.trim();
-        cumulativeChars += label.length + content.length;
-        items.push({ label, content, memory_tier: classifyTier(label) });
+      if (toolExecutor) {
+        // NOTE: Tool path uses git log --oneline (commit summaries) vs fallback's git diff --stat (file change stats).
+        // Both serve as "recent changes" context for LLM consumption — the semantic difference is intentional.
+        const result = await toolExecutor.execute(
+          "git_log",
+          { maxCount: 10, format: "oneline" },
+          ctx
+        );
+        if (result.success && result.data) {
+          const logLines = (result.data as string[]).join("\n");
+          if (logLines.trim()) {
+            const label = "[Recent changes: git log --oneline]";
+            const content = logLines.trim();
+            cumulativeChars += label.length + content.length;
+            items.push({ label, content, memory_tier: classifyTier(label) });
+          }
+        }
+      } else {
+        const { stdout } = await execFileAsync(
+          "git",
+          ["diff", "HEAD~1", "--stat"],
+          { cwd, timeout: 10000 }
+        );
+        if (stdout.trim()) {
+          const label = "[Recent changes: git diff HEAD~1 --stat]";
+          const content = stdout.trim();
+          cumulativeChars += label.length + content.length;
+          items.push({ label, content, memory_tier: classifyTier(label) });
+        }
       }
     } catch {
       // ignore
@@ -225,17 +290,38 @@ async function collectContextItems(
   if (cumulativeChars < maxTotalChars) {
     // 3. Test status summary — recall tier
     try {
-      const { stdout } = await execFileAsync(
-        "npx",
-        ["vitest", "run", "--reporter=dot"],
-        { cwd, timeout: 30000 }
-      );
-      const lastLines = stdout.split("\n").slice(-10).join("\n");
-      const label = `[Test status]`;
-      cumulativeChars += label.length + lastLines.length;
-      items.push({ label, content: lastLines, memory_tier: classifyTier(label) });
+      if (toolExecutor) {
+        const result = await toolExecutor.execute(
+          "test-runner",
+          { command: "npx vitest run --reporter=dot", timeout: 30000 },
+          ctx
+        );
+        if (result.success && result.data && typeof result.data === "object" && "rawOutput" in result.data) {
+          const testData = result.data as { rawOutput: string };
+          const lastLines = testData.rawOutput.split("\n").slice(-10).join("\n");
+          const label = "[Test status]";
+          cumulativeChars += label.length + lastLines.length;
+          items.push({ label, content: lastLines, memory_tier: classifyTier(label) });
+        } else if (result.success && typeof result.data === "string") {
+          // Truncated output — use raw string directly
+          const lastLines = result.data.split("\n").slice(-10).join("\n");
+          const label = "[Test status]";
+          cumulativeChars += label.length + lastLines.length;
+          items.push({ label, content: lastLines, memory_tier: classifyTier(label) });
+        }
+      } else {
+        const { stdout } = await execFileAsync(
+          "npx",
+          ["vitest", "run", "--reporter=dot"],
+          { cwd, timeout: 30000 }
+        );
+        const lastLines = stdout.split("\n").slice(-10).join("\n");
+        const label = "[Test status]";
+        cumulativeChars += label.length + lastLines.length;
+        items.push({ label, content: lastLines, memory_tier: classifyTier(label) });
+      }
     } catch (err: unknown) {
-      if (typeof err === "object" && err !== null && "stdout" in err) {
+      if (!toolExecutor && typeof err === "object" && err !== null && "stdout" in err) {
         const lastLines = (
           (err as { stdout: string }).stdout || ""
         )
@@ -243,11 +329,12 @@ async function collectContextItems(
           .slice(-10)
           .join("\n");
         if (lastLines.trim()) {
-          const label = `[Test status (failures detected)]`;
+          const label = "[Test status (failures detected)]";
           cumulativeChars += label.length + lastLines.length;
           items.push({ label, content: lastLines, memory_tier: classifyTier(label) });
         }
       }
+      // For toolExecutor path: skip gracefully on failure
     }
   }
 
@@ -258,9 +345,28 @@ async function collectContextItems(
  * Build a context string for chat mode execution.
  * Gathers git diff, test status, and keyword-matching files.
  */
-export async function buildChatContext(taskDescription: string, cwd: string): Promise<string> {
+export async function buildChatContext(
+  taskDescription: string,
+  cwd: string,
+  options?: {
+    toolExecutor?: ToolExecutor;
+    toolContext?: Partial<ToolCallContext>;
+  }
+): Promise<string> {
   const gitRoot = resolveGitRoot(cwd);
   const CHAT_CONTEXT_MAX_CHARS = 24000; // ~6000 tokens
+  const toolExecutor = options?.toolExecutor;
+  const toolContext = options?.toolContext;
+
+  const ctx: ToolCallContext = {
+    cwd,
+    goalId: "context-provider",
+    trustBalance: 0,
+    preApproved: true,
+    approvalFn: async () => true,
+    ...(toolContext ?? {}),
+  };
+
   const parts: string[] = [
     `Working directory: ${cwd}`,
     gitRoot !== cwd ? `Git root: ${gitRoot}` : null,
@@ -268,34 +374,71 @@ export async function buildChatContext(taskDescription: string, cwd: string): Pr
     `Session type: chat_execution`,
   ].filter((x): x is string => x !== null);
 
-  // 1. git diff HEAD --stat (cap 30 lines)
+  // 1. git log --oneline (via tool) or git diff HEAD --stat (via execFile)
   try {
-    const { stdout } = await execFileAsync(
-      "git",
-      ["diff", "HEAD", "--stat"],
-      { cwd: gitRoot, timeout: 10000 }
-    );
-    const lines = stdout.trim().split("\n").slice(0, 30).join("\n");
-    if (lines) {
-      parts.push(`[Recent changes: git diff HEAD --stat]\n${lines}`);
+    if (toolExecutor) {
+      // NOTE: Tool path uses git log --oneline (commit summaries) vs fallback's git diff --stat (file change stats).
+      // Both serve as "recent changes" context for LLM consumption — the semantic difference is intentional.
+      const result = await toolExecutor.execute(
+        "git_log",
+        { maxCount: 10, format: "oneline", cwd: gitRoot },
+        ctx
+      );
+      if (result.success && result.data) {
+        const logLines = (result.data as string[]).join("\n");
+        if (logLines.trim()) {
+          parts.push(`[Recent changes: git log --oneline]\n${logLines.trim()}`);
+        }
+      }
+    } else {
+      const { stdout } = await execFileAsync(
+        "git",
+        ["diff", "HEAD", "--stat"],
+        { cwd: gitRoot, timeout: 10000 }
+      );
+      const lines = stdout.trim().split("\n").slice(0, 30).join("\n");
+      if (lines) {
+        parts.push(`[Recent changes: git diff HEAD --stat]\n${lines}`);
+      }
     }
   } catch {
     // ignore
   }
 
-  // 2. vitest last 20 lines (5s timeout)
+  // 2. vitest last 20 lines (5s timeout) or test-runner tool
   try {
-    const { stdout } = await execFileAsync(
-      "npx",
-      ["vitest", "run", "--reporter=dot"],
-      { cwd: gitRoot, timeout: 5000 }
-    );
-    const lastLines = stdout.split("\n").slice(-20).join("\n");
-    if (lastLines.trim()) {
-      parts.push(`[Test status]\n${lastLines}`);
+    if (toolExecutor) {
+      const result = await toolExecutor.execute(
+        "test-runner",
+        { command: "npx vitest run --reporter=dot", timeout: 30000 },
+        ctx
+      );
+      if (result.success && result.data && typeof result.data === "object" && "rawOutput" in result.data) {
+        const testData = result.data as { rawOutput: string };
+        const lastLines = testData.rawOutput.split("\n").slice(-20).join("\n");
+        if (lastLines.trim()) {
+          parts.push(`[Test status]\n${lastLines}`);
+        }
+      } else if (result.success && typeof result.data === "string") {
+        // Truncated output — use raw string directly
+        const lastLines = result.data.split("\n").slice(-20).join("\n");
+        if (lastLines.trim()) {
+          parts.push(`[Test status]\n${lastLines}`);
+        }
+      }
+    } else {
+      const { stdout } = await execFileAsync(
+        "npx",
+        ["vitest", "run", "--reporter=dot"],
+        { cwd: gitRoot, timeout: 5000 }
+      );
+      const lastLines = stdout.split("\n").slice(-20).join("\n");
+      if (lastLines.trim()) {
+        parts.push(`[Test status]\n${lastLines}`);
+      }
     }
   } catch (err: unknown) {
-    if (typeof err === "object" && err !== null && "stdout" in err) {
+    if (!toolExecutor && typeof err === "object" && err !== null && "stdout" in err) {
       const lastLines = ((err as { stdout: string }).stdout || "")
         .split("\n")
         .slice(-20)
@@ -304,6 +447,7 @@ export async function buildChatContext(taskDescription: string, cwd: string): Pr
         parts.push(`[Test status (failures detected)]\n${lastLines}`);
       }
     }
+    // For toolExecutor path: skip gracefully on failure
   }
 
   // 3. Keyword-based file search (words >= 4 chars, max 3 keywords, max 3 files, 50 lines each)
@@ -314,18 +458,46 @@ export async function buildChatContext(taskDescription: string, cwd: string): Pr
 
   for (const keyword of keywords) {
     try {
-      const { stdout } = await execFileAsync(
-        "grep",
-        ["-rn", "--include=*.ts", "--include=*.js", "-l", keyword, gitRoot],
-        { timeout: 10000 }
-      );
-      const files = stdout.trim().split("\n").filter(Boolean).slice(0, 3);
+      let files: string[] = [];
+
+      if (toolExecutor) {
+        const result = await toolExecutor.execute(
+          "grep",
+          { pattern: keyword, path: gitRoot, glob: "*.{ts,js}", outputMode: "files_with_matches", limit: 5 },
+          ctx
+        );
+        if (result.success) {
+          files = (result.data as string).split("\n").filter(Boolean).slice(0, 3);
+        }
+      } else {
+        const { stdout } = await execFileAsync(
+          "grep",
+          ["-rn", "--include=*.ts", "--include=*.js", "-l", keyword, gitRoot],
+          { timeout: 10000 }
+        );
+        files = stdout.trim().split("\n").filter(Boolean).slice(0, 3);
+      }
+
       for (const filePath of files) {
         try {
-          const content = await readFile(filePath, "utf-8");
-          const lines = content.split("\n").slice(0, 50).join("\n");
-          const relativePath = filePath.replace(gitRoot + "/", "");
-          parts.push(`[File: ${relativePath} (keyword: ${keyword})]\n${lines}`);
+          if (toolExecutor) {
+            const result = await toolExecutor.execute(
+              "read",
+              { file_path: filePath, limit: 50 },
+              ctx
+            );
+            if (result.success) {
+              const rawContent = (result.data as string).replace(/^\d+\t/gm, "");
+              const lines = rawContent.split("\n").slice(0, 50).join("\n");
+              const relativePath = filePath.replace(gitRoot + "/", "");
+              parts.push(`[File: ${relativePath} (keyword: ${keyword})]\n${lines}`);
+            }
+          } else {
+            const content = await readFile(filePath, "utf-8");
+            const lines = content.split("\n").slice(0, 50).join("\n");
+            const relativePath = filePath.replace(gitRoot + "/", "");
+            parts.push(`[File: ${relativePath} (keyword: ${keyword})]\n${lines}`);
+          }
         } catch {
           // skip unreadable files
         }
