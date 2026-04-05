@@ -95,7 +95,7 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: ChatMessage })
     return (
       <Box flexDirection="column" marginBottom={1}>
         <Box>
-          <Text backgroundColor="#3D4752">
+          <Text backgroundColor="#D9D9D9" color="#1A1A1A">
             {" ❧ "}{msg.text}{" "}
           </Text>
           <Text dimColor> {timeStr}</Text>
