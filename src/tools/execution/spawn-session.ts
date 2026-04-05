@@ -3,15 +3,6 @@ import type { ITool, ToolResult, ToolCallContext, PermissionCheckResult, ToolMet
 import type { SessionManager } from "../../orchestrator/execution/session-manager.js";
 import type { SessionType } from "../../orchestrator/execution/types/session.js";
 import { DEFAULT_CONTEXT_BUDGET } from "../../orchestrator/execution/session-manager.js";
-
-const VALID_SESSION_TYPES: SessionType[] = [
-  "task_execution",
-  "observation",
-  "task_review",
-  "goal_review",
-  "chat_execution",
-];
-
 export const SpawnSessionInputSchema = z.object({
   session_type: z.enum(["task_execution", "observation", "task_review", "goal_review", "chat_execution"]),
   goal_id: z.string().min(1, "goal_id is required"),
