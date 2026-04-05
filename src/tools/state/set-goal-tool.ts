@@ -77,8 +77,7 @@ export class SetGoalTool implements ITool<SetGoalInput, unknown> {
     }
   }
 
-  async checkPermissions(_input: SetGoalInput, context: ToolCallContext): Promise<PermissionCheckResult> {
-    if (context.preApproved) return { status: "allowed" };
+  async checkPermissions(): Promise<PermissionCheckResult> {
     return { status: "allowed" };
   }
 
