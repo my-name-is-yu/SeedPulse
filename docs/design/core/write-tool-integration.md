@@ -212,8 +212,9 @@ Recommended order: A → B → C. Each phase is independently shippable.
 | `src/interface/chat/self-knowledge-tools.ts` | A | Refactor (re-export) |
 | `src/interface/chat/mutation-tool-defs.ts` | A | Refactor (re-export) |
 | `src/interface/chat/self-knowledge-mutation-tools.ts` | A | Refactor (re-export) |
-| `src/interface/chat/chat-runner.ts` | A | Fix role + use dispatcher |
+| `src/interface/chat/chat-runner.ts` | A | Fix role + use dispatcher; pass onStatus callback |
 | `src/interface/chat/__tests__/tool-registry.test.ts` | A | Create |
+| `src/interface/tui/tool-status.tsx` | A | Create — status display component |
 | `src/interface/chat/tool-metadata.ts` | B | Expand all tool descriptions |
 | toggle_plugin handler | B | Implement |
 | update_config handler | B | Expand keys |
@@ -223,11 +224,81 @@ Recommended order: A → B → C. Each phase is independently shippable.
 | `src/core-loop.ts` | C | Wire tool results to state |
 | `src/__tests__/integration/tool-coreloop.test.ts` | C | Create |
 
-Total: 9 files modified, 3 files created.
+Total: 9 files modified, 4 files created.
 
 ---
 
-## 6. Test Strategy
+---
+
+## 7. Real-Time Tool Status Display
+
+Inspired by Claude Code's per-tool status labels: when a tool executes, the TUI displays a one-line status like "Deleting goal: improve-test-coverage" or "Updating config: daemon_mode".
+
+### ToolDefinition Extension
+
+Add to the ToolDefinition interface:
+```typescript
+interface ToolDefinition {
+  // ... existing fields ...
+  statusVerb: string;        // e.g., "Deleting", "Updating", "Archiving"
+  statusArgKey?: string;     // Parameter key to show in status (e.g., "goal_id")
+}
+```
+
+When the dispatcher executes a tool, it emits a status event:
+```typescript
+// In ToolDispatcher.dispatch()
+const statusText = `${tool.statusVerb} ${tool.statusArgKey ? params[tool.statusArgKey] : tool.name}`;
+ctx.onStatus?.(statusText);  // callback to TUI
+```
+
+### TUI Integration
+
+The TUI already has:
+- `shimmer-text.tsx` — wave animation component
+- Plant-themed spinner verbs (100+) — shown during LLM thinking
+- EventServer (SSE) — for daemon mode events
+
+Tool status display is separate from spinner verbs:
+- **Spinner verbs** = LLM is thinking (model wait)
+- **Tool status** = a specific tool is executing (action in progress)
+
+The `ToolStatusLine` component in TUI shows the current tool status:
+```typescript
+// src/interface/tui/tool-status.tsx (new, Phase A)
+const ToolStatusLine: FC<{ status: string | null }> = ({ status }) => {
+  if (!status) return null;
+  return <Text dimColor>  ⚡ {status}</Text>;
+};
+```
+
+Wired via ToolContext.onStatus callback from ChatRunner → TUI.
+
+### Status for Each Tool
+
+| Tool | statusVerb | statusArgKey |
+|------|-----------|-------------|
+| get_goals | Fetching goals | — |
+| get_sessions | Fetching sessions | — |
+| get_trust_state | Checking trust | — |
+| get_config | Reading config | — |
+| get_plugins | Listing plugins | — |
+| set_goal | Creating goal | description |
+| update_goal | Updating goal | goal_id |
+| archive_goal | Archiving goal | goal_id |
+| delete_goal | Deleting goal | goal_id |
+| toggle_plugin | Toggling plugin | plugin_name |
+| update_config | Updating config | key |
+| reset_trust | Resetting trust | — |
+
+### Phase Assignment
+
+This feature is part of **Phase A** (Tool Registry Unification) since it requires the unified ToolDefinition type. The Phase A file impact table in section 5 includes:
+- `src/interface/tui/tool-status.tsx` (new) — status display component
+- `src/interface/chat/chat-runner.ts` (modify) — pass onStatus callback via ToolContext
+
+
+## 8. Test Strategy
 
 **Unit tests** (Phase A — `tool-registry.test.ts`):
 - Register tool, dispatch with valid params → success
