@@ -293,8 +293,10 @@ export class ChatRunner {
           tools,
           ...(systemPrompt ? { system: systemPrompt } : {}),
         });
-      } catch {
-        return "Sorry, I encountered an error processing your request.";
+      } catch (err) {
+        console.error("[chat-runner] executeWithTools error:", err);
+        const hint = err instanceof Error ? `: ${err.message}` : "";
+        return `Sorry, I encountered an error processing your request${hint}.`;
       }
 
       // No tool calls — return the text content
