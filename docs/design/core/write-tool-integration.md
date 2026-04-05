@@ -39,24 +39,21 @@ System A tools implement the existing `ITool` interface from `src/tools/types.ts
 For ChatRunner compatibility, a single adapter converts any ITool to LLM-compatible JSON:
 
 ```typescript
-// src/tools/to-tool-definition.ts
+// src/tools/tool-definition-adapter.ts
 import type { ITool } from './types.js';
-
-export interface ToolDefinition {
-  name: string;
-  description: string;
-  input_schema: {
-    type: 'object';
-    properties: Record<string, unknown>;
-    required?: string[];
-  };
-}
+import type { ToolDefinition } from '../base/llm/llm-client.js';
 
 export function toToolDefinition(tool: ITool): ToolDefinition {
   return {
-    name: tool.name,
-    description: tool.description,
-    input_schema: tool.inputSchema,  // ITool already carries JSON schema
+    type: 'function',
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: {
+        type: 'object',
+        ...tool.inputSchema,  // ITool already carries JSON schema properties/required
+      },
+    },
   };
 }
 ```
@@ -97,20 +94,20 @@ src/tools/state/
 ├── progress-history.ts     # existing
 ├── knowledge-query.ts      # existing (≈ SearchKnowledge)
 ├── config-tool.ts          # NEW — read config/provider settings
-├── plugin-state.ts         # NEW — list active plugins
+├── plugin-state-tool.ts    # NEW — list active plugins
 ├── architecture-tool.ts    # NEW — read module map / architecture
-├── write-goal.ts           # NEW — create/update goal (from mutation-tool-defs.ts)
-├── write-session.ts        # NEW — start/stop session
-├── write-trust.ts          # NEW — adjust trust score
-├── write-knowledge.ts      # NEW — store knowledge entry
-├── write-config.ts         # NEW — update config key
-├── write-plugin.ts         # NEW — enable/disable plugin
-└── reset-state.ts          # NEW — reset goal or session state
+├── set-goal-tool.ts        # NEW — create goal (from mutation-tool-defs.ts)
+├── update-goal-tool.ts     # NEW — update goal fields (from mutation-tool-defs.ts)
+├── archive-goal-tool.ts    # NEW — archive a completed goal (from mutation-tool-defs.ts)
+├── delete-goal-tool.ts     # NEW — delete a goal (from mutation-tool-defs.ts)
+├── toggle-plugin-tool.ts   # NEW — enable/disable plugin (from mutation-tool-defs.ts)
+├── update-config-tool.ts   # NEW — update config key (from mutation-tool-defs.ts)
+└── reset-trust-tool.ts     # NEW — reset trust score (from mutation-tool-defs.ts)
 ```
 
 ```
 src/tools/
-└── to-tool-definition.ts   # NEW — toToolDefinition() adapter
+└── tool-definition-adapter.ts   # NEW — toToolDefinition() adapter
 ```
 
 ---
@@ -133,17 +130,17 @@ src/tools/
 | Tool | Category | readOnly | Destructive | Source |
 |------|----------|----------|-------------|--------|
 | config-tool | state | true | false | self-knowledge-tools.ts |
-| plugin-state | state | true | false | self-knowledge-tools.ts |
+| plugin-state-tool | state | true | false | self-knowledge-tools.ts |
 | architecture-tool | state | true | false | self-knowledge-tools.ts |
-| write-goal | state | false | false | mutation-tool-defs.ts |
-| write-session | state | false | false | mutation-tool-defs.ts |
-| write-trust | state | false | false | mutation-tool-defs.ts |
-| write-knowledge | state | false | false | mutation-tool-defs.ts |
-| write-config | state | false | false | mutation-tool-defs.ts |
-| write-plugin | state | false | false | mutation-tool-defs.ts |
-| reset-state | state | false | true | mutation-tool-defs.ts |
+| set-goal-tool | state | false | false | mutation-tool-defs.ts |
+| update-goal-tool | state | false | false | mutation-tool-defs.ts |
+| archive-goal-tool | state | false | false | mutation-tool-defs.ts |
+| delete-goal-tool | state | false | false | mutation-tool-defs.ts |
+| toggle-plugin-tool | state | false | false | mutation-tool-defs.ts |
+| update-config-tool | state | false | false | mutation-tool-defs.ts |
+| reset-trust-tool | state | false | true | mutation-tool-defs.ts |
 
-Note: only irreversible/damaging operations (reset-state) get rich LLM descriptions with risk warnings.
+Note: only irreversible/damaging operations (reset-trust-tool) get rich LLM descriptions with risk warnings.
 
 ---
 
@@ -153,7 +150,7 @@ ToolRegistry already provides `register()` and `getAll()`. New tools are registe
 
 ```typescript
 // src/tools/index.ts (modified)
-import { toToolDefinition } from './to-tool-definition.js';
+import { toToolDefinition } from './tool-definition-adapter.js';
 
 export function getAllTools(): ITool[] {
   return registry.getAll();  // existing + new state tools
@@ -185,9 +182,9 @@ Existing tools already emit status through ToolExecutor. Status format follows t
 
 Migrate System B into System A. No new functionality — behavior preserved exactly.
 
-1. Add 3 missing read tools to `src/tools/state/`: `config-tool.ts`, `plugin-state.ts`, `architecture-tool.ts` (from `self-knowledge-tools.ts`)
-2. Add 7 mutation tools to `src/tools/state/`: write-goal, write-session, write-trust, write-knowledge, write-config, write-plugin, reset-state (from `mutation-tool-defs.ts` + `self-knowledge-mutation-tools.ts`)
-3. Create `src/tools/to-tool-definition.ts` — `toToolDefinition(tool: ITool): ToolDefinition`
+1. Add 3 missing read tools to `src/tools/state/`: `config-tool.ts`, `plugin-state-tool.ts`, `architecture-tool.ts` (from `self-knowledge-tools.ts`)
+2. Add 7 mutation tools to `src/tools/state/`: set-goal-tool, update-goal-tool, archive-goal-tool, delete-goal-tool, toggle-plugin-tool, update-config-tool, reset-trust-tool (from `mutation-tool-defs.ts` + `self-knowledge-mutation-tools.ts`)
+3. Create `src/tools/tool-definition-adapter.ts` — `toToolDefinition(tool: ITool): ToolDefinition`
 4. Wire `chat-runner.ts` to use `getAllTools().map(toToolDefinition)` instead of raw definitions
 5. Deprecate System B files with re-export shims for backward compatibility
 
@@ -224,17 +221,17 @@ Files: 2-3 modified | Tests: concurrency, overflow
 
 | File | Phase | Action |
 |------|-------|--------|
-| src/tools/to-tool-definition.ts | 0 | Create |
+| src/tools/tool-definition-adapter.ts | 0 | Create |
 | src/tools/state/config-tool.ts | 0 | Create |
-| src/tools/state/plugin-state.ts | 0 | Create |
+| src/tools/state/plugin-state-tool.ts | 0 | Create |
 | src/tools/state/architecture-tool.ts | 0 | Create |
-| src/tools/state/write-goal.ts | 0 | Create |
-| src/tools/state/write-session.ts | 0 | Create |
-| src/tools/state/write-trust.ts | 0 | Create |
-| src/tools/state/write-knowledge.ts | 0 | Create |
-| src/tools/state/write-config.ts | 0 | Create |
-| src/tools/state/write-plugin.ts | 0 | Create |
-| src/tools/state/reset-state.ts | 0 | Create |
+| src/tools/state/set-goal-tool.ts | 0 | Create |
+| src/tools/state/update-goal-tool.ts | 0 | Create |
+| src/tools/state/archive-goal-tool.ts | 0 | Create |
+| src/tools/state/delete-goal-tool.ts | 0 | Create |
+| src/tools/state/toggle-plugin-tool.ts | 0 | Create |
+| src/tools/state/update-config-tool.ts | 0 | Create |
+| src/tools/state/reset-trust-tool.ts | 0 | Create |
 | src/tools/index.ts | 0 | Modify (export toToolDefinition) |
 | src/interface/chat/chat-runner.ts | 0 | Modify (use registry) |
 | src/interface/chat/self-knowledge-tools.ts | 0 | Shim (re-export) |
