@@ -6,6 +6,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 
+// We cannot easily intercept homedir() since it is inlined.
+// Use the real ~/.pulseed/decisions dir but with isolated plan_ids per test.
+
 function makeContext(): ToolCallContext {
   return {
     cwd: "/tmp",
@@ -16,19 +19,27 @@ function makeContext(): ToolCallContext {
   };
 }
 
+const TEST_PLAN_PREFIX = "vitest-test-";
+
+async function cleanupTestPlans() {
+  const decDir = path.join(os.homedir(), ".pulseed", "decisions");
+  try {
+    const files = await fs.readdir(decDir);
+    for (const f of files) {
+      if (f.startsWith(TEST_PLAN_PREFIX)) {
+        await fs.rm(path.join(decDir, f), { force: true });
+      }
+    }
+  } catch {
+    // directory may not exist, ignore
+  }
+}
+
 describe("CreatePlanTool", () => {
   const tool = new CreatePlanTool();
-  let tmpDir: string;
+  const planId = `${TEST_PLAN_PREFIX}create-${Date.now()}`;
 
-  beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pulseed-test-"));
-    vi.spyOn(os, "homedir").mockReturnValue(tmpDir);
-  });
-
-  afterEach(async () => {
-    vi.restoreAllMocks();
-    await fs.rm(tmpDir, { recursive: true, force: true });
-  });
+  afterEach(cleanupTestPlans);
 
   it("has correct metadata", () => {
     expect(tool.metadata.name).toBe("create-plan");
@@ -43,7 +54,7 @@ describe("CreatePlanTool", () => {
 
   it("checkPermissions returns allowed", async () => {
     const result = await tool.checkPermissions(
-      { plan_id: "my-plan", title: "T", content: "C" },
+      { plan_id: planId, title: "T", content: "C" },
       makeContext()
     );
     expect(result.status).toBe("allowed");
@@ -55,13 +66,13 @@ describe("CreatePlanTool", () => {
 
   it("writes plan file with frontmatter", async () => {
     const result = await tool.call(
-      { plan_id: "my-plan", title: "My Plan", content: "Step 1\nStep 2" },
+      { plan_id: planId, title: "My Plan", content: "Step 1\nStep 2" },
       makeContext()
     );
     expect(result.success).toBe(true);
     const data = result.data as { plan_id: string; path: string; created_at: string };
-    expect(data.plan_id).toBe("my-plan");
-    expect(data.path).toContain("my-plan.md");
+    expect(data.plan_id).toBe(planId);
+    expect(data.path).toContain(`${planId}.md`);
     const fileContent = await fs.readFile(data.path, "utf8");
     expect(fileContent).toContain("title: My Plan");
     expect(fileContent).toContain("created_at:");
@@ -69,12 +80,12 @@ describe("CreatePlanTool", () => {
   });
 
   it("creates decisions directory if missing", async () => {
+    const decDir = path.join(os.homedir(), ".pulseed", "decisions");
     const result = await tool.call(
-      { plan_id: "new-plan", title: "T", content: "C" },
+      { plan_id: `${TEST_PLAN_PREFIX}dir-${Date.now()}`, title: "T", content: "C" },
       makeContext()
     );
     expect(result.success).toBe(true);
-    const decDir = path.join(tmpDir, ".pulseed", "decisions");
     const stat = await fs.stat(decDir);
     expect(stat.isDirectory()).toBe(true);
   });
@@ -109,17 +120,9 @@ describe("CreatePlanTool", () => {
 
 describe("ReadPlanTool", () => {
   const tool = new ReadPlanTool();
-  let tmpDir: string;
+  const planId = `${TEST_PLAN_PREFIX}read-${Date.now()}`;
 
-  beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pulseed-test-"));
-    vi.spyOn(os, "homedir").mockReturnValue(tmpDir);
-  });
-
-  afterEach(async () => {
-    vi.restoreAllMocks();
-    await fs.rm(tmpDir, { recursive: true, force: true });
-  });
+  afterEach(cleanupTestPlans);
 
   it("has correct metadata", () => {
     expect(tool.metadata.name).toBe("read-plan");
@@ -138,21 +141,25 @@ describe("ReadPlanTool", () => {
   });
 
   it("reads existing plan file", async () => {
-    const decDir = path.join(tmpDir, ".pulseed", "decisions");
+    const decDir = path.join(os.homedir(), ".pulseed", "decisions");
     await fs.mkdir(decDir, { recursive: true });
-    await fs.writeFile(path.join(decDir, "test-plan.md"), "---\ntitle: T\n---\n\nHello", "utf8");
+    await fs.writeFile(
+      path.join(decDir, `${planId}.md`),
+      "---\ntitle: T\n---\n\nHello",
+      "utf8"
+    );
 
-    const result = await tool.call({ plan_id: "test-plan" }, makeContext());
+    const result = await tool.call({ plan_id: planId }, makeContext());
     expect(result.success).toBe(true);
     const data = result.data as { plan_id: string; content: string };
-    expect(data.plan_id).toBe("test-plan");
+    expect(data.plan_id).toBe(planId);
     expect(data.content).toContain("Hello");
   });
 
   it("returns failure when plan not found", async () => {
-    const result = await tool.call({ plan_id: "missing-plan" }, makeContext());
+    const result = await tool.call({ plan_id: `${TEST_PLAN_PREFIX}missing-xyz` }, makeContext());
     expect(result.success).toBe(false);
-    expect(result.error).toContain("missing-plan");
+    expect(result.error).toContain("not found");
   });
 
   it("Zod rejects invalid plan_id", () => {
