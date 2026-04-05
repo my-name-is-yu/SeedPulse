@@ -350,7 +350,11 @@ export class ChatRunner {
       return JSON.stringify({ error: `Unknown tool: ${name}` });
     }
     try {
-      const result = await tool.call(args, context);
+      const parsed = tool.inputSchema.safeParse(args);
+      if (!parsed.success) {
+        return JSON.stringify({ error: `Invalid input: ${parsed.error.message}` });
+      }
+      const result = await tool.call(parsed.data, context);
       return result.summary || JSON.stringify(result.data);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
