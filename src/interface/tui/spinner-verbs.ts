@@ -19,7 +19,7 @@ const SPINNER_VERBS: readonly string[] = [
   "Blossoming",
   "Petaling",
   "Pollinating",
-  "Pollenating",
+  "Pollen-Drifting",
   "Photosynthesizing",
   "Seeding",
   "Reseeding",
