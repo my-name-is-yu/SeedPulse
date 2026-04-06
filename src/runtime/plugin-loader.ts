@@ -218,7 +218,7 @@ export class PluginLoader {
       adapter: ["execute", "adapterType"],
       data_source: ["connect", "query", "disconnect", "healthCheck"],
       notifier: ["name", "notify", "supports"],
-      schedule_source: ["fetchEntries", "healthCheck"],
+      schedule_source: ["id", "fetchEntries", "healthCheck"],
     };
 
     const required = requiredMethods[type];
