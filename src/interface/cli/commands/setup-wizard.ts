@@ -183,13 +183,13 @@ async function stepAdapter(model: string, provider: Provider): Promise<string> {
   const adapters = getAdaptersForModel(model, provider);
   const recommendedAdapter = RECOMMENDED_ADAPTERS[provider];
 
-  if (adapters.length === 0 && provider !== "ollama") {
+  if (adapters.length === 0) {
     p.log.error(`No compatible adapters found for model "${model}".`);
     return "";
   }
 
   if (adapters.length <= 1) {
-    const adapter = adapters[0] ?? "openai_api";
+    const adapter = adapters[0];
     p.log.info(`Adapter: ${adapter} (auto-selected)`);
     return adapter;
   }
@@ -221,6 +221,7 @@ async function stepApiKey(
   const key = guardCancel(
     await p.password({
       message: `Enter ${envKeyName}:`,
+      validate: (v) => (!v ? 'API key is required' : undefined),
     })
   );
   if (!key) {
@@ -251,7 +252,7 @@ function ensurePulseedDir(): string {
 }
 
 function writeSeedMd(dir: string, agentName: string): void {
-  const content = DEFAULT_SEED.replace(/^# Seedy/m, `# ${agentName}`);
+  const content = DEFAULT_SEED.replace(/^#\s+.+$/m, `# ${agentName}`);
   fs.writeFileSync(path.join(dir, "SEED.md"), content, "utf-8");
 }
 
@@ -264,7 +265,10 @@ function writeRootMd(dir: string, presetKey: RootPresetKey): void {
 }
 
 function writeUserMd(dir: string, userName: string): void {
-  const content = `# About You\n\nName: ${userName}\n\n<!-- Seedy will remember things about you here -->\n`;
+  const content = DEFAULT_USER.replace(
+    /^(#[^\n]*)\n/m,
+    `$1\n\nName: ${userName}\n`
+  );
   fs.writeFileSync(path.join(dir, "USER.md"), content, "utf-8");
 }
 
