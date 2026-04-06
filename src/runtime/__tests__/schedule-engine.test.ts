@@ -1368,3 +1368,114 @@ describe("Budget management (Phase 3)", () => {
     expect(after2.tokens_used_today).toBe(300); // 150 + 150
   });
 });
+
+// ─── Phase 3: Additional reviewer-required tests ───
+
+describe("Cron execution — output_format both and report (Phase 3)", () => {
+  it("executeCron with output_format 'both' dispatches notification and includes output_summary", async () => {
+    const adapter = makeMockAdapter("data-both");
+    const registry = new Map([["test-source", adapter]]);
+    const notifications: Record<string, unknown>[] = [];
+    const mockLlm = {
+      sendMessage: vi.fn().mockResolvedValue({
+        content: "summary for both",
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+      parseJSON: vi.fn(),
+    };
+
+    const eng = new ScheduleEngine({
+      baseDir: tempDir,
+      dataSourceRegistry: registry,
+      llmClient: mockLlm as unknown as import("../../base/llm/llm-client.js").ILLMClient,
+      notificationDispatcher: { dispatch: async (r) => { notifications.push(r); } },
+    });
+
+    const entry = await eng.addEntry(makeCronEntry({
+      cron: {
+        prompt_template: "Summarize: {{test-source}}",
+        context_sources: ["test-source"],
+        output_format: "both",
+        max_tokens: 1000,
+      },
+    }));
+    const result = await (eng as any).executeCron(entry);
+
+    expect(result.status).toBe("ok");
+    expect(result.output_summary).toBe("summary for both");
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]!["report_type"]).toBe("schedule_report_ready");
+    expect(notifications[0]!["output_summary"]).toBe("summary for both");
+  });
+
+  it("executeCron with output_format 'report' logs warning about unimplemented report path", async () => {
+    const adapter = makeMockAdapter("data-report");
+    const registry = new Map([["test-source", adapter]]);
+    const warnMessages: string[] = [];
+    const mockLlm = {
+      sendMessage: vi.fn().mockResolvedValue({
+        content: "report summary",
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+      parseJSON: vi.fn(),
+    };
+    const mockLogger = {
+      info: vi.fn(),
+      warn: vi.fn().mockImplementation((msg: string) => { warnMessages.push(msg); }),
+      error: vi.fn(),
+    };
+
+    const eng = new ScheduleEngine({
+      baseDir: tempDir,
+      dataSourceRegistry: registry,
+      llmClient: mockLlm as unknown as import("../../base/llm/llm-client.js").ILLMClient,
+      logger: mockLogger,
+    });
+
+    const entry = await eng.addEntry(makeCronEntry({
+      cron: {
+        prompt_template: "Summarize: {{test-source}}",
+        context_sources: ["test-source"],
+        output_format: "report",
+        max_tokens: 1000,
+      },
+    }));
+    await (eng as any).executeCron(entry);
+
+    const reportWarn = warnMessages.find((m) => m.includes("not yet implemented"));
+    expect(reportWarn).toBeDefined();
+    expect(reportWarn).toContain("Phase 4");
+  });
+});
+
+describe("GoalTrigger execution — token accumulation (Phase 3)", () => {
+  it("executeGoalTrigger accumulates tokens from coreLoop result — defaults to 0 (TODO Phase 4)", async () => {
+    // LoopResult does not currently expose token usage. tokensUsed defaults to 0.
+    // When CoreLoop adds a tokensUsed field this test should be updated.
+    const mockCoreLoop = {
+      run: vi.fn().mockResolvedValue({
+        finalStatus: "completed",
+        totalIterations: 3,
+        goalId: "test-goal-id",
+        iterations: [],
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+      }),
+    };
+
+    const eng = new ScheduleEngine({
+      baseDir: tempDir,
+      coreLoop: mockCoreLoop,
+    });
+
+    const entry = await eng.addEntry(makeGoalTriggerEntry({
+      goal_trigger: { goal_id: "test-goal-id", max_iterations: 3, skip_if_active: false },
+    }));
+    const result = await (eng as any).executeGoalTrigger(entry);
+
+    expect(result.status).toBe("ok");
+    // tokens_used is 0 until LoopResult exposes token usage (Phase 4 TODO)
+    expect(result.tokens_used).toBe(0);
+    expect(mockCoreLoop.run).toHaveBeenCalledWith("test-goal-id", { maxIterations: 3 });
+  });
+});
