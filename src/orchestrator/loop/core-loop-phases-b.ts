@@ -19,6 +19,8 @@ import {
   getMilestones,
   evaluatePace,
 } from "../goal/milestone-evaluator.js";
+import { verifyWithTools } from "./verification-layer1.js";
+import { buildLoopToolContext } from "./core-loop-phases.js";
 
 // ─── Phase 5 ───
 
@@ -541,6 +543,26 @@ export async function runTaskCycleWithContext(
         ctx.deps.portfolioManager.recordTaskCompletion(taskResult.task.strategy_id);
       } catch {
         // Non-fatal
+      }
+    }
+
+    // Phase 7: tool-based verification (Layer 1)
+    if (ctx.toolExecutor && taskResult.task.success_criteria.length > 0) {
+      try {
+        const toolCtx = await buildLoopToolContext(ctx, goalId);
+        const verificationResult = await verifyWithTools(taskResult.task.success_criteria, ctx.toolExecutor, toolCtx);
+        if (!verificationResult.mechanicalPassed) {
+          taskResult.verificationResult = { ...taskResult.verificationResult, verdict: "fail" };
+          ctx.logger?.info("CoreLoop Phase 7: tool verification failed", {
+            taskId: taskResult.task.id,
+            details: verificationResult.details,
+          });
+        }
+        result.toolVerification = verificationResult;
+      } catch (err) {
+        ctx.logger?.warn("CoreLoop Phase 7: tool verification threw (non-fatal)", {
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
