@@ -27,6 +27,10 @@ interface ScheduleEngineDeps {
   };
   dataSourceRegistry?: Map<string, IDataSourceAdapter> | DataSourceRegistry;
   llmClient?: ILLMClient;
+  // Intentionally loose: schedule notifications are lightweight payloads and do not go through
+  // the full Report pipeline (which requires Report schema fields like id, goal_id, generated_at).
+  // Using Record<string,unknown> here allows ScheduleEngine to dispatch without constructing
+  // a full Report object. Full Report integration deferred to Phase 4.
   notificationDispatcher?: { dispatch(report: Record<string, unknown>): Promise<void> };
 }
 
@@ -249,11 +253,13 @@ export class ScheduleEngine {
 
     try {
       // Execute probe query
+      // dimension_name comes AFTER query_params spread so it is authoritative and cannot be
+      // accidentally overridden by user-supplied query_params.
       const queryResult = await adapter.query({
-        dimension_name: cfg.data_source_id,
         timeout_ms: 10000,
         ...cfg.query_params,
-      });
+        dimension_name: cfg.data_source_id,
+      } as Parameters<typeof adapter.query>[0]);
 
       const currentValue = queryResult.value ?? queryResult.raw;
 
@@ -355,16 +361,16 @@ export class ScheduleEngine {
       }
     }
 
-    // Check rate limit (max_per_hour)
+    // Check minimum interval between escalations (derived from max_per_hour)
+    // Simplified: enforces minimum interval between escalations (60min / max_per_hour).
+    // Full rolling-window tracking deferred to Phase 4.
     if (entry.last_escalation_at) {
       const lastEsc = new Date(entry.last_escalation_at).getTime();
       const hourAgo = now - 60 * 60 * 1000;
       if (lastEsc > hourAgo) {
-        // Simple rate check: we only track last escalation, so check if within 1 hour
-        // For full per-hour tracking, we'd need a ring buffer — simplified to "1 per period"
         const minIntervalMs = (60 * 60 * 1000) / esc.max_per_hour;
         if (now - lastEsc < minIntervalMs) {
-          this.logger.info(`Escalation for "${entry.name}" suppressed (rate limit)`);
+          this.logger.info(`Escalation for "${entry.name}" suppressed (min interval)`);
           return null;
         }
       }
