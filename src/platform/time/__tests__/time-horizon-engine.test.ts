@@ -154,13 +154,8 @@ describe("evaluatePacing — status classification", () => {
   });
 
   it("recommendation is consider_strategy_change when critical with low confidence", () => {
-    // Only 2 observations → confidence = 2/3 ≈ 0.67 — actually >= 0.6
-    // Let us use 1 observation for low confidence
-    const history = makeHistory([0.5, 0.4], 1); // confidence = 2/3 ≈ 0.67
-    // ratio = 0.1/1h → we need ratio >= 2; let gap=0.3
+    // Use 1 observation for low confidence (confidence = 1/3 < 0.6)
     const deadline = deadlineInHours(1);
-    const result = engine.evaluatePacing("g1", 0.3, deadline, history);
-    // confidence = 2/3 = 0.67 >= 0.6 → escalate_to_user; test with 1 obs
     const history1 = makeHistory([0.5], 1);
     const result1 = engine.evaluatePacing("g1", 0.5, deadline, history1);
     // velocity = 0, pacing_ratio = Infinity → critical, confidence = 1/3 = 0.33
@@ -487,5 +482,67 @@ describe("insufficient observations", () => {
     const history = makeHistory([0.5, 0.4, 0.3, 0.2], 1); // 4 obs >= 3
     const result = engine.evaluatePacing("g1", 0.2, null, history);
     expect(result.projectedCompletionDate).not.toBeNull();
+  });
+});
+
+// ─── New tests for review fixes ───────────────────────────────────────────────
+
+describe("TimeBudgetWithWait — canAffordWait method presence", () => {
+  const engine = new TimeHorizonEngine();
+
+  it("getTimeBudget return value has canAffordWait as a function", () => {
+    const start = startHoursAgo(1);
+    const budget = engine.getTimeBudget(deadlineInHours(10), start, 0.5, 1.0, 0.1);
+    expect(typeof budget.canAffordWait).toBe("function");
+  });
+});
+
+describe("perpetual goal — projectedCompletionDate always null", () => {
+  const engine = new TimeHorizonEngine();
+
+  it("deadline=null always returns projectedCompletionDate: null", () => {
+    // Even with enough observations and positive velocity
+    const history = makeHistory([0.5, 0.4, 0.3, 0.2, 0.1], 1);
+    const result = engine.evaluatePacing("g1", 0.1, null, history);
+    expect(result.status).toBe("no_deadline");
+    expect(result.projectedCompletionDate).toBeNull();
+  });
+});
+
+describe("isVelocityDeclining — historicalEma <= 0 returns true", () => {
+  const engine = new TimeHorizonEngine();
+
+  it("zero velocity history → sustainable_pace_declining recommendation", () => {
+    // Flat history (no progress) → historical EMA = 0 → isVelocityDeclining=true
+    const history = makeHistory([0.5, 0.5, 0.5, 0.5, 0.5], 1);
+    const result = engine.evaluatePacing("g1", 0.5, null, history);
+    expect(result.status).toBe("no_deadline");
+    expect(result.recommendation).toBe("sustainable_pace_declining");
+  });
+
+  it("negative velocity history → sustainable_pace_declining recommendation", () => {
+    // Increasing gap → historical EMA < 0 → isVelocityDeclining=true
+    const history = makeHistory([0.2, 0.3, 0.4, 0.5, 0.6], 1);
+    const result = engine.evaluatePacing("g1", 0.6, null, history);
+    expect(result.status).toBe("no_deadline");
+    expect(result.recommendation).toBe("sustainable_pace_declining");
+  });
+});
+
+describe("canAffordWait — critical threshold inclusive", () => {
+  it("exactly at critical threshold returns true (<=, not <)", () => {
+    // critical threshold default = 2.0
+    // Set up: after wait, newPacingRatio == exactly 2.0 → should return true
+    // gap=0.2, remaining=1h after wait
+    // newRequiredVelocity = 0.2/1 = 0.2
+    // velocity = 0.1 → ratio = 0.2/0.1 = 2.0 == critical → should be true
+    const start = startHoursAgo(1);
+    const deadline = deadlineInHours(2); // 2h remaining
+    // After 1h wait: 1h left. gap=0.1, velocity=0.1 → ratio = 0.1/1 / 0.1 = 1.0 (not exact)
+    // Need: gap / (remaining - wait) / velocity == 2.0
+    // 0.2 / (2 - 1) / 0.1 = 0.2 / 1 / 0.1 = 2.0 exactly
+    const engine = new TimeHorizonEngine();
+    const budget = engine.getTimeBudget(deadline, start, 0.2, 1.0, 0.1);
+    expect(budget.canAffordWait(1)).toBe(true); // ratio == 2.0 → <=, returns true
   });
 });
