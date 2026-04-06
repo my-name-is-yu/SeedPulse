@@ -148,7 +148,7 @@ Schedule fires
   layer: "probe",
   data_source_id: string,         // registered IDataSourceAdapter to query
   query_params: DataSourceQuery,  // parameters for the query
-  change_detection: {
+  change_detector: {
     mode: "threshold" | "diff" | "presence",
     threshold?: number,           // for threshold mode: trigger if value exceeds
     baseline_window?: number,     // number of recent results to compare against
@@ -294,7 +294,7 @@ const ProbeConfigSchema = z.object({
   layer: z.literal("probe"),
   data_source_id: z.string(),
   query_params: z.record(z.unknown()).default({}),
-  change_detection: z.object({
+  change_detector: z.object({
     mode: z.enum(["threshold", "diff", "presence"]),
     threshold: z.number().optional(),
     baseline_window: z.number().int().positive().default(5),
@@ -648,7 +648,7 @@ Schedule entries are persisted to `~/.pulseed/schedules.json`. This file is mana
         "layer": "probe",
         "data_source_id": "gmail-datasource",
         "query_params": { "label": "INBOX", "unread_only": true },
-        "change_detection": {
+        "change_detector": {
           "mode": "presence",
           "baseline_window": 1
         },
