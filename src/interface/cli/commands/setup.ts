@@ -9,12 +9,24 @@ import {
   loadProviderConfig,
   saveProviderConfig,
   validateProviderConfig,
-  MODEL_REGISTRY,
 } from "../../../base/llm/provider-config.js";
 import type { ProviderConfig } from "../../../base/llm/provider-config.js";
 import { getPulseedDirPath } from "../../../base/utils/paths.js";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import {
+  PROVIDERS,
+  PROVIDER_LABELS,
+  ENV_KEY_NAMES,
+  RECOMMENDED_MODELS,
+  RECOMMENDED_ADAPTERS,
+  MODEL_REGISTRY,
+  detectApiKeys,
+  getModelsForProvider,
+  getAdaptersForModel,
+  maskKey,
+} from "./setup-shared.js";
+import type { Provider } from "./setup-shared.js";
 
 // ─── Readline helpers ───
 
@@ -31,56 +43,6 @@ async function ask(rl: readline.Interface, question: string): Promise<string> {
   });
 }
 
-// ─── Provider / Model / Adapter lists ───
-
-const PROVIDERS = ["openai", "anthropic", "ollama"] as const;
-type Provider = (typeof PROVIDERS)[number];
-
-const PROVIDER_LABELS: Record<Provider, string> = {
-  openai: "OpenAI",
-  anthropic: "Anthropic",
-  ollama: "Ollama (local)",
-};
-
-const ENV_KEY_NAMES: Record<string, string> = {
-  openai: "OPENAI_API_KEY",
-  anthropic: "ANTHROPIC_API_KEY",
-};
-
-function detectApiKeys(): Record<string, boolean> {
-  return {
-    openai: !!process.env["OPENAI_API_KEY"],
-    anthropic: !!process.env["ANTHROPIC_API_KEY"],
-  };
-}
-
-function getModelsForProvider(provider: string): string[] {
-  return Object.entries(MODEL_REGISTRY)
-    .filter(([, info]) => info.provider === provider)
-    .map(([name]) => name);
-}
-
-function getAdaptersForModel(model: string, provider: string): string[] {
-  const entry = MODEL_REGISTRY[model];
-  if (entry) return entry.adapters;
-  // For unknown/custom models, return all adapters for the provider
-  if (provider === "openai") return ["openai_codex_cli", "openai_api"];
-  if (provider === "anthropic") return ["claude_code_cli", "claude_api"];
-  if (provider === "ollama") return ["openai_api"];
-  return [];
-}
-
-const RECOMMENDED_MODELS: Record<string, string> = {
-  openai: "gpt-5.4-mini",
-  anthropic: "claude-sonnet-4-6",
-  ollama: "qwen3:4b",
-};
-
-const RECOMMENDED_ADAPTERS: Record<string, string> = {
-  openai: "openai_codex_cli",
-  anthropic: "claude_code_cli",
-};
-
 // ─── Config file check ───
 
 async function configFileExists(): Promise<boolean> {
@@ -91,12 +53,6 @@ async function configFileExists(): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function maskKey(key: string | undefined): string {
-  if (!key) return "(not set)";
-  if (key.length <= 8) return "****";
-  return key.slice(0, 4) + "..." + key.slice(-4);
 }
 
 // ─── Non-interactive mode ───
