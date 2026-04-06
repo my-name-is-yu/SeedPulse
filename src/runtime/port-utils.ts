@@ -29,8 +29,7 @@ export async function getProcessOnPort(port: number): Promise<string | null> {
     // lsof works on macOS and Linux
     const output = execSync(`lsof -i :${port} -sTCP:LISTEN -t`, { encoding: 'utf-8' }).trim();
     if (!output) return null;
-    const pid = output.split('
-')[0];
+    const pid = output.split('\n')[0];
     // Get process name from PID
     const name = execSync(`ps -p ${pid} -o comm=`, { encoding: 'utf-8' }).trim();
     return name || null;
