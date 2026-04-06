@@ -272,4 +272,28 @@ describe("MemoryRecallTool", () => {
       expect(result.error).toContain("storage error");
     });
   });
+
+  describe("semantic mode", () => {
+    it("passes semantic=true when mode='semantic'", async () => {
+      vi.mocked(km.recallAgentMemory).mockResolvedValue([]);
+
+      await tool.call({ query: "test", mode: "semantic" }, makeContext());
+
+      expect(vi.mocked(km.recallAgentMemory)).toHaveBeenCalledWith(
+        "test",
+        expect.objectContaining({ semantic: true })
+      );
+    });
+
+    it("defaults to keyword mode (semantic=false) when mode not specified", async () => {
+      vi.mocked(km.recallAgentMemory).mockResolvedValue([]);
+
+      await tool.call({ query: "test" }, makeContext());
+
+      expect(vi.mocked(km.recallAgentMemory)).toHaveBeenCalledWith(
+        "test",
+        expect.objectContaining({ semantic: false })
+      );
+    });
+  });
 });

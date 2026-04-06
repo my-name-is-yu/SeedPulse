@@ -13,6 +13,7 @@ import type { DaemonConfig, DaemonState } from "../base/types/daemon.js";
 import { DaemonConfigSchema, DaemonStateSchema } from "../base/types/daemon.js";
 import type { ILLMClient } from "../base/llm/llm-client.js";
 import { CronScheduler } from "./cron-scheduler.js";
+import { ScheduleEngine } from "./schedule-engine.js";
 import { getInternalIdentityPrefix } from "../base/config/identity-loader.js";
 import { z } from "zod";
 import { generateCronEntry } from "./daemon-signals.js";
@@ -61,6 +62,7 @@ export interface DaemonDeps {
   eventServer?: EventServer;
   llmClient?: ILLMClient;
   cronScheduler?: CronScheduler;
+  scheduleEngine?: ScheduleEngine;
 }
 
 export class DaemonRunner {
@@ -85,6 +87,7 @@ export class DaemonRunner {
   private lastProactiveTickAt: number = 0;
   private llmClient: ILLMClient | undefined;
   private cronScheduler: CronScheduler | undefined;
+  private scheduleEngine: ScheduleEngine | undefined;
   private consecutiveIdleCycles: number = 0;
 
   constructor(deps: DaemonDeps) {
@@ -96,6 +99,7 @@ export class DaemonRunner {
     this.eventServer = deps.eventServer;
     this.llmClient = deps.llmClient;
     this.cronScheduler = deps.cronScheduler;
+    this.scheduleEngine = deps.scheduleEngine;
     this.lastProactiveTickAt = Date.now();
 
     // Parse config with defaults via DaemonConfigSchema.parse()
@@ -351,6 +355,9 @@ export class DaemonRunner {
 
         // 3b. Process due cron-scheduled tasks
         await this.processCronTasks();
+
+        // 3b2. Process schedule engine entries
+        await this.processScheduleEntries();
 
         // 3c. Expire old cron tasks periodically (every 100 cycles)
         if (this.state.loop_count > 0 && this.state.loop_count % 100 === 0) {
@@ -617,6 +624,23 @@ export class DaemonRunner {
       this.logger.warn("Failed to process cron tasks", {
         error: err instanceof Error ? err.message : String(err),
       });
+    }
+  }
+
+  /**
+   * Process due schedule engine entries.
+   */
+  private async processScheduleEntries(): Promise<void> {
+    if (!this.scheduleEngine) return;
+    try {
+      const results = await this.scheduleEngine.tick();
+      for (const result of results) {
+        if (result.status === "error") {
+          this.logger?.warn?.(`Schedule entry ${result.entry_id} failed: ${result.error_message}`);
+        }
+      }
+    } catch (error) {
+      this.logger?.error?.("Failed to process schedule entries", { error: error instanceof Error ? error.message : String(error) });
     }
   }
 

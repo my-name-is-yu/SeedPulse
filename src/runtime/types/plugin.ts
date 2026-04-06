@@ -93,7 +93,11 @@ export type NotificationEventType =
   | "task_blocked" // タスクがブロックされた
   | "approval_needed" // 人間の承認が必要
   | "stall_detected" // 停滞が検知された
-  | "trust_change"; // 信頼スコアが大きく変化した
+  | "trust_change" // 信頼スコアが大きく変化した
+  | "schedule_change_detected" // スケジュール変更を検出した
+  | "schedule_heartbeat_failure" // ハートビート失敗
+  | "schedule_escalation" // スケジュールエスカレーション
+  | "schedule_report_ready"; // スケジュールレポート準備完了
 
 export interface NotificationEvent {
   type: NotificationEventType;

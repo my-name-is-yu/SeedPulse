@@ -43,6 +43,11 @@ export const MemoryRecallInputSchema = z.object({
     .optional()
     .default(false)
     .describe("Include archived entries in results"),
+  mode: z
+    .enum(["keyword", "semantic"])
+    .optional()
+    .default("keyword")
+    .describe("Search mode: keyword (substring match) or semantic (embedding-based similarity)"),
 });
 export type MemoryRecallInput = z.infer<typeof MemoryRecallInputSchema>;
 
@@ -90,6 +95,7 @@ export class MemoryRecallTool
           memory_type: input.memory_type,
           limit: input.limit,
           include_archived: input.include_archived,
+          semantic: input.mode === "semantic",
         }
       );
 

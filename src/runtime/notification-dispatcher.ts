@@ -42,6 +42,14 @@ function reportTypeToEventType(reportType: string): NotificationEventType | null
       return "task_blocked";
     case "progress_update":
       return "goal_progress";
+    case "schedule_change":
+      return "schedule_change_detected";
+    case "schedule_heartbeat_failure":
+      return "schedule_heartbeat_failure";
+    case "schedule_escalation":
+      return "schedule_escalation";
+    case "schedule_report":
+      return "schedule_report_ready";
     default:
       return null;
   }

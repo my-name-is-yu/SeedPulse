@@ -41,6 +41,7 @@ import { cmdLogs } from "./commands/logs.js";
 import { cmdInstall, cmdUninstall } from "./commands/install.js";
 import { cmdNotify } from "./commands/notify.js";
 import { cmdTelegramSetup } from "./commands/telegram.js";
+import { cmdSchedule } from "./commands/schedule.js";
 import { printUsage, formatOperationError } from "./utils.js";
 import { ensureProviderConfig } from "./ensure-api-key.js";
 
@@ -291,6 +292,11 @@ export async function dispatchCommand(
 
   if (subcommand === "cron") {
     await cmdCron(argv.slice(1));
+    return 0;
+  }
+
+  if (subcommand === "schedule") {
+    await cmdSchedule(stateManager, argv.slice(1));
     return 0;
   }
 

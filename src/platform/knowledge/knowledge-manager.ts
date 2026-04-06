@@ -23,6 +23,7 @@ import type {
 } from "../../base/types/knowledge.js";
 import type { VectorIndex } from "./vector-index.js";
 import type { IEmbeddingClient } from "./embedding-client.js";
+import { cosineSimilarity } from "./embedding-client.js";
 import {
   searchKnowledge,
   searchAcrossGoals,
@@ -509,25 +510,43 @@ export class KnowledgeManager {
       memory_type?: AgentMemoryType;
       limit?: number;
       include_archived?: boolean;
+      semantic?: boolean;
     }
   ): Promise<AgentMemoryEntry[]> {
     const store = await this._loadAgentMemoryStore();
-    const { exact = false, category, memory_type, limit = 10, include_archived = false } = opts ?? {};
-    const lower = query.toLowerCase();
+    const { exact = false, category, memory_type, limit = 10, include_archived = false, semantic = false } = opts ?? {};
 
-    let results = store.entries.filter((e) => {
-      // Exclude archived entries unless explicitly requested
+    // Pre-filter by category, memory_type, and archived status (applies to both modes)
+    const candidates = store.entries.filter((e) => {
       if (!include_archived && e.status === "archived") return false;
+      const matchesCategory = category ? e.category === category : true;
+      const matchesType = memory_type ? e.memory_type === memory_type : true;
+      return matchesCategory && matchesType;
+    });
 
-      const matchesQuery = exact
+    // Semantic search mode: use embedding similarity
+    if (semantic && this.embeddingClient) {
+      const texts = candidates.map((e) => {
+        const base = `${e.key}: ${e.value}`;
+        return e.summary ? `${base} (${e.summary})` : base;
+      });
+      const queryVec = await this.embeddingClient.embed(query);
+      const candidateVecs = await this.embeddingClient.batchEmbed(texts);
+      const scored = candidates
+        .map((e, i) => ({ entry: e, score: cosineSimilarity(queryVec, candidateVecs[i]!) }))
+        .filter((s) => s.score >= 0.3);
+      scored.sort((a, b) => b.score - a.score);
+      return scored.slice(0, limit).map((s) => s.entry);
+    }
+
+    // Keyword search mode (default)
+    const lower = query.toLowerCase();
+    let results = candidates.filter((e) => {
+      return exact
         ? e.key === query
         : e.key.toLowerCase().includes(lower) ||
           e.value.toLowerCase().includes(lower) ||
           e.tags.some((t) => t.toLowerCase().includes(lower));
-
-      const matchesCategory = category ? e.category === category : true;
-      const matchesType = memory_type ? e.memory_type === memory_type : true;
-      return matchesQuery && matchesCategory && matchesType;
     });
 
     // Tiered sort: compiled entries first, then raw, both sorted by updated_at desc
