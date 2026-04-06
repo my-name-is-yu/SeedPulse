@@ -122,7 +122,22 @@ describe("SlackChannelAdapter — signature verification", () => {
     expect(res.status).toBe(401);
   });
 
-  it("rejects a valid sig for a DIFFERENT body (401)", () => {
+  it("rejects a valid signature with trailing bytes appended (401)", () => {
+    // Security: a signature like `v0=<valid_hex>AAAA` must be rejected.
+    // Previously the padding approach would truncate extra bytes and pass.
+    const adapter = makeAdapter();
+    const body = JSON.stringify({ type: "event_callback", event: { type: "message" }, team_id: "T1", event_id: "E1" });
+    const headers = buildHeaders(body);
+    const validSig = headers["x-slack-signature"]; // "v0=" + 64 hex chars = 67 bytes
+    const tamperedSig = validSig + "AAAA"; // append trailing bytes
+    const res = adapter.handleRequest(body, {
+      ...headers,
+      "x-slack-signature": tamperedSig,
+    });
+    expect(res.status).toBe(401);
+  });
+
+    it("rejects a valid sig for a DIFFERENT body (401)", () => {
     const adapter = makeAdapter();
     const body = JSON.stringify({ type: "event_callback", event: { type: "message" } });
     const differentBody = JSON.stringify({ type: "event_callback", event: { type: "app_mention" } });
