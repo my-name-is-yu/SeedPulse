@@ -191,9 +191,6 @@ describe("EventSubscriber", () => {
 
   describe("subscribe / unsubscribe", () => {
     it("connects to the correct URL (baseUrl + /stream)", async () => {
-      const fetchMock = vi.fn().mockRejectedValue(new Error("AbortError"));
-      (fetchMock as any).name = "AbortError";
-
       // Minimal ReadableStream that ends immediately
       const stream = new ReadableStream({
         start(controller) {
@@ -242,8 +239,7 @@ describe("EventSubscriber", () => {
       sub.on("notification", (n: TendNotification) => received.push(n));
 
       // Invoke parseSSEMessage directly
-      const raw = 'event: progress
-data: {"phase":"Observing...","gap":0.5,"iteration":1,"maxIterations":5}';
+      const raw = `event: progress\ndata: {"phase":"Observing...","gap":0.5,"iteration":1,"maxIterations":5}`;
       (sub as any).parseSSEMessage(raw);
 
       expect(received).toHaveLength(1);
@@ -255,8 +251,7 @@ data: {"phase":"Observing...","gap":0.5,"iteration":1,"maxIterations":5}';
       const received: TendNotification[] = [];
       sub.on("notification", (n: TendNotification) => received.push(n));
 
-      (sub as any).parseSSEMessage("event: progress
-data: {not-json}");
+      (sub as any).parseSSEMessage(`event: progress\ndata: {not-json}`);
 
       expect(received).toHaveLength(0);
     });
@@ -266,8 +261,7 @@ data: {not-json}");
       const received: TendNotification[] = [];
       sub.on("notification", (n: TendNotification) => received.push(n));
 
-      const raw = 'event: progress
-data: {"phase":"Observing...","gap":0.5,"iteration":1,"maxIterations":5}';
+      const raw = `event: progress\ndata: {"phase":"Observing...","gap":0.5,"iteration":1,"maxIterations":5}`;
       (sub as any).parseSSEMessage(raw);
 
       expect(received).toHaveLength(0);
