@@ -90,7 +90,7 @@ export function getAgentName(): string {
 }
 
 function getCoreIdentity(name: string): string {
-  return `${name} runs PulSeed — an AI agent orchestrator that pursues your goals.`;
+  return `${name} runs PulSeed, an AI agent orchestration system.`;
 }
 
 export function getInternalIdentityPrefix(role: string): string {

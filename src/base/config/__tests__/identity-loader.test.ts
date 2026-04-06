@@ -180,7 +180,7 @@ describe("getInternalIdentityPrefix()", () => {
 
   it("returns expected default prefix", () => {
     const result = getInternalIdentityPrefix("morning planner");
-    expect(result).toBe("You are Seedy, PulSeed's morning planner. Seedy runs PulSeed — an AI agent orchestrator that pursues your goals.");
+    expect(result).toBe("You are Seedy, PulSeed's morning planner. Seedy runs PulSeed, an AI agent orchestration system.");
   });
 
   it("uses custom agent name when SEED.md sets one", () => {
