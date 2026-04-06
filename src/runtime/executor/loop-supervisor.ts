@@ -20,7 +20,7 @@ export interface SupervisorConfig {
 }
 
 export interface SupervisorDeps {
-  coreLoop: CoreLoop;
+  coreLoopFactory: () => CoreLoop;
   eventBus: EventBus;
   driveSystem: DriveSystem;
   stateManager: StateManager;
@@ -60,6 +60,7 @@ export class LoopSupervisor {
   private readonly deps: SupervisorDeps;
   // Track running executions for graceful shutdown
   private runningExecutions: Promise<void>[] = [];
+  private pendingTimers: Set<ReturnType<typeof setTimeout>> = new Set();
 
   constructor(deps: SupervisorDeps, config?: Partial<SupervisorConfig>) {
     this.deps = deps;
@@ -69,7 +70,7 @@ export class LoopSupervisor {
   async start(initialGoalIds: string[]): Promise<void> {
     const workerCfg: GoalWorkerConfig = { iterationsPerCycle: this.config.iterationsPerCycle };
     for (let i = 0; i < this.config.concurrency; i++) {
-      this.workers.push(new GoalWorker(this.deps.coreLoop, workerCfg));
+      this.workers.push(new GoalWorker(this.deps.coreLoopFactory(), workerCfg));
     }
 
     this.running = true;
@@ -95,6 +96,8 @@ export class LoopSupervisor {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
+    for (const timer of this.pendingTimers) clearTimeout(timer);
+    this.pendingTimers.clear();
     await Promise.allSettled(this.runningExecutions);
     this.persistState();
   }
@@ -144,40 +147,44 @@ export class LoopSupervisor {
   }
 
   private async executeWorker(worker: GoalWorker, goalId: string): Promise<void> {
-    const result: WorkerResult = await worker.execute(goalId);
-    this.activeGoals.delete(goalId);
+    try {
+      const result: WorkerResult = await worker.execute(goalId);
 
-    if (result.status === 'error') {
-      const count = (this.crashCounts.get(goalId) ?? 0) + 1;
-      this.crashCounts.set(goalId, count);
+      if (result.status === 'error') {
+        const count = (this.crashCounts.get(goalId) ?? 0) + 1;
+        this.crashCounts.set(goalId, count);
 
-      if (count >= this.config.maxCrashCount) {
-        this.suspendedGoals.add(goalId);
-        this.deps.logger?.warn('Goal suspended after max crashes', {
-          goalId, crashCount: count,
-        });
-        this.deps.onEscalation?.(goalId, count, result.error ?? 'unknown error');
-      } else {
-        const jitter = Math.random() * 0.3;
-        const backoffMs = Math.min(
-          this.config.crashBackoffBaseMs * Math.pow(2, count - 1) * (1 + jitter),
-          30_000
-        );
-        setTimeout(() => {
-          if (!this.running) return;
-          this.deps.eventBus.push(createEnvelope({
-            type: 'event',
-            name: 'goal_activated',
-            source: 'supervisor',
-            goal_id: goalId,
-            payload: {},
-            priority: 'normal',
-          }));
-        }, backoffMs);
+        if (count >= this.config.maxCrashCount) {
+          this.suspendedGoals.add(goalId);
+          this.deps.logger?.warn('Goal suspended after max crashes', {
+            goalId, crashCount: count,
+          });
+          this.deps.onEscalation?.(goalId, count, result.error ?? 'unknown error');
+        } else {
+          const jitter = Math.random() * 0.3;
+          const backoffMs = Math.min(
+            this.config.crashBackoffBaseMs * Math.pow(2, count - 1) * (1 + jitter),
+            30_000
+          );
+          const timer = setTimeout(() => {
+            this.pendingTimers.delete(timer);
+            if (!this.running) return;
+            this.deps.eventBus.push(createEnvelope({
+              type: 'event',
+              name: 'goal_activated',
+              source: 'supervisor',
+              goal_id: goalId,
+              payload: {},
+              priority: 'normal',
+            }));
+          }, backoffMs);
+          this.pendingTimers.add(timer);
+        }
       }
+    } finally {
+      this.activeGoals.delete(goalId);
+      this.persistState();
     }
-
-    this.persistState();
   }
 
   private persistState(): void {
