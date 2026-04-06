@@ -716,11 +716,15 @@ export class DaemonRunner {
           this.logger?.warn?.(`Schedule entry ${result.entry_id} failed: ${result.error_message}`);
         } else if (this.eventBus) {
           // Push activated schedule entries to eventBus as envelopes
+          const goalId = (result as Record<string, unknown>)["goal_id"] as string | undefined;
+          if (!goalId) {
+            this.logger.warn("schedule_activated envelope missing goal_id", { entry_id: (result as Record<string, unknown>)["entry_id"] });
+          }
           const envelope = createEnvelope({
             type: "event",
             name: "schedule_activated",
             source: "schedule-engine",
-            goal_id: (result as Record<string, unknown>)["goal_id"] as string | undefined,
+            goal_id: goalId,
             priority: "normal",
             payload: result,
             dedupe_key: result.entry_id,
