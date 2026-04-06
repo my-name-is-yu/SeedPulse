@@ -93,7 +93,7 @@ async function stepExistingConfig(): Promise<"keep" | "modify" | "reset" | null>
 async function stepUserName(): Promise<string> {
   const name = guardCancel(
     await p.text({
-      message: "What should we call you?",
+      message: "What should I call you?",
       placeholder: "Your name",
       validate: (v) => {
         if (!v || !v.trim()) return "Name cannot be empty.";
@@ -107,7 +107,7 @@ async function stepUserName(): Promise<string> {
 async function stepSeedyName(): Promise<string> {
   p.note(
     SEEDY_PIXEL + "\n\n" +
-    "Your agent has a pixel art avatar at assets/seedy.png",
+    "Hi! I'm your new agent companion.",
     "Meet your agent"
   );
 
