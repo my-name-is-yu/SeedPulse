@@ -4,6 +4,7 @@
 // Receives events via SSE, sends commands via REST.
 
 import http from "node:http";
+import { DEFAULT_PORT } from "./port-utils.js";
 
 export interface DaemonClientConfig {
   host: string;
