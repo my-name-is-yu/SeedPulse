@@ -3,6 +3,7 @@
 import { parseArgs } from "node:util";
 import { spawn } from "node:child_process";
 import * as os from "node:os";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { readJsonFileOrNull } from "../../../base/utils/json-io.js";
 import { DaemonStateSchema, DaemonConfigSchema } from "../../../base/types/daemon.js";
@@ -96,6 +97,19 @@ export async function cmdStart(
     } catch (err) {
       getCliLogger().error(formatOperationError(`parse daemon config from "${values.config}"`, err));
       process.exit(1);
+    }
+  }
+
+  // Auto-load ~/.pulseed/daemon.json when no --config flag was provided
+  if (!values.config) {
+    const defaultDaemonConfigPath = path.join(os.homedir(), '.pulseed', 'daemon.json');
+    if (fs.existsSync(defaultDaemonConfigPath)) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(defaultDaemonConfigPath, 'utf-8'));
+        daemonConfig = DaemonConfigSchema.parse(raw);
+      } catch {
+        // Ignore invalid daemon.json, use defaults
+      }
     }
   }
 
