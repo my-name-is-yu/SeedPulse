@@ -93,8 +93,8 @@ export class StrategyManager extends StrategyManagerBase {
   }
 
   /**
-   * For each newly activated WaitStrategy, read its wait_until from the sidecar
-   * and write it to the goal current active task plateau_until field.
+   * For each newly activated WaitStrategy, read its wait_until directly from the
+   * strategy object and write it to the goal current active task plateau_until field.
    * Non-fatal: errors are silently ignored to avoid blocking strategy activation.
    */
   private async _applyWaitStrategyPlateauUntil(
