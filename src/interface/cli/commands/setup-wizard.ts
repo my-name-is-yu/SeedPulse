@@ -6,6 +6,7 @@
 import * as p from "@clack/prompts";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { spawnSync } from "node:child_process";
 import {
   loadProviderConfig,
   saveProviderConfig,
@@ -217,6 +218,44 @@ async function stepAdapter(model: string, provider: Provider): Promise<string> {
   return adapter;
 }
 
+async function runCodexOAuthLogin(): Promise<string | undefined> {
+  p.log.info("Opening browser for OAuth login...");
+
+  // Try npx @openai/codex --login first, then npx codex --login as fallback
+  const attempts = [
+    ["npx", ["--yes", "@openai/codex", "--login"]],
+    ["npx", ["--yes", "codex", "--login"]],
+  ] as [string, string[]][];
+
+  for (const [cmd, args] of attempts) {
+    try {
+      const result = spawnSync(cmd, args, { stdio: "inherit", shell: false });
+      if (result.error) {
+        // Command not found — try next
+        continue;
+      }
+      if (result.status === 0) {
+        // Login succeeded — verify token was written
+        const token = await readCodexOAuthToken();
+        if (token) {
+          p.log.success("OAuth login successful. Token saved.");
+          return token;
+        }
+        p.log.warn("OAuth login completed but no token found at ~/.codex/auth.json.");
+        return undefined;
+      }
+      // Non-zero exit — try next
+    } catch {
+      // Unexpected error — try next
+    }
+  }
+
+  p.log.error(
+    "Codex CLI not found. Install with: npm install -g @openai/codex"
+  );
+  return undefined;
+}
+
 async function stepApiKey(
   provider: Provider,
   detectedKeys: Record<string, boolean>
@@ -229,30 +268,48 @@ async function stepApiKey(
     return process.env[envKeyName];
   }
 
-  // OAuth auto-detection for OpenAI (Codex CLI login)
+  // OpenAI: offer OAuth login options
   if (provider === "openai") {
-    const oauthToken = await readCodexOAuthToken();
-    if (oauthToken) {
-      const oauthChoice = guardCancel(
-        await p.select({
-          message: "OpenAI OAuth token detected from Codex CLI login:",
-          options: [
-            {
-              value: "oauth" as const,
-              label: "Use existing OAuth token (from Codex CLI login)",
-              hint: "no API key needed",
-            },
-            {
-              value: "manual" as const,
-              label: "Enter API key manually",
-            },
-          ],
-        })
-      );
-      if (oauthChoice === "oauth") {
-        return oauthToken;
-      }
+    const existingToken = await readCodexOAuthToken();
+
+    type OAuthMethod = "login" | "oauth" | "manual";
+    const oauthOptions: p.Option<OAuthMethod>[] = [
+      {
+        value: "login" as const,
+        label: "Login with OAuth (opens browser via Codex CLI)",
+        hint: "runs npx @openai/codex --login",
+      },
+    ];
+
+    if (existingToken) {
+      oauthOptions.push({
+        value: "oauth" as const,
+        label: "Use existing OAuth token",
+        hint: "from previous Codex CLI login",
+      });
     }
+
+    oauthOptions.push({
+      value: "manual" as const,
+      label: "Enter API key manually",
+    });
+
+    const authMethod = guardCancel(
+      await p.select({
+        message: "Select authentication method:",
+        options: oauthOptions,
+      })
+    ) as "login" | "oauth" | "manual";
+
+    if (authMethod === "login") {
+      const token = await runCodexOAuthLogin();
+      if (token) return token;
+      // OAuth failed — fall through to manual entry
+      p.log.info("Falling back to manual API key entry.");
+    } else if (authMethod === "oauth" && existingToken) {
+      return existingToken;
+    }
+    // "manual" or fallback: continue to password prompt below
   }
 
   const key = guardCancel(
