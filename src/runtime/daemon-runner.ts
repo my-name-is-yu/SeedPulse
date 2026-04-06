@@ -640,7 +640,7 @@ export class DaemonRunner {
         }
       }
     } catch (error) {
-      this.logger?.error?.("Failed to process schedule entries:", error);
+      this.logger?.error?.("Failed to process schedule entries", { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
