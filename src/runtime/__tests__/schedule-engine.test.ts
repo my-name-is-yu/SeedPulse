@@ -1411,7 +1411,46 @@ describe("Cron execution — output_format both and report (Phase 3)", () => {
     expect(notifications[0]!["output_summary"]).toBe("summary for both");
   });
 
-  it("executeCron with output_format 'report' logs warning about unimplemented report path", async () => {
+  it("executeCron with output_format 'report' calls reportingEngine when provided", async () => {
+    const adapter = makeMockAdapter("data-report");
+    const registry = new Map([["test-source", adapter]]);
+    const mockLlm = {
+      sendMessage: vi.fn().mockResolvedValue({
+        content: "report summary",
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+      parseJSON: vi.fn(),
+    };
+    const mockReportingEngine = {
+      generateNotification: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const eng = new ScheduleEngine({
+      baseDir: tempDir,
+      dataSourceRegistry: registry,
+      llmClient: mockLlm as unknown as import("../../base/llm/llm-client.js").ILLMClient,
+      reportingEngine: mockReportingEngine,
+    });
+
+    const entry = await eng.addEntry(makeCronEntry({
+      cron: {
+        prompt_template: "Summarize: {{test-source}}",
+        context_sources: ["test-source"],
+        output_format: "report",
+        max_tokens: 1000,
+      },
+    }));
+    const result = await (eng as any).executeCron(entry);
+
+    expect(result.status).toBe("ok");
+    expect(mockReportingEngine.generateNotification).toHaveBeenCalledOnce();
+    expect(mockReportingEngine.generateNotification).toHaveBeenCalledWith(
+      "schedule_report",
+      expect.objectContaining({ entry_id: entry.id, output: "report summary" })
+    );
+  });
+
+  it("executeCron with output_format 'report' logs warning when no reportingEngine provided", async () => {
     const adapter = makeMockAdapter("data-report");
     const registry = new Map([["test-source", adapter]]);
     const warnMessages: string[] = [];
@@ -1433,6 +1472,7 @@ describe("Cron execution — output_format both and report (Phase 3)", () => {
       dataSourceRegistry: registry,
       llmClient: mockLlm as unknown as import("../../base/llm/llm-client.js").ILLMClient,
       logger: mockLogger,
+      // no reportingEngine provided
     });
 
     const entry = await eng.addEntry(makeCronEntry({
@@ -1445,9 +1485,8 @@ describe("Cron execution — output_format both and report (Phase 3)", () => {
     }));
     await (eng as any).executeCron(entry);
 
-    const reportWarn = warnMessages.find((m) => m.includes("not yet implemented"));
+    const reportWarn = warnMessages.find((m) => m.includes("ReportingEngine not available"));
     expect(reportWarn).toBeDefined();
-    expect(reportWarn).toContain("Phase 4");
   });
 });
 
