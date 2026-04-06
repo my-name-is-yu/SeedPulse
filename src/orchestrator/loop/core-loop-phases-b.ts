@@ -448,6 +448,10 @@ async function rebalancePortfolio(
           );
           if (waitTrigger) {
             await ctx.deps.portfolioManager.rebalance(goalId, waitTrigger);
+            if (result) {
+              result.waitExpired = true;
+              result.waitStrategyId = strategy.id;
+            }
           }
         }
       }
