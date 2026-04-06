@@ -19,11 +19,14 @@ export function detectChange(
   switch (mode) {
     case "threshold": {
       const num = Number(currentResult);
-      if (isNaN(num)) {
-        return { changed: false, details: "threshold: non-numeric result" };
+      if (isNaN(num) || typeof num !== "number") {
+        // Surface misconfiguration: non-numeric result cannot be evaluated against a threshold.
+        // Return changed: true so the issue is visible rather than silently ignored.
+        return { changed: true, details: "non-numeric result cannot be evaluated against threshold" };
       }
       if (thresholdValue === undefined) {
-        return { changed: false, details: "threshold: no threshold_value configured" };
+        // Surface misconfiguration: threshold mode requires threshold_value to be set.
+        return { changed: true, details: "non-numeric result cannot be evaluated against threshold" };
       }
       const changed = num > thresholdValue;
       return {
