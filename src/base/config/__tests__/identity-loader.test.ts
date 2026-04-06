@@ -144,7 +144,7 @@ describe("getAgentName()", () => {
     mockExistsSync.mockReset();
   });
 
-  it("returns "Seedy" by default", () => {
+  it('returns "Seedy" by default', () => {
     noFiles();
     expect(getAgentName()).toBe("Seedy");
   });
@@ -155,7 +155,7 @@ Some content.`);
     expect(getAgentName()).toBe("Pebble");
   });
 
-  it("falls back to "Seedy" when SEED.md has no h1 heading", () => {
+  it('falls back to "Seedy" when SEED.md has no h1 heading', () => {
     withFile("SEED.md", "No heading here, just content.");
     expect(getAgentName()).toBe("Seedy");
   });
