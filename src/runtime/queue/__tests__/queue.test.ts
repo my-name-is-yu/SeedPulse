@@ -113,31 +113,28 @@ describe('EventBus', () => {
     expect(bus.size()).toBe(0);
   });
 
-  it('TTL: pull skips expired item', () => {
-    const bus = new EventBus({ dlqPath });
-    const env = createEnvelope({ type: 'event', name: 'e', source: 's', payload: {}, ttl_ms: 60_000 });
-    bus.push(env);
-    // Expire after push
-    (env as any).created_at = Date.now() - 70_000;
-    // Modify the queued item by pushing again with same id approach — instead
-    // we test by draining and re-checking via a fresh expired envelope
-    // Reset: use a separate bus to test pull-time expiry
+  it('TTL: pull skips item that expired while queued', () => {
+    // Test pull-time TTL check: use fake timers to advance time after push
+    vi.useFakeTimers();
+    const now = Date.now();
+    vi.setSystemTime(now);
+
     const bus2 = new EventBus({ dlqPath });
-    const env2 = createEnvelope({ type: 'event', name: 'e2', source: 's', payload: {}, ttl_ms: 50_000 });
-    // Manually enqueue with past created_at via push then mutate internal state
-    // Simpler: push with very short TTL and wait isn't feasible, so we push
-    // two items — one that will expire (ttl_ms=1, created far in past) and one valid
-    const expired = { ...createEnvelope({ type: 'event', name: 'exp', source: 's', payload: {} }), ttl_ms: 1, created_at: 1 };
+    // Push item with short TTL — valid at push time
+    const shortLived = createEnvelope({ type: 'event', name: 'short', source: 's', payload: {}, ttl_ms: 100 });
     const valid = createEnvelope({ type: 'event', name: 'valid', source: 's', payload: {} });
-    bus2.push(expired as any);
+    bus2.push(shortLived);
     bus2.push(valid);
-    // expired is LOW priority (normal) so high priority pulled first — both normal
-    // pull should skip expired and return valid
+    expect(bus2.size()).toBe(2);
+
+    // Advance time so shortLived is expired
+    vi.setSystemTime(now + 200);
+
+    // pull() should skip shortLived and return valid
     const result = bus2.pull();
-    expect(result?.name).toBe('exp'); // expired gets pulled first by insertion order but is dropped
-    // Actually the expired envelope fails TTL check on push (created_at=1 + any ttl <= now)
-    expect(bus2.size()).toBe(1); // only valid remains after expired was dropped on push
-    expect(bus2.pull()?.name).toBe('valid');
+    expect(result?.name).toBe('valid');
+
+    vi.useRealTimers();
   });
 
   it('backpressure: LOW dropped to DLQ at high-water mark', () => {
