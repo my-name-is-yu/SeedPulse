@@ -102,8 +102,7 @@ export class EventSubscriber extends EventEmitter {
       if (line.startsWith("event: ")) {
         eventType = line.slice(7).trim();
       } else if (line.startsWith("data: ")) {
-        data += (data ? "
-" : "") + line.slice(6);
+        data += (data ? "\n" : "") + line.slice(6);
       }
     }
 
