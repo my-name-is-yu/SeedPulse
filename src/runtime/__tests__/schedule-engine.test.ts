@@ -8,7 +8,7 @@ let engine: ScheduleEngine;
 
 beforeEach(() => {
   tempDir = makeTempDir("schedule-engine-test-");
-  engine = new ScheduleEngine(tempDir);
+  engine = new ScheduleEngine({ baseDir: tempDir });
 });
 
 afterEach(() => {
@@ -45,7 +45,7 @@ describe("ScheduleEngine", () => {
     expect(new Date(entry.next_fire_at).getTime()).toBeGreaterThan(Date.now());
 
     // Verify persistence via new instance
-    const engine2 = new ScheduleEngine(tempDir);
+    const engine2 = new ScheduleEngine({ baseDir: tempDir });
     const loaded = await engine2.loadEntries();
     expect(loaded).toHaveLength(1);
     expect(loaded[0]!.id).toBe(entry.id);
@@ -70,7 +70,7 @@ describe("ScheduleEngine", () => {
     expect(engine.getEntries()).toHaveLength(0);
 
     // Verify persistence
-    const engine2 = new ScheduleEngine(tempDir);
+    const engine2 = new ScheduleEngine({ baseDir: tempDir });
     const loaded = await engine2.loadEntries();
     expect(loaded).toHaveLength(0);
   });
@@ -95,7 +95,7 @@ describe("ScheduleEngine", () => {
     await engine.saveEntries();
     await engine.loadEntries();
 
-    const due = engine.getDueEntries();
+    const due = await engine.getDueEntries();
     expect(due).toHaveLength(1);
   });
 
@@ -119,7 +119,7 @@ describe("ScheduleEngine", () => {
     await engine.saveEntries();
     await engine.loadEntries();
 
-    const due = engine.getDueEntries();
+    const due = await engine.getDueEntries();
     expect(due).toHaveLength(0);
   });
 
@@ -138,7 +138,7 @@ describe("ScheduleEngine", () => {
     });
 
     // next_fire_at should be ~1 hour from now, not due yet
-    const due = engine.getDueEntries();
+    const due = await engine.getDueEntries();
     expect(due).toHaveLength(0);
   });
 });
@@ -277,7 +277,7 @@ describe("Schedule computation", () => {
     });
 
     const nextFire = new Date(entry.next_fire_at).getTime();
-    // Should be approximately 60 seconds from now (allow ±5s tolerance)
+    // Should be approximately 60 seconds from now (allow +/-5s tolerance)
     expect(nextFire).toBeGreaterThanOrEqual(before + 55_000);
     expect(nextFire).toBeLessThanOrEqual(before + 65_000);
   });
@@ -292,7 +292,7 @@ describe("Schedule computation", () => {
     });
 
     const nextFire = new Date(entry.next_fire_at).getTime();
-    // "every minute" — next fire must be within the next 60 seconds
+    // "every minute" -- next fire must be within the next 60 seconds
     expect(nextFire).toBeGreaterThan(before);
     expect(nextFire).toBeLessThanOrEqual(before + 60_000);
   });
