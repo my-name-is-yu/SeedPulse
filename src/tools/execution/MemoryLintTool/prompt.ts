@@ -1,0 +1,1 @@
+export const DESCRIPTION = `Scan compiled agent memory entries for quality issues: contradictions (conflicting entries), staleness (outdated entries), and redundancy (overlapping entries). Optionally auto-repairs issues. Use periodically after consolidation to maintain memory quality.`;
