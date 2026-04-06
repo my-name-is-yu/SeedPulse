@@ -153,7 +153,7 @@ export class LoopSupervisor {
 
       if (count >= this.config.maxCrashCount) {
         this.suspendedGoals.add(goalId);
-        this.deps.logger?.warn('LoopSupervisor', 'Goal suspended after max crashes', {
+        this.deps.logger?.warn('Goal suspended after max crashes', {
           goalId, crashCount: count,
         });
         this.deps.onEscalation?.(goalId, count, result.error ?? 'unknown error');
@@ -189,7 +189,7 @@ export class LoopSupervisor {
       writeFileSync(tmpPath, JSON.stringify(state, null, 2), 'utf8');
       renameSync(tmpPath, filePath);
     } catch (err) {
-      this.deps.logger?.error('LoopSupervisor', 'Failed to persist state', { err });
+      this.deps.logger?.error('Failed to persist supervisor state', { err: String(err) });
     }
   }
 
