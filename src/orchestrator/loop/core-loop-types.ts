@@ -133,6 +133,16 @@ export interface LoopConfig {
    * If not set, maxIterations acts as the sole upper bound.
    */
   iterationBudget?: IterationBudget;
+  /**
+   * When true (default), automatically consolidate agent memory when a goal completes
+   * and raw entry count exceeds consolidationRawThreshold.
+   */
+  autoConsolidateOnComplete?: boolean;
+  /**
+   * Minimum number of raw agent memory entries required to trigger auto-consolidation.
+   * Default: 20.
+   */
+  consolidationRawThreshold?: number;
 }
 
 // ─── Result types ───
