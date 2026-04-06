@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { StateManager } from "../../base/state/state-manager.js";
-import { StrategySchema, PortfolioSchema } from "../../base/types/strategy.js";
+import { StrategySchema, PortfolioSchema, parseStrategy } from "../../base/types/strategy.js";
 import type { Strategy, Portfolio } from "../../base/types/strategy.js";
 import type { StrategyState } from "../../base/types/core.js";
 import type { ILLMClient } from "../../base/llm/llm-client.js";
@@ -273,7 +273,7 @@ export class StrategyManagerBase {
     }
     const now = new Date().toISOString();
 
-    const activated = StrategySchema.parse({
+    const activated = parseStrategy({
       ...best,
       state: "active",
       started_at: now,
@@ -321,7 +321,7 @@ export class StrategyManagerBase {
     }
 
     const now = new Date().toISOString();
-    const updated = StrategySchema.parse({
+    const updated = parseStrategy({
       ...strategy,
       state: newState,
       completed_at:
@@ -392,7 +392,7 @@ export class StrategyManagerBase {
     if (active) {
       // Increment consecutive_stall_count before terminating
       const portfolio = await this.loadOrCreatePortfolio(goalId);
-      const updated = StrategySchema.parse({
+      const updated = parseStrategy({
         ...active,
         consecutive_stall_count: active.consecutive_stall_count + 1,
       });
@@ -567,7 +567,7 @@ export class StrategyManagerBase {
     );
     if (raw === null) return [];
     const parsed = raw as unknown[];
-    return parsed.map((s) => StrategySchema.parse(s));
+    return parsed.map((s) => parseStrategy(s));
   }
 
   // ─── Knowledge Gap Detection ───
