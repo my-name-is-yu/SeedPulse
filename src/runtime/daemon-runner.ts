@@ -23,6 +23,7 @@ import type { Envelope } from "./types/envelope.js";
 import { createEnvelope } from "./types/envelope.js";
 import { EventBus } from "./queue/event-bus.js";
 import { CommandBus } from "./queue/command-bus.js";
+import { LoopSupervisor } from "./executor/index.js";
 import { PulSeedEventSchema } from "../base/types/drive.js";
 
 // Re-exports for callers that imported these from daemon-runner
@@ -72,6 +73,7 @@ export interface DaemonDeps {
   gateway?: IngressGateway;
   eventBus?: EventBus;
   commandBus?: CommandBus;
+  supervisor?: LoopSupervisor;
 }
 
 export class DaemonRunner {
@@ -101,6 +103,7 @@ export class DaemonRunner {
   private gateway: IngressGateway | undefined;
   private eventBus: EventBus | undefined;
   private commandBus: CommandBus | undefined;
+  private supervisor: LoopSupervisor | null = null;
 
   constructor(deps: DaemonDeps) {
     this.coreLoop = deps.coreLoop;
@@ -115,6 +118,7 @@ export class DaemonRunner {
     this.gateway = deps.gateway;
     this.eventBus = deps.eventBus;
     this.commandBus = deps.commandBus;
+    this.supervisor = deps.supervisor ?? null;
     this.lastProactiveTickAt = Date.now();
 
     // Parse config with defaults via DaemonConfigSchema.parse()
@@ -297,9 +301,31 @@ export class DaemonRunner {
       check_interval_ms: this.config.check_interval_ms,
     });
 
-    // 7. Run main loop
+    // 7. Create supervisor if not injected via deps
+    if (!this.supervisor && this.eventBus) {
+      this.supervisor = new LoopSupervisor(
+        {
+          coreLoop: this.coreLoop,
+          eventBus: this.eventBus!,
+          driveSystem: this.driveSystem,
+          stateManager: this.stateManager,
+          logger: this.logger,
+          onEscalation: (goalId, crashCount, lastError) => {
+            this.logger.error(`Goal ${goalId} suspended after ${crashCount} crashes: ${lastError}`);
+          },
+        },
+        { iterationsPerCycle: this.config.iterations_per_cycle }
+      );
+    }
+
+    // 8. Run main loop (supervisor mode if eventBus available, else fallback)
     try {
-      await this.runLoop(mergedGoalIds);
+      if (this.supervisor && this.eventBus) {
+        await this.supervisor.start(mergedGoalIds);
+      } else {
+        // Fallback: sequential mode (no eventBus configured)
+        await this.runLoop(mergedGoalIds);
+      }
     } finally {
       // Cancel the force-stop timer if it's still pending
       if (forceStopTimer !== null) {
@@ -314,6 +340,7 @@ export class DaemonRunner {
       }
       // Stop file watcher and EventServer
       clearInterval(heartbeatInterval);
+      await this.supervisor?.shutdown();
       this.driveSystem.stopWatcher();
       if (this.gateway) {
         await this.gateway.stop();
