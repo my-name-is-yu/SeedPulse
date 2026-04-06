@@ -1,0 +1,1 @@
+export const DESCRIPTION = `Consolidate raw agent memory entries into compiled summaries using LLM. Groups entries by category and memory_type, then merges each group into a single compiled entry. Original entries are archived. Use this periodically to keep memory lean and organized.`;
