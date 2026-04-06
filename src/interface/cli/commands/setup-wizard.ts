@@ -262,6 +262,7 @@ async function stepDaemon(): Promise<{ start: boolean; port: number }> {
       placeholder: String(suggestedPort),
       defaultValue: String(suggestedPort),
       validate: (v) => {
+        if (!v) return "Port is required.";
         const n = parseInt(v, 10);
         if (isNaN(n) || !Number.isInteger(n)) return "Port must be a whole number.";
         if (n < 1024 || n > 65535) return "Port must be between 1024 and 65535.";
