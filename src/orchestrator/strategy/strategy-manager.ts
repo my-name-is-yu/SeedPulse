@@ -109,22 +109,42 @@ export class StrategyManager extends StrategyManagerBase {
 
         const waitUntil = meta.wait_until;
 
-        // Find the most recent task for this goal and strategy, update plateau_until
-        // Tasks are stored as tasks/<goalId>/<taskId>.json
-        // Scan tasks for this goal (strategy.tasks_generated holds the task IDs)
-        const taskIds = strategy.tasks_generated;
-        if (taskIds.length === 0) continue;
+        // WaitStrategy has allocation=0 and generates no tasks, so tasks_generated is always
+        // empty. Instead, find the goal's current active task from the task-history log.
+        // task-history.json holds an array ordered oldest→newest; scan from the end for the
+        // most recent in-progress or pending entry, falling back to the last entry overall.
+        const rawHistory = await this.stateManager.readRaw(
+          `tasks/${goalId}/task-history.json`
+        );
+        if (!Array.isArray(rawHistory) || rawHistory.length === 0) continue;
 
-        // Update the last task in tasks_generated (most recent)
-        const lastTaskId = taskIds[taskIds.length - 1]!;
+        const history = rawHistory as Array<Record<string, unknown>>;
+        // Prefer the most recent in_progress task; fall back to the very last entry
+        let targetTask: Record<string, unknown> | undefined;
+        for (let i = history.length - 1; i >= 0; i--) {
+          const entry = history[i];
+          if (!entry) continue;
+          if (entry["status"] === "in_progress" || entry["status"] === "pending") {
+            targetTask = entry;
+            break;
+          }
+        }
+        if (!targetTask) {
+          targetTask = history[history.length - 1];
+        }
+        if (!targetTask) continue;
+
+        const taskId = targetTask["id"];
+        if (typeof taskId !== "string") continue;
+
         const taskRaw = await this.stateManager.readRaw(
-          `tasks/${goalId}/${lastTaskId}.json`
+          `tasks/${goalId}/${taskId}.json`
         ) as Record<string, unknown> | null;
         if (!taskRaw) continue;
 
         taskRaw["plateau_until"] = waitUntil;
         await this.stateManager.writeRaw(
-          `tasks/${goalId}/${lastTaskId}.json`,
+          `tasks/${goalId}/${taskId}.json`,
           taskRaw
         );
       } catch {
