@@ -138,6 +138,37 @@ export async function detectStallsAndRebalance(
       }
     }
 
+    // Gap 3: isSuppressed wiring — check if an active WaitStrategy suppresses stall detection
+    // If the goal has an active WaitStrategy whose wait_until is in the future, skip stall detection.
+    if (ctx.deps.portfolioManager) {
+      try {
+        const portfolio = await ctx.deps.strategyManager.getPortfolio(goalId);
+        if (portfolio) {
+          const activeWait = portfolio.strategies.find(
+            (s) => s.state === "active" && ctx.deps.portfolioManager!.isWaitStrategy(s)
+          );
+          if (activeWait) {
+            const waitUntil = (activeWait as Record<string, unknown>)["wait_until"];
+            const plateauUntil = typeof waitUntil === "string" ? waitUntil : null;
+            if (ctx.deps.stallDetector.isSuppressed(plateauUntil)) {
+              ctx.logger?.info("CoreLoop: stall detection suppressed by active WaitStrategy", {
+                goalId,
+                waitUntil: plateauUntil,
+              });
+              result.waitSuppressed = true;
+              // Portfolio rebalance still runs (WaitStrategy expiry check)
+              if (ctx.deps.portfolioManager) {
+                await rebalancePortfolio(ctx, goalId, goal);
+              }
+              return;
+            }
+          }
+        }
+      } catch {
+        // Non-fatal: suppression check failure does not block stall detection
+      }
+    }
+
     // Per-dimension stall check
     for (const dim of goal.dimensions) {
       const dimGapHistory = gapHistory
