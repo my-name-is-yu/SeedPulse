@@ -181,6 +181,8 @@ export async function cmdStart(
     logger,
     dataSourceRegistry,
     llmClient: deps.llmClient,
+    coreLoop: deps.coreLoop,
+    stateManager: deps.stateManager,
   });
   await scheduleEngine.loadEntries();
 
