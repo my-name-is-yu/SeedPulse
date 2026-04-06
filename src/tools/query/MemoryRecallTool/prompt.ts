@@ -1,0 +1,2 @@
+export const DESCRIPTION =
+  "Search goal-independent agent memory by keyword or exact key. Returns matching memory entries using tiered retrieval: compiled entries (with summaries) are returned first, followed by raw entries, both sorted by most recently updated. Archived entries are excluded by default (use include_archived=true to include them). Use this to recall previously saved facts, procedures, preferences, or observations.";
