@@ -104,8 +104,8 @@ async function stepUserName(): Promise<string> {
 
 async function stepSeedyName(): Promise<string> {
   p.note(
-    "Your agent has a pixel art avatar at assets/seedy.png\n\n" +
-      "  \ud83c\udf31\n /|\\\n  |",
+    SEEDY_PIXEL + "\n\n" +
+    "Your agent has a pixel art avatar at assets/seedy.png",
     "Meet your agent"
   );
 
