@@ -157,8 +157,8 @@ export type SeedyState = "default" | "thinking" | "success" | "error" | "active"
 // Pixel grid (9 columns × 9 rows):
 // 0=transparent, 1=green, 2=cream, 3=black
 const _PIXEL_GRID: readonly (readonly number[])[] = [
-  [0, 1, 1, 1, 0, 1, 1, 1, 0], // row 0
-  [1, 1, 1, 1, 1, 1, 1, 1, 1], // row 1
+  [0, 0, 1, 1, 0, 1, 1, 0, 0], // row 0
+  [0, 1, 1, 1, 1, 1, 1, 1, 0], // row 1
   [0, 0, 0, 0, 1, 0, 0, 0, 0], // row 2
   [0, 0, 2, 2, 2, 2, 2, 0, 0], // row 3
   [0, 2, 2, 2, 2, 2, 2, 2, 0], // row 4
