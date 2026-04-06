@@ -164,6 +164,8 @@ export interface LoopIterationResult {
   skipReason?: string;
   /** Result from Phase 7 tool-based verification (Layer 1). Present when toolExecutor is set and task has success_criteria. */
   toolVerification?: VerificationLayer1Result;
+  /** Tool-based workspace evidence gathered during stall detection (Phase 6). */
+  toolStallEvidence?: import("./stall-evidence.js").StallEvidence;
 }
 
 /**
