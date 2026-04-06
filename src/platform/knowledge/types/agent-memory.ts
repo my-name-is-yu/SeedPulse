@@ -39,3 +39,28 @@ export const AgentMemoryStoreSchema = z.object({
   last_consolidated_at: z.string().nullable().default(null),
 });
 export type AgentMemoryStore = z.infer<typeof AgentMemoryStoreSchema>;
+
+// --- Active Linting schemas ---
+
+export const LintIssueTypeEnum = z.enum(["contradiction", "staleness", "redundancy"]);
+export type LintIssueType = z.infer<typeof LintIssueTypeEnum>;
+
+export const LintFindingSchema = z.object({
+  type: LintIssueTypeEnum,
+  entry_ids: z.array(z.string()).min(1),
+  description: z.string(),
+  confidence: z.number().min(0).max(1),
+  suggested_action: z.enum(["flag_review", "auto_resolve_newest", "mark_stale", "merge"]),
+});
+export type LintFinding = z.infer<typeof LintFindingSchema>;
+
+export const LintResponseSchema = z.object({
+  findings: z.array(LintFindingSchema),
+});
+
+export const LintResultSchema = z.object({
+  findings: z.array(LintFindingSchema),
+  repairs_applied: z.number(),
+  entries_flagged: z.number(),
+});
+export type LintResult = z.infer<typeof LintResultSchema>;
