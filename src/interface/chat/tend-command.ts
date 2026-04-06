@@ -25,6 +25,8 @@ export interface TendResult {
   success: boolean;
   goalId?: string;
   goalTitle?: string;
+  /** maxIterations from parsed args, carried through confirmation flow. */
+  maxIterations?: number;
   /** Formatted message for chat display. */
   message: string;
   /** Formatted confirmation prompt shown to user before daemon start. */
@@ -187,6 +189,7 @@ export class TendCommand {
       success: true,
       goalId: goal.id,
       goalTitle: goal.title,
+      maxIterations,
       message: "Generated goal from conversation.",
       confirmation,
       needsConfirmation: true,
