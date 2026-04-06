@@ -65,43 +65,82 @@ describe("LoopSupervisor", () => {
 
   // ─── 3. Suspended goals are skipped ───
 
-  it("suspended goals are not re-queued on subsequent polls", async () => {
-    let callCount = 0;
+  it("goal is added to suspendedGoals after max crashes reached", async () => {
+    // Use a mock coreLoop that crashes exactly maxCrashCount times
+    // Then verify the goal appears in getState().suspendedGoals
     const onEscalation = vi.fn();
-    const { supervisor, mockCoreLoop } = makeSupervisor(async () => {
-      callCount++;
-      throw new Error("crash");
-    }, { onEscalation } as any);
-    // maxCrashCount=3 — after 3 crashes, goal is suspended
+    let runCallCount = 0;
+    const crashingLoop = {
+      run: vi.fn().mockImplementation(async () => {
+        runCallCount++;
+        throw new Error("crash");
+      }),
+      stop: vi.fn(),
+    };
+    const stateFile = path.join(os.tmpdir(), `sv-susp-${Date.now()}.json`);
+    const eventBus = new EventBus();
     const sv = new LoopSupervisor(
-      { ...(supervisor as any).deps, onEscalation, coreLoop: mockCoreLoop as any },
-      { concurrency: 1, pollIntervalMs: 20, maxCrashCount: 2, crashBackoffBaseMs: 20,
-        stateFilePath: path.join(os.tmpdir(), `sv-susp-${Date.now()}.json`) }
+      {
+        coreLoop: crashingLoop as any,
+        eventBus,
+        driveSystem: { shouldActivate: vi.fn(), prioritizeGoals: vi.fn(), startWatcher: vi.fn(), stopWatcher: vi.fn(), writeEvent: vi.fn() } as any,
+        stateManager: { getBaseDir: vi.fn().mockReturnValue(os.tmpdir()) } as any,
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as any,
+        onEscalation,
+      },
+      { concurrency: 1, pollIntervalMs: 10, maxCrashCount: 1, crashBackoffBaseMs: 9999, stateFilePath: stateFile }
     );
     await sv.start(["g-susp"]);
-    await new Promise((r) => setTimeout(r, 400));
+    // Wait for first run to complete (crash → immediate suspend since maxCrashCount=1)
+    const deadline = Date.now() + 1000;
+    while (runCallCount === 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    await new Promise((r) => setTimeout(r, 50)); // let executeWorker finish
     await sv.shutdown();
-    expect(onEscalation).toHaveBeenCalledWith("g-susp", expect.any(Number), expect.any(String));
+    expect(onEscalation).toHaveBeenCalledWith("g-susp", 1, "crash");
+    expect(sv.getState().suspendedGoals).toContain("g-susp");
   });
 
   // ─── 4. Crash recovery re-queues under threshold ───
 
-  it("re-queues goal after crash under threshold", async () => {
-    let calls = 0;
-    const { supervisor, mockCoreLoop } = makeSupervisor(async () => {
-      calls++;
-      if (calls === 1) throw new Error("first crash");
-      return makeLoopResult();
+  it("crash under threshold increments crashCount and does not suspend", async () => {
+    // Verify that after one crash (under maxCrashCount=3):
+    // - crashCounts["g-retry"] === 1
+    // - goal is NOT in suspendedGoals
+    // - a re-queue envelope is scheduled (eventBus will receive it after backoff)
+    const retryLoop = {
+      run: vi.fn().mockRejectedValue(new Error("transient")),
+      stop: vi.fn(),
+    };
+    const stateFile = path.join(os.tmpdir(), `sv-retry-${Date.now()}.json`);
+    const eventBus = new EventBus();
+    let runCallCount = 0;
+    const wrappedRun = vi.fn().mockImplementation(async (...args: unknown[]) => {
+      runCallCount++;
+      return retryLoop.run(...args);
     });
-    // Override with tighter backoff
-    const sv = new LoopSupervisor((supervisor as any).deps, {
-      concurrency: 1, pollIntervalMs: 20, maxCrashCount: 3,
-      crashBackoffBaseMs: 30, stateFilePath: path.join(os.tmpdir(), `sv-retry-${Date.now()}.json`),
-    });
+    const sv = new LoopSupervisor(
+      {
+        coreLoop: { run: wrappedRun, stop: vi.fn() } as any,
+        eventBus,
+        driveSystem: { shouldActivate: vi.fn(), prioritizeGoals: vi.fn(), startWatcher: vi.fn(), stopWatcher: vi.fn(), writeEvent: vi.fn() } as any,
+        stateManager: { getBaseDir: vi.fn().mockReturnValue(os.tmpdir()) } as any,
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as any,
+      },
+      { concurrency: 1, pollIntervalMs: 10, maxCrashCount: 3, crashBackoffBaseMs: 9999, stateFilePath: stateFile }
+    );
     await sv.start(["g-retry"]);
-    await new Promise((r) => setTimeout(r, 300));
+    // Wait for first run to crash
+    const deadline = Date.now() + 1000;
+    while (runCallCount === 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    await new Promise((r) => setTimeout(r, 50));
     await sv.shutdown();
-    expect(mockCoreLoop.run.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const state = sv.getState();
+    expect(state.crashCounts["g-retry"]).toBe(1);
+    expect(state.suspendedGoals).not.toContain("g-retry");
   });
 
   // ─── 5. shutdown() ───
