@@ -59,19 +59,19 @@ export class SlackChannelAdapter implements ChannelAdapter {
       return { status: 400, body: "invalid json" };
     }
 
-    // URL Verification Challenge (no signature check needed for this)
+    // Signature verification for ALL requests (including url_verification)
+    const sigResult = this.verifySignature(body, headers);
+    if (sigResult !== null) {
+      return sigResult;
+    }
+
+    // URL Verification Challenge
     if (parsed["type"] === "url_verification") {
       const challenge = parsed["challenge"];
       return {
         status: 200,
         body: JSON.stringify({ challenge }),
       };
-    }
-
-    // Signature verification for all other requests
-    const sigResult = this.verifySignature(body, headers);
-    if (sigResult !== null) {
-      return sigResult;
     }
 
     // Event callback
@@ -111,14 +111,12 @@ export class SlackChannelAdapter implements ChannelAdapter {
       .digest("hex");
     const expected = `v0=${mac}`;
 
-    // Compare using timing-safe comparison
+    // Compare using timing-safe comparison (pad to expected length to avoid length leak)
     try {
       const expectedBuf = Buffer.from(expected, "utf8");
-      const actualBuf = Buffer.from(signature, "utf8");
-      if (
-        expectedBuf.length !== actualBuf.length ||
-        !timingSafeEqual(expectedBuf, actualBuf)
-      ) {
+      const actualBuf = Buffer.alloc(expectedBuf.length);
+      Buffer.from(signature, "utf8").copy(actualBuf);
+      if (!timingSafeEqual(expectedBuf, actualBuf)) {
         return { status: 401, body: "invalid signature" };
       }
     } catch {
