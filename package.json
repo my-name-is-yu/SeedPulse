@@ -1,6 +1,6 @@
 {
   "name": "pulseed",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "AI agent orchestrator that gives existing agents the drive to persist — set a goal, and PulSeed observes, delegates, verifies, and loops until done.",
   "type": "module",
   "main": "dist/index.js",

@@ -4,6 +4,44 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] - 2026-04-07
+
+### Features
+- **Tool System**: introduced the first full tool runtime with typed schemas, registry, permission model, concurrency control, executor pipeline, builtin tool APIs, and deep CoreLoop/AgentLoop integration for observation, verification, research, and execution workflows (#459, #460, #464, #467, #469, #503, #507, #519)
+- **Core Loop & Strategy Engine**: added tool-backed observation and direct measurement, workspace context caching, post-task Git diff and test verification, stall and learning evidence collection, execution feedback scoring, auto-consolidation hooks, and adaptive observation delay based on deadlines and velocity history (#474, #478, #484, #486, #525, #529, #532, #551)
+- **ScheduleEngine**: delivered Probe and ChangeDetector layers, cron and GoalTrigger orchestration, plugin extensibility, reporting, and rolling-window escalation for more capable scheduled execution (#533, #534, #536)
+- **Multi-Channel Runtime**: added the ingress envelope model, queue-backed daemon routing, worker-pool execution, durable state snapshots/WAL/advisory locking, and WebSocket plus Slack Events API channel adapters (#538, #541, #542)
+- **Queue**: added `PriorityQueue`, `EventBus`, and `CommandBus` with TTL handling, deduplication, backpressure controls, dead-letter support, and drop callbacks
+- **TUI & CLI**: moved to a daemon-first SSE/REST architecture, made the TUI the default launch path, and added `/tend`, rich delete confirmations, no-flicker rendering, IME support, clipboard toasts, pixel-art branding, bash mode, and row-based scrollback (#498, #499, #500, #504, #510, #520, #524, #560)
+- **Setup Wizard**: overhauled onboarding with `@clack/prompts` and added notification configuration as a first-class setup step (#523, #555)
+- **Agent Memory**: added goal-independent memory tools, active linting, and lifecycle-driven consolidation for longer-running agent workflows (#526, #531, #532)
+- **WaitStrategy**: implemented the remaining WaitStrategy design gaps and connected them to runtime scheduling behavior (#547)
+- **Branding**: introduced the Seedy identity system and refreshed README/product presentation (#521)
+
+### Bug Fixes
+- Hardened tool execution against malformed and unsafe calls by sanitizing LLM-planned tool invocations, blocking SSRF and shell-injection paths in verification, tightening `TestRunnerTool` allowlists, masking environment variable values, and moving Tavily auth to headers (#460, #464, #469, #470)
+- Fixed tool-backed observation and measurement correctness, including null parsed-value handling, refreshed dimension persistence, 2xx verification acceptance, missing executor/context wiring, and token accumulation per CoreLoop iteration (#464, #485, #537)
+- Resolved chat and TUI reliability issues including REPL hangs, missing adapter error surfacing, second-input freezes, a FlickerOverlay regression, and exact slash-command submission handling (#488, #493, #494, #558)
+- Corrected queue and daemon edge cases by moving EventBus dedupe after the backpressure gate, warning on missing `goal_id`, and preventing double-processing in the event server (#539)
+- Fixed WaitStrategy persistence and plateau scanning so running tasks are included correctly during target selection (#549, #550)
+- Restored task lifecycle compatibility by fixing constructor overload behavior and related health-check/tool wiring regressions (#553)
+- Corrected package/runtime wiring issues including the published CLI bin path and build configuration so test files stay out of release artifacts (#491)
+
+### Refactoring
+- Reorganized the codebase into clearer architectural layers under `src/base`, `src/platform`, `src/orchestrator`, and `src/interface`, while colocating tests and distributed type definitions with their owning modules
+- Restructured the tools implementation into dedicated per-tool and genre-based folders, with shared exports aligned to the new module layout (#511)
+- Extracted shared execution helpers from task lifecycle code and split the setup wizard into step modules to reduce file size and improve maintainability (#552, #554)
+- Consolidated common tool-output parsing into shared utilities used across observation and gap-calculation flows (#474)
+
+### Infrastructure
+- Added `eslint-plugin-boundaries` to enforce layer boundaries in the new architecture
+- Hardened build and packaging flows with an explicit `tsconfig.build.json` and related path/build fixes for publishable artifacts
+- Improved runtime durability with advisory locking, write-ahead logging, and snapshot support in the state layer (#541)
+
+### Docs
+- Expanded the tool-system design documentation across runtime, mechanism, observation, and knowledge-acquisition docs, and added a unified shared-tools design writeup (#458, #501)
+- Added dedicated design documents for `TimeHorizonEngine` and `WaitStrategy` to capture the new scheduling model (#543, #544)
+
 ## [0.2.0] - 2026-04-05
 
 ### Added
