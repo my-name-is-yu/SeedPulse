@@ -95,7 +95,7 @@ export interface ProviderConfig {
     }>;
   };
 
-  /** OpenClaw ACP adapter configuration */
+  /** Optional local-only OpenClaw ACP adapter configuration */
   openclaw?: {
     cli_path?: string;
     profile?: string;
