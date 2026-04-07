@@ -11,6 +11,7 @@ Overview of PulSeed's design documentation, organized by subsystem.
 | [Gap Calculation](core/gap-calculation.md) | Computing the gap between current state and goal thresholds |
 | [State Vector](core/state-vector.md) | Multi-dimensional state representation |
 | [Observation](core/observation.md) | How PulSeed observes the current state of the world |
+| [Dream Mode](core/dream-mode.md) | Offline learning, consolidation, and runtime activation from accumulated experience |
 | [Stall Detection](core/stall-detection.md) | Detecting when progress has stalled and triggering recovery |
 | [Satisficing](core/satisficing.md) | Judging when a goal is "good enough" to stop |
 

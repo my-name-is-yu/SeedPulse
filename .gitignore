@@ -10,6 +10,7 @@ coverage-c8/
 .claire/
 .claude/
 memory/
+/memory/research/dream-mode/
 *.tmp
 web/.next/
 web/node_modules/
