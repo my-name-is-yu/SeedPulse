@@ -42,7 +42,8 @@ import type { ObservationEngine } from "../../../platform/observation/observatio
 
 export { LLMGeneratedTaskSchema } from "./task-generation.js";
 import { generateTask as _generateTask } from "./task-generation.js";
-import { executeTask as _executeTask, reloadTaskFromDisk, durationToMs } from "./task-executor.js";
+import { reloadTaskFromDisk, durationToMs } from "./task-executor.js";
+import { executeTaskWithGuards, verifyExecutionWithGitDiff } from "./task-execution-helpers.js";
 import { runPreExecutionChecks } from "./task-approval.js";
 import { checkIrreversibleApproval as _checkIrreversibleApproval } from "./task-approval-check.js";
 import { runPipelineTaskCycle as runPipelineTaskCycleFn } from "./task-pipeline-cycle.js";
@@ -197,90 +198,17 @@ export class TaskLifecycle {
 
   /** Execute a task via the given adapter. */
   async executeTask(task: Task, adapter: IAdapter, workspaceContext?: string): Promise<AgentResult> {
-    if (this.guardrailRunner) {
-      const beforeResult = await this.guardrailRunner.run("before_tool", {
-        checkpoint: "before_tool",
-        goal_id: task.goal_id,
-        task_id: task.id,
-        input: { task, adapter_type: adapter.adapterType },
-      });
-      if (!beforeResult.allowed) {
-        return {
-          success: false,
-          output: `Guardrail rejected: ${beforeResult.results.map(r => r.reason).filter(Boolean).join("; ")}`,
-          error: "guardrail_rejected",
-          exit_code: null,
-          elapsed_ms: 0,
-          stopped_reason: "error",
-        };
-      }
-    }
-
-    // Route through run-adapter tool when ToolExecutor is available
-    if (this.toolExecutor) {
-      try {
-        let trustBalance = 0;
-        try {
-          const balance = await this.stateManager.loadGoal(task.goal_id);
-          void balance; // goal_id is enough; trust fetched below if needed
-        } catch { /* non-fatal */ }
-        const toolCtx = {
-          cwd: process.cwd(),
-          goalId: task.goal_id,
-          trustBalance,
-          preApproved: true,
-          approvalFn: async () => false,
-        };
-        const toolResult = await this.toolExecutor.execute(
-          "run-adapter",
-          {
-            adapter_id: adapter.adapterType,
-            task_description: task.work_description ?? "",
-            goal_id: task.goal_id,
-          },
-          toolCtx
-        );
-        if (toolResult.success && toolResult.data != null) {
-          return toolResult.data as AgentResult;
-        }
-        this.logger?.warn?.(`[TaskLifecycle] run-adapter tool failed, falling back to direct call: ${toolResult.error ?? "unknown"}`);
-      } catch (err) {
-        this.logger?.warn?.(`[TaskLifecycle] run-adapter tool threw, falling back to direct call: ${(err as Error).message}`);
-      }
-    }
-
-    const result = await _executeTask(
-      {
-        stateManager: this.stateManager,
-        sessionManager: this.sessionManager,
-        logger: this.logger,
-        execFileSyncFn: this.execFileSyncFn,
-      },
+    return executeTaskWithGuards({
       task,
       adapter,
-      workspaceContext
-    );
-
-    if (this.guardrailRunner) {
-      const afterResult = await this.guardrailRunner.run("after_tool", {
-        checkpoint: "after_tool",
-        goal_id: task.goal_id,
-        task_id: task.id,
-        input: { task, result, adapter_type: adapter.adapterType },
-      });
-      if (!afterResult.allowed) {
-        return {
-          success: false,
-          output: `Guardrail rejected result: ${afterResult.results.map(r => r.reason).filter(Boolean).join("; ")}`,
-          error: "guardrail_rejected",
-          exit_code: null,
-          elapsed_ms: result.elapsed_ms,
-          stopped_reason: "error",
-        };
-      }
-    }
-
-    return result;
+      workspaceContext,
+      guardrailRunner: this.guardrailRunner,
+      toolExecutor: this.toolExecutor,
+      stateManager: this.stateManager,
+      sessionManager: this.sessionManager,
+      logger: this.logger,
+      execFileSyncFn: this.execFileSyncFn,
+    });
   }
 
   /** Verify task execution results using 3-layer verification. */
@@ -381,7 +309,7 @@ export class TaskLifecycle {
 
     // 4c. Post-execution git diff verification (optional, non-blocking)
     if (executionResult.success && this.toolExecutor) {
-      const diffCheck = await this.verifyWithGitDiff(goalId);
+      const diffCheck = await verifyExecutionWithGitDiff(this.toolExecutor, goalId);
       this.logger?.info(
         `[TaskLifecycle] Git diff verification: ${diffCheck.diffSummary || "no changes"}`,
         { verified: diffCheck.verified }
@@ -488,44 +416,6 @@ export class TaskLifecycle {
       completionJudgerConfig: this.completionJudgerConfig,
       toolExecutor: this.toolExecutor,
     };
-  }
-
-  /**
-   * Run a git diff to verify that file changes occurred after task execution.
-   * Returns verified=true (non-blocking) if toolExecutor is unavailable or diff fails.
-   */
-  private async verifyWithGitDiff(goalId: string): Promise<{ verified: boolean; diffSummary: string }> {
-    if (!this.toolExecutor) return { verified: true, diffSummary: "" };
-
-    try {
-      const result = await this.toolExecutor.execute(
-        "git_diff",
-        { target: "unstaged", maxLines: 200 },
-        {
-          cwd: process.cwd(),
-          goalId,
-          trustBalance: 0,
-          preApproved: true,
-          approvalFn: async () => true,
-        }
-      );
-
-      if (!result.success) return { verified: true, diffSummary: "diff unavailable" };
-
-      const diffText = typeof result.data === "string" ? result.data : "";
-      if (!diffText.trim()) {
-        return { verified: false, diffSummary: "no changes detected" };
-      }
-
-      // Count changed files from diff output (lines starting with "diff --git")
-      const filesChanged = (diffText.match(/^diff --git /gm) ?? []).length;
-      return {
-        verified: filesChanged > 0,
-        diffSummary: `${filesChanged} file${filesChanged !== 1 ? "s" : ""} changed`,
-      };
-    } catch {
-      return { verified: true, diffSummary: "diff check failed" };
-    }
   }
 
   /** Run build and test checks after successful task execution. Opt-in via healthCheckEnabled. */
