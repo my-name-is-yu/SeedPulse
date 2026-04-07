@@ -73,6 +73,17 @@ export class StrategyManagerBase {
   /** Execution feedback buffer for strategy scoring (bounded, max 50). */
   protected executionHistory: ExecutionFeedback[] = [];
 
+  private dedupeCandidatesById(candidates: Strategy[]): Strategy[] {
+    const seen = new Set<string>();
+    return candidates.filter((candidate) => {
+      if (seen.has(candidate.id)) {
+        return false;
+      }
+      seen.add(candidate.id);
+      return true;
+    });
+  }
+
   constructor(stateManager: StateManager, llmClient: ILLMClient, knowledgeManager?: KnowledgeManager, promptGateway?: IPromptGateway, logger?: Logger) {
     this.stateManager = stateManager;
     this.llmClient = llmClient;
@@ -245,25 +256,32 @@ export class StrategyManagerBase {
       if (activation.flags.decisionHeuristics) {
         const heuristics = await loadDecisionHeuristics(this.stateManager.getBaseDir());
         candidates = applyDecisionHeuristicsToCandidates(candidates, heuristics, {
-          stallCount: Math.max(0, context.pastStrategies.length),
-          activeStrategyId: context.pastStrategies[0]?.id ?? null,
+          stallCount: Math.max(
+            0,
+            ...context.pastStrategies.map((strategy) => strategy.consecutive_stall_count ?? 0)
+          ),
+          activeStrategyId: context.pastStrategies.find((strategy) => strategy.state === "active")?.id ?? null,
         });
       }
     } catch {
       // Non-fatal: dream activation enrichment must not block candidate generation.
     }
 
+    candidates = this.dedupeCandidatesById(candidates);
+
     // Store candidates in portfolio
     const portfolio = await this.loadOrCreatePortfolio(goalId);
-    portfolio.strategies.push(...candidates);
+    const existingIds = new Set(portfolio.strategies.map((strategy) => strategy.id));
+    const freshCandidates = candidates.filter((candidate) => !existingIds.has(candidate.id));
+    portfolio.strategies.push(...freshCandidates);
     await this.savePortfolio(goalId, portfolio);
 
     // Update in-memory index
-    for (const c of candidates) {
+    for (const c of freshCandidates) {
       this.strategyIndex.set(c.id, goalId);
     }
 
-    return candidates;
+    return freshCandidates;
   }
 
   /**

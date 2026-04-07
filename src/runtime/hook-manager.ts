@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
@@ -9,6 +10,8 @@ import {
   type HookPayload,
 } from "../base/types/hook.js";
 import { DreamLogCollector } from "../platform/dream/dream-log-collector.js";
+import type { DreamCollectorConfig } from "../platform/dream/dream-log-collector.js";
+import { DreamLogConfigSchema } from "../platform/dream/dream-types.js";
 
 // ─── HookManager ───
 
@@ -24,11 +27,21 @@ export class HookManager {
 
   constructor(private readonly baseDir: string, logger?: Logger) {
     this.logger = logger;
-    this.dreamCollector = new DreamLogCollector(baseDir, logger);
+    this.dreamCollector = new DreamLogCollector(baseDir, logger, this.loadDreamCollectorConfig());
   }
 
   getDreamCollector(): DreamLogCollector {
     return this.dreamCollector;
+  }
+
+  private loadDreamCollectorConfig(): DreamCollectorConfig {
+    const configPath = path.join(this.baseDir, "dream", "config.json");
+    try {
+      const raw = JSON.parse(fs.readFileSync(configPath, "utf8")) as unknown;
+      return DreamLogConfigSchema.parse(raw).logCollection;
+    } catch {
+      return {};
+    }
   }
 
   /**

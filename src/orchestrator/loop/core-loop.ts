@@ -466,6 +466,16 @@ export class CoreLoop {
 
     if (result.stallDetected && result.stallReport) {
       this.logger?.warn(`[iter ${loopIndex}] stall detected: ${result.stallReport.stall_type}`, { escalation: result.stallReport.escalation_level });
+      void this.deps.hookManager?.emit("StallDetected", {
+        goal_id: goalId,
+        dimension: result.stallReport.dimension_name ?? undefined,
+        data: {
+          stall_type: result.stallReport.stall_type,
+          escalation_level: result.stallReport.escalation_level,
+          suggested_cause: result.stallReport.suggested_cause,
+          task_id: result.stallReport.task_id ?? undefined,
+        },
+      });
     }
 
     if (
@@ -513,6 +523,8 @@ export class CoreLoop {
                 acquiredCount: acquired.length,
               });
               await generateLoopReport(goalId, loopIndex, result, goal, this.deps.reportingEngine, this.logger);
+              result.skipped = true;
+              result.skipReason = "dream_auto_acquire_knowledge";
               result.elapsedMs = Date.now() - startTime;
               return result;
             }

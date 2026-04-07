@@ -5,6 +5,7 @@ import { StateManager } from "../../../base/state/state-manager.js";
 import { StrategyManager } from "../strategy-manager.js";
 import type { ILLMClient } from "../../../base/llm/llm-client.js";
 import type { Strategy } from "../../../base/types/strategy.js";
+import { applyDecisionHeuristicsToCandidates } from "../../../platform/dream/dream-activation.js";
 import { saveDreamConfig } from "../../../platform/dream/dream-config.js";
 import { createMockLLMClient } from "../../../../tests/helpers/mock-llm.js";
 import { makeTempDir } from "../../../../tests/helpers/temp-dir.js";
@@ -221,31 +222,114 @@ describe("generateCandidates", () => {
     expect(candidates[0]!.hypothesis).toContain("structured research checklist");
   });
 
-  it("reorders candidates with decision heuristics when enabled", async () => {
-    const mock = createMockLLMClient([CANDIDATE_RESPONSE_TWO]);
+  it("assigns unique ids to repeated template-backed candidates", async () => {
+    const mock = createMockLLMClient([CANDIDATE_RESPONSE_ONE, CANDIDATE_RESPONSE_ONE]);
     const manager = new StrategyManager(stateManager, mock);
-    await saveDreamConfig({ activation: { decisionHeuristics: true } }, stateManager.getBaseDir());
-    fs.mkdirSync(`${tempDir}/dream`, { recursive: true });
+    await saveDreamConfig({ activation: { strategyTemplates: true } }, stateManager.getBaseDir());
+    await stateManager.saveGoal({
+      id: "goal-1",
+      title: "Improve research throughput",
+      description: "Need a reusable research plan",
+      status: "active",
+      dimensions: [],
+      parent_id: null,
+      child_goal_ids: [],
+      success_criteria: [],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    } as any);
     fs.writeFileSync(
-      `${tempDir}/dream/decision-heuristics.json`,
-      JSON.stringify({
-        heuristics: [
-          {
-            id: "heur-1",
-            prefer_strategy_hypothesis_includes: "outline",
-            score_delta: 0.4,
-            reason: "outline-first has worked before",
-          },
-        ],
-      }, null, 2)
+      `${tempDir}/strategy-templates.json`,
+      JSON.stringify([
+        {
+          template_id: "tmpl-1",
+          source_goal_id: "goal-src",
+          source_strategy_id: "strat-src",
+          hypothesis_pattern: "Start with a structured research checklist",
+          domain_tags: ["research"],
+          effectiveness_score: 0.9,
+          applicable_dimensions: ["research_depth"],
+          embedding_id: null,
+          created_at: new Date().toISOString(),
+        },
+      ], null, 2)
     );
 
-    const candidates = await manager.generateCandidates("goal-1", "research_depth", ["research_depth", "word_count"], {
+    const first = await manager.generateCandidates("goal-1", "research_depth", ["research_depth"], {
+      currentGap: 0.5,
+      pastStrategies: [],
+    });
+    const second = await manager.generateCandidates("goal-1", "research_depth", ["research_depth"], {
       currentGap: 0.5,
       pastStrategies: [],
     });
 
-    expect(candidates[0]!.hypothesis).toContain("structured outline");
+    expect(first[0]!.id).not.toBe(second[0]!.id);
+  });
+
+  it("applies decision heuristics without double-counting prefer/avoid deltas", async () => {
+    const candidates = [
+      {
+        id: "cand-1",
+        goal_id: "goal-1",
+        primary_dimension: "research_depth",
+        target_dimensions: ["research_depth"],
+        hypothesis: "Use the Pomodoro technique for focused research sessions",
+        expected_effect: [],
+        resource_estimate: { sessions: 1, duration: { value: 1, unit: "days" }, llm_calls: null },
+        state: "candidate",
+        allocation: 0.6,
+        created_at: new Date().toISOString(),
+        started_at: null,
+        completed_at: null,
+        gap_snapshot_at_start: null,
+        tasks_generated: [],
+        effectiveness_score: null,
+        consecutive_stall_count: 0,
+      },
+      {
+        id: "cand-2",
+        goal_id: "goal-1",
+        primary_dimension: "research_depth",
+        target_dimensions: ["research_depth"],
+        hypothesis: "Create a structured outline before each writing session",
+        expected_effect: [],
+        resource_estimate: { sessions: 1, duration: { value: 1, unit: "days" }, llm_calls: null },
+        state: "candidate",
+        allocation: 0.4,
+        created_at: new Date().toISOString(),
+        started_at: null,
+        completed_at: null,
+        gap_snapshot_at_start: null,
+        tasks_generated: [],
+        effectiveness_score: null,
+        consecutive_stall_count: 0,
+      },
+    ] satisfies Strategy[];
+
+    const reordered = applyDecisionHeuristicsToCandidates(
+      candidates,
+      [
+        {
+          id: "heur-1",
+          prefer_strategy_hypothesis_includes: "outline",
+          score_delta: 0.4,
+          reason: "outline-first has worked before",
+        },
+        {
+          id: "heur-2",
+          avoid_strategy_hypothesis_includes: "pomodoro",
+          score_delta: 0.2,
+          reason: "avoid previous dead end",
+        },
+      ],
+      {
+        stallCount: 0,
+        activeStrategyId: null,
+      }
+    );
+
+    expect(reordered[0]!.hypothesis).toContain("structured outline");
   });
 });
 

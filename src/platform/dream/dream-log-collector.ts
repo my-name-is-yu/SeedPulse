@@ -127,6 +127,20 @@ export class DreamLogCollector {
     await this.markImportanceProcessed(lastProcessedLine, lastProcessedTimestamp);
   }
 
+  async markImportanceCursorProcessed(cursor: {
+    lastProcessedLine: number;
+    lastProcessedTimestamp?: string;
+    lastProcessedId?: string;
+  }): Promise<void> {
+    const state = await this.loadWatermarks();
+    state.importanceBuffer = {
+      lastProcessedLine: cursor.lastProcessedLine,
+      ...(cursor.lastProcessedTimestamp ? { lastProcessedTimestamp: cursor.lastProcessedTimestamp } : {}),
+      ...(cursor.lastProcessedId ? { lastProcessedId: cursor.lastProcessedId } : {}),
+    };
+    await this.saveWatermarks(state);
+  }
+
   buildSessionId(goalId: string, startedAt: string): string {
     return `${goalId}:${startedAt}`;
   }
@@ -139,6 +153,7 @@ export class DreamLogCollector {
   }): Promise<void> {
     const { goalId, sessionId, iterationResult, timestamp } = params;
     await this.appendIterationLog({
+      entryId: randomUUID(),
       timestamp: timestamp ?? new Date().toISOString(),
       goalId,
       iteration: iterationResult.loopIndex,

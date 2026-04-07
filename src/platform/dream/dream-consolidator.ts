@@ -157,7 +157,7 @@ export class DreamConsolidator {
         };
       case "agentMemory":
         return {
-          lintFindings: await this.countJsonArrayEntries("agent-memory/store.json"),
+          lintFindings: await this.countAgentMemoryEntries(),
           autoAppliedConsolidations: 0,
           duplicatesMerged: 0,
         };
@@ -313,6 +313,14 @@ export class DreamConsolidator {
     return Array.isArray(parsed) ? parsed.length : 0;
   }
 
+  private async countAgentMemoryEntries(): Promise<number> {
+    const filePath = path.join(this.deps.baseDir, "memory", "agent-memory", "entries.json");
+    const raw = await fsp.readFile(filePath, "utf8").catch(() => "");
+    if (!raw) return 0;
+    const parsed = JSON.parse(raw) as { entries?: unknown[] };
+    return Array.isArray(parsed.entries) ? parsed.entries.length : 0;
+  }
+
   private async countEventLines(eventType: string): Promise<number> {
     const dreamDir = path.join(this.deps.baseDir, "dream", "events");
     let total = 0;
@@ -327,11 +335,11 @@ export class DreamConsolidator {
   }
 
   private async countTrustDomains(): Promise<number> {
-    const filePath = path.join(this.deps.baseDir, "trust-store.json");
+    const filePath = path.join(this.deps.baseDir, "trust", "trust-store.json");
     const raw = await fsp.readFile(filePath, "utf8").catch(() => "");
     if (!raw) return 0;
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return Object.keys(parsed).length;
+    const parsed = JSON.parse(raw) as { balances?: Record<string, unknown> };
+    return parsed.balances ? Object.keys(parsed.balances).length : 0;
   }
 
   private async countVerificationArtifacts(): Promise<number> {

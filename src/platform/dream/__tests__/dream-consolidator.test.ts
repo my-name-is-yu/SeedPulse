@@ -51,7 +51,8 @@ async function seedDreamFiles(baseDir: string): Promise<void> {
   await fs.mkdir(path.join(baseDir, "dream", "events"), { recursive: true });
   await fs.mkdir(path.join(baseDir, "archive", "goal-1"), { recursive: true });
   await fs.mkdir(path.join(baseDir, "verification", "task-1"), { recursive: true });
-  await fs.mkdir(path.join(baseDir, "agent-memory"), { recursive: true });
+  await fs.mkdir(path.join(baseDir, "memory", "agent-memory"), { recursive: true });
+  await fs.mkdir(path.join(baseDir, "trust"), { recursive: true });
 
   await fs.writeFile(
     path.join(baseDir, "goals", "goal-1", "iteration-logs.jsonl"),
@@ -70,5 +71,20 @@ async function seedDreamFiles(baseDir: string): Promise<void> {
   );
   await fs.writeFile(path.join(baseDir, "archive", "goal-1", "bundle.json"), "{}", "utf8");
   await fs.writeFile(path.join(baseDir, "verification", "task-1", "report.json"), "{}", "utf8");
-  await fs.writeFile(path.join(baseDir, "agent-memory", "store.json"), "[]", "utf8");
+  await fs.writeFile(
+    path.join(baseDir, "memory", "agent-memory", "entries.json"),
+    JSON.stringify({ entries: [{ id: "am-1" }], last_consolidated_at: null }),
+    "utf8"
+  );
+  await fs.writeFile(
+    path.join(baseDir, "trust", "trust-store.json"),
+    JSON.stringify({
+      balances: {
+        github: { domain: "github", balance: 10, success_delta: 3, failure_delta: -10 },
+      },
+      permanent_gates: {},
+      override_log: [],
+    }),
+    "utf8"
+  );
 }

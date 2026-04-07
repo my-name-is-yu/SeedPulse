@@ -592,18 +592,24 @@ describe("CoreLoop", async () => {
       };
       const toolExecutor = { executeBatch: vi.fn() };
 
+      const hookManager = {
+        emit: vi.fn().mockResolvedValue(undefined),
+        getDreamCollector: vi.fn(),
+      };
       const loop = new CoreLoop(
-        { ...deps, knowledgeManager: knowledgeManager as any, toolExecutor: toolExecutor as any },
+        { ...deps, knowledgeManager: knowledgeManager as any, toolExecutor: toolExecutor as any, hookManager: hookManager as any },
         { delayBetweenLoopsMs: 0 }
       );
       const result = await loop.runOneIteration("goal-1", 1);
 
       expect(result.error).toBeNull();
       expect(result.stallDetected).toBe(true);
+      expect(result.skipped).toBe(true);
+      expect(result.skipReason).toBe("dream_auto_acquire_knowledge");
       expect(knowledgeManager.acquireWithTools).toHaveBeenCalledOnce();
       expect(knowledgeManager.saveKnowledge).toHaveBeenCalledOnce();
       expect(mocks.taskLifecycle.runTaskCycle).not.toHaveBeenCalled();
-      expect(result.error).toBeNull();
+      expect(hookManager.emit).toHaveBeenCalledWith("StallDetected", expect.any(Object));
     });
   });
 

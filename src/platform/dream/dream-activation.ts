@@ -1,5 +1,6 @@
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { KnowledgeEntry } from "../knowledge/types/knowledge.js";
 import { KnowledgeEntrySchema } from "../knowledge/types/knowledge.js";
@@ -156,7 +157,7 @@ export function materializeTemplateCandidate(
 ): Strategy {
   const now = new Date().toISOString();
   return {
-    id: `dream-template-${template.template_id}`,
+    id: `dream-template-${template.template_id}-${randomUUID()}`,
     goal_id: goalId,
     primary_dimension: primaryDimension,
     target_dimensions: targetDimensions.length > 0 ? targetDimensions : template.applicable_dimensions,
@@ -224,12 +225,14 @@ export function applyDecisionHeuristicsToCandidates(
         candidate.hypothesis.toLowerCase().includes(heuristic.prefer_strategy_hypothesis_includes.toLowerCase())
       ) {
         score += Math.abs(heuristic.score_delta || 0.15);
+        continue;
       }
       if (
         heuristic.avoid_strategy_hypothesis_includes &&
         candidate.hypothesis.toLowerCase().includes(heuristic.avoid_strategy_hypothesis_includes.toLowerCase())
       ) {
         score -= Math.abs(heuristic.score_delta || 0.15);
+        continue;
       }
       score += heuristic.score_delta;
     }

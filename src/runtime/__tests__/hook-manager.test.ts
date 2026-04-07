@@ -98,6 +98,21 @@ describe("HookManager", () => {
   // ─── emit ───
 
   describe("emit", () => {
+    it("respects dream logCollection config when persisting events", async () => {
+      await fs.promises.mkdir(path.join(tempDir, "dream"), { recursive: true });
+      await fs.promises.writeFile(
+        path.join(tempDir, "dream", "config.json"),
+        JSON.stringify({ logCollection: { enabled: true, eventPersistenceEnabled: false } }),
+        "utf8"
+      );
+
+      const manager = new HookManager(tempDir);
+      await manager.emit("LoopCycleStart", { goal_id: "g1" });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(fs.existsSync(path.join(tempDir, "dream", "events", "g1.jsonl"))).toBe(false);
+    });
+
     it("only fires hooks matching the event type", async () => {
       const spawnedCommands: string[] = [];
 

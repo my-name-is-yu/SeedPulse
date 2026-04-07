@@ -56,6 +56,7 @@ export const IterationGapDimensionSchema = z.object({
 export type IterationGapDimension = z.infer<typeof IterationGapDimensionSchema>;
 
 export const IterationLogSchema = z.object({
+  entryId: z.string().optional(),
   timestamp: z.string(),
   goalId: z.string(),
   iteration: z.number().int().nonnegative(),
@@ -130,6 +131,7 @@ export const WatermarkStateSchema = z.object({
   importanceBuffer: z.object({
     lastProcessedLine: z.number().int().nonnegative().default(0),
     lastProcessedTimestamp: z.string().optional(),
+    lastProcessedId: z.string().optional(),
   }).default({
     lastProcessedLine: 0,
   }),
@@ -243,8 +245,20 @@ export const IngestionOutputSchema = z.object({
   sessionLogs: z.array(SessionLogSchema),
   stats: IngestionStatsSchema,
   watermarkTargets: z.object({
-    goals: z.record(z.string(), z.number().int().nonnegative()).default({}),
-    importanceBufferLine: z.number().int().nonnegative().default(0),
+    goals: z.record(
+      z.string(),
+      z.object({
+        lastProcessedLine: z.number().int().nonnegative().default(0),
+        lastProcessedTimestamp: z.string().optional(),
+      })
+    ).default({}),
+    importanceBuffer: z.object({
+      lastProcessedLine: z.number().int().nonnegative().default(0),
+      lastProcessedTimestamp: z.string().optional(),
+      lastProcessedId: z.string().optional(),
+    }).default({
+      lastProcessedLine: 0,
+    }),
   }),
 });
 

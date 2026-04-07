@@ -58,7 +58,7 @@ function makeIteration(goalId: string, iteration: number) {
 }
 
 describe("DreamAnalyzer", () => {
-  it("runs phase 2 analysis, persists patterns and schedule suggestions, and advances line-based watermarks", async () => {
+  it("runs phase 2 analysis, persists patterns and schedule suggestions, and advances resumable watermarks", async () => {
     const tempDir = makeTempDir("dream-analyzer-");
     try {
       const goalA = "goal-a";
@@ -185,12 +185,130 @@ describe("DreamAnalyzer", () => {
       const watermarks = JSON.parse(
         await fs.promises.readFile(path.join(tempDir, "dream", "watermarks.json"), "utf8")
       ) as {
-        goals: Record<string, { lastProcessedLine: number }>;
-        importanceBuffer: { lastProcessedLine: number };
+        goals: Record<string, { lastProcessedLine: number; lastProcessedTimestamp?: string }>;
+        importanceBuffer: { lastProcessedLine: number; lastProcessedTimestamp?: string; lastProcessedId?: string };
       };
       expect(watermarks.goals[goalA]?.lastProcessedLine).toBe(12);
       expect(watermarks.goals[goalB]?.lastProcessedLine).toBe(15);
+      expect(watermarks.goals[goalB]?.lastProcessedTimestamp).toBeTruthy();
       expect(watermarks.importanceBuffer.lastProcessedLine).toBe(3);
+      expect(watermarks.importanceBuffer.lastProcessedId).toBe("imp-2");
+    } finally {
+      cleanupTempDir(tempDir);
+    }
+  });
+
+  it("falls back to timestamp-based resume when iteration logs were pruned", async () => {
+    const tempDir = makeTempDir("dream-analyzer-pruned-");
+    try {
+      const goalId = "goal-pruned";
+      await writeJsonl(
+        path.join(tempDir, "goals", goalId, "iteration-logs.jsonl"),
+        [makeIteration(goalId, 3), makeIteration(goalId, 4), makeIteration(goalId, 5)]
+      );
+      await fs.promises.mkdir(path.join(tempDir, "dream"), { recursive: true });
+      await fs.promises.writeFile(
+        path.join(tempDir, "dream", "watermarks.json"),
+        JSON.stringify({
+          goals: {
+            [goalId]: {
+              lastProcessedLine: 10,
+              lastProcessedTimestamp: makeIteration(goalId, 4).timestamp,
+            },
+          },
+          importanceBuffer: { lastProcessedLine: 0 },
+        }),
+        "utf8"
+      );
+
+      const stateManager = new StateManager(tempDir, undefined, { walEnabled: false });
+      await stateManager.init();
+      const learningPipeline = new LearningPipeline(makeMockLLM([[]]), null, stateManager);
+      const analyzer = new DreamAnalyzer({
+        baseDir: tempDir,
+        llmClient: makeMockLLM([[{
+          pattern_type: "strategy_effectiveness",
+          confidence: 0.91,
+          summary: "Recent post-prune iteration was analyzed.",
+          evidence_refs: [`iter:${goalId}:5`],
+          metadata: { applicable_domains: ["strategy"] },
+        }]]),
+        learningPipeline,
+        config: { minIterationsForAnalysis: 1 },
+      });
+
+      const report = await analyzer.runDeep({ goalIds: [goalId], phases: ["A", "B"] });
+
+      expect(report.stats.linesRead).toBe(1);
+      expect(report.patternsPersisted).toBe(1);
+    } finally {
+      cleanupTempDir(tempDir);
+    }
+  });
+
+  it("does not advance importance watermark past excluded goals", async () => {
+    const tempDir = makeTempDir("dream-analyzer-importance-");
+    try {
+      const goalA = "goal-a";
+      const goalB = "goal-b";
+      await writeJsonl(
+        path.join(tempDir, "goals", goalA, "iteration-logs.jsonl"),
+        Array.from({ length: 6 }, (_, index) => makeIteration(goalA, index))
+      );
+      await writeJsonl(
+        path.join(tempDir, "goals", goalB, "iteration-logs.jsonl"),
+        Array.from({ length: 6 }, (_, index) => makeIteration(goalB, index))
+      );
+      await writeJsonl(path.join(tempDir, "dream", "importance-buffer.jsonl"), [
+        {
+          id: "imp-a",
+          timestamp: "2026-04-07T01:00:00.000Z",
+          goalId: goalA,
+          source: "verification",
+          importance: 0.8,
+          reason: "A",
+          data_ref: `iter:${goalA}:2`,
+          tags: [],
+          processed: false,
+        },
+        {
+          id: "imp-b",
+          timestamp: "2026-04-07T01:01:00.000Z",
+          goalId: goalB,
+          source: "stall",
+          importance: 0.9,
+          reason: "B",
+          data_ref: `iter:${goalB}:2`,
+          tags: [],
+          processed: false,
+        },
+      ]);
+
+      const stateManager = new StateManager(tempDir, undefined, { walEnabled: false });
+      await stateManager.init();
+      const learningPipeline = new LearningPipeline(makeMockLLM([[]]), null, stateManager);
+      const analyzer = new DreamAnalyzer({
+        baseDir: tempDir,
+        llmClient: makeMockLLM([[{
+          pattern_type: "verification",
+          confidence: 0.8,
+          summary: "Goal A processed",
+          evidence_refs: [`iter:${goalA}:2`],
+          metadata: {},
+        }]]),
+        learningPipeline,
+        config: { minIterationsForAnalysis: 1, maxGoalsPerRun: 1 },
+      });
+
+      await analyzer.runDeep({ phases: ["A", "B"] });
+
+      const watermarks = JSON.parse(
+        await fs.promises.readFile(path.join(tempDir, "dream", "watermarks.json"), "utf8")
+      ) as {
+        importanceBuffer: { lastProcessedLine: number; lastProcessedId?: string };
+      };
+      expect(watermarks.importanceBuffer.lastProcessedLine).toBe(1);
+      expect(watermarks.importanceBuffer.lastProcessedId).toBe("imp-a");
     } finally {
       cleanupTempDir(tempDir);
     }
