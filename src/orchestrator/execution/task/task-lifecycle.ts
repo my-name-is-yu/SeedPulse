@@ -48,7 +48,7 @@ import { checkIrreversibleApproval as _checkIrreversibleApproval } from "./task-
 import { runPipelineTaskCycle as runPipelineTaskCycleFn } from "./task-pipeline-cycle.js";
 import type { KnowledgeTransfer } from "../../../platform/knowledge/transfer/knowledge-transfer.js";
 import type { KnowledgeManager } from "../../../platform/knowledge/knowledge-manager.js";
-import { getReflectionsForGoal, formatReflectionsForPrompt } from "../reflection-generator.js";
+import { buildEnrichedKnowledgeContext } from "./task-context-enricher.js";
 import { persistTaskCycleSideEffects } from "./task-side-effects.js";
 import { GuardrailRunner } from "../../../platform/traits/guardrail-runner.js";
 import type { HookManager } from "../../../runtime/hook-manager.js";
@@ -328,36 +328,13 @@ export class TaskLifecycle {
     }
     const targetDimension = this.selectTargetDimension(gapVector, driveContext, goalDimensions);
 
-    // 2. Realtime transfer candidate detection (optional enrichment)
-    let enrichedKnowledgeContext = knowledgeContext;
-    if (this.knowledgeTransfer) {
-      try {
-        const { contextSnippets } = await this.knowledgeTransfer.detectCandidatesRealtime(goalId);
-        if (contextSnippets.length > 0) {
-          const snippetText = contextSnippets.join("\n");
-          enrichedKnowledgeContext = knowledgeContext ? `${knowledgeContext}\n${snippetText}` : snippetText;
-        }
-      } catch (err) {
-        // non-fatal: proceed without enrichment
-        this.logger?.warn(`[TaskLifecycle] Knowledge transfer candidate detection failed (proceeding without enrichment): ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-
-    // Inject past reflections
-    if (this.knowledgeManager) {
-      try {
-        const pastReflections = await getReflectionsForGoal(this.knowledgeManager, goalId, 5, this.logger);
-        if (pastReflections.length > 0) {
-          const reflectionText = formatReflectionsForPrompt(pastReflections);
-          enrichedKnowledgeContext = enrichedKnowledgeContext
-            ? `${enrichedKnowledgeContext}\n${reflectionText}`
-            : reflectionText;
-        }
-      } catch (err) {
-        // non-fatal: proceed without reflections
-        this.logger?.warn(`[TaskLifecycle] Failed to load past reflections (proceeding without): ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
+    const enrichedKnowledgeContext = await buildEnrichedKnowledgeContext({
+      goalId,
+      knowledgeContext,
+      knowledgeTransfer: this.knowledgeTransfer,
+      knowledgeManager: this.knowledgeManager,
+      logger: this.logger,
+    });
 
     // 3. Generate task (optionally with injected knowledge context)
     void this.hookManager?.emit("PreTaskCreate", { goal_id: goalId, data: { task_type: targetDimension } });
