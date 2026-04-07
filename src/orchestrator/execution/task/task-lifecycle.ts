@@ -128,18 +128,18 @@ export class TaskLifecycle {
 
   constructor(deps: TaskLifecycleDeps);
   constructor(
-    stateManager: StateManager,
-    llmClient: ILLMClient,
-    sessionManager: SessionManager,
-    trustManager: TrustManager,
-    strategyManager: StrategyManager,
-    stallDetector: StallDetector,
+    stateManagerOrDeps: StateManager | TaskLifecycleDeps,
+    llmClient?: ILLMClient,
+    sessionManager?: SessionManager,
+    trustManager?: TrustManager,
+    strategyManager?: StrategyManager,
+    stallDetector?: StallDetector,
     options?: TaskLifecycleOptions
   ) {
-    const resolved = TaskLifecycle.isDepsObject(stateManager)
-      ? stateManager
+    const resolved = TaskLifecycle.isDepsObject(stateManagerOrDeps)
+      ? stateManagerOrDeps
       : {
-          stateManager,
+          stateManager: stateManagerOrDeps,
           llmClient: llmClient!,
           sessionManager: sessionManager!,
           trustManager: trustManager!,
