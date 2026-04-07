@@ -1,6 +1,6 @@
 # Design Documents
 
-Overview of SeedPulse's design documentation, organized by subsystem.
+Overview of PulSeed's design documentation, organized by subsystem.
 
 ## Core — Loop and State Management
 
@@ -10,7 +10,7 @@ Overview of SeedPulse's design documentation, organized by subsystem.
 | [Drive Scoring](core/drive-scoring.md) | How drive intensity is calculated and prioritized |
 | [Gap Calculation](core/gap-calculation.md) | Computing the gap between current state and goal thresholds |
 | [State Vector](core/state-vector.md) | Multi-dimensional state representation |
-| [Observation](core/observation.md) | How SeedPulse observes the current state of the world |
+| [Observation](core/observation.md) | How PulSeed observes the current state of the world |
 | [Stall Detection](core/stall-detection.md) | Detecting when progress has stalled and triggering recovery |
 | [Satisficing](core/satisficing.md) | Judging when a goal is "good enough" to stop |
 
@@ -22,7 +22,7 @@ Overview of SeedPulse's design documentation, organized by subsystem.
 | [Goal Refinement Pipeline](goal/goal-refinement-pipeline.md) | Pipeline for refining raw goals into structured dimensions |
 | [Goal Tree](goal/goal-tree.md) | Hierarchical goal decomposition and cross-goal orchestration |
 | [Goal Ethics](goal/goal-ethics.md) | Ethics gate for goal validation and safety |
-| [Execution Boundary](goal/execution-boundary.md) | Defining what SeedPulse does vs. delegates |
+| [Execution Boundary](goal/execution-boundary.md) | Defining what PulSeed does vs. delegates |
 
 ## Knowledge — Learning and Memory
 
@@ -53,7 +53,7 @@ Overview of SeedPulse's design documentation, organized by subsystem.
 | [Token Optimization](infrastructure/token-optimization.md) | Strategies for reducing LLM token usage |
 | [Prompt Context Architecture](infrastructure/prompt-context-architecture.md) | How hierarchical memory feeds into LLM prompts |
 | [Plugin Architecture](infrastructure/plugin-architecture.md) | Plugin loading, lifecycle, and registry |
-| [Plugin Development Guide](infrastructure/plugin-development-guide.md) | How to build SeedPulse plugins |
+| [Plugin Development Guide](infrastructure/plugin-development-guide.md) | How to build PulSeed plugins |
 | [Reporting](infrastructure/reporting.md) | Progress reporting and visualization |
 | [Web UI](infrastructure/web-ui.md) | Next.js web dashboard design |
 
@@ -61,7 +61,7 @@ Overview of SeedPulse's design documentation, organized by subsystem.
 
 | Document | Description |
 |----------|-------------|
-| [Character](personality/character.md) | SeedPulse personality traits and behavioral parameters |
+| [Character](personality/character.md) | PulSeed personality traits and behavioral parameters |
 | [Curiosity](personality/curiosity.md) | Meta-iteration and exploratory goal generation |
 | [Trust and Safety](personality/trust-and-safety.md) | Trust scoring, safety boundaries, and approval flows |
 | [Brand](personality/brand.md) | Visual identity, naming, and communication style |

@@ -19,7 +19,7 @@ describe("JsonQueryTool", () => {
   let jsonFilePath: string;
 
   const sampleData = {
-    name: "seedpulse",
+    name: "pulseed",
     version: "0.1.0",
     scripts: { build: "tsc", test: "vitest" },
     dependencies: { zod: "^3.0.0", typescript: "^5.3.0" },
@@ -64,7 +64,7 @@ describe("JsonQueryTool", () => {
     it("queries top-level string key", async () => {
       const result = await tool.call({ file_path: jsonFilePath, query: "name" }, makeContext(tmpDir));
       expect(result.success).toBe(true);
-      expect(result.data).toBe("seedpulse");
+      expect(result.data).toBe("pulseed");
     });
 
     it("queries top-level version", async () => {
@@ -118,13 +118,13 @@ describe("JsonQueryTool", () => {
     it("resolves relative path from context.cwd", async () => {
       const result = await tool.call({ file_path: "package.json", query: "name" }, makeContext(tmpDir));
       expect(result.success).toBe(true);
-      expect(result.data).toBe("seedpulse");
+      expect(result.data).toBe("pulseed");
     });
 
     it("includes query in summary", async () => {
       const result = await tool.call({ file_path: jsonFilePath, query: "name" }, makeContext(tmpDir));
       expect(result.summary).toContain("name");
-      expect(result.summary).toContain("seedpulse");
+      expect(result.summary).toContain("pulseed");
     });
   });
 

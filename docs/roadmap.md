@@ -1,6 +1,6 @@
 # Roadmap
 
-SeedPulse has completed its core implementation through 18 milestones. This document outlines future directions.
+PulSeed has completed its core implementation through 18 milestones. This document outlines future directions.
 
 For completed milestone history, see [archive/completed-milestones.md](archive/completed-milestones.md).
 

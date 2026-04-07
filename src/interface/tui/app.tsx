@@ -500,7 +500,7 @@ export function App({
         {/* Info text (right, vertically centered) */}
         <Box flexDirection="column" justifyContent="center">
           <Box>
-            <Text bold color={theme.brand}>SeedPulse</Text>
+            <Text bold color={theme.brand}>PulSeed</Text>
             <Text dimColor> v0.2.0</Text>
           </Box>
           <Text dimColor>
