@@ -24,7 +24,13 @@ vi.mock("../../../orchestrator/loop/core-loop.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../orchestrator/loop/core-loop.js")>();
   return {
     ...actual,
-    CoreLoop: vi.fn(),
+    CoreLoop: vi.fn().mockImplementation(function() {
+      return {
+        run: vi.fn(),
+        stop: vi.fn(),
+        setTimeHorizonEngine: vi.fn(),
+      };
+    }),
   };
 });
 

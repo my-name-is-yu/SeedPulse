@@ -7,17 +7,17 @@ import type { EthicsGateInterface, PermissionManagerDeps } from "../permission.j
 
 function makeTool(overrides: Partial<ToolMetadata> = {}): ITool {
   const metadata: ToolMetadata = {
-    ...overrides,
     name: "test-tool",
-    aliases: overrides.aliases ?? [],
     permissionLevel: "write_local",
     isReadOnly: false,
-    isDestructive: overrides.isDestructive ?? false,
-    shouldDefer: overrides.shouldDefer ?? false,
-    alwaysLoad: overrides.alwaysLoad ?? false,
-    maxConcurrency: overrides.maxConcurrency ?? 0,
-    maxOutputChars: overrides.maxOutputChars ?? 8000,
-    tags: overrides.tags ?? [],
+    aliases: [],
+    isDestructive: false,
+    shouldDefer: false,
+    alwaysLoad: false,
+    maxConcurrency: 0,
+    maxOutputChars: 8000,
+    tags: [],
+    ...overrides,
   };
   return {
     metadata,
