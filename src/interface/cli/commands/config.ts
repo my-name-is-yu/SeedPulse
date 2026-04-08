@@ -212,19 +212,28 @@ export async function cmdDatasourceAdd(
   stateManager: StateManager,
   argv: string[]
 ): Promise<number> {
-  const type = argv[0];
-  if (!type) {
+  const rawType = argv[0];
+  if (!rawType) {
     getCliLogger().error("Error: type is required. Usage: pulseed datasource add <type> [options]");
-    getCliLogger().error("  Types: file, http_api, github_issue, file_existence");
+    getCliLogger().error("  Types: file, http_api, database, github_issue, file_existence");
     return 1;
   }
 
-  if (type !== "file" && type !== "http_api" && type !== "github_issue" && type !== "file_existence") {
-    getCliLogger().error(`Error: unsupported type "${type}". Supported: file, http_api, github_issue, file_existence`);
+  const type = rawType === "postgres" ? "database" : rawType;
+
+  if (type !== "file" && type !== "http_api" && type !== "database" && type !== "github_issue" && type !== "file_existence") {
+    getCliLogger().error(`Error: unsupported type "${rawType}". Supported: file, http_api, database, postgres, github_issue, file_existence`);
     return 1;
   }
 
-  let values: { name?: string; path?: string; url?: string };
+  let values: {
+    name?: string;
+    path?: string;
+    url?: string;
+    "connection-string"?: string;
+    dimension?: string;
+    query?: string;
+  };
   try {
     ({ values } = parseArgs({
       args: argv.slice(1),
@@ -232,9 +241,21 @@ export async function cmdDatasourceAdd(
         name: { type: "string" },
         path: { type: "string" },
         url: { type: "string" },
+        "connection-string": { type: "string" },
+        dimension: { type: "string" },
+        query: { type: "string" },
       },
       strict: false,
-    }) as { values: { name?: string; path?: string; url?: string } });
+    }) as {
+      values: {
+        name?: string;
+        path?: string;
+        url?: string;
+        "connection-string"?: string;
+        dimension?: string;
+        query?: string;
+      };
+    });
   } catch (err) {
     getCliLogger().error(formatOperationError(`parse datasource add arguments for type "${type}"`, err));
     values = {};
@@ -249,6 +270,8 @@ export async function cmdDatasourceAdd(
         ? `file_existence:${values.path ?? id}`
         : type === "github_issue"
           ? `github_issue:${id}`
+          : type === "database"
+            ? `database:${values.dimension ?? id}`
           : `http_api:${values.url ?? id}`);
 
   const connection: Record<string, string> = {};
@@ -268,6 +291,26 @@ export async function cmdDatasourceAdd(
     extraConfig = { filePaths: { file_exists: values.path } };
   } else if (type === "github_issue") {
     // No connection params needed — uses `gh` CLI
+  } else if (type === "database") {
+    const connectionString = values["connection-string"] ?? values.url;
+    if (!connectionString) {
+      getCliLogger().error("Error: --connection-string or --url is required for database data source");
+      return 1;
+    }
+    if (!values.query) {
+      getCliLogger().error("Error: --query is required for database data source");
+      return 1;
+    }
+    const dimensionName = values.dimension ?? "value";
+    extraConfig = {
+      connection_string: values["connection-string"],
+      dimension_mapping: {
+        [dimensionName]: values.query,
+      },
+    };
+    if (values.url) {
+      connection["url"] = values.url;
+    }
   } else {
     if (!values.url) {
       getCliLogger().error("Error: --url is required for http_api data source");
@@ -297,6 +340,9 @@ export async function cmdDatasourceAdd(
   console.log(`  ID:   ${id}`);
   console.log(`  Type: ${type}`);
   console.log(`  Name: ${name}`);
+  if (type === "database") {
+    console.log(`  Query dimension: ${values.dimension ?? "value"}`);
+  }
 
   return 0;
 }

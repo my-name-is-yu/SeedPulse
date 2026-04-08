@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { LearnedPatternSchema } from "../knowledge/types/learning.js";
+import { ScheduleTriggerSchema } from "../../runtime/types/schedule.js";
 
 export const DreamSourceSchema = z.enum([
   "observation",
@@ -284,13 +285,21 @@ export const DreamPatternResponseSchema = z.object({
 export type DreamPatternResponse = z.infer<typeof DreamPatternResponseSchema>;
 
 export const ScheduleSuggestionSchema = z.object({
+  id: z.string().min(1).optional(),
   type: z.enum(["cron", "goal_trigger", "cleanup", "dream_cron"]),
   goalId: z.string().optional(),
+  name: z.string().optional(),
+  trigger: ScheduleTriggerSchema.optional(),
   confidence: z.number().min(0).max(1),
   reason: z.string(),
   proposal: z.string(),
+  status: z.enum(["pending", "applied", "rejected", "dismissed"]).default("pending"),
+  applied_entry_id: z.string().optional(),
+  decided_at: z.string().optional(),
+  decision_reason: z.string().optional(),
 });
 
+export type ScheduleSuggestionInput = z.input<typeof ScheduleSuggestionSchema>;
 export type ScheduleSuggestion = z.infer<typeof ScheduleSuggestionSchema>;
 
 export const ScheduleSuggestionFileSchema = z.object({

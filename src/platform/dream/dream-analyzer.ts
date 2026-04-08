@@ -12,8 +12,10 @@ import {
 } from "../../prompt/purposes/dream.js";
 import {
   DreamPatternResponseSchema,
+  DreamRunReportSchema,
   ImportanceEntrySchema,
   IterationLogSchema,
+  ScheduleSuggestionSchema,
   ScheduleSuggestionFileSchema,
   SessionLogSchema,
   type DreamLogConfig,
@@ -128,7 +130,9 @@ export class DreamAnalyzer {
       completedPhases.push("C");
     }
 
-    return {
+    const normalizedSuggestions = suggestions.map((suggestion) => ScheduleSuggestionSchema.parse(suggestion));
+
+    return DreamRunReportSchema.parse({
       tier: options.tier,
       phasesCompleted: completedPhases,
       goalsProcessed: selectedGoalIds,
@@ -138,8 +142,8 @@ export class DreamAnalyzer {
       partial,
       stats: ingestion.stats,
       learnedPatterns: patterns,
-      suggestions,
-    };
+      suggestions: normalizedSuggestions,
+    });
   }
 
   private async resolveGoalIds(requested?: string[]): Promise<string[]> {
@@ -540,11 +544,18 @@ export class DreamAnalyzer {
       if (!best || best[1] < 3) continue;
       const [hour, count] = best;
       suggestions.push({
-        type: "cron",
+        type: "goal_trigger",
         goalId,
+        name: `Dream goal trigger: ${goalId}`,
+        trigger: {
+          type: "cron",
+          expression: `0 ${hour} * * *`,
+          timezone: "UTC",
+        },
         confidence: Math.min(0.95, 0.55 + count * 0.08),
         reason: `Manual execution clusters around ${hour.toString().padStart(2, "0")}:00 UTC.`,
         proposal: `0 ${hour} * * *`,
+        status: "pending",
       });
     }
     return suggestions;

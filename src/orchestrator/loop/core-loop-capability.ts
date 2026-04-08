@@ -10,6 +10,13 @@ import type { IAdapter } from "../execution/adapter-layer.js";
 import type { CapabilityDetector } from "../../platform/observation/capability-detector.js";
 import type { CapabilityAcquisitionTask } from "../../base/types/capability.js";
 
+export interface CapabilityAcquisitionOutcome {
+  capabilityName: string;
+  replanRequired: boolean;
+  recommendationSource?: string;
+  recommendedPlugin?: string;
+}
+
 /** Handle the "capability_acquiring" action from TaskLifecycle.
  * Delegates acquisition to an adapter, verifies the result, and registers
  * the capability on success. Retries up to 3 times before escalating. */
@@ -20,27 +27,44 @@ export async function handleCapabilityAcquisition(
   capabilityDetector: CapabilityDetector | undefined,
   capabilityAcquisitionFailures: Map<string, number>,
   logger: Logger | undefined
-): Promise<void> {
-  if (!capabilityDetector) {
-    logger?.warn("CoreLoop: capability_acquiring action received but no capabilityDetector configured — skipping");
-    return;
-  }
-
+): Promise<CapabilityAcquisitionOutcome> {
   const capName = acquisitionTask.gap.missing_capability.name;
   const capType = acquisitionTask.gap.missing_capability.type;
 
+  if (!capabilityDetector) {
+    logger?.warn("CoreLoop: capability_acquiring action received but no capabilityDetector configured — skipping");
+    return { capabilityName: capName, replanRequired: false };
+  }
+
+  const recommendation = capabilityDetector.recommendAcquisition(acquisitionTask.gap)[0];
+
+  try {
+    await capabilityDetector.setCapabilityStatus(capName, capType, "requested");
+  } catch {
+    // Non-fatal.
+  }
+
   logger?.info("CoreLoop: handling capability acquisition", { capName, capType, method: acquisitionTask.method });
+
+  const recommendationBlock = recommendation
+    ? `\nRecommended acquisition path:\n` +
+      `- Plugin: ${recommendation.pluginName}\n` +
+      `- Install source: ${recommendation.installSource}\n` +
+      `- Verification hint: ${recommendation.verificationHint}\n`
+    : "";
 
   const prompt =
     `Capability Acquisition Task\n` +
     `Method: ${acquisitionTask.method}\n` +
     `Description: ${acquisitionTask.task_description}\n` +
     `Success criteria: ${acquisitionTask.success_criteria.join("; ")}\n\n` +
+    recommendationBlock +
     `Instructions: Please acquire or set up the capability "${capName}" (${capType}). ` +
     `Follow the method "${acquisitionTask.method}" and ensure the success criteria are met.`;
 
   let agentResult;
   try {
+    await capabilityDetector.setCapabilityStatus(capName, capType, "acquiring");
     agentResult = await adapter.execute({ prompt, timeout_ms: 120000, adapter_type: adapter.adapterType });
   } catch (err) {
     logger?.error("CoreLoop: adapter execution failed during capability acquisition", {
@@ -48,7 +72,12 @@ export async function handleCapabilityAcquisition(
       error: err instanceof Error ? err.message : String(err),
     });
     await recordCapabilityFailure(capabilityDetector, acquisitionTask, goalId, capabilityAcquisitionFailures, logger);
-    return;
+    return {
+      capabilityName: capName,
+      replanRequired: false,
+      recommendationSource: recommendation?.installSource,
+      recommendedPlugin: recommendation?.pluginName,
+    };
   }
 
   const capability = {
@@ -72,7 +101,12 @@ export async function handleCapabilityAcquisition(
       error: err instanceof Error ? err.message : String(err),
     });
     await recordCapabilityFailure(capabilityDetector, acquisitionTask, goalId, capabilityAcquisitionFailures, logger);
-    return;
+    return {
+      capabilityName: capName,
+      replanRequired: false,
+      recommendationSource: recommendation?.installSource,
+      recommendedPlugin: recommendation?.pluginName,
+    };
   }
 
   if (verificationResult === "pass") {
@@ -84,12 +118,28 @@ export async function handleCapabilityAcquisition(
         acquired_at: new Date().toISOString(),
       });
       await capabilityDetector.setCapabilityStatus(capName, capType, "available");
-      logger?.info("CoreLoop: capability acquired and registered successfully", { capName });
+      logger?.info("CoreLoop: capability acquired and registered successfully", {
+        capName,
+        replanRequired: true,
+        recommendedPlugin: recommendation?.pluginName,
+      });
+      return {
+        capabilityName: capName,
+        replanRequired: true,
+        recommendationSource: recommendation?.installSource,
+        recommendedPlugin: recommendation?.pluginName,
+      };
     } catch (err) {
       logger?.error("CoreLoop: failed to register capability after verification pass", {
         capName,
         error: err instanceof Error ? err.message : String(err),
       });
+      return {
+        capabilityName: capName,
+        replanRequired: false,
+        recommendationSource: recommendation?.installSource,
+        recommendedPlugin: recommendation?.pluginName,
+      };
     }
   } else if (verificationResult === "escalate") {
     capabilityAcquisitionFailures.delete(capName);
@@ -97,6 +147,13 @@ export async function handleCapabilityAcquisition(
   } else {
     await recordCapabilityFailure(capabilityDetector, acquisitionTask, goalId, capabilityAcquisitionFailures, logger);
   }
+
+  return {
+    capabilityName: capName,
+    replanRequired: false,
+    recommendationSource: recommendation?.installSource,
+    recommendedPlugin: recommendation?.pluginName,
+  };
 }
 
 /** Records a capability acquisition failure and escalates after 3 consecutive failures. */

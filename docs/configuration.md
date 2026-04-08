@@ -215,6 +215,9 @@ Common flags available across multiple commands. Run `pulseed <command> --help` 
 | `pulseed start --goal <id>` | Start daemon mode for continuous looping |
 | `pulseed stop` | Stop the running daemon |
 | `pulseed cron --goal <id>` | Print a crontab entry for scheduled runs |
+| `pulseed schedule list/add/remove` | Manage persisted schedule entries |
+| `pulseed schedule presets` | List reusable schedule presets such as `daily_brief` and `weekly_review` |
+| `pulseed schedule suggestions list/apply/reject/dismiss` | Review and materialize dream-generated schedule suggestions |
 | `pulseed tui` | Launch the interactive terminal UI |
 | `pulseed setup` | Interactive provider and adapter setup wizard |
 | `pulseed datasource add/list/remove` | Manage data sources |
@@ -229,3 +232,20 @@ pulseed setup --provider openai --model gpt-5.4-mini --adapter openai_codex_cli
 ```
 
 Use `--provider`, `--model`, and `--adapter` to run setup non-interactively (useful in CI or scripts).
+
+### Postgres datasource
+
+PulSeed ships a first-party `database` datasource backed by `psql`. A working
+`psql` binary must be available in `$PATH` for health checks and query
+execution.
+
+```bash
+pulseed datasource add database \
+  --name "Prod analytics" \
+  --connection-string postgresql://localhost:5432/analytics \
+  --dimension open_issue_count \
+  --query "SELECT count(*) FROM issues WHERE state = 'open'"
+```
+
+This stores the SQL in `dimension_mapping`, so the observation layer can read
+`open_issue_count` without custom glue code.

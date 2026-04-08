@@ -4,6 +4,7 @@ import * as net from "node:net";
 import { randomUUID } from "node:crypto";
 import { exec } from "node:child_process";
 import { writeJsonFileAtomic, readJsonFileOrNull } from "../base/utils/json-io.js";
+import type { StateManager } from "../base/state/state-manager.js";
 import {
   ScheduleEntrySchema,
   ScheduleEntryListSchema,
@@ -22,6 +23,9 @@ import { executeCron, executeGoalTrigger, executeProbe } from "./schedule-engine
 import type { IDataSourceAdapter } from "../platform/observation/data-source-adapter.js";
 import type { DataSourceRegistry } from "../platform/observation/data-source-adapter.js";
 import type { ILLMClient } from "../base/llm/llm-client.js";
+import type { HookManager } from "./hook-manager.js";
+import type { MemoryLifecycleManager } from "../platform/knowledge/memory/memory-lifecycle.js";
+import type { KnowledgeManager } from "../platform/knowledge/knowledge-manager.js";
 
 const SCHEDULES_FILE = "schedules.json";
 
@@ -40,8 +44,11 @@ interface ScheduleEngineDeps {
   // a full Report object. Full Report integration deferred to Phase 4.
   notificationDispatcher?: { dispatch(report: Record<string, unknown>): Promise<any> };
   coreLoop?: { run(goalId: string, options?: { maxIterations?: number }): Promise<any> };
-  stateManager?: { loadGoal(goalId: string): Promise<any> };
+  stateManager?: StateManager;
   reportingEngine?: { generateNotification(type: string, context: Record<string, unknown>): Promise<any> };
+  hookManager?: HookManager;
+  memoryLifecycle?: MemoryLifecycleManager;
+  knowledgeManager?: KnowledgeManager;
 }
 
 const noopLogger = {
@@ -63,16 +70,21 @@ export type ScheduleEntryUpdateInput = Partial<{
 
 export class ScheduleEngine {
   private entries: ScheduleEntry[] = [];
+  private baseDir: string;
   private schedulesPath: string;
   private logger: NonNullable<ScheduleEngineDeps["logger"]>;
   private dataSourceRegistry?: Map<string, IDataSourceAdapter> | DataSourceRegistry;
   private llmClient?: ILLMClient;
   private notificationDispatcher?: { dispatch(report: Record<string, unknown>): Promise<any> };
   private coreLoop?: { run(goalId: string, options?: { maxIterations?: number }): Promise<any> };
-  private stateManager?: { loadGoal(goalId: string): Promise<any> };
+  private stateManager?: StateManager;
   private reportingEngine?: { generateNotification(type: string, context: Record<string, unknown>): Promise<any> };
+  private hookManager?: HookManager;
+  private memoryLifecycle?: MemoryLifecycleManager;
+  private knowledgeManager?: KnowledgeManager;
 
   constructor(deps: ScheduleEngineDeps) {
+    this.baseDir = deps.baseDir;
     this.schedulesPath = path.join(deps.baseDir, SCHEDULES_FILE);
     this.logger = deps.logger ?? noopLogger;
     this.dataSourceRegistry = deps.dataSourceRegistry;
@@ -81,6 +93,9 @@ export class ScheduleEngine {
     this.coreLoop = deps.coreLoop;
     this.stateManager = deps.stateManager;
     this.reportingEngine = deps.reportingEngine;
+    this.hookManager = deps.hookManager;
+    this.memoryLifecycle = deps.memoryLifecycle;
+    this.knowledgeManager = deps.knowledgeManager;
   }
 
   // ─── Persistence ───
@@ -368,12 +383,16 @@ export class ScheduleEngine {
 
   private layerDeps() {
     return {
+      baseDir: this.baseDir,
       dataSourceRegistry: this.dataSourceRegistry,
       llmClient: this.llmClient,
       notificationDispatcher: this.notificationDispatcher,
       coreLoop: this.coreLoop,
       stateManager: this.stateManager,
       reportingEngine: this.reportingEngine,
+      hookManager: this.hookManager,
+      memoryLifecycle: this.memoryLifecycle,
+      knowledgeManager: this.knowledgeManager,
       logger: this.logger,
     };
   }

@@ -5,6 +5,7 @@ import {
   getNestedValue,
   FileDataSourceAdapter,
   HttpApiDataSourceAdapter,
+  PostgresDataSourceAdapter,
   DataSourceRegistry,
 } from "../data-source-adapter.js";
 import type { DataSourceConfig } from "../../../base/types/data-source.js";
@@ -420,6 +421,88 @@ describe("HttpApiDataSourceAdapter", () => {
     const result = await adapter.query({ dimension_name: "x", timeout_ms: 5000 });
 
     expect(result.value).toBeNull();
+  });
+});
+
+describe("PostgresDataSourceAdapter", () => {
+  function makeDatabaseConfig(overrides: Partial<DataSourceConfig> = {}): DataSourceConfig {
+    return makeConfig({
+      id: "pg-source",
+      name: "Analytics DB",
+      type: "database",
+      connection: {},
+      connection_string: "postgresql://localhost:5432/analytics",
+      dimension_mapping: {
+        open_issue_count: "SELECT count(*) FROM issues WHERE state = 'open'",
+      },
+      ...overrides,
+    });
+  }
+
+  it("runs configured SQL and parses a scalar value", async () => {
+    const runner = vi.fn().mockResolvedValue({
+      stdout: "42\n",
+      stderr: "",
+      code: 0,
+    });
+    const adapter = new PostgresDataSourceAdapter(makeDatabaseConfig(), runner);
+
+    const result = await adapter.query({
+      dimension_name: "open_issue_count",
+      timeout_ms: 5000,
+    });
+
+    expect(runner).toHaveBeenCalledWith(
+      "postgresql://localhost:5432/analytics",
+      "SELECT count(*) FROM issues WHERE state = 'open'",
+      5000
+    );
+    expect(result.value).toBe(42);
+    expect(result.metadata?.query).toBe("SELECT count(*) FROM issues WHERE state = 'open'");
+  });
+
+  it("wraps scalar expressions in a SELECT statement", async () => {
+    const runner = vi.fn().mockResolvedValue({
+      stdout: "7\n",
+      stderr: "",
+      code: 0,
+    });
+    const adapter = new PostgresDataSourceAdapter(
+      makeDatabaseConfig({
+        dimension_mapping: {
+          open_issue_count: "count(*)",
+        },
+      }),
+      runner
+    );
+
+    const result = await adapter.query({
+      dimension_name: "open_issue_count",
+      timeout_ms: 5000,
+    });
+
+    expect(runner).toHaveBeenCalledWith(
+      "postgresql://localhost:5432/analytics",
+      "SELECT (count(*)) AS value",
+      5000
+    );
+    expect(result.value).toBe(7);
+  });
+
+  it("healthCheck returns true when SELECT 1 succeeds", async () => {
+    const runner = vi.fn().mockResolvedValue({
+      stdout: "1\n",
+      stderr: "",
+      code: 0,
+    });
+    const adapter = new PostgresDataSourceAdapter(makeDatabaseConfig(), runner);
+
+    await expect(adapter.healthCheck()).resolves.toBe(true);
+    expect(runner).toHaveBeenCalledWith(
+      "postgresql://localhost:5432/analytics",
+      "SELECT 1",
+      5000
+    );
   });
 });
 

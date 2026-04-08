@@ -45,6 +45,61 @@ import {
 
 const CONSECUTIVE_FAILURE_THRESHOLD = 3;
 
+export interface CapabilityAcquisitionRecommendation {
+  pluginName: string;
+  installSource: string;
+  rationale: string;
+  verificationHint: string;
+  requiresApproval: boolean;
+}
+
+const ACQUISITION_RECOMMENDATION_RULES: Array<{
+  pluginName: string;
+  installSource: string;
+  capabilityTypes: Capability["type"][];
+  patterns: RegExp[];
+  rationale: string;
+  verificationHint: string;
+  requiresApproval: boolean;
+}> = [
+  {
+    pluginName: "postgres-datasource",
+    installSource: "examples/plugins/postgres-datasource",
+    capabilityTypes: ["data_source", "service"],
+    patterns: [/\bpostgres\b/i, /\bpostgresql\b/i, /\banalytics_db\b/i, /\bdatabase\b/i, /\bsql\b/i],
+    rationale: "Use the first-party Postgres datasource plugin for structured SQL observation.",
+    verificationHint: "Load the plugin, configure a DSN, and confirm datasource health checks succeed.",
+    requiresApproval: false,
+  },
+  {
+    pluginName: "mysql-datasource",
+    installSource: "examples/plugins/mysql-datasource",
+    capabilityTypes: ["data_source", "service"],
+    patterns: [/\bmysql\b/i],
+    rationale: "Use the first-party MySQL datasource plugin when the gap targets MySQL-backed data.",
+    verificationHint: "Load the plugin, configure the database, and confirm datasource connectivity.",
+    requiresApproval: false,
+  },
+  {
+    pluginName: "jira-datasource",
+    installSource: "examples/plugins/jira-datasource",
+    capabilityTypes: ["service", "data_source"],
+    patterns: [/\bjira\b/i],
+    rationale: "Use the first-party Jira datasource plugin instead of bespoke API glue.",
+    verificationHint: "Load the plugin, configure Jira credentials, and verify plugin/API health.",
+    requiresApproval: false,
+  },
+  {
+    pluginName: "websocket-datasource",
+    installSource: "examples/plugins/websocket-datasource",
+    capabilityTypes: ["service", "data_source"],
+    patterns: [/\bwebsocket\b/i, /\bws\b/i],
+    rationale: "Use the first-party WebSocket datasource plugin for realtime observation.",
+    verificationHint: "Load the plugin, connect to the event stream, and confirm health checks pass.",
+    requiresApproval: false,
+  },
+];
+
 // ─── LLM response schema for deficiency detection ───
 
 const DeficiencyResponseSchema = z.union([
@@ -370,6 +425,28 @@ export class CapabilityDetector {
     return consecutiveFailures >= CONSECUTIVE_FAILURE_THRESHOLD;
   }
 
+  recommendAcquisition(gap: CapabilityGap): CapabilityAcquisitionRecommendation[] {
+    const haystack = [
+      gap.missing_capability.name,
+      gap.reason,
+      gap.impact_description,
+      ...gap.alternatives,
+    ].join(" ");
+
+    return ACQUISITION_RECOMMENDATION_RULES
+      .filter((rule) =>
+        rule.capabilityTypes.includes(gap.missing_capability.type) &&
+        rule.patterns.some((pattern) => pattern.test(haystack))
+      )
+      .map((rule) => ({
+        pluginName: rule.pluginName,
+        installSource: rule.installSource,
+        rationale: rule.rationale,
+        verificationHint: rule.verificationHint,
+        requiresApproval: rule.requiresApproval,
+      }));
+  }
+
   // ─── planAcquisition ───
 
   /**
@@ -379,6 +456,7 @@ export class CapabilityDetector {
   planAcquisition(gap: CapabilityGap): CapabilityAcquisitionTask {
     const capabilityName = gap.missing_capability.name;
     const capabilityType = gap.missing_capability.type;
+    const recommendation = this.recommendAcquisition(gap)[0];
 
     let method: CapabilityAcquisitionTask["method"];
     let task_description: string;
@@ -410,14 +488,29 @@ export class CapabilityDetector {
         `Impact if unavailable: ${gap.impact_description}`;
     }
 
+    if (recommendation) {
+      task_description +=
+        ` Recommended acquisition path: install plugin "${recommendation.pluginName}" from ` +
+        `"${recommendation.installSource}". ${recommendation.rationale} ` +
+        `Verification hint: ${recommendation.verificationHint}`;
+    }
+
+    const successCriteria = [
+      "capability registered in registry",
+      `${capabilityName} is operational and accessible`,
+    ];
+    if (recommendation) {
+      successCriteria.push(
+        `recommended plugin "${recommendation.pluginName}" is installed or otherwise made available`,
+        "follow-up replanning is triggered after the capability becomes available"
+      );
+    }
+
     return CapabilityAcquisitionTaskSchema.parse({
       gap,
       method,
       task_description,
-      success_criteria: [
-        "capability registered in registry",
-        `${capabilityName} is operational and accessible`,
-      ],
+      success_criteria: successCriteria,
       verification_attempts: 0,
       max_verification_attempts: 3,
     });

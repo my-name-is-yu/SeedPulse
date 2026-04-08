@@ -29,6 +29,7 @@ import {
   expandKnowledgeEntriesWithGraph,
   mergeWorkingMemorySelections,
 } from "../execution/context/context-builder.js";
+import type { CapabilityAcquisitionOutcome } from "./core-loop-capability.js";
 
 // ─── Phase 5 ───
 
@@ -505,7 +506,7 @@ export function checkDependencyBlock(
 
 /** Callbacks passed to runTaskCycleWithContext to keep mutable state and side-effects on CoreLoop. */
 export interface LoopCallbacks {
-  handleCapabilityAcquisition: (task: unknown, goalId: string, adapter: unknown) => Promise<void>;
+  handleCapabilityAcquisition: (task: unknown, goalId: string, adapter: unknown) => Promise<CapabilityAcquisitionOutcome | void>;
   incrementTransferCounter: () => number;
   tryGenerateReport: (goalId: string, loopIndex: number, result: LoopIterationResult, goal: Goal) => void;
 }
@@ -728,7 +729,22 @@ export async function runTaskCycleWithContext(
 
     // Handle capability_acquiring
     if (taskResult.action === "capability_acquiring" && taskResult.acquisition_task) {
-      await handleCapabilityAcquisition(taskResult.acquisition_task, goalId, adapter);
+      const acquisitionOutcome = await handleCapabilityAcquisition(taskResult.acquisition_task, goalId, adapter);
+      if (acquisitionOutcome?.replanRequired) {
+        ctx.logger?.info("CoreLoop: capability acquisition requested replanning", {
+          capabilityName: acquisitionOutcome.capabilityName,
+          replanRequired: acquisitionOutcome.replanRequired,
+          recommendationSource: acquisitionOutcome.recommendationSource,
+          recommendedPlugin: acquisitionOutcome.recommendedPlugin,
+        });
+        ctx.deps.onProgress?.({
+          iteration: loopIndex + 1,
+          maxIterations: ctx.config.maxIterations,
+          phase: "Generating task...",
+          gap: result.gapAggregate,
+          taskDescription: `Replanning after capability acquisition: ${acquisitionOutcome.capabilityName}`,
+        });
+      }
     }
 
     // Portfolio: record task completion

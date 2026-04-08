@@ -64,6 +64,7 @@ export class NotificationDispatcher implements INotificationDispatcher {
   private notifierRegistry?: NotifierRegistry;
   private readonly logger?: Logger;
   private batcher?: NotificationBatcher;
+  private realtimeSink?: (report: Report) => void | Promise<void>;
 
   constructor(config?: Partial<NotificationConfig>, notifierRegistry?: NotifierRegistry, logger?: Logger) {
     this.config = NotificationConfigSchema.parse(config ?? {});
@@ -84,6 +85,10 @@ export class NotificationDispatcher implements INotificationDispatcher {
   /** Flush batcher and stop the timer. Call on shutdown. */
   async stop(): Promise<void> {
     await this.batcher?.stop();
+  }
+
+  setRealtimeSink(sink: ((report: Report) => void | Promise<void>) | undefined): void {
+    this.realtimeSink = sink;
   }
 
   /** Dispatch report to all configured channels */
@@ -148,6 +153,14 @@ export class NotificationDispatcher implements INotificationDispatcher {
 
     // Route to NotifierRegistry plugins (additive, failures don't affect core dispatch)
     await this.dispatchToPluginNotifiers(report);
+
+    if (this.realtimeSink) {
+      try {
+        await this.realtimeSink(report);
+      } catch (err) {
+        this.logger?.warn?.(`[NotificationDispatcher] realtime sink failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
 
     return results;
   }

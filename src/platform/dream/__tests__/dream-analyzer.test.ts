@@ -177,9 +177,18 @@ describe("DreamAnalyzer", () => {
 
       const scheduleSuggestions = JSON.parse(
         await fs.promises.readFile(path.join(tempDir, "dream", "schedule-suggestions.json"), "utf8")
-      ) as { suggestions: Array<{ goalId?: string; proposal: string }> };
+      ) as { suggestions: Array<{ goalId?: string; proposal: string; type: string }> };
       expect(scheduleSuggestions.suggestions).toEqual([
-        expect.objectContaining({ goalId: goalB, proposal: "0 3 * * *" }),
+        expect.objectContaining({
+          goalId: goalB,
+          proposal: "0 3 * * *",
+          type: "goal_trigger",
+          trigger: {
+            type: "cron",
+            expression: "0 3 * * *",
+            timezone: "UTC",
+          },
+        }),
       ]);
 
       const watermarks = JSON.parse(

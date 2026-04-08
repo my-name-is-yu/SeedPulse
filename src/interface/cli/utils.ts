@@ -50,7 +50,7 @@ Usage:
   pulseed config set <key> <value>     Set a configuration value
   pulseed config get <key>             Get a configuration value
   pulseed config character             Show or update character configuration
-  pulseed datasource add <type>        Register a new data source (file | http_api)
+  pulseed datasource add <type>        Register a new data source (file | http_api | database)
   pulseed datasource list              List all registered data sources
   pulseed datasource remove <id>       Remove a data source by ID
   pulseed capability list              List all registered capabilities
@@ -116,6 +116,9 @@ Options (pulseed datasource add):
   --name <name>                       Human-readable name for the data source
   --path <path>                       File path (required for type=file)
   --url <url>                         HTTP URL (required for type=http_api)
+  --connection-string <dsn>           Postgres DSN (required for type=database unless --url is used)
+  --dimension <name>                  Dimension name mapped by the datasource query (type=database)
+  --query <sql>                       SQL query or scalar expression (required for type=database)
 
 Options (pulseed provider set):
   --llm <provider>                    LLM provider: anthropic | openai | ollama | codex
@@ -141,6 +144,7 @@ Examples:
   pulseed config character --caution-level 3
   pulseed datasource add file --path /path/to/metrics.json --name "My Metrics"
   pulseed datasource add http_api --url https://api.example.com/metrics --name "API"
+  pulseed datasource add database --connection-string postgresql://localhost/app --dimension open_issue_count --query "SELECT count(*) FROM issues WHERE state = 'open'"
   pulseed datasource list
   pulseed datasource remove ds_1234567890
 `.trim());

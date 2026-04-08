@@ -35,6 +35,7 @@ function makeEntry(
     heartbeat: undefined,
     probe: undefined,
     cron: {
+      job_kind: "prompt",
       prompt_template: "Summarize daily changes.",
       context_sources: ["memory://daily"],
       output_format: "notification",
@@ -163,6 +164,7 @@ describe("UpdateScheduleTool", () => {
       enabled: false,
       trigger: { type: "interval", seconds: 300 },
       cron: {
+        job_kind: "prompt",
         prompt_template: "Summarize the latest activity.",
         context_sources: ["memory://daily"],
         output_format: "report",
@@ -182,6 +184,7 @@ describe("UpdateScheduleTool", () => {
         enabled: false,
         trigger: { type: "interval", seconds: 300, jitter_factor: 0 },
         cron: {
+          job_kind: "prompt",
           prompt_template: "Summarize the latest activity.",
           context_sources: ["memory://daily"],
           output_format: "report",

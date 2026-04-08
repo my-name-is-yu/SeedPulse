@@ -10,7 +10,7 @@ import { readJsonFile } from "../../base/utils/json-io.js";
 import { StateManager } from "../../base/state/state-manager.js";
 import type { DataSourceConfig } from "../../base/types/data-source.js";
 import type { IDataSourceAdapter } from "../../platform/observation/data-source-adapter.js";
-import { FileDataSourceAdapter, HttpApiDataSourceAdapter } from "../../platform/observation/data-source-adapter.js";
+import { FileDataSourceAdapter, HttpApiDataSourceAdapter, PostgresDataSourceAdapter } from "../../platform/observation/data-source-adapter.js";
 import { GitHubIssueDataSourceAdapter } from "../../adapters/datasources/github-issue-datasource.js";
 import { FileExistenceDataSourceAdapter } from "../../adapters/datasources/file-existence-datasource.js";
 import { ShellDataSourceAdapter } from "../../adapters/datasources/shell-datasource.js";
@@ -51,6 +51,37 @@ import { HookManager } from "../../runtime/hook-manager.js";
 import { getCliLogger } from "./cli-logger.js";
 import { formatOperationError } from "./utils.js";
 
+export function createCliDataSourceAdapter(cfg: DataSourceConfig): IDataSourceAdapter | null {
+  if (cfg.type === "file") {
+    return new FileDataSourceAdapter(cfg);
+  }
+  if (cfg.type === "http_api") {
+    return new HttpApiDataSourceAdapter(cfg);
+  }
+  if (cfg.type === "database") {
+    return new PostgresDataSourceAdapter(cfg);
+  }
+  if (cfg.type === "github_issue") {
+    return new GitHubIssueDataSourceAdapter(cfg);
+  }
+  if (cfg.type === "file_existence") {
+    return new FileExistenceDataSourceAdapter(cfg);
+  }
+  if (cfg.type === "shell") {
+    const adapter = new ShellDataSourceAdapter(
+      cfg.id,
+      (cfg.connection.commands ?? {}) as Record<string, import("../../adapters/datasources/shell-datasource.js").ShellCommandSpec>,
+      cfg.connection?.path ?? process.cwd()
+    );
+    if (cfg.scope_goal_id) {
+      (adapter.config as Record<string, unknown>).scope_goal_id = cfg.scope_goal_id;
+    }
+    return adapter;
+  }
+
+  return null;
+}
+
 export async function buildDeps(
   stateManager: StateManager,
   characterConfigManager: CharacterConfigManager,
@@ -75,25 +106,11 @@ export async function buildDeps(
       const files = (await fsp.readdir(dsDir)).filter(f => f.endsWith('.json'));
       for (const file of files) {
         const cfg = await readJsonFile<DataSourceConfig>(path.join(dsDir, file));
-        if (cfg.type === 'file') {
-          dataSources.push(new FileDataSourceAdapter(cfg));
-        } else if (cfg.type === 'http_api') {
-          dataSources.push(new HttpApiDataSourceAdapter(cfg));
-        } else if (cfg.type === 'github_issue' || cfg.type === 'custom' || cfg.type === 'database') {
-          dataSources.push(new GitHubIssueDataSourceAdapter(cfg));
-        } else if (cfg.type === 'file_existence') {
-          dataSources.push(new FileExistenceDataSourceAdapter(cfg));
-        } else if (cfg.type === 'shell') {
-          const adapter = new ShellDataSourceAdapter(
-            cfg.id,
-            (cfg.connection.commands ?? {}) as Record<string, import("../../adapters/datasources/shell-datasource.js").ShellCommandSpec>,
-            cfg.connection?.path ?? process.cwd()
-          );
-          // Propagate scope_goal_id from datasource config for dimension matching
-          if (cfg.scope_goal_id) {
-            (adapter.config as Record<string, unknown>).scope_goal_id = cfg.scope_goal_id;
-          }
+        const adapter = createCliDataSourceAdapter(cfg);
+        if (adapter) {
           dataSources.push(adapter);
+        } else {
+          getCliLogger().warn(`[pulseed] Unsupported built-in datasource type "${cfg.type}" in ${file}; skipping`);
         }
       }
     }
@@ -271,5 +288,16 @@ export async function buildDeps(
 
   coreLoop.setTimeHorizonEngine(new TimeHorizonEngine());
 
-  return { coreLoop, goalNegotiator, goalRefiner, reportingEngine, stateManager, driveSystem, llmClient };
+  return {
+    coreLoop,
+    goalNegotiator,
+    goalRefiner,
+    reportingEngine,
+    stateManager,
+    driveSystem,
+    llmClient,
+    hookManager,
+    memoryLifecycleManager,
+    knowledgeManager,
+  };
 }

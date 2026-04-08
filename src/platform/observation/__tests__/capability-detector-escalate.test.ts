@@ -362,4 +362,21 @@ describe("planAcquisition", () => {
     expect(result.gap.missing_capability.name).toBe("Stripe API");
     expect(result.gap.missing_capability.type).toBe("service");
   });
+
+  it("adds recommendation guidance when the gap matches a known datasource plugin", () => {
+    const llm = createMockLLMClient([]);
+    const detector = new CapabilityDetector(stateManager, llm, reportingEngine);
+
+    const gap = makeGap({
+      missing_capability: { name: "postgres analytics", type: "data_source" },
+      reason: "Need to read from the analytics database",
+    });
+    const result = detector.planAcquisition(gap);
+
+    expect(result.task_description).toContain("postgres-datasource");
+    expect(result.task_description).toContain("examples/plugins/postgres-datasource");
+    expect(result.success_criteria).toContain(
+      "follow-up replanning is triggered after the capability becomes available"
+    );
+  });
 });

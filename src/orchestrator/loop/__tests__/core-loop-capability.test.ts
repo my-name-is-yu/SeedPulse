@@ -8,6 +8,7 @@ import {
   type DriveScorerModule,
   type ReportingEngine,
 } from "../core-loop.js";
+import { handleCapabilityAcquisition } from "../core-loop-capability.js";
 import { StateManager } from "../../../base/state/state-manager.js";
 import type { ObservationEngine } from "../../../platform/observation/observation-engine.js";
 import type { TaskLifecycle, TaskCycleResult } from "../../execution/task/task-lifecycle.js";
@@ -156,6 +157,7 @@ function createMockCapabilityDetector() {
   return {
     detectDeficiency: vi.fn(),
     detectGoalCapabilityGap: vi.fn(),
+    recommendAcquisition: vi.fn().mockReturnValue([]),
     planAcquisition: vi.fn(),
     verifyAcquiredCapability: vi.fn().mockResolvedValue("pass"),
     registerCapability: vi.fn().mockResolvedValue(undefined),
@@ -458,5 +460,62 @@ describe("CoreLoop — capability_acquiring handler", () => {
 
     // escalateToUser should have been called after 3 adapter failures
     expect(mocks.capabilityDetector.escalateToUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("includes a recommended plugin path in the acquisition prompt when available", async () => {
+    const { mocks } = createMockDeps(tmpDir);
+    mocks.capabilityDetector.recommendAcquisition.mockReturnValue([
+      {
+        pluginName: "postgres-datasource",
+        installSource: "examples/plugins/postgres-datasource",
+        rationale: "Use the bundled Postgres datasource plugin.",
+        verificationHint: "Load the plugin and check its datasource health.",
+        requiresApproval: false,
+      },
+    ]);
+
+    await handleCapabilityAcquisition(
+      makeAcquisitionTask(),
+      "goal-1",
+      mocks.adapter,
+      mocks.capabilityDetector as unknown as CapabilityDetector,
+      new Map(),
+      undefined
+    );
+
+    const executeCall = (mocks.adapter.execute as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(executeCall.prompt).toContain("postgres-datasource");
+    expect(executeCall.prompt).toContain("examples/plugins/postgres-datasource");
+  });
+
+  it("returns a replan signal after successful capability acquisition", async () => {
+    const { mocks } = createMockDeps(tmpDir);
+    mocks.capabilityDetector.recommendAcquisition.mockReturnValue([
+      {
+        pluginName: "postgres-datasource",
+        installSource: "examples/plugins/postgres-datasource",
+        rationale: "Use the bundled Postgres datasource plugin.",
+        verificationHint: "Load the plugin and check its datasource health.",
+        requiresApproval: false,
+      },
+    ]);
+
+    const outcome = await handleCapabilityAcquisition(
+      makeAcquisitionTask(),
+      "goal-1",
+      mocks.adapter,
+      mocks.capabilityDetector as unknown as CapabilityDetector,
+      new Map(),
+      undefined
+    );
+
+    expect(outcome).toEqual(
+      expect.objectContaining({
+        capabilityName: "docker",
+        replanRequired: true,
+        recommendedPlugin: "postgres-datasource",
+        recommendationSource: "examples/plugins/postgres-datasource",
+      })
+    );
   });
 });

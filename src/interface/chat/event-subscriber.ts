@@ -1,13 +1,15 @@
 import { EventEmitter } from "node:events";
 
 export interface TendNotification {
-  type: "progress" | "stall" | "complete" | "error";
+  type: "progress" | "stall" | "complete" | "error" | "approval";
   goalId: string;
   message: string;
   iteration?: number;
   maxIterations?: number;
   gap?: number;
   previousGap?: number;
+  requestId?: string;
+  reportType?: string;
 }
 
 export type NotificationVerbosity = "verbose" | "normal" | "quiet";
@@ -19,6 +21,13 @@ interface RawProgressEvent {
   gap?: number;
   taskDescription?: string;
   skipReason?: string;
+}
+
+interface RawNotificationReport {
+  report_type?: string;
+  title?: string;
+  content?: string;
+  goal_id?: string | null;
 }
 
 export class EventSubscriber extends EventEmitter {
@@ -177,6 +186,52 @@ export class EventSubscriber extends EventEmitter {
       }
 
       return null;
+    }
+
+    if (eventType === "notification_report") {
+      const report = data as RawNotificationReport;
+      if (report.report_type === "approval_request") {
+        return null;
+      }
+      const title = report.title ?? report.report_type ?? "Notification";
+      const prefix = report.report_type === "weekly_report"
+        ? "🗓"
+        : report.report_type === "daily_summary"
+          ? "📰"
+          : report.report_type === "urgent_alert"
+            ? "⚠️"
+            : "🔔";
+      return {
+        type: "progress",
+        goalId: this.goalId,
+        reportType: report.report_type,
+        message: `${prefix} [tend] ${shortId}: ${title}`,
+      };
+    }
+
+    if (eventType === "approval_required") {
+      const ev = data as {
+        requestId?: string;
+        goalId?: string;
+        task?: { description?: string; action?: string };
+      };
+      const description = ev.task?.description ?? ev.task?.action ?? "A task requires approval";
+      return {
+        type: "approval",
+        goalId: this.goalId,
+        requestId: ev.requestId,
+        message: `🛂 [tend] ${shortId}: Approval required — ${description}`,
+      };
+    }
+
+    if (eventType === "approval_resolved") {
+      const ev = data as { approved?: boolean };
+      const decision = ev.approved ? "approved" : "rejected";
+      return {
+        type: "progress",
+        goalId: this.goalId,
+        message: `🧾 [tend] ${shortId}: Approval ${decision}`,
+      };
     }
 
     // CoreLoop completion broadcast

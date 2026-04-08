@@ -5,6 +5,7 @@
 // multiple adapter instances.
 
 import * as fsp from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { ValidationError } from "../../base/utils/errors.js";
 import type {
   DataSourceType,
@@ -229,6 +230,183 @@ export class HttpApiDataSourceAdapter implements IDataSourceAdapter {
       return false;
     } finally {
       clearTimeout(timer);
+    }
+  }
+}
+
+// ─── PostgresDataSourceAdapter ───
+
+function parseScalarResult(text: string): number | string | boolean | null {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed === "null") return null;
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  if (/^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/.test(trimmed)) {
+    const num = Number(trimmed);
+    if (!Number.isNaN(num)) return num;
+  }
+  return trimmed;
+}
+
+function buildPsqlArgs(connectionString: string, sql: string): string[] {
+  return [
+    "-X",
+    "-q",
+    "-t",
+    "-A",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-d",
+    connectionString,
+    "-c",
+    sql,
+  ];
+}
+
+function normalizeSqlExpression(expression: string): string {
+  const trimmed = expression.trim();
+  if (/^(select|with)\b/i.test(trimmed)) {
+    return trimmed;
+  }
+  return `SELECT (${trimmed}) AS value`;
+}
+
+function runPsql(connectionString: string, sql: string, timeoutMs: number): Promise<{ stdout: string; stderr: string; code: number | null }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("psql", buildPsqlArgs(connectionString, sql), {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error("PostgresDataSourceAdapter: query timed out"));
+    }, timeoutMs);
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf-8");
+    });
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf-8");
+    });
+
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || `psql exited with code ${code ?? "unknown"}`));
+        return;
+      }
+      resolve({ stdout, stderr, code });
+    });
+  });
+}
+
+export class PostgresDataSourceAdapter implements IDataSourceAdapter {
+  readonly sourceId: string;
+  readonly sourceType: DataSourceType = "database";
+  readonly config: DataSourceConfig;
+  private readonly runner: typeof runPsql;
+
+  constructor(config: DataSourceConfig, runner: typeof runPsql = runPsql) {
+    this.config = config;
+    this.sourceId = config.id;
+    this.runner = runner;
+  }
+
+  private resolveConnectionString(): string | undefined {
+    const direct = this.config.connection_string?.trim();
+    if (direct) return direct;
+    const url = this.config.connection.url?.trim();
+    if (url) return url;
+    return undefined;
+  }
+
+  private resolveQueryExpression(params: DataSourceQuery): string | undefined {
+    const mapped = this.config.dimension_mapping?.[params.dimension_name];
+    const expression = params.expression ?? mapped;
+    if (!expression || !expression.trim()) {
+      return undefined;
+    }
+    return expression;
+  }
+
+  async connect(): Promise<void> {
+    const healthy = await this.healthCheck();
+    if (!healthy) {
+      throw new Error(`PostgresDataSourceAdapter [${this.sourceId}]: health check failed`);
+    }
+  }
+
+  async query(params: DataSourceQuery): Promise<DataSourceResult> {
+    const connectionString = this.resolveConnectionString();
+    if (!connectionString) {
+      throw new ValidationError(`PostgresDataSourceAdapter [${this.sourceId}]: connection_string is required`);
+    }
+
+    const expression = this.resolveQueryExpression(params);
+    if (!expression) {
+      return {
+        value: null,
+        raw: [],
+        timestamp: new Date().toISOString(),
+        source_id: this.sourceId,
+        metadata: {
+          error: `No SQL expression configured for dimension "${params.dimension_name}"`,
+        },
+      };
+    }
+
+    const sql = normalizeSqlExpression(expression);
+    try {
+      const result = await this.runner(connectionString, sql, params.timeout_ms ?? 10_000);
+      const lines = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
+      const firstRow = lines[0] ?? "";
+      const [firstCell = ""] = firstRow.split("\t");
+
+      return {
+        value: parseScalarResult(firstCell),
+        raw: lines,
+        timestamp: new Date().toISOString(),
+        source_id: this.sourceId,
+        metadata: {
+          query: sql,
+        },
+      };
+    } catch (error) {
+      return {
+        value: null,
+        raw: [],
+        timestamp: new Date().toISOString(),
+        source_id: this.sourceId,
+        metadata: {
+          query: sql,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    // no-op
+  }
+
+  async healthCheck(): Promise<boolean> {
+    const connectionString = this.resolveConnectionString();
+    if (!connectionString) return false;
+
+    try {
+      await this.runner(connectionString, "SELECT 1", 5_000);
+      return true;
+    } catch {
+      return false;
     }
   }
 }

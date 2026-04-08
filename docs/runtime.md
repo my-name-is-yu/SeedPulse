@@ -148,6 +148,17 @@ TUI is not a replacement for CLI mode but a complement to it. The loop execution
 - Execution interval can be configured per goal (see drive-system.md scheduling design)
 - Process management (PID file, logs) is handled by the daemon layer
 
+PulSeed now also persists first-class schedule entries under the same runtime state. Common workflows can be created from reusable presets with `pulseed schedule presets` and `pulseed schedule add --preset <name>`, and dream-generated schedule suggestions can be reviewed with `pulseed schedule suggestions <list|apply|reject|dismiss>`.
+
+Schedule presets are available through `pulseed schedule presets` and `pulseed schedule add --preset <key>`.
+
+- `daily_brief` depends on an LLM client and notification delivery
+- `weekly_review` depends on an LLM client and notification delivery
+- `dream_consolidation` depends on memory and knowledge consolidation services
+- `goal_probe` depends on a registered data source
+
+Dream-generated schedule suggestions are reviewable through `pulseed schedule suggestions list` and can be `apply`/`reject`/`dismiss`ed. Applied suggestions record provenance on the resulting schedule entry so later surfaces can explain where the schedule came from.
+
 ### Phase 2b: cron Entry Generation
 
 **`pulseed cron`** outputs a crontab entry the user can add to their shell.

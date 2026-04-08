@@ -76,6 +76,9 @@ export interface DaemonDeps {
   supervisor?: LoopSupervisor;
   /** Factory to create fresh CoreLoop instances for LoopSupervisor workers. */
   coreLoopFactory?: () => CoreLoop;
+  reportingEngine?: {
+    generateNotification(type: string, context: { goalId: string; message: string; details?: string }): Promise<unknown>;
+  };
 }
 
 export class DaemonRunner {
@@ -109,6 +112,7 @@ export class DaemonRunner {
   private cronScheduleInterval: ReturnType<typeof setInterval> | null = null;
   private shutdownResolve: (() => void) | null = null;
   private readonly deps: DaemonDeps;
+  private reportingEngine: DaemonDeps["reportingEngine"];
 
   constructor(deps: DaemonDeps) {
     this.deps = deps;
@@ -126,6 +130,7 @@ export class DaemonRunner {
     this.commandBus = deps.commandBus;
     this.supervisor = deps.supervisor ?? null;
     this.lastProactiveTickAt = Date.now();
+    this.reportingEngine = deps.reportingEngine;
 
     // Parse config with defaults via DaemonConfigSchema.parse()
     this.config = DaemonConfigSchema.parse(deps.config ?? {});
@@ -224,12 +229,20 @@ export class DaemonRunner {
     if (!this.approvalFn && this.eventServer) {
       const es = this.eventServer;
       this.approvalFn = async (task: Record<string, unknown>): Promise<boolean> => {
+        const goalId = String(task["goal_id"] ?? "unknown");
+        const description = String(task["description"] ?? "");
+        const action = String(task["action"] ?? "");
+        void this.reportingEngine?.generateNotification("approval_required", {
+          goalId,
+          message: description || "A task requires approval",
+          details: action ? `Requested action: ${action}` : undefined,
+        });
         return es.requestApproval(
-          String(task["goal_id"] ?? "unknown"),
+          goalId,
           {
             id: String(task["id"] ?? ""),
-            description: String(task["description"] ?? ""),
-            action: String(task["action"] ?? ""),
+            description,
+            action,
           }
         );
       };

@@ -235,4 +235,57 @@ describe("ChatRunner schedule integration", () => {
     );
     expect(vi.mocked(scheduleEngine.addEntry)).toHaveBeenCalledOnce();
   });
+
+  it("supports preset-based schedule creation through the chat tool path", async () => {
+    const createdEntry = makeScheduleEntry({ name: "Daily brief" });
+    const scheduleEngine = makeScheduleEngine();
+    vi.mocked(scheduleEngine.addEntry).mockResolvedValue(createdEntry);
+    const registry = buildRegistry(scheduleEngine);
+    const approvalFn = vi.fn().mockResolvedValue(true);
+    const llmClient = {
+      supportsToolCalling: () => true,
+      sendMessage: vi.fn()
+        .mockResolvedValueOnce({
+          content: "",
+          tool_calls: [
+            {
+              id: "tool-call-1",
+              function: {
+                name: "create_schedule",
+                arguments: JSON.stringify({
+                  preset: "daily_brief",
+                }),
+              },
+            },
+          ],
+          usage: { input_tokens: 1, output_tokens: 1 },
+          stop_reason: "tool_use",
+        })
+        .mockResolvedValueOnce({
+          content: "Created preset schedule",
+          tool_calls: [],
+          usage: { input_tokens: 1, output_tokens: 1 },
+          stop_reason: "completed",
+        }),
+    };
+
+    const runner = new ChatRunner(makeDeps({
+      registry,
+      llmClient: llmClient as never,
+      approvalFn,
+    }));
+
+    await runner.execute("create a daily brief schedule", "/tmp");
+
+    expect(vi.mocked(scheduleEngine.addEntry)).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        source: "preset",
+        preset_key: "daily_brief",
+      }),
+      cron: expect.objectContaining({
+        reflection_kind: "morning_planning",
+      }),
+    }));
+    expect(approvalFn).toHaveBeenCalledOnce();
+  });
 });

@@ -25,12 +25,31 @@ export const ProbeConfigSchema = z.object({
 
 export type ProbeConfig = z.infer<typeof ProbeConfigSchema>;
 
+export const ReflectionJobKindSchema = z.enum([
+  "morning_planning",
+  "evening_catchup",
+  "weekly_review",
+  "dream_consolidation",
+]);
+
+export type ReflectionJobKind = z.infer<typeof ReflectionJobKindSchema>;
+
 export const CronConfigSchema = z.object({
+  job_kind: z.enum(["prompt", "reflection"]).default("prompt"),
+  reflection_kind: ReflectionJobKindSchema.optional(),
   prompt_template: z.string(),
   context_sources: z.array(z.string()).default([]),
   output_format: z.enum(['notification', 'report', 'both']).default('notification'),
   report_type: z.string().optional(),
   max_tokens: z.number().default(4000),
+}).superRefine((value, ctx) => {
+  if (value.job_kind === "reflection" && !value.reflection_kind) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["reflection_kind"],
+      message: "reflection_kind is required when job_kind is reflection",
+    });
+  }
 });
 
 export type CronConfig = z.infer<typeof CronConfigSchema>;
@@ -43,7 +62,15 @@ export const GoalTriggerConfigSchema = z.object({
 
 export type GoalTriggerConfig = z.infer<typeof GoalTriggerConfigSchema>;
 
+export const ScheduleEntryMetadataSchema = z.object({
+  source: z.enum(["manual", "preset", "dream"]).default("manual"),
+  preset_key: z.string().optional(),
+  dream_suggestion_id: z.string().optional(),
+  dependency_hints: z.array(z.string()).default([]),
+  note: z.string().optional(),
+});
 
+export type ScheduleEntryMetadata = z.infer<typeof ScheduleEntryMetadataSchema>;
 
 export const EscalationConfigSchema = z.object({
   enabled: z.boolean().default(false),
@@ -70,6 +97,7 @@ export const ScheduleEntrySchema = z.object({
   layer: ScheduleLayerSchema,
   trigger: ScheduleTriggerSchema,
   enabled: z.boolean().default(true),
+  metadata: ScheduleEntryMetadataSchema.optional(),
   heartbeat: HeartbeatConfigSchema.optional(),
   probe: ProbeConfigSchema.optional(),
   escalation: EscalationConfigSchema.optional(),

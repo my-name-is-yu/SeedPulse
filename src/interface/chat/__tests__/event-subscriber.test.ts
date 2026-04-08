@@ -266,6 +266,33 @@ describe("EventSubscriber", () => {
 
       expect(received).toHaveLength(0);
     });
+
+    it("formats proactive report notifications from SSE", () => {
+      const sub = makeSubscriber("goal-abc", "normal");
+      const received: TendNotification[] = [];
+      sub.on("notification", (n: TendNotification) => received.push(n));
+
+      const raw = `event: notification_report\ndata: {"report_type":"daily_summary","title":"Morning Planning — 2026-04-08"}`;
+      (sub as any).parseSSEMessage(raw);
+
+      expect(received).toHaveLength(1);
+      expect(received[0].message).toContain("Morning Planning");
+      expect(received[0].reportType).toBe("daily_summary");
+    });
+
+    it("formats approval_required events as actionable approvals", () => {
+      const sub = makeSubscriber("goal-abc", "normal");
+      const received: TendNotification[] = [];
+      sub.on("notification", (n: TendNotification) => received.push(n));
+
+      const raw = `event: approval_required\ndata: {"requestId":"approval-123","task":{"description":"Approve daily brief dispatch","action":"dispatch_notification"}}`;
+      (sub as any).parseSSEMessage(raw);
+
+      expect(received).toHaveLength(1);
+      expect(received[0].type).toBe("approval");
+      expect(received[0].requestId).toBe("approval-123");
+      expect(received[0].message).toContain("Approve daily brief dispatch");
+    });
   });
 
   describe("goalId truncation", () => {

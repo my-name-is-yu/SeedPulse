@@ -1,1 +1,1 @@
-export const DESCRIPTION = `Create a persistent schedule entry for the heartbeat, probe, cron, or goal_trigger layer.`;
+export const DESCRIPTION = `Create a persistent schedule entry for the heartbeat, probe, cron, or goal_trigger layer, or use a reusable preset such as daily_brief, weekly_review, dream_consolidation, or goal_probe.`;

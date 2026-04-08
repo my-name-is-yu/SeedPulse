@@ -6,19 +6,34 @@ import {
   ScheduleResultSchema,
   type ScheduleEntry,
   type ScheduleResult,
+  type ReflectionJobKind,
 } from "./types/schedule.js";
 import type { IDataSourceAdapter } from "../platform/observation/data-source-adapter.js";
 import type { DataSourceRegistry } from "../platform/observation/data-source-adapter.js";
 import type { ILLMClient } from "../base/llm/llm-client.js";
+import type { StateManager } from "../base/state/state-manager.js";
+import type { HookManager } from "./hook-manager.js";
+import type { MemoryLifecycleManager } from "../platform/knowledge/memory/memory-lifecycle.js";
+import type { KnowledgeManager } from "../platform/knowledge/knowledge-manager.js";
 import { detectChange } from "./change-detector.js";
+import {
+  runDreamConsolidation,
+  runEveningCatchup,
+  runMorningPlanning,
+  runWeeklyReview,
+} from "../reflection/index.js";
 
 interface LayerDeps {
+  baseDir?: string;
   dataSourceRegistry?: Map<string, IDataSourceAdapter> | DataSourceRegistry;
   llmClient?: ILLMClient;
   notificationDispatcher?: { dispatch(report: Record<string, unknown>): Promise<any> };
   coreLoop?: { run(goalId: string, options?: { maxIterations?: number }): Promise<any> };
-  stateManager?: { loadGoal(goalId: string): Promise<any> };
+  stateManager?: StateManager;
   reportingEngine?: { generateNotification(type: string, context: Record<string, unknown>): Promise<any> };
+  hookManager?: HookManager;
+  memoryLifecycle?: MemoryLifecycleManager;
+  knowledgeManager?: KnowledgeManager;
   logger: {
     info: (msg: string, ctx?: Record<string, unknown>) => void;
     warn: (msg: string, ctx?: Record<string, unknown>) => void;
@@ -38,6 +53,99 @@ async function getAdapter(
     return (registry as DataSourceRegistry).getSource(sourceId);
   } catch {
     return undefined;
+  }
+}
+
+function summarizeReflection(kind: ReflectionJobKind, report: Record<string, unknown>): string {
+  switch (kind) {
+    case "morning_planning":
+      return `Morning planning completed (${report["goals_reviewed"] ?? 0} goals reviewed)`;
+    case "evening_catchup":
+      return `Evening catch-up completed (${report["goals_reviewed"] ?? 0} goals reviewed)`;
+    case "weekly_review":
+      return `Weekly review completed (${report["goals_reviewed"] ?? 0} goals reviewed)`;
+    case "dream_consolidation":
+      return `Dream consolidation completed (${report["goals_consolidated"] ?? 0} goals consolidated)`;
+  }
+}
+
+async function executeReflectionCron(
+  entry: ScheduleEntry,
+  deps: LayerDeps,
+  firedAt: string,
+  start: number,
+  kind: ReflectionJobKind,
+): Promise<ScheduleResult> {
+  if (!deps.baseDir || !deps.stateManager) {
+    return ScheduleResultSchema.parse({
+      entry_id: entry.id,
+      status: "error",
+      duration_ms: 0,
+      error_message: "Reflection cron requires baseDir and stateManager",
+      fired_at: firedAt,
+    });
+  }
+
+  try {
+    let report: Record<string, unknown>;
+
+    switch (kind) {
+      case "morning_planning":
+        if (!deps.llmClient) throw new Error("Reflection cron requires llmClient for morning_planning");
+        report = await runMorningPlanning({
+          stateManager: deps.stateManager,
+          llmClient: deps.llmClient,
+          baseDir: deps.baseDir,
+          notificationDispatcher: deps.notificationDispatcher,
+          hookManager: deps.hookManager,
+        }) as unknown as Record<string, unknown>;
+        break;
+      case "evening_catchup":
+        if (!deps.llmClient) throw new Error("Reflection cron requires llmClient for evening_catchup");
+        report = await runEveningCatchup({
+          stateManager: deps.stateManager,
+          llmClient: deps.llmClient,
+          baseDir: deps.baseDir,
+          notificationDispatcher: deps.notificationDispatcher,
+          hookManager: deps.hookManager,
+        }) as unknown as Record<string, unknown>;
+        break;
+      case "weekly_review":
+        if (!deps.llmClient) throw new Error("Reflection cron requires llmClient for weekly_review");
+        report = await runWeeklyReview({
+          stateManager: deps.stateManager,
+          llmClient: deps.llmClient,
+          baseDir: deps.baseDir,
+          notificationDispatcher: deps.notificationDispatcher,
+        }) as unknown as Record<string, unknown>;
+        break;
+      case "dream_consolidation":
+        report = await runDreamConsolidation({
+          stateManager: deps.stateManager,
+          memoryLifecycle: deps.memoryLifecycle,
+          knowledgeManager: deps.knowledgeManager,
+          baseDir: deps.baseDir,
+        }) as unknown as Record<string, unknown>;
+        break;
+    }
+
+    return ScheduleResultSchema.parse({
+      entry_id: entry.id,
+      status: "ok",
+      duration_ms: Date.now() - start,
+      fired_at: firedAt,
+      output_summary: summarizeReflection(kind, report),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    deps.logger.error(`Cron "${entry.name}" reflection failed: ${msg}`);
+    return ScheduleResultSchema.parse({
+      entry_id: entry.id,
+      status: "error",
+      duration_ms: Date.now() - start,
+      error_message: msg,
+      fired_at: firedAt,
+    });
   }
 }
 
@@ -69,6 +177,19 @@ export async function executeCron(entry: ScheduleEntry, deps: LayerDeps): Promis
   }
 
   try {
+    if (cfg.job_kind === "reflection") {
+      if (!cfg.reflection_kind) {
+        return ScheduleResultSchema.parse({
+          entry_id: entry.id,
+          status: "error",
+          duration_ms: 0,
+          error_message: "Reflection cron is missing reflection_kind",
+          fired_at: firedAt,
+        });
+      }
+      return executeReflectionCron(entry, deps, firedAt, start, cfg.reflection_kind);
+    }
+
     // Gather context from data sources
     const contextMap: Record<string, string> = {};
     for (const sourceId of cfg.context_sources) {
@@ -191,7 +312,7 @@ export async function executeGoalTrigger(entry: ScheduleEntry, deps: LayerDeps):
   if (cfg.skip_if_active && deps.stateManager) {
     try {
       const goal = await deps.stateManager.loadGoal(cfg.goal_id);
-      if (goal && (goal.status === "active" || goal.status === "running")) {
+      if (goal && goal.status === "active") {
         deps.logger.info(`GoalTrigger "${entry.name}" skipped: goal ${cfg.goal_id} is already active`);
         return ScheduleResultSchema.parse({
           entry_id: entry.id,

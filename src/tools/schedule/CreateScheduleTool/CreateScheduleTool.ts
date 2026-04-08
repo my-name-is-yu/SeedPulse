@@ -17,6 +17,10 @@ import {
   ScheduleTriggerSchema,
   type ScheduleEntry,
 } from "../../../runtime/types/schedule.js";
+import {
+  SchedulePresetInputSchema,
+  buildSchedulePresetEntry,
+} from "../../../runtime/schedule-presets.js";
 import { DESCRIPTION } from "./prompt.js";
 import { TAGS, CATEGORY as _CATEGORY, READ_ONLY, PERMISSION_LEVEL } from "./constants.js";
 
@@ -27,7 +31,7 @@ const BaseCreateScheduleInputSchema = z.object({
   escalation: EscalationConfigSchema.optional(),
 });
 
-export const CreateScheduleInputSchema = z.discriminatedUnion("layer", [
+const ExplicitCreateScheduleInputSchema = z.discriminatedUnion("layer", [
   BaseCreateScheduleInputSchema.extend({
     layer: z.literal("heartbeat"),
     heartbeat: HeartbeatConfigSchema,
@@ -44,6 +48,11 @@ export const CreateScheduleInputSchema = z.discriminatedUnion("layer", [
     layer: z.literal("goal_trigger"),
     goal_trigger: GoalTriggerConfigSchema,
   }),
+]);
+
+export const CreateScheduleInputSchema = z.union([
+  ExplicitCreateScheduleInputSchema,
+  SchedulePresetInputSchema,
 ]);
 
 export type CreateScheduleInput = z.infer<typeof CreateScheduleInputSchema>;
@@ -78,7 +87,9 @@ export class CreateScheduleTool implements ITool<CreateScheduleInput, CreateSche
     const startTime = Date.now();
 
     try {
-      const entry = await this.scheduleEngine.addEntry(input);
+      const entry = await this.scheduleEngine.addEntry(
+        "preset" in input ? buildSchedulePresetEntry(input) : input
+      );
 
       return {
         success: true,

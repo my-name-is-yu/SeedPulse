@@ -162,15 +162,24 @@ export async function cmdStart(
     process.exit(1);
   }
 
-  // Gap 2: Create EventServer for event-driven wake-ups (only if config specifies a port)
-  let eventServer: EventServer | undefined;
-  if (daemonConfig && typeof (daemonConfig as Record<string, unknown>).event_server_port === "number") {
-    eventServer = new EventServer(
-      deps.driveSystem,
-      { port: (daemonConfig as Record<string, unknown>).event_server_port as number },
-      logger
-    );
-  }
+  const configuredPort = daemonConfig && typeof (daemonConfig as Record<string, unknown>).event_server_port === "number"
+    ? (daemonConfig as Record<string, unknown>).event_server_port as number
+    : undefined;
+  const eventServer = new EventServer(
+    deps.driveSystem,
+    configuredPort !== undefined ? { port: configuredPort } : undefined,
+    logger
+  );
+  notificationDispatcher.setRealtimeSink(async (report) => {
+    eventServer.broadcast("notification_report", {
+      id: report.id,
+      report_type: report.report_type,
+      goal_id: report.goal_id,
+      title: report.title,
+      content: report.content,
+      generated_at: report.generated_at,
+    });
+  });
 
   // Gap 4: Create CronScheduler for scheduled tasks
   const cronScheduler = new CronScheduler(baseDir);
@@ -184,6 +193,9 @@ export async function cmdStart(
     coreLoop: deps.coreLoop,
     stateManager: deps.stateManager,
     notificationDispatcher,
+    hookManager: deps.hookManager,
+    memoryLifecycle: deps.memoryLifecycleManager,
+    knowledgeManager: deps.knowledgeManager,
   });
   await scheduleEngine.loadEntries();
 
@@ -194,10 +206,11 @@ export async function cmdStart(
     pidManager,
     logger,
     config: daemonConfig,
-    ...(eventServer ? { eventServer } : {}),
+    eventServer,
     llmClient: deps.llmClient,
     cronScheduler,
     scheduleEngine,
+    reportingEngine: deps.reportingEngine,
   });
 
   logger.info(`Starting PulSeed daemon for goals: ${goalIds.join(", ")}`);

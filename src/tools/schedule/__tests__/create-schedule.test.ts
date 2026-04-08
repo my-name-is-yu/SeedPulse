@@ -169,6 +169,32 @@ describe("CreateScheduleTool", () => {
     expect((result.data as CreateScheduleOutput).entry).toEqual(entry);
   });
 
+  it("expands preset inputs before calling scheduleEngine.addEntry", async () => {
+    const entry = makeScheduleEntry();
+    const addEntry = vi.fn().mockResolvedValue(entry);
+    const tool = new CreateScheduleTool({ addEntry } as unknown as ScheduleEngine);
+    const input = CreateScheduleInputSchema.parse({
+      preset: "daily_brief",
+    });
+
+    const result = await tool.call(input, makeContext());
+
+    expect(addEntry).toHaveBeenCalledTimes(1);
+    expect(addEntry).toHaveBeenCalledWith(expect.objectContaining({
+      name: "Daily brief",
+      layer: "cron",
+      metadata: expect.objectContaining({
+        source: "preset",
+        preset_key: "daily_brief",
+      }),
+      cron: expect.objectContaining({
+        job_kind: "reflection",
+        reflection_kind: "morning_planning",
+      }),
+    }));
+    expect(result.success).toBe(true);
+  });
+
   it("returns a failure result when scheduleEngine.addEntry throws", async () => {
     const addEntry = vi.fn().mockRejectedValue(new Error("disk full"));
     const tool = new CreateScheduleTool({ addEntry } as unknown as ScheduleEngine);

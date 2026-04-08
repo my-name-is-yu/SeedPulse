@@ -87,6 +87,7 @@ describe("GetScheduleTool", () => {
         layer: "cron",
         trigger: { type: "cron", expression: "0 * * * *", timezone: "UTC" },
         cron: {
+          job_kind: "prompt",
           prompt_template: "Summarize status",
           context_sources: ["notes"],
           output_format: "report",

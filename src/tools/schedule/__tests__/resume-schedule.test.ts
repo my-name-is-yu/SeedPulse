@@ -32,6 +32,7 @@ function makeEntry(
     heartbeat: undefined,
     probe: undefined,
     cron: {
+      job_kind: "prompt",
       prompt_template: "Summarize daily changes.",
       context_sources: ["memory://daily"],
       output_format: "notification",

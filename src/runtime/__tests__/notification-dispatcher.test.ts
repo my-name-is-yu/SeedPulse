@@ -78,6 +78,19 @@ describe("NotificationDispatcher — constructor", () => {
   });
 });
 
+describe("dispatch() — realtime sink", () => {
+  it("forwards dispatched reports to the realtime sink", async () => {
+    const sink = vi.fn().mockResolvedValue(undefined);
+    const dispatcher = new NotificationDispatcher({ channels: [] });
+    dispatcher.setRealtimeSink(sink);
+
+    await dispatcher.dispatch(createMockReport({ report_type: "daily_summary" }));
+
+    expect(sink).toHaveBeenCalledOnce();
+    expect(sink).toHaveBeenCalledWith(expect.objectContaining({ report_type: "daily_summary" }));
+  });
+});
+
 // ─── dispatch() with no channels ───
 
 describe("dispatch() — no channels", () => {
