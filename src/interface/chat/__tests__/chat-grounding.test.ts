@@ -43,6 +43,7 @@ import type { IAdapter, AgentResult } from "../../../orchestrator/execution/adap
 import type { StateManager } from "../../../base/state/state-manager.js";
 import type { ILLMClient } from "../../../base/llm/llm-client.js";
 import { spawnWithTimeout } from "../../../adapters/spawn-helper.js";
+import { clearIdentityCache } from "../../../base/config/identity-loader.js";
 
 // ─── Shared helpers ───
 
@@ -89,10 +90,14 @@ describe("buildSystemPrompt (grounding.ts)", () => {
 
   beforeEach(async () => {
     tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), "pulseed-grounding-test-"));
+    process.env["PULSEED_HOME"] = tmpDir;
+    clearIdentityCache();
   });
 
   afterEach(async () => {
     await fsp.rm(tmpDir, { recursive: true, force: true });
+    delete process.env["PULSEED_HOME"];
+    clearIdentityCache();
   });
 
   it("includes Seedy identity text", async () => {
@@ -100,14 +105,19 @@ describe("buildSystemPrompt (grounding.ts)", () => {
     const prompt = await buildSystemPrompt({ stateManager: sm, homeDir: tmpDir });
 
     expect(prompt).toContain("Seedy");
-    expect(prompt).toContain("goals");
+    expect(prompt).toContain("You run PulSeed");
   });
 
-  it("includes identity system content", async () => {
+  it("includes fixed policy sections", async () => {
     const sm = makeMockStateManager();
     const prompt = await buildSystemPrompt({ stateManager: sm, homeDir: tmpDir });
 
-    expect(prompt).toContain("Seedy");
+    expect(prompt).toContain("## Identity");
+    expect(prompt).toContain("## Execution Bias");
+    expect(prompt).toContain("## Tooling Policy");
+    expect(prompt).toContain("## Communication Policy");
+    expect(prompt).toContain("## Safety And Approval");
+    expect(prompt).toContain("## Dynamic Context");
     expect(prompt.length).toBeGreaterThan(0);
   });
 
@@ -125,6 +135,7 @@ describe("buildSystemPrompt (grounding.ts)", () => {
     expect(prompt).toContain("goal-1");
     expect(prompt).toContain("Fix prod bug");
     expect(prompt).toContain("goal-2");
+    expect(prompt).toContain("### Current Goals");
   });
 
   it("shows 'No goals configured yet' when no goals", async () => {
@@ -155,6 +166,7 @@ describe("buildSystemPrompt (grounding.ts)", () => {
 
     expect(prompt).toContain("slack-notifier");
     expect(prompt).toContain("github-issues");
+    expect(prompt).toContain("### Installed Plugins");
   });
 
   it("shows 'none' when plugins directory is absent", async () => {
@@ -177,6 +189,7 @@ describe("buildSystemPrompt (grounding.ts)", () => {
 
     expect(prompt).toContain("claude-sonnet-4");
     expect(prompt).toContain("claude_api");
+    expect(prompt).toContain("### Provider");
   });
 
   it("shows 'not configured' when provider.json is absent", async () => {
