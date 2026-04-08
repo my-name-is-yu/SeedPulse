@@ -13,6 +13,8 @@ export { TrustStateTool } from "../query/TrustStateTool/TrustStateTool.js";
 export { SessionHistoryTool } from "../query/SessionHistoryTool/SessionHistoryTool.js";
 export { KnowledgeQueryTool } from "../query/KnowledgeQueryTool/KnowledgeQueryTool.js";
 export { ProgressHistoryTool } from "../query/ProgressHistoryTool/ProgressHistoryTool.js";
+export { TaskListTool } from "../query/TaskListTool/TaskListTool.js";
+export { TaskGetTool } from "../query/TaskGetTool/TaskGetTool.js";
 export { ConfigTool } from "../query/ConfigTool/ConfigTool.js";
 export { PluginStateTool } from "../query/PluginStateTool/PluginStateTool.js";
 export { ArchitectureTool } from "../query/ArchitectureTool/ArchitectureTool.js";
@@ -26,6 +28,10 @@ export { FileWriteTool } from "../fs/FileWriteTool/FileWriteTool.js";
 export { FileEditTool } from "../fs/FileEditTool/FileEditTool.js";
 export { validateFilePath } from "../fs/FileValidationTool/FileValidationTool.js";
 export { SetGoalTool } from "../mutation/SetGoalTool/SetGoalTool.js";
+export { TaskCreateTool } from "../mutation/TaskCreateTool/TaskCreateTool.js";
+export { TaskOutputTool } from "../mutation/TaskOutputTool/TaskOutputTool.js";
+export { TaskStopTool } from "../mutation/TaskStopTool/TaskStopTool.js";
+export { TaskUpdateTool } from "../mutation/TaskUpdateTool/TaskUpdateTool.js";
 export { UpdateGoalTool } from "../mutation/UpdateGoalTool/UpdateGoalTool.js";
 export { ArchiveGoalTool } from "../mutation/ArchiveGoalTool/ArchiveGoalTool.js";
 export { DeleteGoalTool } from "../mutation/DeleteGoalTool/DeleteGoalTool.js";
@@ -62,6 +68,8 @@ import { TrustStateTool } from "../query/TrustStateTool/TrustStateTool.js";
 import { SessionHistoryTool } from "../query/SessionHistoryTool/SessionHistoryTool.js";
 import { KnowledgeQueryTool } from "../query/KnowledgeQueryTool/KnowledgeQueryTool.js";
 import { ProgressHistoryTool } from "../query/ProgressHistoryTool/ProgressHistoryTool.js";
+import { TaskListTool } from "../query/TaskListTool/TaskListTool.js";
+import { TaskGetTool } from "../query/TaskGetTool/TaskGetTool.js";
 import { ConfigTool } from "../query/ConfigTool/ConfigTool.js";
 import { PluginStateTool } from "../query/PluginStateTool/PluginStateTool.js";
 import { ArchitectureTool } from "../query/ArchitectureTool/ArchitectureTool.js";
@@ -73,6 +81,10 @@ import { GitDiffTool } from "../system/GitDiffTool/GitDiffTool.js";
 import { FileWriteTool } from "../fs/FileWriteTool/FileWriteTool.js";
 import { FileEditTool } from "../fs/FileEditTool/FileEditTool.js";
 import { SetGoalTool } from "../mutation/SetGoalTool/SetGoalTool.js";
+import { TaskCreateTool } from "../mutation/TaskCreateTool/TaskCreateTool.js";
+import { TaskOutputTool } from "../mutation/TaskOutputTool/TaskOutputTool.js";
+import { TaskStopTool } from "../mutation/TaskStopTool/TaskStopTool.js";
+import { TaskUpdateTool } from "../mutation/TaskUpdateTool/TaskUpdateTool.js";
 import { UpdateGoalTool } from "../mutation/UpdateGoalTool/UpdateGoalTool.js";
 import { ArchiveGoalTool } from "../mutation/ArchiveGoalTool/ArchiveGoalTool.js";
 import { DeleteGoalTool } from "../mutation/DeleteGoalTool/DeleteGoalTool.js";
@@ -141,6 +153,8 @@ export function createBuiltinTools(deps?: BuiltinToolDeps): ITool[] {
       new TrustStateTool(deps.stateManager),
       new SessionHistoryTool(deps.stateManager),
       new ProgressHistoryTool(deps.stateManager),
+      new TaskListTool(deps.stateManager),
+      new TaskGetTool(deps.stateManager),
     );
   }
 
@@ -160,6 +174,10 @@ export function createBuiltinTools(deps?: BuiltinToolDeps): ITool[] {
   if (deps?.stateManager) {
     tools.push(
       new SetGoalTool(deps.stateManager),
+      new TaskCreateTool(deps.stateManager),
+      new TaskOutputTool(deps.stateManager),
+      new TaskStopTool(deps.stateManager),
+      new TaskUpdateTool(deps.stateManager),
       new UpdateGoalTool(deps.stateManager),
       new ArchiveGoalTool(deps.stateManager),
       new DeleteGoalTool(deps.stateManager),
