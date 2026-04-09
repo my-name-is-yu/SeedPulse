@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import Spinner from "ink-spinner";
+import { CheckerboardSpinner } from "./checkerboard-spinner.js";
 import type { LoopState, DimensionProgress } from "./use-loop.js";
 import { theme, statusColor, progressColor } from "./theme.js";
 
@@ -106,7 +106,7 @@ export function Dashboard({ state }: DashboardProps) {
         <Text>{"  "}</Text>
         {state.status === "running" ? (
           <Text color={theme.success}>
-            <Spinner type="dots" />
+            <CheckerboardSpinner />
             {" " + statusLabel("running")}
           </Text>
         ) : (
