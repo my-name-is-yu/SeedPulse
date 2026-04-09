@@ -88,6 +88,8 @@ export interface DaemonDeps {
   supervisor?: LoopSupervisor;
   /** Factory to create fresh CoreLoop instances for LoopSupervisor workers. */
   coreLoopFactory?: () => CoreLoop;
+  /** Internal: watchdog child runs without owning the shared PID file. */
+  managePidFile?: boolean;
 }
 
 export class DaemonRunner {
@@ -138,6 +140,9 @@ export class DaemonRunner {
   private journalQueue: JournalBackedQueue | null = null;
   private queueClaimSweeper: QueueClaimSweeper | null = null;
   private approvalBroker: ApprovalBroker | null = null;
+  private leaderOwnerToken: string | null = null;
+  private leaderHeartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  private readonly managePidFile: boolean;
 
   constructor(deps: DaemonDeps) {
     this.deps = deps;
@@ -155,6 +160,7 @@ export class DaemonRunner {
     this.eventBus = deps.eventBus;
     this.commandBus = deps.commandBus;
     this.supervisor = deps.supervisor ?? null;
+    this.managePidFile = deps.managePidFile ?? true;
     this.lastProactiveTickAt = Date.now();
 
     // Parse config with defaults via DaemonConfigSchema.parse()
@@ -173,7 +179,10 @@ export class DaemonRunner {
       this.approvalStore = new ApprovalStore(runtimePaths);
       this.outboxStore = new OutboxStore(runtimePaths);
       this.runtimeHealthStore = new RuntimeHealthStore(runtimePaths);
-      this.leaderLockManager = new LeaderLockManager(this.runtimeRoot);
+      this.leaderLockManager = new LeaderLockManager(
+        this.runtimeRoot,
+        this.config.watchdog.lease_ms
+      );
       this.goalLeaseManager = new GoalLeaseManager(this.runtimeRoot);
       this.approvalBroker = new ApprovalBroker({
         store: this.approvalStore,
@@ -218,7 +227,7 @@ export class DaemonRunner {
    */
   async start(goalIds: string[]): Promise<void> {
     // 1. Check if already running
-    if (await this.pidManager.isRunning()) {
+    if (this.managePidFile && await this.pidManager.isRunning()) {
       const info = await this.pidManager.readPID();
       throw new Error(
         `Daemon is already running (PID ${info?.pid ?? "unknown"}). ` +
@@ -230,9 +239,12 @@ export class DaemonRunner {
     await this.rotateLog();
     await this.checkCrashRecovery();
     await this.initializeRuntimeFoundation();
+    await this.acquireLeaderLock();
 
     // 2b. Publish PID only after startup prerequisites succeed.
-    await this.pidManager.writePID();
+    if (this.managePidFile) {
+      await this.pidManager.writePID();
+    }
 
     // 2c. Start EventServer (always-on) and file watcher
     if (!this.eventServer) {
@@ -373,6 +385,9 @@ export class DaemonRunner {
       last_error: null,
     });
     await this.saveDaemonState();
+    await this.persistDaemonHealth("ok", {
+      lifecycle_state: "running",
+    });
 
     // 5b. Write "running" shutdown marker (crash detection on next startup)
     await this.writeShutdownMarker({
@@ -399,6 +414,7 @@ export class DaemonRunner {
       });
     }
     this.queueClaimSweeper?.start();
+    this.startLeaderHeartbeat();
 
     // 7. Create supervisor if not already provided and runtime execution wiring is configured
     if (!this.supervisor && (this.eventBus || (this.journalQueue && this.goalLeaseManager))) {
@@ -470,6 +486,7 @@ export class DaemonRunner {
         clearTimeout(forceStopTimer);
         forceStopTimer = null;
       }
+      this.stopLeaderHeartbeat();
       this.queueClaimSweeper?.stop();
       // Remove signal handlers
       if (this.shutdownHandler) {
@@ -523,6 +540,23 @@ export class DaemonRunner {
     });
   }
 
+  private async acquireLeaderLock(): Promise<void> {
+    if (!this.leaderLockManager) return;
+
+    const record = await this.leaderLockManager.acquire({
+      leaseMs: this.config.watchdog.lease_ms,
+    });
+    if (!record) {
+      throw new Error("Runtime leader lock is already held by another daemon");
+    }
+
+    this.leaderOwnerToken = record.owner_token;
+    await this.persistDaemonHealth("ok", {
+      lifecycle_state: "starting",
+      lease_until: record.lease_until,
+    });
+  }
+
   private async saveRuntimeHealthSnapshot(
     phase: string,
     components: {
@@ -537,17 +571,119 @@ export class DaemonRunner {
     if (!this.config.runtime_journal_v2) return;
 
     const status = Object.values(components).every((value) => value === "ok") ? "ok" : "degraded";
+    const existingDaemonHealth = await this.runtimeHealthStore?.loadDaemonHealth();
     await this.runtimeHealthStore?.saveSnapshot({
       status,
-      leader: false,
+      leader: existingDaemonHealth?.leader ?? this.leaderOwnerToken !== null,
       checked_at: Date.now(),
       components,
       details: {
+        ...(existingDaemonHealth?.details ?? {}),
         runtime_journal_v2: true,
         runtime_root: this.runtimeRoot,
         phase,
       },
     });
+  }
+
+  private async persistDaemonHealth(
+    status: "ok" | "degraded" | "failed",
+    details: Record<string, unknown> = {}
+  ): Promise<void> {
+    if (!this.runtimeHealthStore) return;
+
+    const existing = await this.runtimeHealthStore.loadDaemonHealth();
+    await this.runtimeHealthStore.saveDaemonHealth({
+      status,
+      leader: this.leaderOwnerToken !== null,
+      checked_at: Date.now(),
+      details: {
+        ...(existing?.details ?? {}),
+        runtime_journal_v2: this.config.runtime_journal_v2,
+        runtime_root: this.runtimeRoot,
+        pid: process.pid,
+        process_role: this.managePidFile ? "daemon" : "watchdog_child",
+        watchdog_enabled: this.config.watchdog.enabled,
+        ...details,
+      },
+    });
+  }
+
+  private startLeaderHeartbeat(): void {
+    if (!this.leaderLockManager || !this.leaderOwnerToken) return;
+
+    const heartbeatIntervalMs = Math.max(
+      1_000,
+      Math.min(
+        this.config.watchdog.heartbeat_interval_ms,
+        Math.floor(this.config.watchdog.lease_ms / 2)
+      )
+    );
+
+    this.leaderHeartbeatInterval = setInterval(() => {
+      void this.renewLeaderHeartbeat();
+    }, heartbeatIntervalMs);
+  }
+
+  private stopLeaderHeartbeat(): void {
+    if (this.leaderHeartbeatInterval !== null) {
+      clearInterval(this.leaderHeartbeatInterval);
+      this.leaderHeartbeatInterval = null;
+    }
+  }
+
+  private async renewLeaderHeartbeat(): Promise<void> {
+    if (!this.leaderLockManager || !this.leaderOwnerToken) return;
+
+    try {
+      const renewed = await this.leaderLockManager.renew(this.leaderOwnerToken, {
+        leaseMs: this.config.watchdog.lease_ms,
+      });
+      if (!renewed) {
+        await this.handleLeaderHeartbeatLost();
+        return;
+      }
+
+      await this.persistDaemonHealth("ok", {
+        lifecycle_state: this.state.status,
+        lease_until: renewed.lease_until,
+      });
+    } catch (error) {
+      this.logger.error("Failed to renew runtime leader heartbeat", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await this.handleLeaderHeartbeatLost();
+    }
+  }
+
+  private async handleLeaderHeartbeatLost(): Promise<void> {
+    if (!this.leaderOwnerToken) return;
+
+    this.logger.error("Runtime leader lock lost; stopping daemon");
+    this.stopLeaderHeartbeat();
+    const ownerToken = this.leaderOwnerToken;
+    try {
+      await this.leaderLockManager?.release(ownerToken);
+    } catch {
+      // If the lease is already gone or reassigned, shutdown still proceeds.
+    }
+    this.leaderOwnerToken = null;
+    await this.persistDaemonHealth("failed", {
+      lifecycle_state: "crashed",
+      leader_status: "lost",
+    });
+    this.running = false;
+    this.shuttingDown = true;
+    this.shutdownResolve?.();
+    this.sleepAbortController?.abort();
+  }
+
+  private async releaseLeaderLock(): Promise<void> {
+    if (!this.leaderLockManager || !this.leaderOwnerToken) return;
+
+    const ownerToken = this.leaderOwnerToken;
+    this.leaderOwnerToken = null;
+    await this.leaderLockManager.release(ownerToken);
   }
 
   /** Expose approvalFn for callers (e.g. cmdStart) to wire into TaskLifecycle */
@@ -850,7 +986,14 @@ export class DaemonRunner {
       }
     }
     await this.saveDaemonState();
-    await this.pidManager.cleanup();
+    this.stopLeaderHeartbeat();
+    await this.releaseLeaderLock();
+    await this.persistDaemonHealth(wasCrashed ? "failed" : "degraded", {
+      lifecycle_state: wasCrashed ? "crashed" : "stopped",
+    });
+    if (this.managePidFile) {
+      await this.pidManager.cleanup();
+    }
 
     // Write clean shutdown marker (async, atomic)
     const markerPath = path.join(this.baseDir, "shutdown-state.json");

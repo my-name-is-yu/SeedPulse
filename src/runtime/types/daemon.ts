@@ -7,6 +7,16 @@ export const DaemonConfigSchema = z.object({
   pid_file: z.string().default("pulseed.pid"),
   log_dir: z.string().default("logs"),
   runtime_root: z.string().optional(),
+  watchdog: z.object({
+    enabled: z.boolean().default(false),
+    lease_ms: z.number().int().positive().default(30_000),
+    heartbeat_interval_ms: z.number().int().positive().default(5_000),
+    heartbeat_timeout_ms: z.number().int().positive().default(15_000),
+    startup_grace_ms: z.number().int().positive().default(20_000),
+    restart_backoff_ms: z.number().int().positive().default(1_000),
+    max_restart_backoff_ms: z.number().int().positive().default(30_000),
+    child_shutdown_grace_ms: z.number().int().positive().default(5_000),
+  }).default({}),
   log_rotation: z.object({
     max_size_mb: z.number().positive().default(10),
     max_files: z.number().int().positive().default(5),

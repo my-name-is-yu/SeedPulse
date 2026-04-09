@@ -17,6 +17,9 @@ import { PIDManager } from "../../../runtime/pid-manager.js";
 import { EventServer } from "../../../runtime/event-server.js";
 import { CronScheduler } from "../../../runtime/cron-scheduler.js";
 import { ScheduleEngine } from "../../../runtime/schedule-engine.js";
+import { RuntimeWatchdog } from "../../../runtime/watchdog.js";
+import { LeaderLockManager } from "../../../runtime/leader-lock-manager.js";
+import { RuntimeHealthStore } from "../../../runtime/store/index.js";
 import { PluginLoader } from "../../../runtime/plugin-loader.js";
 import { NotifierRegistry } from "../../../runtime/notifier-registry.js";
 import { NotificationDispatcher } from "../../../runtime/notification-dispatcher.js";
@@ -27,12 +30,43 @@ import { formatOperationError } from "../utils.js";
 import { getCliLogger } from "../cli-logger.js";
 import { getPulseedDirPath, getLogsDir } from "../../../base/utils/paths.js";
 
+interface StartCommandValues {
+  "api-key"?: string;
+  config?: string;
+  goal?: string[];
+  detach?: boolean;
+  watchdog?: boolean;
+  "watchdog-child"?: boolean;
+  "check-interval-ms"?: string;
+  "iterations-per-cycle"?: string;
+}
+
+function buildStartArgs(goalIds: string[], values: StartCommandValues, extraFlags: string[] = []): string[] {
+  const childArgs = ["start"];
+  for (const g of goalIds) childArgs.push("--goal", g);
+  if (values.config) childArgs.push("--config", values.config);
+  if (values["check-interval-ms"]) childArgs.push("--check-interval-ms", values["check-interval-ms"]);
+  if (values["iterations-per-cycle"]) childArgs.push("--iterations-per-cycle", values["iterations-per-cycle"]);
+  if (values.watchdog) childArgs.push("--watchdog");
+  childArgs.push(...extraFlags);
+  return childArgs;
+}
+
+function resolveRuntimeRoot(baseDir: string, runtimeRoot?: string): string {
+  if (!runtimeRoot || runtimeRoot.trim() === "") {
+    return path.join(baseDir, "runtime");
+  }
+  return path.isAbsolute(runtimeRoot)
+    ? runtimeRoot
+    : path.resolve(baseDir, runtimeRoot);
+}
+
 export async function cmdStart(
   stateManager: StateManager,
   characterConfigManager: CharacterConfigManager,
   args: string[]
 ): Promise<void> {
-  let values: { "api-key"?: string; config?: string; goal?: string[]; detach?: boolean; "check-interval-ms"?: string; "iterations-per-cycle"?: string };
+  let values: StartCommandValues;
   try {
     ({ values } = parseArgs({
       args,
@@ -41,17 +75,20 @@ export async function cmdStart(
         config: { type: "string" },
         goal: { type: "string", multiple: true },
         detach: { type: "boolean", short: "d" },
+        watchdog: { type: "boolean" },
+        "watchdog-child": { type: "boolean" },
         "check-interval-ms": { type: "string" },
         "iterations-per-cycle": { type: "string" },
       },
       strict: false,
-    }) as { values: { "api-key"?: string; config?: string; goal?: string[]; detach?: boolean; "check-interval-ms"?: string; "iterations-per-cycle"?: string } });
+    }) as { values: StartCommandValues });
   } catch (err) {
     getCliLogger().error(formatOperationError("parse start command arguments", err));
     values = {};
   }
 
   const goalIds = (values.goal as string[]) || [];
+  const isWatchdogChild = values["watchdog-child"] === true;
 
   if (goalIds.length === 0) {
     getCliLogger().error("Error: at least one --goal is required for daemon mode");
@@ -61,11 +98,7 @@ export async function cmdStart(
   // --detach: spawn a detached child and exit immediately
   if (values.detach) {
     const scriptPath = process.argv[1]!;
-    // Reconstruct args from parsed values (never include --detach)
-    const childArgs = ["start"];
-    for (const g of goalIds) childArgs.push("--goal", g);
-    if (values["check-interval-ms"]) childArgs.push("--check-interval-ms", values["check-interval-ms"]);
-    if (values["iterations-per-cycle"]) childArgs.push("--iterations-per-cycle", values["iterations-per-cycle"]);
+    const childArgs = buildStartArgs(goalIds, values);
 
     const child = spawn(process.execPath, [scriptPath, ...childArgs], {
       detached: true,
@@ -133,8 +166,64 @@ export async function cmdStart(
     daemonConfig = daemonConfig ?? {};
     daemonConfig.iterations_per_cycle = parsed;
   }
+  if (values.watchdog) {
+    daemonConfig = daemonConfig ?? {};
+    const defaultWatchdog = DaemonConfigSchema.parse({}).watchdog;
+    daemonConfig.watchdog = {
+      ...(daemonConfig.watchdog ?? defaultWatchdog),
+      enabled: true,
+    };
+  }
 
   const resolvedDaemonConfig = DaemonConfigSchema.parse(daemonConfig ?? {});
+  if (resolvedDaemonConfig.watchdog.enabled && !resolvedDaemonConfig.runtime_journal_v2) {
+    getCliLogger().error("Watchdog mode requires runtime_journal_v2 to be enabled");
+    process.exit(1);
+  }
+
+  if (resolvedDaemonConfig.watchdog.enabled && !isWatchdogChild) {
+    const baseDir = stateManager.getBaseDir();
+    const pidManager = new PIDManager(baseDir);
+    const logger = new Logger({
+      dir: getLogsDir(baseDir),
+    });
+    const runtimeRoot = resolveRuntimeRoot(baseDir, resolvedDaemonConfig.runtime_root);
+    const watchdog = new RuntimeWatchdog({
+      pidManager,
+      healthStore: new RuntimeHealthStore(runtimeRoot),
+      leaderLockManager: new LeaderLockManager(runtimeRoot, resolvedDaemonConfig.watchdog.lease_ms),
+      logger,
+      pollIntervalMs: resolvedDaemonConfig.watchdog.heartbeat_interval_ms,
+      heartbeatTimeoutMs: resolvedDaemonConfig.watchdog.heartbeat_timeout_ms,
+      startupGraceMs: resolvedDaemonConfig.watchdog.startup_grace_ms,
+      restartBackoffMs: resolvedDaemonConfig.watchdog.restart_backoff_ms,
+      maxRestartBackoffMs: resolvedDaemonConfig.watchdog.max_restart_backoff_ms,
+      childShutdownGraceMs: resolvedDaemonConfig.watchdog.child_shutdown_grace_ms,
+      startChild: () => {
+        const scriptPath = process.argv[1]!;
+        return spawn(
+          process.execPath,
+          [scriptPath, ...buildStartArgs(goalIds, values, ["--watchdog-child"])],
+          {
+            detached: false,
+            stdio: "ignore",
+          }
+        );
+      },
+    });
+
+    const shutdown = (): void => watchdog.stop();
+    process.on("SIGTERM", shutdown);
+    process.on("SIGINT", shutdown);
+    try {
+      logger.info(`Starting PulSeed watchdog for goals: ${goalIds.join(", ")}`);
+      await watchdog.start();
+    } finally {
+      process.removeListener("SIGTERM", shutdown);
+      process.removeListener("SIGINT", shutdown);
+    }
+    return;
+  }
 
   const deps = await buildDeps(stateManager, characterConfigManager);
 
@@ -158,7 +247,7 @@ export async function cmdStart(
     dir: getLogsDir(baseDir),
   });
 
-  if (await pidManager.isRunning()) {
+  if (!isWatchdogChild && await pidManager.isRunning()) {
     const info = await pidManager.readPID();
     logger.error(`Daemon already running (PID: ${info?.pid})`);
     process.exit(1);
@@ -205,6 +294,7 @@ export async function cmdStart(
     llmClient: deps.llmClient,
     cronScheduler,
     scheduleEngine,
+    managePidFile: !isWatchdogChild,
   });
 
   logger.info(`Starting PulSeed daemon for goals: ${goalIds.join(", ")}`);
