@@ -1,10 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 import { StateManager } from "../../../base/state/state-manager.js";
 import { SessionManager } from "../session-manager.js";
 import { TrustManager } from "../../../platform/traits/trust-manager.js";
 import { StallDetector } from "../../../platform/drive/stall-detector.js";
-import { clampDimensionUpdate, handleVerdict, checkDimensionDirection } from "../task/task-verifier.js";
+import {
+  clampDimensionUpdate,
+  handleVerdict,
+  handleFailure,
+  checkDimensionDirection,
+} from "../task/task-verifier.js";
 import type { VerifierDeps } from "../task/task-verifier.js";
 import type { Task, VerificationResult } from "../../../base/types/task.js";
 import type { Logger } from "../../../runtime/logger.js";
@@ -392,6 +400,110 @@ describe("P0 Guard 2: progress-verdict contradiction", () => {
     const dim = dims.find((d) => d.name === "dim")!;
     // Should be clamped: 0.4 + 0.3 = 0.7
     expect(dim.current_value as number).toBeCloseTo(0.7, 10);
+  });
+});
+
+describe("attemptRevert safety", () => {
+  let tmpDir: string;
+  let stateManager: StateManager;
+  let sessionManager: SessionManager;
+  let trustManager: TrustManager;
+  let stallDetector: StallDetector;
+
+  beforeEach(() => {
+    tmpDir = makeTempDir();
+    stateManager = new StateManager(tmpDir);
+    sessionManager = new SessionManager(stateManager);
+    trustManager = new TrustManager(stateManager);
+    stallDetector = new StallDetector(stateManager);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  });
+
+  function initGitRepo(repoDir: string): void {
+    execFileSync("git", ["init"], { cwd: repoDir, stdio: "pipe" });
+    execFileSync("git", ["config", "user.name", "Codex Test"], { cwd: repoDir, stdio: "pipe" });
+    execFileSync("git", ["config", "user.email", "codex@example.com"], { cwd: repoDir, stdio: "pipe" });
+    fs.writeFileSync(path.join(repoDir, "tracked.txt"), "original\n", "utf-8");
+    execFileSync("git", ["add", "tracked.txt"], { cwd: repoDir, stdio: "pipe" });
+    execFileSync("git", ["commit", "-m", "init"], { cwd: repoDir, stdio: "pipe" });
+  }
+
+  function makeFailureVerificationResult(): VerificationResult {
+    return makeVerificationResult({
+      verdict: "fail",
+      evidence: [
+        { layer: "independent_review", description: "Wrong direction", confidence: 0.3 },
+        { layer: "self_report", description: "Failed", confidence: 0.3 },
+      ],
+    });
+  }
+
+  it("does not run raw git restore without an explicit workspace root", async () => {
+    const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "attempt-revert-repo-"));
+    initGitRepo(repoDir);
+    fs.writeFileSync(path.join(repoDir, "tracked.txt"), "changed\n", "utf-8");
+
+    const originalCwd = process.cwd();
+    process.chdir(repoDir);
+    try {
+      const llmClient = createMockLLMClient([
+        '```json\n{"success": false, "reason": "Skip raw git restore in tests"}\n```',
+      ]);
+      const deps: VerifierDeps = {
+        stateManager,
+        llmClient,
+        sessionManager,
+        trustManager,
+        stallDetector,
+        durationToMs: (d) => d.value * (d.unit === "hours" ? 3600000 : 60000),
+      };
+      const task = makeTask({
+        scope_boundary: { in_scope: ["tracked.txt"], out_of_scope: [], blast_radius: "low" },
+        reversibility: "reversible",
+      });
+
+      await stateManager.writeRaw(`tasks/${task.goal_id}/${task.id}.json`, task);
+      const result = await handleFailure(deps, task, makeFailureVerificationResult());
+
+      expect(result.action).toBe("escalate");
+      expect(fs.readFileSync(path.join(repoDir, "tracked.txt"), "utf-8")).toBe("changed\n");
+    } finally {
+      process.chdir(originalCwd);
+      fs.rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses explicit revertCwd to restore tracked files safely", async () => {
+    const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "attempt-revert-repo-"));
+    initGitRepo(repoDir);
+    fs.writeFileSync(path.join(repoDir, "tracked.txt"), "changed\n", "utf-8");
+
+    const deps: VerifierDeps = {
+      stateManager,
+      llmClient: createMockLLMClient([]),
+      sessionManager,
+      trustManager,
+      stallDetector,
+      durationToMs: (d) => d.value * (d.unit === "hours" ? 3600000 : 60000),
+      revertCwd: repoDir,
+    };
+    const task = makeTask({
+      scope_boundary: { in_scope: ["tracked.txt"], out_of_scope: [], blast_radius: "low" },
+      reversibility: "reversible",
+    });
+
+    try {
+      await stateManager.writeRaw(`tasks/${task.goal_id}/${task.id}.json`, task);
+      const result = await handleFailure(deps, task, makeFailureVerificationResult());
+
+      expect(result.action).toBe("discard");
+      expect(fs.readFileSync(path.join(repoDir, "tracked.txt"), "utf-8")).toBe("original\n");
+    } finally {
+      fs.rmSync(repoDir, { recursive: true, force: true });
+    }
   });
 });
 

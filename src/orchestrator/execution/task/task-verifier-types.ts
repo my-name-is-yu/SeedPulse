@@ -75,6 +75,8 @@ export interface VerifierDeps {
   /** Optional ToolExecutor for internal shell operations (e.g. git restore in attemptRevert).
    *  When provided, used instead of raw child_process. */
   toolExecutor?: ToolExecutor;
+  /** Optional explicit workspace root for raw git-based revert operations. */
+  revertCwd?: string;
   /**
    * Optional mutable token counter. When provided, verifier LLM calls accumulate
    * input+output tokens into this object so callers can read the total after verification.

@@ -165,7 +165,7 @@ describe("§4.7 round-trip: handleVerdict writes, buildTaskGenerationPrompt read
       success_criteria: [
         { description: "Manual check", verification_method: "Manual review", is_blocking: true },
       ],
-      scope_boundary: { in_scope: ["src"], out_of_scope: [], blast_radius: "low" },
+      scope_boundary: { in_scope: ["failure context"], out_of_scope: [], blast_radius: "low" },
       constraints: [],
       plateau_until: null,
       estimated_duration: { value: 1, unit: "hours" },

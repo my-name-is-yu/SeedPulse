@@ -104,6 +104,8 @@ export interface TaskLifecycleOptions {
   hookManager?: HookManager;
   /** Optional ToolExecutor for post-execution git diff verification (read-only) */
   toolExecutor?: ToolExecutor;
+  /** Optional explicit workspace root for git-based revert operations. */
+  revertCwd?: string;
 }
 
 export interface TaskLifecycleDeps extends TaskLifecycleCoreDeps {
@@ -136,6 +138,7 @@ export class TaskLifecycle {
   private readonly guardrailRunner?: GuardrailRunner;
   private readonly hookManager?: HookManager;
   private readonly toolExecutor?: ToolExecutor;
+  private readonly revertCwd?: string;
   private onTaskComplete?: (strategyId: string) => void;
 
   constructor(deps: TaskLifecycleDeps);
@@ -189,6 +192,7 @@ export class TaskLifecycle {
     this.guardrailRunner = resolvedOptions?.guardrailRunner;
     this.hookManager = resolvedOptions?.hookManager;
     this.toolExecutor = resolvedOptions?.toolExecutor;
+    this.revertCwd = resolvedOptions?.revertCwd;
   }
 
   /** Register a callback invoked when a task completes successfully (used by PortfolioManager). */
@@ -457,6 +461,7 @@ export class TaskLifecycle {
       durationToMs: durationToMs,
       completionJudgerConfig: this.completionJudgerConfig,
       toolExecutor: this.toolExecutor,
+      revertCwd: this.revertCwd,
     };
   }
 

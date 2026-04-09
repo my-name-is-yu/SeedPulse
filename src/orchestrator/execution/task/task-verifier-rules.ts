@@ -181,14 +181,53 @@ export function isDirectionCorrect(verificationResult: VerificationResult): bool
 
 // ─── attemptRevert ───
 
+async function resolveRevertCwd(deps: VerifierDeps, task: Task): Promise<string | null> {
+  const explicitCwd = deps.revertCwd?.trim();
+  if (explicitCwd) {
+    return explicitCwd;
+  }
+
+  const taskWorkspaceConstraint = task.constraints.find((constraint) =>
+    constraint.startsWith("workspace_path:")
+  );
+  if (taskWorkspaceConstraint) {
+    const taskWorkspace = taskWorkspaceConstraint.slice("workspace_path:".length).trim();
+    if (taskWorkspace) {
+      return taskWorkspace;
+    }
+  }
+
+  try {
+    const goal = await deps.stateManager.loadGoal(task.goal_id);
+    const goalWorkspaceConstraint = goal?.constraints.find((constraint) =>
+      constraint.startsWith("workspace_path:")
+    );
+    if (goalWorkspaceConstraint) {
+      const goalWorkspace = goalWorkspaceConstraint.slice("workspace_path:".length).trim();
+      if (goalWorkspace) {
+        return goalWorkspace;
+      }
+    }
+  } catch {
+    // Non-fatal: absence of goal state should just disable raw git restore.
+  }
+
+  return null;
+}
+
 export async function attemptRevert(deps: VerifierDeps, task: Task): Promise<boolean> {
   try {
     const filesToRestore = task.scope_boundary.in_scope;
     if (filesToRestore.length > 0) {
+      const revertCwd = await resolveRevertCwd(deps, task);
+      if (!revertCwd) {
+        deps.logger?.warn?.("[attemptRevert] skipping raw git restore because no workspace_path/revertCwd was configured");
+        throw new Error("git restore disabled without explicit workspace");
+      }
       if (deps.toolExecutor) {
         // Use ToolExecutor (preferred): keeps all shell ops in the tool pipeline
         const ctx: import("../../../tools/types.js").ToolCallContext = {
-          cwd: process.cwd(),
+          cwd: revertCwd,
           goalId: task.goal_id,
           trustBalance: 100,
           preApproved: true,
@@ -215,7 +254,7 @@ export async function attemptRevert(deps: VerifierDeps, task: Task): Promise<boo
       } else {
         // Fallback: raw child_process (no ToolExecutor available)
         const { execFileSync } = await import("child_process");
-        execFileSync("git", ["restore", ...filesToRestore], { cwd: process.cwd(), encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+        execFileSync("git", ["restore", ...filesToRestore], { cwd: revertCwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
         deps.logger?.info?.(`[attemptRevert] git restore succeeded for ${filesToRestore.length} files`);
         return true;
       }
