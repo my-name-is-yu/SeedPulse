@@ -215,12 +215,16 @@ export class KnowledgeTransfer {
     return getEffectivenessRecords(this.effectivenessRecords);
   }
 
-  async listTransferSnapshot(): Promise<{
+  async listTransferSnapshot(options?: { forceRefresh?: boolean }): Promise<{
     transfers: TransferCandidate[];
     results: TransferResult[];
     effectiveness_records: TransferEffectivenessRecord[];
   }> {
-    await this.ensureSnapshotLoaded();
+    if (options?.forceRefresh) {
+      await this.loadSnapshot();
+    } else {
+      await this.ensureSnapshotLoaded();
+    }
     return this.buildTransferSnapshot();
   }
 
@@ -275,6 +279,10 @@ export class KnowledgeTransfer {
       this.snapshotLoadPromise = this.loadSnapshot();
     }
     await this.snapshotLoadPromise;
+  }
+
+  async refreshSnapshot(): Promise<void> {
+    await this.loadSnapshot();
   }
 
   private async loadSnapshot(): Promise<void> {

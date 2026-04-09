@@ -163,7 +163,7 @@ export async function searchKnowledge(
 
 export async function listKnowledgeTransfers(): Promise<KnowledgeTransferSnapshot> {
   const knowledgeTransfer = await getKnowledgeTransfer();
-  const snapshot = await knowledgeTransfer.listTransferSnapshot();
+  const snapshot = await knowledgeTransfer.listTransferSnapshot({ forceRefresh: true });
   const transfers = snapshot.transfers;
   const results = snapshot.results;
   const effectivenessRecords = snapshot.effectiveness_records;

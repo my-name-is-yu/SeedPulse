@@ -110,4 +110,114 @@ describe("KnowledgeTransfer snapshot persistence", () => {
     expect(snapshot.results[0]!.transfer_id).toBe(applyResult.transfer_id);
     expect(snapshot.effectiveness_records[0]!.transfer_id).toBe(applyResult.transfer_id);
   });
+
+  it("refreshes an already-loaded snapshot when forceRefresh is requested", async () => {
+    const tmpDir = makeTmpDir();
+    const stateManager = new StateManager(tmpDir);
+    const vectorIndex = new VectorIndex(
+      path.join(tmpDir, "vectors.json"),
+      new MockEmbeddingClient()
+    );
+    const pattern = makePattern({
+      pattern_id: "pat_refresh",
+      source_goal_ids: ["goal_b"],
+      confidence: 0.85,
+    });
+
+    await stateManager.writeRaw("goals/goal_a/state.json", { gap: 0.8 });
+    await stateManager.writeRaw("goals/goal_b/state.json", { gap: 0.4 });
+
+    const kt = new KnowledgeTransfer({
+      llmClient: createMockLLMClient([ADAPTATION_RESPONSE]),
+      knowledgeManager: makeMockKnowledgeManager(),
+      vectorIndex,
+      learningPipeline: makeMockLearningPipeline({ goal_b: [pattern] }),
+      ethicsGate: makeMockEthicsGate(),
+      stateManager,
+    });
+
+    const candidates = await kt.detectTransferOpportunities("goal_a");
+    expect(candidates).toHaveLength(1);
+
+    const initialSnapshot = await kt.listTransferSnapshot();
+    expect(initialSnapshot.transfers).toHaveLength(1);
+
+    const rawSnapshot = await stateManager.readRaw("knowledge-transfer/snapshot.json");
+    expect(rawSnapshot).not.toBeNull();
+    const snapshotObject = rawSnapshot as {
+      transfers: Array<Record<string, unknown>>;
+      results: Array<Record<string, unknown>>;
+      effectiveness_records: Array<Record<string, unknown>>;
+      apply_contexts: Record<string, unknown>;
+      pattern_trackers: Record<string, unknown>;
+    };
+
+    snapshotObject.transfers.push({
+      ...initialSnapshot.transfers[0]!,
+      candidate_id: "tc_external_refresh",
+      proposed_at: new Date().toISOString(),
+    });
+
+    await stateManager.writeRaw("knowledge-transfer/snapshot.json", snapshotObject);
+
+    const staleSnapshot = await kt.listTransferSnapshot();
+    expect(staleSnapshot.transfers).toHaveLength(1);
+
+    const refreshedSnapshot = await kt.listTransferSnapshot({ forceRefresh: true });
+    expect(refreshedSnapshot.transfers).toHaveLength(2);
+    expect(refreshedSnapshot.transfers.some((candidate) => candidate.candidate_id === "tc_external_refresh")).toBe(true);
+  });
+
+  it("does not create duplicate candidates for the same source pattern and target goal", async () => {
+    const tmpDir = makeTmpDir();
+    const stateManager1 = new StateManager(tmpDir);
+    const vectorIndex1 = new VectorIndex(
+      path.join(tmpDir, "vectors.json"),
+      new MockEmbeddingClient()
+    );
+    const pattern = makePattern({
+      pattern_id: "pat_repeat",
+      source_goal_ids: ["goal_b"],
+      confidence: 0.85,
+    });
+
+    await stateManager1.writeRaw("goals/goal_a/state.json", { gap: 0.7 });
+    await stateManager1.writeRaw("goals/goal_b/state.json", { gap: 0.4 });
+
+    const kt1 = new KnowledgeTransfer({
+      llmClient: createMockLLMClient([]),
+      knowledgeManager: makeMockKnowledgeManager(),
+      vectorIndex: vectorIndex1,
+      learningPipeline: makeMockLearningPipeline({ goal_b: [pattern] }),
+      ethicsGate: makeMockEthicsGate(),
+      stateManager: stateManager1,
+    });
+
+    const firstPass = await kt1.detectTransferOpportunities("goal_a");
+    expect(firstPass).toHaveLength(1);
+    expect(kt1.getTransferCandidates()).toHaveLength(1);
+
+    const stateManager2 = new StateManager(tmpDir);
+    const vectorIndex2 = new VectorIndex(
+      path.join(tmpDir, "vectors.json"),
+      new MockEmbeddingClient()
+    );
+    const kt2 = new KnowledgeTransfer({
+      llmClient: createMockLLMClient([]),
+      knowledgeManager: makeMockKnowledgeManager(),
+      vectorIndex: vectorIndex2,
+      learningPipeline: makeMockLearningPipeline({ goal_b: [pattern] }),
+      ethicsGate: makeMockEthicsGate(),
+      stateManager: stateManager2,
+    });
+
+    const secondPass = await kt2.detectTransferOpportunities("goal_a");
+    expect(secondPass).toHaveLength(1);
+    expect(secondPass[0]!.candidate_id).toBe(firstPass[0]!.candidate_id);
+    expect(kt2.getTransferCandidates()).toHaveLength(1);
+
+    const snapshot = await kt2.listTransferSnapshot();
+    expect(snapshot.transfers).toHaveLength(1);
+    expect(snapshot.transfers[0]!.candidate_id).toBe(firstPass[0]!.candidate_id);
+  });
 });
