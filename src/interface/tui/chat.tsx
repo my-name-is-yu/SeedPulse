@@ -7,7 +7,7 @@
 import React, { useCallback, useState } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
 import TextInput from "ink-text-input";
-import Spinner from "ink-spinner";
+import { CheckerboardSpinner } from "./checkerboard-spinner.js";
 import {
   renderMarkdownLines,
   splitMarkdownLineToRows,
@@ -639,7 +639,7 @@ export function Chat({
 
         {isProcessing && (
           <Box>
-            <Spinner type="dots" />
+            <CheckerboardSpinner />
             <Text> </Text>
             <ShimmerText>{`${spinnerVerb}...`}</ShimmerText>
           </Box>
