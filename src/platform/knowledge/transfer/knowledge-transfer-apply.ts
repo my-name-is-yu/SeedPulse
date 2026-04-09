@@ -18,6 +18,10 @@ import { detectTransferOpportunities } from "./knowledge-transfer-detect.js";
 import type { DetectDeps } from "./knowledge-transfer-detect.js";
 import type { PatternEffectivenessTracker } from "./knowledge-transfer-types.js";
 
+function isAutoApplicableCandidate(candidate: TransferCandidate): boolean {
+  return candidate.state === "pending" || candidate.state === "proposed";
+}
+
 // ─── Deps ───
 
 export interface ApplyDeps {
@@ -192,6 +196,10 @@ export async function autoApplyHighConfidenceTransfers(
   const processed: TransferCandidate[] = [];
 
   for (const candidate of detectedCandidates) {
+    if (!isAutoApplicableCandidate(candidate)) {
+      continue;
+    }
+
     // Get trust score for the candidate's domain pair
     let sourcePattern = null;
     try {

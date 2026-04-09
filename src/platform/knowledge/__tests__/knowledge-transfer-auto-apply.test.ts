@@ -106,6 +106,28 @@ describe("KnowledgeTransfer.autoApplyHighConfidenceTransfers", () => {
     expect(applied.length).toBeGreaterThan(0);
   });
 
+  it("does not re-apply the same transfer on a later auto-apply run", async () => {
+    const highConfPattern = makePattern({ confidence: 0.9, applicable_domains: ["testing"] });
+    const llmClient = createMockLLMClient([ADAPTATION_RESPONSE]);
+    const kt = new KnowledgeTransfer({
+      llmClient,
+      knowledgeManager: {} as any,
+      vectorIndex,
+      learningPipeline: makeMockLearningPipeline({ goal_a: [highConfPattern] }),
+      ethicsGate: makeMockEthicsGate("pass"),
+      stateManager,
+      transferTrust: makeMockTransferTrust(0.8),
+    });
+
+    const firstRun = await kt.autoApplyHighConfidenceTransfers("goal_b");
+    expect(firstRun.filter((c) => c.state === "applied")).toHaveLength(1);
+    expect(kt.getTransferResults()).toHaveLength(1);
+
+    const secondRun = await kt.autoApplyHighConfidenceTransfers("goal_b");
+    expect(secondRun).toHaveLength(0);
+    expect(kt.getTransferResults()).toHaveLength(1);
+  });
+
   it("keeps as proposed when confidence < 0.85", async () => {
     const lowConfPattern = makePattern({ confidence: 0.75, applicable_domains: ["testing"] });
     const llmClient = createMockLLMClient([ADAPTATION_RESPONSE, ADAPTATION_RESPONSE, ADAPTATION_RESPONSE]);

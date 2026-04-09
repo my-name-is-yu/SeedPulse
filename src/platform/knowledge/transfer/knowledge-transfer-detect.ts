@@ -34,6 +34,10 @@ function findExistingCandidate(
   return null;
 }
 
+function isReusableCandidateState(candidate: TransferCandidate): boolean {
+  return candidate.state === "pending" || candidate.state === "proposed";
+}
+
 // ─── Deps ───
 
 export interface DetectDeps {
@@ -197,7 +201,9 @@ export async function detectTransferOpportunities(
       source_item_id: pattern.pattern_id,
     });
     if (existingCandidate) {
-      newCandidates.push(existingCandidate);
+      if (isReusableCandidateState(existingCandidate)) {
+        newCandidates.push(existingCandidate);
+      }
       continue;
     }
     const candidate = TransferCandidateSchema.parse({
