@@ -31,6 +31,7 @@ import { CharacterConfigManager } from "../../platform/traits/character-config.j
 import type { CoreLoop } from "../../orchestrator/loop/core-loop.js";
 import { dispatchCommand } from "./cli-command-registry.js";
 import { formatOperationError } from "./utils.js";
+import { getPulseedVersion } from "../../base/utils/pulseed-meta.js";
 
 const logger = getCliLogger();
 
@@ -80,6 +81,11 @@ export class CLIRunner {
    * @returns {Promise<number>} A promise that resolves to `0` for success, `1` for errors, or `2` for stall escalation.
    */
   async run(argv: string[]): Promise<number> {
+    if (argv.includes("--version") || argv.includes("-v")) {
+      console.log(getPulseedVersion(import.meta.url));
+      return 0;
+    }
+
     await this.init();
 
     // Extract --yes / -y globally so it works regardless of position

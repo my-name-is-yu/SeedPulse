@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.3] - 2026-04-10
+
+### Fixed
+- Added `pulseed --version` / `-v` and wired version display to shared package metadata so the CLI, TUI, and runtime stay in sync
+- Tightened the first-run setup path so non-interactive launches fail clearly instead of silently skipping the setup wizard, while preserving existing env/default fallback behavior for non-TUI commands
+
+### Changed
+- Bumped the npm package version to `0.4.3`
+
 ## [0.4.2] - 2026-04-10
 
 ### Fixed

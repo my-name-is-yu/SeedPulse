@@ -1,9 +1,8 @@
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
-import * as fsSync from "node:fs";
-import * as url from "node:url";
 import yaml from "js-yaml";
 import { getPluginsDir } from "../base/utils/paths.js";
+import { getPulseedVersion as getPackageVersion } from "../base/utils/pulseed-meta.js";
 import { writeJsonFileAtomic } from "../base/utils/json-io.js";
 import { ValidationError } from "../base/utils/errors.js";
 import type { Logger } from "./logger.js";
@@ -373,16 +372,7 @@ let _pulseedVersion: string | undefined;
 
 function getPulseedVersion(): string {
   if (_pulseedVersion !== undefined) return _pulseedVersion;
-  try {
-    const pkgPath = path.resolve(
-      path.dirname(url.fileURLToPath(import.meta.url)),
-      "../../package.json"
-    );
-    const pkg = JSON.parse(fsSync.readFileSync(pkgPath, "utf-8")) as { version: string };
-    _pulseedVersion = pkg.version;
-  } catch {
-    _pulseedVersion = "0.0.0";
-  }
+  _pulseedVersion = getPackageVersion(import.meta.url);
   return _pulseedVersion;
 }
 

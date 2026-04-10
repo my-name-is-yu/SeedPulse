@@ -5,6 +5,7 @@ import * as cp from "node:child_process";
 import { promisify } from "node:util";
 import yaml from "js-yaml";
 import { PluginManifestSchema } from "../../../base/types/plugin.js";
+import { getPulseedVersion as getPackageVersion } from "../../../base/utils/pulseed-meta.js";
 import { formatOperationError } from "../utils.js";
 import { getCliLogger } from "../cli-logger.js";
 import { getPluginsDir } from "../../../base/utils/paths.js";
@@ -142,13 +143,7 @@ function checkVersionCompat(
 }
 
 function getPulseedVersion(): string {
-  try {
-    const pkgPath = path.resolve(new URL(".", import.meta.url).pathname, "../../../package.json");
-    const pkg = JSON.parse(fsSync.readFileSync(pkgPath, "utf-8")) as { version?: string };
-    return pkg.version ?? "0.0.0";
-  } catch {
-    return "0.0.0";
-  }
+  return getPackageVersion(import.meta.url);
 }
 
 export async function cmdPluginInstall(

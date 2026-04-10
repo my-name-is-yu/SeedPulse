@@ -49,6 +49,10 @@ vi.mock("../../../base/llm/provider-factory.js", () => ({
   }),
 }));
 
+vi.mock("../../../base/utils/pulseed-meta.js", () => ({
+  getPulseedVersion: vi.fn().mockReturnValue("9.8.7"),
+}));
+
 vi.mock("../ensure-api-key.js", () => ({
   ensureProviderConfig: vi.fn().mockResolvedValue({
     provider: "anthropic",
@@ -163,6 +167,7 @@ import { StateManager } from "../../../base/state/state-manager.js";
 import { CoreLoop } from "../../../orchestrator/loop/core-loop.js";
 import { GoalNegotiator, EthicsRejectedError } from "../../../orchestrator/goal/goal-negotiator.js";
 import { GoalRefiner } from "../../../orchestrator/goal/goal-refiner.js";
+import { getPulseedVersion } from "../../../base/utils/pulseed-meta.js";
 import { ensureProviderConfig } from "../ensure-api-key.js";
 import type { LoopResult } from "../../../orchestrator/loop/core-loop.js";
 import type { Goal } from "../../../base/types/goal.js";
@@ -263,6 +268,34 @@ describe("CLIRunner construction", () => {
 // ─── Unknown subcommand ───────────────────────────────────────────────────────
 
 describe("unknown subcommand", async () => {
+  it("prints the package version and exits 0 for --version", async () => {
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const initSpy = vi.spyOn(StateManager.prototype, "init");
+
+    const code = await runCLI("--version");
+
+    expect(code).toBe(0);
+    expect(consoleSpy).toHaveBeenCalledWith("9.8.7");
+    expect(initSpy).not.toHaveBeenCalled();
+    expect(ensureProviderConfig).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
+    initSpy.mockRestore();
+  });
+
+  it("prints the package version and exits 0 for -v", async () => {
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const initSpy = vi.spyOn(StateManager.prototype, "init");
+    vi.mocked(getPulseedVersion).mockReturnValueOnce("9.8.7");
+
+    const code = await runCLI("-v");
+
+    expect(code).toBe(0);
+    expect(consoleSpy).toHaveBeenCalledWith("9.8.7");
+    expect(initSpy).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
+    initSpy.mockRestore();
+  });
+
   it("exits with code 1 for an unknown subcommand", async () => {
     const code = await runCLI("unknown-command");
     expect(code).toBe(1);
