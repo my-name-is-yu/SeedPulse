@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DaemonClient, isDaemonRunning } from "../daemon-client.js";
+import { DaemonClient, isDaemonRunning, probeDaemonHealth } from "../daemon-client.js";
 import { EventServer } from "../event-server.js";
 import { DEFAULT_PORT } from "../port-utils.js";
 import { OutboxStore } from "../store/outbox-store.js";
@@ -139,11 +139,36 @@ describe("isDaemonRunning", () => {
       JSON.stringify({ status: "idle", pid: process.pid }),
       "utf-8"
     );
-    vi.spyOn(DaemonClient.prototype, "healthCheck").mockResolvedValue(true);
+    vi.spyOn(DaemonClient.prototype, "getHealth").mockResolvedValue({ status: "ok" });
 
     await expect(isDaemonRunning(tmpDir)).resolves.toEqual({
       running: true,
       port: DEFAULT_PORT,
+    });
+  });
+});
+
+describe("probeDaemonHealth", () => {
+  it("returns health payload and latency when /health responds", async () => {
+    vi.spyOn(DaemonClient.prototype, "getHealth").mockResolvedValue({
+      status: "ok",
+      uptime: 4.2,
+    });
+
+    await expect(probeDaemonHealth({ host: "127.0.0.1", port: 41700 })).resolves.toMatchObject({
+      ok: true,
+      port: 41700,
+      health: { status: "ok", uptime: 4.2 },
+    });
+  });
+
+  it("returns the error message when /health probe fails", async () => {
+    vi.spyOn(DaemonClient.prototype, "getHealth").mockRejectedValue(new Error("connect ECONNREFUSED"));
+
+    await expect(probeDaemonHealth({ host: "127.0.0.1", port: 41700 })).resolves.toMatchObject({
+      ok: false,
+      port: 41700,
+      error: "connect ECONNREFUSED",
     });
   });
 });

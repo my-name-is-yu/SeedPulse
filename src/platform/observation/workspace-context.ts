@@ -12,6 +12,7 @@ export interface WorkspaceContextOptions {
   maxFiles?: number;       // default: 5
   maxCharsPerFile?: number; // default: 4000
   externalFileMaxBytes?: number; // default: 10240 (10KB)
+  cacheTtlMs?: number; // default: 30000
 }
 
 const ALLOWED_EXTERNAL_PREFIXES = [os.homedir(), "/tmp"];
@@ -154,7 +155,14 @@ export function createWorkspaceContextProvider(
   getGoalDescription: (goalId: string) => string | undefined | Promise<string | undefined>,
   getGoalConstraints?: (goalId: string) => string[] | undefined | Promise<string[] | undefined>
 ): (goalId: string, dimensionName: string) => Promise<string> {
-  const { workDir, maxFiles = 15, maxCharsPerFile = 6000, externalFileMaxBytes = 10240 } = options;
+  const {
+    workDir,
+    maxFiles = 15,
+    maxCharsPerFile = 6000,
+    externalFileMaxBytes = 10240,
+    cacheTtlMs = 30_000,
+  } = options;
+  const cache = new Map<string, { value: string; expiresAt: number }>();
 
   return async (goalId: string, dimensionName: string): Promise<string> => {
     const goalDescription = (await getGoalDescription(goalId)) ?? "";
@@ -168,6 +176,12 @@ export function createWorkspaceContextProvider(
       if (workspaceConstraint) {
         effectiveWorkDir = workspaceConstraint.slice("workspace_path:".length);
       }
+    }
+
+    const cacheKey = `${effectiveWorkDir}\u0000${goalId}\u0000${dimensionName}`;
+    const cached = cache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
     }
 
     const parts: string[] = [`# Workspace: ${effectiveWorkDir}`];
@@ -228,7 +242,9 @@ export function createWorkspaceContextProvider(
           parts.push(`## ${rel}\n\`\`\`\n${content}\n\`\`\``);
         }
       }
-      return parts.join("\n\n");
+      const result = parts.join("\n\n");
+      cache.set(cacheKey, { value: result, expiresAt: Date.now() + cacheTtlMs });
+      return result;
     }
 
     // Dimension-name derived file hints: extract segments and match kebab-case filenames
@@ -270,14 +286,14 @@ export function createWorkspaceContextProvider(
 
     if (selected.length < neededFromCandidates) {
       const remaining = candidates.filter((fp) => !selected.includes(fp));
-      const contentMatchResults = await Promise.all(
-        remaining.map(async (fp) => ({ fp, match: await fileContentMatchesKeywords(fp, keywords) }))
-      );
-      const contentMatched = contentMatchResults.filter((r) => r.match).map((r) => r.fp);
-      selected = [
-        ...selected,
-        ...contentMatched.slice(0, neededFromCandidates - selected.length),
-      ];
+      const contentMatched: string[] = [];
+      for (const fp of remaining) {
+        if (contentMatched.length >= neededFromCandidates - selected.length) break;
+        if (await fileContentMatchesKeywords(fp, keywords)) {
+          contentMatched.push(fp);
+        }
+      }
+      selected = [...selected, ...contentMatched];
     }
 
     // Phase 3: grep content match — find files whose content contains dimension-derived terms
@@ -344,6 +360,8 @@ export function createWorkspaceContextProvider(
       }
     }
 
-    return parts.join("\n\n");
+    const result = parts.join("\n\n");
+    cache.set(cacheKey, { value: result, expiresAt: Date.now() + cacheTtlMs });
+    return result;
   };
 }

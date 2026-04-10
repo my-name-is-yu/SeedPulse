@@ -308,6 +308,7 @@ export class ScheduleEngine {
   async tick(): Promise<ScheduleResult[]> {
     // Reset daily budget for entries whose budget_reset_at is null or in the past
     const nowMs = Date.now();
+    let budgetReset = false;
     for (let i = 0; i < this.entries.length; i++) {
       const e = this.entries[i]!;
       if (!e.budget_reset_at || new Date(e.budget_reset_at).getTime() <= nowMs) {
@@ -316,7 +317,12 @@ export class ScheduleEngine {
           tokens_used_today: 0,
           budget_reset_at: new Date(nowMs + 24 * 60 * 60 * 1000).toISOString(),
         };
+        budgetReset = true;
       }
+    }
+
+    if (budgetReset) {
+      await this.saveEntries();
     }
 
     const due = await this.getDueEntryDescriptors();
@@ -340,6 +346,9 @@ export class ScheduleEngine {
       }
 
       if (applied) {
+        // Persist cadence/retry advancement before history side effects so a crash
+        // cannot replay an already-fired entry from stale schedule state.
+        await this.saveEntries();
         await this.recordHistory({
           entry_id: applied.entry?.id ?? descriptor.entry.id,
           entry_name: applied.entry?.name ?? descriptor.entry.name,
@@ -359,10 +368,6 @@ export class ScheduleEngine {
       }
 
       results.push(finalResult);
-    }
-
-    if (results.length > 0) {
-      await this.saveEntries();
     }
 
     return results;
@@ -651,6 +656,7 @@ export class ScheduleEngine {
       immediateEntry.next_fire_at
     );
     if (applied) {
+      await this.saveEntries();
       await this.recordHistory({
         entry_id: targetEntry.id,
         entry_name: targetEntry.name,
@@ -760,6 +766,7 @@ export class ScheduleEngine {
         last_escalation_at: nowIso,
         escalation_timestamps: prunedTimestamps,
       };
+      await this.saveEntries();
     }
 
     // Dispatch escalation notification

@@ -369,13 +369,48 @@ describe("CoreLoop auto-decompose (issue #295)", () => {
     const orchestratorMock = createTreeLoopOrchestratorMock();
     const { deps, mocks } = createMockDeps(tmpDir, orchestratorMock);
 
-    const goal = makeGoal({ id: "goal-1", specificity_score: null, children_ids: [], node_type: "goal" });
+    const goal = makeGoal({ id: "goal-1", specificity_score: null, children_ids: [], node_type: "goal", dimensions: [] });
     await mocks.stateManager.saveGoal(goal);
 
     const loop = new CoreLoop(deps, { maxIterations: 3, delayBetweenLoopsMs: 0 });
     await loop.run("goal-1");
 
     // ensureGoalRefined should be called exactly once across all iterations
+    expect(orchestratorMock.ensureGoalRefined).toHaveBeenCalledTimes(1);
+    expect(orchestratorMock.ensureGoalRefined).toHaveBeenCalledWith("goal-1", { force: true });
+  });
+
+  it("does not force refinement on first iteration when the goal is already measurable", async () => {
+    const orchestratorMock = createTreeLoopOrchestratorMock();
+    const { deps, mocks } = createMockDeps(tmpDir, orchestratorMock);
+
+    const goal = makeGoal({ id: "goal-1", specificity_score: null, children_ids: [], node_type: "goal" });
+    await mocks.stateManager.saveGoal(goal);
+
+    const loop = new CoreLoop(deps, { maxIterations: 1, delayBetweenLoopsMs: 0 });
+    await loop.run("goal-1");
+
+    expect(orchestratorMock.ensureGoalRefined).toHaveBeenCalledTimes(1);
+    expect(orchestratorMock.ensureGoalRefined).toHaveBeenCalledWith("goal-1", { force: false });
+  });
+
+  it("still forces refinement on first iteration for manual goals with no dimensions", async () => {
+    const orchestratorMock = createTreeLoopOrchestratorMock();
+    const { deps, mocks } = createMockDeps(tmpDir, orchestratorMock);
+
+    const goal = makeGoal({
+      id: "goal-1",
+      specificity_score: null,
+      children_ids: [],
+      node_type: "goal",
+      origin: "manual",
+      dimensions: [],
+    });
+    await mocks.stateManager.saveGoal(goal);
+
+    const loop = new CoreLoop(deps, { maxIterations: 1, delayBetweenLoopsMs: 0 });
+    await loop.run("goal-1");
+
     expect(orchestratorMock.ensureGoalRefined).toHaveBeenCalledTimes(1);
     expect(orchestratorMock.ensureGoalRefined).toHaveBeenCalledWith("goal-1", { force: true });
   });

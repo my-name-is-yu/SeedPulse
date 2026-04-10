@@ -83,7 +83,7 @@ export function extractJSON(text: string): string {
   if (jsonBlock) {
     return jsonBlock[1].trim();
   }
-  const genericBlock = trimmed.match(/```\s*([\s\S]*?)```/);
+  const genericBlock = trimmed.match(/```(?:[a-zA-Z0-9_-]+)?\s*([\s\S]*?)```/);
   if (genericBlock) {
     return genericBlock[1].trim();
   }

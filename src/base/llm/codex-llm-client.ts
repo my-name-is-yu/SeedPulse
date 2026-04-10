@@ -135,7 +135,14 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
       // Build spawn args: exec -s danger-full-access -o <tmpfile> [--model <model>] -
       // Prompt is sent via stdin (using "-" as positional arg) to avoid arg length limits.
       // --path is not supported by codex-cli 0.114.0+; use cwd instead (see src/adapters/openai-codex.ts)
-      const spawnArgs: string[] = ["exec", "-s", "danger-full-access", "-o", tmpFile];
+      const spawnArgs: string[] = [
+        "exec",
+        "-s",
+        "danger-full-access",
+        "--skip-git-repo-check",
+        "-o",
+        tmpFile,
+      ];
 
       if (model) {
         spawnArgs.push("--model", model);

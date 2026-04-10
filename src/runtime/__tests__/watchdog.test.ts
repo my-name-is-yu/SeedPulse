@@ -104,6 +104,11 @@ describe("RuntimeWatchdog", () => {
       status: "ok",
       leader: true,
       checked_at: Date.now(),
+      kpi: {
+        process_alive: { status: "ok", checked_at: Date.now(), last_ok_at: Date.now() },
+        command_acceptance: { status: "degraded", checked_at: Date.now(), last_degraded_at: Date.now() },
+        task_execution: { status: "degraded", checked_at: Date.now(), last_degraded_at: Date.now() },
+      },
       details: { pid: children[0]!.pid },
     });
 
@@ -115,6 +120,11 @@ describe("RuntimeWatchdog", () => {
       status: "ok",
       leader: true,
       checked_at: Date.now(),
+      kpi: {
+        process_alive: { status: "ok", checked_at: Date.now(), last_ok_at: Date.now() },
+        command_acceptance: { status: "ok", checked_at: Date.now(), last_ok_at: Date.now() },
+        task_execution: { status: "ok", checked_at: Date.now(), last_ok_at: Date.now() },
+      },
       details: { pid: children[1]!.pid },
     });
 
@@ -176,6 +186,11 @@ describe("RuntimeWatchdog", () => {
       status: "ok",
       leader: true,
       checked_at: Date.now(),
+      kpi: {
+        process_alive: { status: "ok", checked_at: Date.now(), last_ok_at: Date.now() },
+        command_acceptance: { status: "degraded", checked_at: Date.now(), last_degraded_at: Date.now() },
+        task_execution: { status: "degraded", checked_at: Date.now(), last_degraded_at: Date.now() },
+      },
       details: { pid: children[0]!.pid },
     });
 
@@ -190,6 +205,80 @@ describe("RuntimeWatchdog", () => {
       runtime_pid: children[1]!.pid,
       owner_pid: process.pid,
       watchdog_pid: process.pid,
+    });
+
+    watchdog.stop();
+    await startPromise;
+  });
+
+  it("restarts the child when the live daemon health probe fails repeatedly", async () => {
+    tmpDir = makeTempDir();
+    const runtimeRoot = path.join(tmpDir, "runtime");
+    const pidManager = new PIDManager(tmpDir);
+    const healthStore = new RuntimeHealthStore(runtimeRoot);
+    const leaderLockManager = new LeaderLockManager(runtimeRoot, 60);
+    await healthStore.ensureReady();
+
+    const children: FakeChildProcess[] = [];
+    const healthProbe = vi.fn()
+      .mockResolvedValueOnce({ ok: false, detail: "ECONNREFUSED" })
+      .mockResolvedValueOnce({ ok: false, detail: "ECONNREFUSED" })
+      .mockResolvedValue({ ok: true });
+    const watchdog = new RuntimeWatchdog({
+      pidManager,
+      healthStore,
+      leaderLockManager,
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      },
+      startChild: () => {
+        const child = new FakeChildProcess(30_000 + children.length);
+        children.push(child);
+        return child;
+      },
+      healthProbe,
+      healthProbeFailureThreshold: 2,
+      pollIntervalMs: 20,
+      heartbeatTimeoutMs: 200,
+      startupGraceMs: 40,
+      restartBackoffMs: 10,
+      maxRestartBackoffMs: 20,
+      childShutdownGraceMs: 10,
+    });
+
+    const startPromise = watchdog.start();
+
+    await waitFor(() => children.length === 1);
+    await writeLeaderRecord(runtimeRoot, children[0]!.pid, Date.now() + 500);
+    await healthStore.saveDaemonHealth({
+      status: "ok",
+      leader: true,
+      checked_at: Date.now(),
+      kpi: {
+        process_alive: { status: "ok", checked_at: Date.now(), last_ok_at: Date.now() },
+        command_acceptance: { status: "ok", checked_at: Date.now(), last_ok_at: Date.now() },
+        task_execution: { status: "ok", checked_at: Date.now(), last_ok_at: Date.now() },
+      },
+      details: { pid: children[0]!.pid },
+    });
+
+    await waitFor(() => children.length === 2, 2_000, 20);
+    expect(children[0]!.kills).toContain("SIGTERM");
+    expect(healthProbe).toHaveBeenCalledTimes(2);
+
+    await writeLeaderRecord(runtimeRoot, children[1]!.pid, Date.now() + 500);
+    await healthStore.saveDaemonHealth({
+      status: "ok",
+      leader: true,
+      checked_at: Date.now(),
+      kpi: {
+        process_alive: { status: "ok", checked_at: Date.now(), last_ok_at: Date.now() },
+        command_acceptance: { status: "ok", checked_at: Date.now(), last_ok_at: Date.now() },
+        task_execution: { status: "ok", checked_at: Date.now(), last_ok_at: Date.now() },
+      },
+      details: { pid: children[1]!.pid },
     });
 
     watchdog.stop();

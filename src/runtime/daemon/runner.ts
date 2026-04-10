@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { CoreLoop } from "../../orchestrator/loop/core-loop.js";
@@ -7,6 +8,7 @@ import type { GoalNegotiator } from "../../orchestrator/goal/goal-negotiator.js"
 import type { Goal } from "../../base/types/goal.js";
 import { DriveSystem } from "../../platform/drive/drive-system.js";
 import { StateManager } from "../../base/state/state-manager.js";
+import { TaskSchema, type Task } from "../../base/types/task.js";
 import { getProviderRuntimeFingerprint } from "../../base/llm/provider-config.js";
 import type { CuriosityEngine } from "../../platform/traits/curiosity-engine.js";
 import { PIDManager } from "../pid-manager.js";
@@ -24,6 +26,7 @@ import { DreamAnalyzer } from "../../platform/dream/dream-analyzer.js";
 import { DreamScheduleSuggestionStore } from "../../platform/dream/dream-schedule-suggestions.js";
 import type { DreamRunReport, DreamTier } from "../../platform/dream/dream-types.js";
 import { runDreamConsolidation } from "../../reflection/dream-consolidation.js";
+import { PipelineStateSchema } from "../../base/types/pipeline.js";
 import { generateCronEntry } from "./signals.js";
 import { rotateDaemonLog, calculateAdaptiveInterval as calcAdaptiveInterval } from "./health.js";
 import { IngressGateway, HttpChannelAdapter } from "../gateway/index.js";
@@ -68,6 +71,10 @@ import {
   writeShutdownMarkerFile,
 } from "./index.js";
 import type { GoalCycleScheduleSnapshotEntry } from "./maintenance.js";
+import { appendTaskOutcomeEvent } from "../../orchestrator/execution/task/task-outcome-ledger.js";
+import { durationToMs } from "../../orchestrator/execution/task/task-executor.js";
+
+const RUNTIME_JOURNAL_MAX_ATTEMPTS = 1_000;
 
 function gatherResidentWorkspaceContext(workspaceDir: string, seedDescription?: string): string {
   const parts: string[] = [`Workspace: ${workspaceDir}`];
@@ -138,6 +145,7 @@ export type { ShutdownMarker } from "./index.js";
 
 const RUNTIME_LEADER_LEASE_MS = 30_000;
 const RUNTIME_LEADER_HEARTBEAT_MS = 10_000;
+const MAX_IDLE_SLEEP_MS = 5_000;
 
 // ─── DaemonRunner ───
 //
@@ -300,11 +308,13 @@ export class DaemonRunner {
     });
     this.journalQueue = new JournalBackedQueue({
       journalPath: path.join(this.runtimeRoot, "queue.json"),
+      maxAttempts: RUNTIME_JOURNAL_MAX_ATTEMPTS,
     });
     this.queueClaimSweeper = new QueueClaimSweeper({
       queue: this.journalQueue,
     });
     this.runtimeOwnership = new RuntimeOwnershipCoordinator({
+      baseDir: this.baseDir,
       runtimeRoot: this.runtimeRoot,
       logger: this.logger,
       approvalStore: this.approvalStore,
@@ -474,7 +484,9 @@ export class DaemonRunner {
       this.shutdownCoordinator.activate();
 
       // 4. Restore state from previous interrupted run
-      const mergedGoalIds = await this.restoreState(goalIds);
+      const restoredGoalIds = await this.restoreState(goalIds);
+      const reconciledGoalIds = await this.reconcileInterruptedExecutions();
+      const mergedGoalIds = Array.from(new Set([...restoredGoalIds, ...reconciledGoalIds]));
 
       // 5. Save initial daemon state
       this.running = true;
@@ -537,7 +549,10 @@ export class DaemonRunner {
             this.logger.error(`Goal ${goalId} suspended after ${crashCount} crashes: ${lastError}`);
           },
         },
-        { iterationsPerCycle: this.config.iterations_per_cycle }
+        {
+          iterationsPerCycle: this.config.iterations_per_cycle,
+          stateFilePath: path.join(this.runtimeRoot!, "supervisor-state.json"),
+        }
       );
     }
     if (!this.eventDispatcher) {
@@ -554,12 +569,14 @@ export class DaemonRunner {
       this.commandDispatcher = new CommandDispatcher({
         journalQueue: this.journalQueue!,
         logger: this.logger,
-        onGoalStart: async (goalId) => this.handleGoalStartCommand(goalId),
-        onGoalStop: async (goalId) => this.handleGoalStopCommand(goalId),
+        onGoalStart: async (goalId) =>
+          this.runCommandWithHealth("goal_start", () => this.handleGoalStartCommand(goalId)),
+        onGoalStop: async (goalId) =>
+          this.runCommandWithHealth("goal_stop", () => this.handleGoalStopCommand(goalId)),
         onChatMessage: async (goalId, message) =>
-          this.handleChatMessageCommand(goalId, message),
+          this.runCommandWithHealth("chat_message", () => this.handleChatMessageCommand(goalId, message)),
         onApprovalResponse: async (goalId, requestId, approved) =>
-          this.handleApprovalResponseCommand(goalId, requestId, approved),
+          this.runCommandWithHealth("approval_response", () => this.handleApprovalResponseCommand(goalId, requestId, approved)),
       });
     }
 
@@ -668,6 +685,7 @@ export class DaemonRunner {
     });
     this.state.status = "crashed";
     this.state.last_error = reason;
+    this.state.interrupted_goals = [...this.state.active_goals];
     this.running = false;
     this.shuttingDown = true;
     this.shutdownResolve?.();
@@ -811,8 +829,10 @@ export class DaemonRunner {
             maxGapScore,
             this.consecutiveIdleCycles
           );
-          this.logger.info(`Sleeping for ${intervalMs}ms until next check`);
-          await this.sleep(intervalMs);
+          const sleepIntervalMs =
+            activeGoals.length === 0 ? Math.min(intervalMs, MAX_IDLE_SLEEP_MS) : intervalMs;
+          this.logger.info(`Sleeping for ${sleepIntervalMs}ms until next check`);
+          await this.sleep(sleepIntervalMs);
         }
       } catch (err) {
         await this.handleCriticalError(err);
@@ -862,6 +882,10 @@ export class DaemonRunner {
   private handleLoopError(goalId: string, err: unknown): void {
     this.state.last_error = err instanceof Error ? err.message : String(err);
     this.state.crash_count++;
+    void this.runtimeOwnership.observeTaskExecution(
+      "failed",
+      `loop error for ${goalId}: ${this.state.last_error}`,
+    );
     this.logger.error(`Loop error for goal ${goalId}`, {
       error: this.state.last_error,
       crash_count: this.state.crash_count,
@@ -884,8 +908,10 @@ export class DaemonRunner {
   private async handleCriticalError(err: unknown): Promise<void> {
     const msg = err instanceof Error ? err.message : String(err);
     this.logger.error("Critical daemon error", { error: msg });
+    await this.runtimeOwnership.observeTaskExecution("failed", `critical daemon error: ${msg}`);
     this.state.status = "crashed";
     this.state.last_error = msg;
+    this.state.interrupted_goals = [...this.state.active_goals];
     await this.saveDaemonState();
     this.running = false;
   }
@@ -906,6 +932,159 @@ export class DaemonRunner {
    */
   private async restoreState(goalIds: string[]): Promise<string[]> {
     return restoreInterruptedGoals(this.baseDir, goalIds, this.logger);
+  }
+
+  private async reconcileInterruptedExecutions(): Promise<string[]> {
+    const recoveredGoalIds = new Set<string>();
+    const now = new Date().toISOString();
+
+    for (const task of await this.findRunningTasks()) {
+      const recoveredTask: Task = TaskSchema.parse({
+        ...task,
+        status: "error",
+        completed_at: task.completed_at ?? now,
+        heartbeat_at: now,
+        execution_output: [
+          task.execution_output,
+          "[RECOVERED] Task execution was interrupted by daemon crash or restart before completion.",
+        ]
+          .filter((value): value is string => typeof value === "string" && value.length > 0)
+          .join("\n"),
+      });
+
+      await this.stateManager.writeRaw(`tasks/${task.goal_id}/${task.id}.json`, recoveredTask);
+      await this.appendRecoveredTaskHistory(recoveredTask);
+      await appendTaskOutcomeEvent(this.stateManager, {
+        task: recoveredTask,
+        type: "failed",
+        attempt: Math.max(task.consecutive_failure_count + 1, 1),
+        reason: "task execution interrupted by daemon recovery",
+      });
+      await appendTaskOutcomeEvent(this.stateManager, {
+        task: recoveredTask,
+        type: "retried",
+        attempt: Math.max(task.consecutive_failure_count + 1, 1),
+        action: "keep",
+        reason: "daemon restarted; task preserved for retry",
+      });
+      recoveredGoalIds.add(task.goal_id);
+    }
+
+    await this.reconcileInterruptedPipelines(now);
+
+    if (recoveredGoalIds.size > 0) {
+      this.logger.warn("Recovered interrupted task executions on startup", {
+        goals: [...recoveredGoalIds],
+        count: recoveredGoalIds.size,
+      });
+    }
+
+    return [...recoveredGoalIds];
+  }
+
+  private async findRunningTasks(): Promise<Task[]> {
+    const tasksDir = path.join(this.baseDir, "tasks");
+    let goalDirs: fs.Dirent[];
+    try {
+      goalDirs = await fsp.readdir(tasksDir, { withFileTypes: true });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        return [];
+      }
+      throw err;
+    }
+
+    const runningTasks: Task[] = [];
+    for (const goalDir of goalDirs) {
+      if (!goalDir.isDirectory()) {
+        continue;
+      }
+
+      const goalTaskDir = path.join(tasksDir, goalDir.name);
+      let taskEntries: fs.Dirent[];
+      try {
+        taskEntries = await fsp.readdir(goalTaskDir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const entry of taskEntries) {
+        if (!entry.isFile() || !entry.name.endsWith(".json") || entry.name === "task-history.json") {
+          continue;
+        }
+
+        try {
+          const raw = await this.stateManager.readRaw(`tasks/${goalDir.name}/${entry.name}`);
+          if (!raw || typeof raw !== "object" || (raw as Record<string, unknown>).status !== "running") {
+            continue;
+          }
+          runningTasks.push(TaskSchema.parse(raw));
+        } catch {
+          // Ignore malformed task files during startup reconciliation.
+        }
+      }
+    }
+
+    return runningTasks;
+  }
+
+  private async appendRecoveredTaskHistory(task: Task): Promise<void> {
+    const historyPath = `tasks/${task.goal_id}/task-history.json`;
+    const existing = await this.stateManager.readRaw(historyPath);
+    const history = Array.isArray(existing) ? existing : [];
+    const actualElapsedMs =
+      task.started_at && task.completed_at
+        ? new Date(task.completed_at).getTime() - new Date(task.started_at).getTime()
+        : null;
+
+    history.push({
+      task_id: task.id,
+      status: task.status,
+      primary_dimension: task.primary_dimension,
+      consecutive_failure_count: task.consecutive_failure_count,
+      completed_at: task.completed_at ?? new Date().toISOString(),
+      actual_elapsed_ms: actualElapsedMs,
+      estimated_duration_ms: task.estimated_duration ? durationToMs(task.estimated_duration) : null,
+    });
+    await this.stateManager.writeRaw(historyPath, history);
+  }
+
+  private async reconcileInterruptedPipelines(now: string): Promise<void> {
+    const pipelinesDir = path.join(this.baseDir, "pipelines");
+    let entries: string[];
+    try {
+      entries = await fsp.readdir(pipelinesDir);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        return;
+      }
+      throw err;
+    }
+
+    for (const entry of entries) {
+      if (!entry.endsWith(".json")) {
+        continue;
+      }
+
+      try {
+        const raw = await this.stateManager.readRaw(`pipelines/${entry}`);
+        if (!raw || typeof raw !== "object") {
+          continue;
+        }
+        const pipelineState = PipelineStateSchema.parse(raw);
+        if (pipelineState.status !== "running") {
+          continue;
+        }
+
+        await this.stateManager.writeRaw(`pipelines/${entry}`, {
+          ...pipelineState,
+          status: "interrupted",
+          updated_at: now,
+        });
+      } catch {
+        // Ignore malformed pipeline state during startup reconciliation.
+      }
+    }
   }
 
   // ─── Private: Cleanup ───
@@ -1082,6 +1261,18 @@ export class DaemonRunner {
     this.currentLoopIndex = this.state.loop_count;
     this.state.last_loop_at = new Date().toISOString();
     await this.saveDaemonState();
+    await this.runtimeOwnership.observeTaskExecution(
+      result.status === "error"
+        ? "failed"
+        : result.status === "stalled"
+          ? "degraded"
+          : "ok",
+      result.status === "error"
+        ? `goal ${goalId} execution failed`
+        : result.status === "stalled"
+          ? `goal ${goalId} stalled`
+          : undefined,
+    );
 
     if (this.eventServer) {
       const goal = await this.stateManager.loadGoal(goalId).catch(() => null);
@@ -1519,6 +1710,21 @@ export class DaemonRunner {
     await writeChatMessageEvent(this.driveSystem, goalId, message);
     await this.broadcastChatResponse(goalId, message);
     this.abortSleep();
+  }
+
+  private async runCommandWithHealth<T>(commandName: string, fn: () => Promise<T>): Promise<T> {
+    try {
+      const result = await fn();
+      await this.runtimeOwnership.observeCommandAcceptance("ok");
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.runtimeOwnership.observeCommandAcceptance(
+        "failed",
+        `${commandName} failed: ${message}`,
+      );
+      throw error;
+    }
   }
 
   private async handleApprovalResponseCommand(

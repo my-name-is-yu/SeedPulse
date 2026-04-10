@@ -20,6 +20,7 @@ import { TrustManager } from "../../platform/traits/trust-manager.js";
 import { CuriosityEngine } from "../../platform/traits/curiosity-engine.js";
 import { DriveSystem } from "../../platform/drive/drive-system.js";
 import { ObservationEngine } from "../../platform/observation/observation-engine.js";
+import { DimensionPreChecker } from "../../platform/observation/dimension-pre-checker.js";
 import { StallDetector } from "../../platform/drive/stall-detector.js";
 import { ProgressPredictor } from "../../platform/drive/progress-predictor.js";
 import { SatisficingJudge } from "../../platform/drive/satisficing-judge.js";
@@ -153,7 +154,20 @@ export async function buildDeps(
   const hookManager = new HookManager(stateManager.getBaseDir(), logger);
   await hookManager.loadHooks();
 
-  const observationEngine = new ObservationEngine(stateManager, dataSources, llmClient, contextProvider, {}, logger, undefined, hookManager);
+  const observationPreChecker = new DimensionPreChecker({
+    min_observation_interval_sec: 60,
+    strategies: ["age", "git_diff"],
+  });
+  const observationEngine = new ObservationEngine(
+    stateManager,
+    dataSources,
+    llmClient,
+    contextProvider,
+    {},
+    logger,
+    observationPreChecker,
+    hookManager
+  );
   const progressPredictor = new ProgressPredictor();
   const stallDetector = new StallDetector(stateManager, characterConfig, progressPredictor);
   const satisficingJudge = new SatisficingJudge(stateManager);

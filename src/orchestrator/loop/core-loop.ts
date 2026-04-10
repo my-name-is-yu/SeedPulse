@@ -402,6 +402,27 @@ export class CoreLoop {
   ): Promise<LoopIterationResult> {
     const startTime = Date.now();
     const ctx: PhaseCtx = { deps: this.deps, config: this.config, logger: this.logger, toolExecutor: this.deps.toolExecutor, timeHorizonEngine: this.timeHorizonEngine };
+    const runPhase = async <T>(phase: string, work: () => Promise<T>): Promise<T> => {
+      const phaseStartedAt = Date.now();
+      this.logger?.info(`[CoreLoop] phase ${phase} starting`, { goalId, loopIndex });
+      try {
+        const value = await work();
+        this.logger?.info(`[CoreLoop] phase ${phase} completed`, {
+          goalId,
+          loopIndex,
+          duration_ms: Date.now() - phaseStartedAt,
+        });
+        return value;
+      } catch (err) {
+        this.logger?.warn(`[CoreLoop] phase ${phase} failed`, {
+          goalId,
+          loopIndex,
+          duration_ms: Date.now() - phaseStartedAt,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
+    };
 
     // Default result (filled in progressively)
     const result: LoopIterationResult = makeEmptyIterationResult(goalId, loopIndex);
@@ -409,11 +430,15 @@ export class CoreLoop {
     this.logger?.info(`[CoreLoop] iteration ${loopIndex + 1} starting`, { goalId, loopIndex });
 
     // 1. Load goal + tree aggregation
-    const loadedGoal = await loadGoalWithAggregation(ctx, goalId, result, startTime);
+    const loadedGoal = await runPhase("load-goal", () =>
+      loadGoalWithAggregation(ctx, goalId, result, startTime)
+    );
     if (!loadedGoal) return result;
     let goal = loadedGoal;
 
-    await phaseAutoDecompose(goalId, goal, this.deps, this.config, this.logger, this.decomposedGoals, isFirstIteration);
+    await runPhase("auto-decompose", () =>
+      phaseAutoDecompose(goalId, goal, this.deps, this.config, this.logger, this.decomposedGoals, isFirstIteration)
+    );
 
     // After decomposition: if children were created, reload and switch to tree mode.
     if (!goal.children_ids.length) {
@@ -428,7 +453,7 @@ export class CoreLoop {
     }
 
     // 2. Observe + reload
-    goal = await observeAndReload(ctx, goalId, goal, loopIndex);
+    goal = await runPhase("observe", () => observeAndReload(ctx, goalId, goal, loopIndex));
 
     // 2b. State diff check (Pillar 2: State Diff + Loop Skip)
     if (this.stateDiff) {
@@ -440,7 +465,9 @@ export class CoreLoop {
     }
 
     // 3. Gap calculate + zero check
-    const gapResult = await calculateGapOrComplete(ctx, goalId, goal, loopIndex, result, startTime);
+    const gapResult = await runPhase("gap-analysis", () =>
+      calculateGapOrComplete(ctx, goalId, goal, loopIndex, result, startTime)
+    );
     if (!gapResult) return result;
     const { gapVector, gapAggregate, skipTaskGeneration } = gapResult;
 
@@ -450,9 +477,11 @@ export class CoreLoop {
     let driveScores: import("../../base/types/drive.js").DriveScore[] = [];
     let highDissatisfactionDimensions: string[] = [];
     if (!skipTaskGeneration) {
-      const driveResult = await scoreDrivesAndCheckKnowledge(
-        ctx, goalId, goal, gapVector, loopIndex, result, startTime,
-        (id, idx, r, g) => generateLoopReport(id, idx, r, g, this.deps.reportingEngine, this.logger)
+      const driveResult = await runPhase("drive-scoring", () =>
+        scoreDrivesAndCheckKnowledge(
+          ctx, goalId, goal, gapVector, loopIndex, result, startTime,
+          (id, idx, r, g) => generateLoopReport(id, idx, r, g, this.deps.reportingEngine, this.logger)
+        )
       );
       if (!driveResult) return result;
       driveScores = driveResult.driveScores;
@@ -460,11 +489,13 @@ export class CoreLoop {
     }
 
     // 5. Completion check + milestones
-    await checkCompletionAndMilestones(ctx, goalId, goal, result, startTime);
+    await runPhase("completion-check", () =>
+      checkCompletionAndMilestones(ctx, goalId, goal, result, startTime)
+    );
     if (result.error) return result;
 
     // 6. Stall detection + rebalance
-    await detectStallsAndRebalance(ctx, goalId, goal, result);
+    await runPhase("stall-detection", () => detectStallsAndRebalance(ctx, goalId, goal, result));
 
     if (result.stallDetected && result.stallReport) {
       this.logger?.warn(`[iter ${loopIndex}] stall detected: ${result.stallReport.stall_type}`, { escalation: result.stallReport.escalation_level });

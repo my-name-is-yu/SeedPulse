@@ -143,10 +143,12 @@ TUI is not a replacement for CLI mode but a complement to it. The loop execution
 
 **`pulseed start`** launches a daemon that automatically executes the core loop at configured intervals. **`pulseed stop`** stops it.
 
-- The daemon is internally just a wrapper that repeatedly calls the core loop
+- The daemon is the resident runtime host for the core loop
 - The core loop itself requires no changes. The cost of daemonization is small
 - Execution interval can be configured per goal (see drive-system.md scheduling design)
-- Process management (PID file, logs) is handled by the daemon layer
+- Process management (PID file, logs, live health probes, durable queueing, and recovery) is handled by the daemon layer
+
+The production daemon uses a watchdog + durable runtime model rather than relying on an in-memory loop. It records runtime health, command acceptance, task execution outcomes, queue claims, goal leases, approvals, outbox events, schedules, task ledgers, and checkpoints to disk so a restart can recover the active goal set and reconcile interrupted work. For the concrete recovery design and operational KPIs, see [Runtime Auto-Recovery](design/infrastructure/runtime-auto-recovery.md).
 
 PulSeed now also persists first-class schedule entries under the same runtime state. Common workflows can be created from reusable presets with `pulseed schedule presets` and `pulseed schedule add --preset <name>`, and dream-generated schedule suggestions can be reviewed with `pulseed schedule suggestions <list|apply|reject|dismiss>`.
 

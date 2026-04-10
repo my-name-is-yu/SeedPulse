@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createWorkspaceContextProvider } from "../workspace-context.js";
 
 // Helper: write a temp file and clean it up after each test
@@ -446,5 +446,49 @@ describe("createWorkspaceContextProvider — existing workspace behavior unchang
 
     const result = await provider("goal-header", "dim");
     expect(result).toContain(`# Workspace: ${tmpWorkDir}`);
+  });
+});
+
+describe("createWorkspaceContextProvider — caching", () => {
+  let tmpWorkDir: string;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    tmpWorkDir = fs.mkdtempSync(path.join(os.tmpdir(), "pulseed-ws-cache-"));
+    fs.writeFileSync(path.join(tmpWorkDir, "README.md"), "# First", "utf-8");
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    fs.rmSync(tmpWorkDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  });
+
+  it("reuses cached workspace context within the TTL", async () => {
+    const provider = createWorkspaceContextProvider(
+      { workDir: tmpWorkDir, cacheTtlMs: 30_000 },
+      () => "Check quality"
+    );
+
+    const first = await provider("goal-cache-1", "quality");
+    fs.writeFileSync(path.join(tmpWorkDir, "README.md"), "# Second", "utf-8");
+
+    const second = await provider("goal-cache-1", "quality");
+    expect(first).toContain("# First");
+    expect(second).toContain("# First");
+    expect(second).not.toContain("# Second");
+  });
+
+  it("refreshes workspace context after the TTL expires", async () => {
+    const provider = createWorkspaceContextProvider(
+      { workDir: tmpWorkDir, cacheTtlMs: 1_000 },
+      () => "Check quality"
+    );
+
+    await provider("goal-cache-2", "quality");
+    fs.writeFileSync(path.join(tmpWorkDir, "README.md"), "# Second", "utf-8");
+    await vi.advanceTimersByTimeAsync(1_001);
+
+    const refreshed = await provider("goal-cache-2", "quality");
+    expect(refreshed).toContain("# Second");
   });
 });

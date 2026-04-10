@@ -80,7 +80,7 @@ export const CuriosityConfigSchema = z.object({
   resource_budget: z.object({
     active_user_goals_max_percent: z.number().default(20),
     waiting_user_goals_max_percent: z.number().default(50),
-  }),
+  }).default({}),
   unexpected_observation_threshold: z.number().default(2.0),
 });
 export type CuriosityConfig = z.infer<typeof CuriosityConfigSchema>;

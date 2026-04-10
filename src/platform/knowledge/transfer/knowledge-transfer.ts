@@ -17,7 +17,7 @@ import {
   TransferEffectivenessSchema,
 } from "../../../base/types/cross-portfolio.js";
 import type { CrossGoalPattern, StructuralFeedbackType } from "../../../base/types/learning.js";
-import { LearnedPatternSchema } from "../../../base/types/learning.js";
+import { CrossGoalPatternSchema, LearnedPatternSchema } from "../../../base/types/learning.js";
 import { TransferTrustManager } from "./transfer-trust.js";
 import type { TransferContext, PatternEffectivenessTracker } from "./knowledge-transfer-types.js";
 
@@ -190,8 +190,16 @@ export class KnowledgeTransfer {
 
   // ─── Cross-Goal Pattern Storage ───
 
-  storePattern(pattern: CrossGoalPattern): void {
+  async storePattern(pattern: CrossGoalPattern): Promise<void> {
     storePattern(pattern, this.crossGoalPatterns, this.metaDeps.vectorIndex);
+    const pendingPatterns = Array.from(this.crossGoalPatterns.values());
+    if (!this.snapshotLoaded) {
+      await this.ensureSnapshotLoaded();
+      for (const pendingPattern of pendingPatterns) {
+        this.crossGoalPatterns.set(pendingPattern.id, pendingPattern);
+      }
+    }
+    await this.persistSnapshot();
   }
 
   retrievePatterns(filter?: {
@@ -257,6 +265,7 @@ export class KnowledgeTransfer {
         invalidated: z.boolean(),
       })
     ).default({}),
+    cross_goal_patterns: z.array(CrossGoalPatternSchema).default([]),
   });
 
   private buildTransferSnapshot(): {
@@ -310,6 +319,10 @@ export class KnowledgeTransfer {
         for (const [patternId, tracker] of Object.entries(snapshot.pattern_trackers)) {
           this.patternTrackers.set(patternId, tracker);
         }
+        this.crossGoalPatterns.clear();
+        for (const pattern of snapshot.cross_goal_patterns) {
+          this.crossGoalPatterns.set(pattern.id, pattern);
+        }
       }
     } catch {
       // non-fatal: start from an empty snapshot
@@ -327,6 +340,7 @@ export class KnowledgeTransfer {
       ...this.buildTransferSnapshot(),
       apply_contexts: Object.fromEntries(this.applyContexts.entries()),
       pattern_trackers: Object.fromEntries(this.patternTrackers.entries()),
+      cross_goal_patterns: Array.from(this.crossGoalPatterns.values()),
     };
     try {
       await this.applyDeps.stateManager.writeRaw(KnowledgeTransfer.SNAPSHOT_PATH, snapshot);

@@ -188,6 +188,17 @@ describe("cmdStart", () => {
 
     await realtimeSink?.({ id: "report-1" });
     expect(eventServerBroadcastMock).toHaveBeenCalledWith("notification_report", { id: "report-1" });
+    expect(buildDepsMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      undefined,
+      expect.any(Function),
+      expect.objectContaining({
+        info: expect.any(Function),
+        warn: expect.any(Function),
+        error: expect.any(Function),
+      }),
+    );
 
     expect(scheduleEngineArgs).toHaveLength(1);
     expect(scheduleEngineArgs[0]).toEqual(
@@ -223,6 +234,7 @@ describe("cmdStart", () => {
     expect(buildDepsMock).not.toHaveBeenCalled();
     expect(watchdogArgs[0]).toEqual(
       expect.objectContaining({
+        healthProbe: expect.any(Function),
         startChild: expect.any(Function),
       })
     );

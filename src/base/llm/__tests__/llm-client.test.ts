@@ -193,6 +193,11 @@ describe("MockLLMClient", () => {
       expect(extractJSON(input)).toBe('{"key": "value"}');
     });
 
+    it("extracts JSON from fenced blocks with a non-json language tag", () => {
+      const input = '```markdown\n{"key": "value"}\n```';
+      expect(extractJSON(input)).toBe('{"key": "value"}');
+    });
+
     it("extracts array JSON with leading prose", () => {
       const input = 'The result is [1, 2, 3] as expected.';
       expect(extractJSON(input)).toBe('[1, 2, 3]');

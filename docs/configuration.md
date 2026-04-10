@@ -50,7 +50,21 @@ All PulSeed runtime state lives under `~/.pulseed/`. The directory is created au
 ```
 ~/.pulseed/
 ├── provider.json            # LLM provider config (optional, see §3)
+├── daemon-state.json        # Last daemon state, active goals, and recovery markers
+├── shutdown-state.json      # Clean-vs-unclean shutdown marker
 ├── goals/                   # Active goal state (one file per goal)
+├── tasks/                   # Task files, task history, and outcome ledgers
+├── pipelines/               # Pipeline execution state for resumable multi-stage tasks
+├── checkpoints/             # Execution context checkpoints
+├── runtime/                 # Durable resident-daemon coordination state
+│   ├── queue.json           # Journal-backed command/event queue
+│   ├── supervisor-state.json # Active worker and crash-counter snapshot
+│   ├── health/              # Runtime KPI health snapshots
+│   ├── leader/              # Runtime leader lock
+│   ├── leases/              # Per-goal execution leases
+│   ├── approvals/           # Pending/resolved approval requests
+│   └── outbox/              # Durable client event stream
+├── schedules.json           # Heartbeat/probe/cron/goal-trigger schedules
 ├── reports/                 # Loop reports (Markdown)
 ├── ethics/                  # Ethics gate decision logs
 ├── plugins/                 # User-installed plugins (loaded at startup)
@@ -71,6 +85,8 @@ All PulSeed runtime state lives under `~/.pulseed/`. The directory is created au
     │   └── statistics/<goal_id>.json
     └── archive/<goal_id>/   # Completed or cancelled goals
 ```
+
+For resident-daemon recovery, treat `daemon-state.json`, `runtime/`, `tasks/`, `pipelines/`, `checkpoints/`, `memory/`, and `schedules.json` as the minimum durable state set. If these are preserved, the daemon can restore active goals, reconcile interrupted task and pipeline work, retain memory/context, and keep the four schedule layers from being lost across restart. See [Runtime Auto-Recovery](design/infrastructure/runtime-auto-recovery.md) for the recovery model and KPI surfaces.
 
 To wipe all state and start fresh:
 

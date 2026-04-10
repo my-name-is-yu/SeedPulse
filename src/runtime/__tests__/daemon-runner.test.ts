@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Goal } from "../../base/types/goal.js";
+import type { Task } from "../../base/types/task.js";
+import { StateManager } from "../../base/state/state-manager.js";
 import { DaemonRunner } from "../daemon-runner.js";
 import { PIDManager } from "../pid-manager.js";
 import { Logger } from "../logger.js";
@@ -14,6 +16,7 @@ import { GoalLeaseManager } from "../goal-lease-manager.js";
 import { createEnvelope } from "../types/envelope.js";
 import { runSupervisorMaintenanceCycleForDaemon } from "../daemon/maintenance.js";
 import type { DaemonState } from "../../base/types/daemon.js";
+import { restoreInterruptedGoals } from "../daemon/persistence.js";
 
 async function pollForFile(
   filePath: string,
@@ -80,6 +83,44 @@ function makeLoopResult(overrides: Partial<LoopResult> = {}): LoopResult {
     iterations: [],
     startedAt: new Date().toISOString(),
     completedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+function makeTask(overrides: Partial<Task> = {}): Task {
+  return {
+    id: "task-1",
+    goal_id: "goal-1",
+    strategy_id: null,
+    target_dimensions: ["dim"],
+    primary_dimension: "dim",
+    work_description: "test task",
+    rationale: "test rationale",
+    approach: "test approach",
+    success_criteria: [
+      {
+        description: "Tests pass",
+        verification_method: "npx vitest run",
+        is_blocking: true,
+      },
+    ],
+    scope_boundary: {
+      in_scope: ["module A"],
+      out_of_scope: ["module B"],
+      blast_radius: "low",
+    },
+    constraints: [],
+    plateau_until: null,
+    estimated_duration: { value: 2, unit: "hours" },
+    consecutive_failure_count: 0,
+    reversibility: "reversible",
+    task_category: "normal",
+    status: "pending",
+    started_at: null,
+    completed_at: null,
+    timeout_at: null,
+    heartbeat_at: null,
+    created_at: new Date().toISOString(),
     ...overrides,
   };
 }
@@ -665,6 +706,44 @@ describe("DaemonRunner durable runtime", () => {
     await startPromise;
   });
 
+  it("caps idle daemon re-checks at 5 seconds", async () => {
+    const deps = makeDeps(tmpDir, {
+      config: {
+        check_interval_ms: 10_000,
+      },
+    });
+    const daemon = new DaemonRunner(deps);
+    currentDaemon = daemon;
+
+    (daemon as any).running = true;
+    (daemon as any).shuttingDown = false;
+    (daemon as any).currentGoalIds = [];
+
+    vi.spyOn(daemon as any, "runRuntimeStoreMaintenance").mockResolvedValue(undefined);
+    vi.spyOn(daemon as any, "proactiveTick").mockResolvedValue(undefined);
+    vi.spyOn(daemon as any, "saveDaemonState").mockResolvedValue(undefined);
+    vi.spyOn(daemon as any, "processCronTasks").mockResolvedValue(undefined);
+    vi.spyOn(daemon as any, "processScheduleEntries").mockResolvedValue(undefined);
+    const adaptiveIntervalSpy = vi
+      .spyOn(daemon as any, "calculateAdaptiveInterval")
+      .mockReturnValue(30_000);
+
+    let scheduledSleepMs: number | null = null;
+    const sleepSpy = vi.spyOn(daemon as any, "sleep").mockImplementation(async (...args: unknown[]) => {
+      scheduledSleepMs = args[0] as number;
+      daemon.stop();
+    });
+
+    const runLoopPromise = (daemon as any).runLoop();
+    currentStartPromise = runLoopPromise;
+
+    await runLoopPromise;
+
+    expect(sleepSpy).toHaveBeenCalledOnce();
+    expect(adaptiveIntervalSpy).toHaveBeenCalledOnce();
+    expect(scheduledSleepMs).toBe(5_000);
+  }, 10_000);
+
   it("queues an observation wake-up for resident preemptive checks", async () => {
     const llmClient = {
       sendMessage: vi.fn().mockResolvedValue({
@@ -858,6 +937,26 @@ describe("DaemonRunner durable runtime", () => {
     await startPromise;
   });
 
+  it("restores active goals from an unclean previous state when interrupted goals are absent", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "daemon-state.json"),
+      JSON.stringify({
+        pid: 12345,
+        started_at: new Date().toISOString(),
+        last_loop_at: null,
+        loop_count: 3,
+        active_goals: ["goal-crashed", "goal-extra"],
+        status: "running",
+        crash_count: 1,
+        last_error: "simulated crash",
+      })
+    );
+
+    const deps = makeDeps(tmpDir, { config: { check_interval_ms: 50 } });
+    const restored = await restoreInterruptedGoals(tmpDir, [], deps.logger);
+    expect(restored).toEqual(["goal-crashed", "goal-extra"]);
+  });
+
   it("starts and stops the event server when provided", async () => {
     const eventServer = makeEventServerMock();
     const deps = makeDeps(tmpDir, {
@@ -899,6 +998,110 @@ describe("DaemonRunner durable runtime", () => {
     expect(fs.existsSync(path.join(runtimeDir, "health", "daemon.json"))).toBe(true);
     expect(fs.existsSync(path.join(runtimeDir, "queue.json"))).toBe(true);
     expect(fs.existsSync(path.join(tmpDir, "pulseed.pid"))).toBe(false);
+  });
+
+  it("persists supervisor state inside the runtime root", async () => {
+    const eventServer = makeEventServerMock();
+    const deps = makeDeps(tmpDir, {
+      config: { check_interval_ms: 50, runtime_journal_v2: true },
+      eventServer: eventServer as unknown as DaemonDeps["eventServer"],
+    });
+    const daemon = new DaemonRunner(deps);
+    currentDaemon = daemon;
+
+    const startPromise = daemon.start(["goal-1"]);
+    currentStartPromise = startPromise;
+    await waitFor(() => fs.existsSync(path.join(tmpDir, "runtime", "supervisor-state.json")));
+
+    daemon.stop();
+    await startPromise;
+
+    expect(fs.existsSync(path.join(tmpDir, "runtime", "supervisor-state.json"))).toBe(true);
+  });
+
+  it("reconciles running tasks on startup, preserves retry context, and restores the goal", async () => {
+    const stateManager = new StateManager(tmpDir);
+    await stateManager.init();
+    const runningTask = makeTask({
+      id: "task-recover",
+      goal_id: "goal-recover",
+      status: "running",
+      started_at: new Date(Date.now() - 5_000).toISOString(),
+    });
+    await stateManager.writeRaw(`tasks/${runningTask.goal_id}/${runningTask.id}.json`, runningTask);
+
+    const eventServer = makeEventServerMock();
+    const deps = makeDeps(tmpDir, {
+      stateManager: stateManager as unknown as DaemonDeps["stateManager"],
+      config: { check_interval_ms: 50 },
+      eventServer: eventServer as unknown as DaemonDeps["eventServer"],
+    });
+    const daemon = new DaemonRunner(deps);
+    currentDaemon = daemon;
+
+    const startPromise = daemon.start([]);
+    currentStartPromise = startPromise;
+
+    const runMock = (deps.coreLoop as unknown as { run: ReturnType<typeof vi.fn> }).run;
+    await waitFor(() => runMock.mock.calls.some((call: unknown[]) => call[0] === "goal-recover"));
+
+    daemon.stop();
+    await startPromise;
+
+    const reconciledTask = await stateManager.readRaw(
+      `tasks/${runningTask.goal_id}/${runningTask.id}.json`
+    ) as Record<string, unknown>;
+    expect(reconciledTask.status).toBe("error");
+    expect(typeof reconciledTask.completed_at).toBe("string");
+    expect(String(reconciledTask.execution_output)).toContain("[RECOVERED]");
+
+    const history = await stateManager.readRaw(`tasks/${runningTask.goal_id}/task-history.json`) as Array<Record<string, unknown>>;
+    expect(history.at(-1)).toMatchObject({
+      task_id: "task-recover",
+      status: "error",
+    });
+
+    const ledger = await stateManager.readRaw(
+      `tasks/${runningTask.goal_id}/ledger/${runningTask.id}.json`
+    ) as { events: Array<{ type: string; reason?: string; action?: string }> };
+    expect(ledger.events.map((event) => event.type)).toEqual(["failed", "retried"]);
+    expect(ledger.events[1]).toMatchObject({
+      action: "keep",
+      reason: "daemon restarted; task preserved for retry",
+    });
+  });
+
+  it("marks stale running pipelines as interrupted on startup", async () => {
+    const stateManager = new StateManager(tmpDir);
+    await stateManager.init();
+    await stateManager.writeRaw("pipelines/task-pipeline.json", {
+      pipeline_id: "pipe-1",
+      task_id: "task-pipeline",
+      current_stage_index: 1,
+      completed_stages: [],
+      status: "running",
+      started_at: new Date(Date.now() - 10_000).toISOString(),
+      updated_at: new Date(Date.now() - 5_000).toISOString(),
+    });
+
+    const eventServer = makeEventServerMock();
+    const deps = makeDeps(tmpDir, {
+      stateManager: stateManager as unknown as DaemonDeps["stateManager"],
+      config: { check_interval_ms: 50 },
+      eventServer: eventServer as unknown as DaemonDeps["eventServer"],
+    });
+    const daemon = new DaemonRunner(deps);
+    currentDaemon = daemon;
+
+    const startPromise = daemon.start([]);
+    currentStartPromise = startPromise;
+    await pollForJsonMatch<{ status: string }>(
+      path.join(tmpDir, "pipelines", "task-pipeline.json"),
+      (value) => value.status === "interrupted"
+    );
+
+    daemon.stop();
+    await startPromise;
   });
 
   it("holds the leader lock, emits runtime heartbeats, and releases leadership on stop", async () => {
@@ -1033,6 +1236,66 @@ describe("DaemonRunner durable runtime", () => {
           envelope: expect.objectContaining({
             name: "goal_activated",
             goal_id: "g-recover",
+          }),
+        }),
+      ])
+    );
+  });
+
+  it("reclaims expired startup claims even after three prior attempts", async () => {
+    const eventServer = makeEventServerMock();
+    const runtimeDir = path.join(tmpDir, "runtime");
+    fs.mkdirSync(runtimeDir, { recursive: true });
+
+    const queue = new JournalBackedQueue({
+      journalPath: path.join(runtimeDir, "queue.json"),
+    });
+    const envelope = createEnvelope({
+      type: "event",
+      name: "goal_activated",
+      source: "restart-test",
+      goal_id: "g-many-attempts",
+      payload: {},
+      priority: "normal",
+    });
+    queue.accept(envelope);
+    const claim1 = queue.claim("worker-1", 100);
+    expect(claim1).not.toBeNull();
+    expect(queue.nack(claim1!.claimToken, "boom", true)).toBe(true);
+    const claim2 = queue.claim("worker-2", 100);
+    expect(claim2).not.toBeNull();
+    expect(queue.nack(claim2!.claimToken, "boom", true)).toBe(true);
+    const claim3 = queue.claim("worker-3", 1);
+    expect(claim3?.attempt).toBe(3);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const deps = makeDeps(tmpDir, {
+      config: { check_interval_ms: 50 },
+      eventServer: eventServer as unknown as DaemonDeps["eventServer"],
+    });
+    const daemon = new DaemonRunner(deps);
+    currentDaemon = daemon;
+
+    const startPromise = daemon.start([]);
+    currentStartPromise = startPromise;
+
+    const runMock = (deps.coreLoop as unknown as { run: ReturnType<typeof vi.fn> }).run;
+    await waitFor(() => runMock.mock.calls.some((call: unknown[]) => call[0] === "g-many-attempts"));
+
+    daemon.stop();
+    await startPromise;
+
+    const persistedQueue = JSON.parse(
+      fs.readFileSync(path.join(runtimeDir, "queue.json"), "utf-8")
+    ) as {
+      records: Record<string, { status: string; deadletterReason?: string; envelope?: { goal_id?: string } }>;
+    };
+    expect(Object.values(persistedQueue.records)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: "completed",
+          envelope: expect.objectContaining({
+            goal_id: "g-many-attempts",
           }),
         }),
       ])

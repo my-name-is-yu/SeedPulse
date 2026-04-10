@@ -214,6 +214,10 @@ export async function generateTask(
   existingTasks?: string[],
   workspaceContext?: string
 ): Promise<{ task: Task | null; tokensUsed: number }> {
+  const isCodeExecutionContext =
+    adapterType === "openai_codex_cli" || adapterType === "claude_code_cli";
+  const maxGenerationTokens = isCodeExecutionContext ? 1024 : 1536;
+  const modelTier: "light" | "main" = isCodeExecutionContext ? "light" : "main";
   // Build optional reflections and lessons XML blocks
   let reflectionsBlock = "";
   let lessonsBlock = "";
@@ -279,9 +283,18 @@ export async function generateTask(
     reflectionsBlock || undefined,
     lessonsBlock || undefined
   );
+  deps.logger?.info("Task generation prompt prepared", {
+    goalId,
+    targetDimension,
+    prompt_chars: prompt.length,
+    existing_task_count: existingTasks?.length ?? 0,
+    workspace_context_chars: workspaceContext?.length ?? 0,
+    knowledge_context_chars: knowledgeContext?.length ?? 0,
+  });
 
   let generated: ReturnType<typeof LLMGeneratedTaskSchema.parse>;
   let generationTokens = 0;
+  const llmStartedAt = Date.now();
   if (deps.gateway) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -292,7 +305,7 @@ export async function generateTask(
         dimensionName: targetDimension,
         additionalContext: { task_prompt: prompt },
         responseSchema: LLMGeneratedTaskSchema as z.ZodSchema<ReturnType<typeof LLMGeneratedTaskSchema.parse>>,
-        maxTokens: 2048,
+        maxTokens: maxGenerationTokens,
       });
       console.log(`  [LLM] Task generation complete (${targetDimension}).`);
     } catch (err) {
@@ -311,8 +324,8 @@ export async function generateTask(
       {
         system:
           "You are a task generation assistant. Given a goal and target dimension, generate a concrete, actionable task. Respond with a JSON object inside a markdown code block.",
-        max_tokens: 2048,
-        model_tier: 'main',
+        max_tokens: maxGenerationTokens,
+        model_tier: modelTier,
       }
     );
     console.log(`  [LLM] Task generation complete (${targetDimension}).`);
@@ -327,6 +340,12 @@ export async function generateTask(
       throw err;
     }
   }
+  deps.logger?.info("Task generation LLM completed", {
+    goalId,
+    targetDimension,
+    duration_ms: Date.now() - llmStartedAt,
+    tokens_used: generationTokens,
+  });
 
   // §4.2 Duplicate task guard — reject if too similar to a recent completed/failed task
   const duplicate = await checkDuplicateTask(

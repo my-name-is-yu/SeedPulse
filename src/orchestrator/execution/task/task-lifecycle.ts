@@ -71,6 +71,7 @@ export type {
 } from "./task-pipeline-types.js";
 import type { TaskCycleResult } from "./task-execution-types.js";
 import { createSkippedTaskResult } from "./task-execution-types.js";
+import { appendTaskOutcomeEvent } from "./task-outcome-ledger.js";
 
 export interface TaskLifecycleCoreDeps {
   stateManager: StateManager;
@@ -321,6 +322,27 @@ export class TaskLifecycle {
     existingTasks?: string[],
     workspaceContext?: string
   ): Promise<TaskCycleResult> {
+    const runPhase = async <T>(phase: string, fn: () => Promise<T>): Promise<T> => {
+      const phaseStart = Date.now();
+      this.logger?.info("TaskLifecycle: phase started", { goalId, phase });
+      try {
+        const value = await fn();
+        this.logger?.info("TaskLifecycle: phase completed", {
+          goalId,
+          phase,
+          duration_ms: Date.now() - phaseStart,
+        });
+        return value;
+      } catch (err) {
+        this.logger?.warn("TaskLifecycle: phase failed", {
+          goalId,
+          phase,
+          duration_ms: Date.now() - phaseStart,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
+    };
     // 1. Select target dimension (with confidence-tier weighting when available)
     let goalDimensions: Dimension[] | undefined;
     try {
@@ -330,17 +352,31 @@ export class TaskLifecycle {
       // If goal load fails, fall back to unweighted selection
       this.logger?.warn(`[TaskLifecycle] Failed to load goal "${goalId}" for dimension selection, using unweighted fallback: ${err instanceof Error ? err.message : String(err)}`);
     }
-    const targetDimension = this.selectTargetDimension(gapVector, driveContext, goalDimensions);
+    const targetDimension = await runPhase("select-target-dimension", async () =>
+      this.selectTargetDimension(gapVector, driveContext, goalDimensions)
+    );
 
-    const enrichedKnowledgeContext = await buildEnrichedKnowledgeContext({
-      goalId,
-      knowledgeContext,
-      ...this.enrichmentDeps(),
-    });
+    const enrichedKnowledgeContext = await runPhase("enrich-knowledge-context", () =>
+      buildEnrichedKnowledgeContext({
+        goalId,
+        knowledgeContext,
+        ...this.enrichmentDeps(),
+      })
+    );
 
     // 3. Generate task (optionally with injected knowledge context)
     void this.hookManager?.emit("PreTaskCreate", { goal_id: goalId, data: { task_type: targetDimension } });
-    const genResult = await this._generateTaskWithTokens(goalId, targetDimension, undefined, enrichedKnowledgeContext, adapter.adapterType, existingTasks, workspaceContext);
+    const genResult = await runPhase("generate-task", () =>
+      this._generateTaskWithTokens(
+        goalId,
+        targetDimension,
+        undefined,
+        enrichedKnowledgeContext,
+        adapter.adapterType,
+        existingTasks,
+        workspaceContext
+      )
+    );
     let taskCycleTokens = genResult.tokensUsed;
     const task = genResult.task;
     if (task === null) {
@@ -351,21 +387,41 @@ export class TaskLifecycle {
     this.logger?.info(`[task] created: ${task.work_description?.substring(0, 120)}`, { taskId: task.id });
 
     // 4. Pre-execution checks: ethics, capability, irreversible approval
-    const preCheckResult = await runPreExecutionChecks(
-      {
-        ethicsGate: this.ethicsGate,
-        capabilityDetector: this.capabilityDetector,
-        approvalFn: this.approvalFn,
-        checkIrreversibleApproval: (t) => this.checkIrreversibleApproval(t),
-      },
-      task
+    const preCheckResult = await runPhase("pre-execution-checks", () =>
+      runPreExecutionChecks(
+        {
+          ethicsGate: this.ethicsGate,
+          capabilityDetector: this.capabilityDetector,
+          approvalFn: this.approvalFn,
+          checkIrreversibleApproval: (t) => this.checkIrreversibleApproval(t),
+        },
+        task
+      )
     );
-    if (preCheckResult !== null) return preCheckResult;
+    if (preCheckResult !== null) {
+      await appendTaskOutcomeEvent(this.stateManager, {
+        task,
+        type: "abandoned",
+        attempt: task.consecutive_failure_count + 1,
+        action: preCheckResult.action,
+        verificationResult: preCheckResult.verificationResult,
+        reason: preCheckResult.verificationResult.evidence[0]?.description,
+      });
+      return preCheckResult;
+    }
+
+    await appendTaskOutcomeEvent(this.stateManager, {
+      task,
+      type: "acked",
+      attempt: task.consecutive_failure_count + 1,
+    });
 
     // 4. Execute task
     this.logger?.debug(`[DEBUG-TL] Executing task ${task.id} via adapter ${adapter.adapterType}`);
     void this.hookManager?.emit("PreExecute", { goal_id: goalId, data: { task_id: task.id } });
-    const executionResult = await this.executeTask(task, adapter, workspaceContext);
+    const executionResult = await runPhase("execute-task", () =>
+      this.executeTask(task, adapter, workspaceContext)
+    );
     void this.hookManager?.emit("PostExecute", { goal_id: goalId, data: { task_id: task.id, success: executionResult.success } });
     this.logger?.info(`[task] executed: ${executionResult.success ? 'success' : 'failed'}`, { taskId: task.id });
     this.logger?.debug(`[DEBUG-TL] Execution result: success=${executionResult.success}, stopped=${executionResult.stopped_reason}, error=${executionResult.error}, output=${executionResult.output?.substring(0, 200)}`);
@@ -383,25 +439,31 @@ export class TaskLifecycle {
     // 5. Verify task — use token accumulator to capture LLM tokens consumed during verification
     const verifierTokenAccumulator = { tokensUsed: 0 };
     const verifierDepsWithAccumulator = { ...this.verifierDeps(), _tokenAccumulator: verifierTokenAccumulator };
-    const verificationResult = await _verifyTask(verifierDepsWithAccumulator, taskForVerification, executionResult);
+    const verificationResult = await runPhase("verify-task", () =>
+      _verifyTask(verifierDepsWithAccumulator, taskForVerification, executionResult)
+    );
     taskCycleTokens += verifierTokenAccumulator.tokensUsed;
     this.logger?.debug(`[DEBUG-TL] Verification: verdict=${verificationResult.verdict}, evidence=${verificationResult.evidence.map(e => e.description).join('; ').substring(0, 300)}`);
 
     // 6. Handle verdict
-    const verdictResult = await this.handleVerdict(taskForVerification, verificationResult);
+    const verdictResult = await runPhase("handle-verdict", () =>
+      this.handleVerdict(taskForVerification, verificationResult)
+    );
     this.logger?.info(`[task] verdict: ${verdictResult.action}`, { taskId: task.id });
 
-    await persistTaskCycleSideEffects({
-      goalId,
-      targetDimension,
-      task: verdictResult.task,
-      action: verdictResult.action,
-      verificationResult,
-      executionResult,
-      adapter,
-      ...this.sideEffectDeps(),
-      gapValue: gapVector?.gaps?.[0]?.normalized_gap,
-    });
+    await runPhase("persist-task-side-effects", () =>
+      persistTaskCycleSideEffects({
+        goalId,
+        targetDimension,
+        task: verdictResult.task,
+        action: verdictResult.action,
+        verificationResult,
+        executionResult,
+        adapter,
+        ...this.sideEffectDeps(),
+        gapValue: gapVector?.gaps?.[0]?.normalized_gap,
+      })
+    );
 
     return {
       task: verdictResult.task,

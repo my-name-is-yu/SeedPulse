@@ -14,6 +14,7 @@ import {
   type LoopIterationResult,
 } from "./contracts.js";
 import { logRewardComputation } from "../../../platform/drive/reward-log.js";
+import { hasValidatedDimensions } from "../../goal/goal-refiner.js";
 
 /** Minimal context passed to every phase function. */
 export interface PhaseCtx {
@@ -117,11 +118,11 @@ export async function phaseAutoDecompose(
     return;
   }
 
-  const force = isFirstIteration === true;
+  const force = isFirstIteration === true && (goal.dimensions.length === 0 || !hasValidatedDimensions(goal));
   if (force) {
     logger?.info("[decompose] forcing goal decomposition on first iteration", { goalId });
   } else {
-    logger?.info("[CoreLoop] phaseAutoDecompose: decomposing abstract goal", { goalId });
+    logger?.info("[CoreLoop] phaseAutoDecompose: delegating refinement check", { goalId });
   }
   decomposedGoals?.add(goalId);
   try {
@@ -408,10 +409,15 @@ export async function scoreDrivesAndCheckKnowledge(
       // 2. Not the first iteration — prevents repeated gap detection from blocking
       //    task execution every loop. Gap detection runs once; after that, let the
       //    normal task cycle proceed.
+      const isCodeExecutionContext =
+        ctx.config.adapterType === "openai_codex_cli" ||
+        ctx.config.adapterType === "claude_code_cli" ||
+        goal.constraints.some((constraint) => constraint.startsWith("workspace_path:"));
       const skipGapDetection =
         observationContext.confidence <= 0.3 ||
         !Number.isFinite(observationContext.confidence) ||
-        loopIndex > 0;
+        loopIndex > 0 ||
+        isCodeExecutionContext;
       const gapSignal = skipGapDetection
         ? null
         : await ctx.deps.knowledgeManager.detectKnowledgeGap(observationContext);

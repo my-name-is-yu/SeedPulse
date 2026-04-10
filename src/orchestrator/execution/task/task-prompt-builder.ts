@@ -2,6 +2,87 @@ import * as _path from "node:path";
 import { access, readFile } from "node:fs/promises";
 import type { StateManager } from "../../../base/state/state-manager.js";
 
+interface RepositoryPromptContext {
+  projectName: string;
+  projectDescription: string;
+}
+
+const MAX_KNOWLEDGE_CONTEXT_CHARS = 4_000;
+const MAX_WORKSPACE_CONTEXT_CHARS = 6_000;
+const MAX_EXISTING_TASKS_CHARS = 2_000;
+const MAX_FAILURE_CONTEXT_CHARS = 2_000;
+
+const repositoryContextCache = new Map<string, Promise<RepositoryPromptContext>>();
+const referencedIssueContextCache = new Map<string, Promise<string>>();
+
+function clampSection(content: string, maxChars: number, label: string): string {
+  if (content.length <= maxChars) return content;
+  return `${content.slice(0, maxChars)}\n...[${label} truncated to ${maxChars} chars]`;
+}
+
+async function getRepositoryPromptContext(repoRoot: string): Promise<RepositoryPromptContext> {
+  const cached = repositoryContextCache.get(repoRoot);
+  if (cached) {
+    return cached;
+  }
+
+  const contextPromise = (async () => {
+    // Read package.json once per repo root; prompt text should stay stable across daemon cycles.
+    const pkgPath = _path.join(repoRoot, "package.json");
+    const exists = await access(pkgPath)
+      .then(() => true)
+      .catch(() => false);
+
+    if (!exists) {
+      return { projectName: "", projectDescription: "" };
+    }
+
+    try {
+      const content = await readFile(pkgPath, "utf-8");
+      const pkg = JSON.parse(content) as {
+        name?: string;
+        description?: string;
+      };
+
+      return {
+        projectName: pkg.name ?? "",
+        projectDescription: pkg.description ?? "",
+      };
+    } catch {
+      // silently ignore — repo context is best-effort
+      return { projectName: "", projectDescription: "" };
+    }
+  })();
+
+  repositoryContextCache.set(repoRoot, contextPromise);
+  return contextPromise;
+}
+
+async function getReferencedIssueContext(repoRoot: string, issueLookupText: string): Promise<string> {
+  const cacheKey = `${repoRoot}\u0000${issueLookupText}`;
+  const cached = referencedIssueContextCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const issueContextPromise = (async () => {
+    if (!issueLookupText) {
+      return "";
+    }
+
+    try {
+      const { fetchIssueContext } = await import("../context/issue-context-fetcher.js");
+      return await fetchIssueContext(issueLookupText);
+    } catch {
+      // issue-context-fetcher not available
+      return "";
+    }
+  })();
+
+  referencedIssueContextCache.set(cacheKey, issueContextPromise);
+  return issueContextPromise;
+}
+
 /**
  * Build the LLM prompt used to generate a task for the given goal and target dimension.
  *
@@ -107,43 +188,31 @@ Constraints:
   }
 
   const knowledgeSection = knowledgeContext
-    ? `\nRelevant domain knowledge:\n${knowledgeContext}\n`
+    ? `\nRelevant domain knowledge:\n${clampSection(knowledgeContext, MAX_KNOWLEDGE_CONTEXT_CHARS, "knowledge context")}\n`
     : "";
 
-  // Read package.json for project identity (best-effort, no throw)
-  let projectName = "";
-  let projectDescription = "";
-  try {
-    const pkgPath = _path.join(process.cwd(), "package.json");
-    const exists = await access(pkgPath)
-      .then(() => true)
-      .catch(() => false);
-    if (exists) {
-      const content = await readFile(pkgPath, "utf-8");
-      const pkg = JSON.parse(content) as {
-        name?: string;
-        description?: string;
-      };
-      projectName = pkg.name ?? "";
-      projectDescription = pkg.description ?? "";
-    }
-  } catch {
-    // silently ignore — repo context is best-effort
-  }
+  const repoRoot = process.cwd();
+  const issueLookupText = [goal?.title, goal?.description, ...parentChain.map((p) => `${p.title} ${p.description}`)]
+    .filter(Boolean)
+    .join(" ");
+  const [repositoryContext, issueSection] = await Promise.all([
+    getRepositoryPromptContext(repoRoot),
+    getReferencedIssueContext(repoRoot, issueLookupText),
+  ]);
 
   const repoContextParts: string[] = [];
-  if (projectName) repoContextParts.push(`Project name: ${projectName}`);
-  if (projectDescription) repoContextParts.push(`Project description: ${projectDescription}`);
+  if (repositoryContext.projectName) repoContextParts.push(`Project name: ${repositoryContext.projectName}`);
+  if (repositoryContext.projectDescription) repoContextParts.push(`Project description: ${repositoryContext.projectDescription}`);
   const repoSection = repoContextParts.length > 0
     ? `\nRepository context:\n${repoContextParts.join("\n")}\n`
     : "";
 
   const existingTasksSection = existingTasks && existingTasks.length > 0
-    ? `\n=== Previously Generated Tasks (avoid duplication) ===\n${existingTasks.join("\n")}\nGenerate a task that addresses a DIFFERENT aspect of the goal than the existing tasks above.\n`
+    ? `\n=== Previously Generated Tasks (avoid duplication) ===\n${clampSection(existingTasks.join("\n"), MAX_EXISTING_TASKS_CHARS, "existing tasks")}\nGenerate a task that addresses a DIFFERENT aspect of the goal than the existing tasks above.\n`
     : "";
 
   const workspaceSection = workspaceContext
-    ? `\n=== Current Workspace State ===\n${workspaceContext}\n`
+    ? `\n=== Current Workspace State ===\n${clampSection(workspaceContext, MAX_WORKSPACE_CONTEXT_CHARS, "workspace context")}\n`
     : "\n=== Current Workspace State ===\nNo workspace context available.\n";
 
   // §4.7 Inject last failure context if available
@@ -157,7 +226,11 @@ Constraints:
       criteria_total?: number;
     } | null;
     if (failureCtx && failureCtx.prev_task_description) {
-      failureContextSection = `\n前回のタスク「${failureCtx.prev_task_description}」は以下の理由で${failureCtx.verdict ?? "failed"}と判定された:\n${failureCtx.reasoning ?? ""}\n達成基準: ${failureCtx.criteria_met ?? 0}/${failureCtx.criteria_total ?? 0}\nこの失敗を踏まえて、異なるアプローチのタスクを生成すること。\n`;
+      failureContextSection = clampSection(
+        `\n前回のタスク「${failureCtx.prev_task_description}」は以下の理由で${failureCtx.verdict ?? "failed"}と判定された:\n${failureCtx.reasoning ?? ""}\n達成基準: ${failureCtx.criteria_met ?? 0}/${failureCtx.criteria_total ?? 0}\nこの失敗を踏まえて、異なるアプローチのタスクを生成すること。\n`,
+        MAX_FAILURE_CONTEXT_CHARS,
+        "failure context"
+      );
     }
   } catch {
     // no failure context — skip injection
@@ -167,16 +240,6 @@ Constraints:
   const parentSection = parentChain.length > 0
     ? `## Parent Goal Context\n${parentChain.map((p, i) => `${"  ".repeat(i)}Goal: ${p.title}\n${"  ".repeat(i)}Description: ${p.description}`).join("\n")}`
     : "";
-
-  // Referenced Issue section (dynamic import — graceful when absent)
-  let issueSection = "";
-  try {
-    const { fetchIssueContext } = await import("../context/issue-context-fetcher.js");
-    const allText = [goal?.title, goal?.description, ...parentChain.map(p => `${p.title} ${p.description}`)].filter(Boolean).join(" ");
-    issueSection = await fetchIssueContext(allText);
-  } catch {
-    // issue-context-fetcher not available
-  }
 
   // Task Purpose section
   const purposeSection = goal

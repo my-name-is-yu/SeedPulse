@@ -389,7 +389,7 @@ describe("CoreLoop", async () => {
       };
 
       const depsWithKM = { ...deps, knowledgeManager: knowledgeManager as any };
-      const loop = new CoreLoop(depsWithKM, { delayBetweenLoopsMs: 0 });
+      const loop = new CoreLoop(depsWithKM, { delayBetweenLoopsMs: 0, adapterType: "test_adapter" as any });
       const result = await loop.runOneIteration("goal-1", 0);
 
       expect(knowledgeManager.detectKnowledgeGap).toHaveBeenCalledOnce();
@@ -415,10 +415,39 @@ describe("CoreLoop", async () => {
       };
 
       const depsWithKM = { ...deps, knowledgeManager: knowledgeManager as any };
-      const loop = new CoreLoop(depsWithKM, { delayBetweenLoopsMs: 0 });
+      const loop = new CoreLoop(depsWithKM, { delayBetweenLoopsMs: 0, adapterType: "test_adapter" as any });
       await loop.runOneIteration("goal-1", 0);
 
       expect(knowledgeManager.detectKnowledgeGap).toHaveBeenCalledOnce();
+      expect(knowledgeManager.generateAcquisitionTask).not.toHaveBeenCalled();
+      expect(mocks.taskLifecycle.runTaskCycle).toHaveBeenCalledOnce();
+    });
+
+    it("skips knowledge-gap diversion for workspace-backed code goals", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      await mocks.stateManager.saveGoal(makeGoal({
+        constraints: [`workspace_path:${tmpDir}`],
+      }));
+
+      const knowledgeManager = {
+        detectKnowledgeGap: vi.fn().mockResolvedValue({
+          signal_type: "interpretation_difficulty" as const,
+          missing_knowledge: "Unknown domain",
+          source_step: "gap_recognition",
+          related_dimension: null,
+        }),
+        generateAcquisitionTask: vi.fn(),
+        getRelevantKnowledge: vi.fn().mockResolvedValue([]),
+        saveKnowledge: vi.fn(),
+        loadKnowledge: vi.fn().mockResolvedValue([]),
+        checkContradiction: vi.fn(),
+      };
+
+      const depsWithKM = { ...deps, knowledgeManager: knowledgeManager as any };
+      const loop = new CoreLoop(depsWithKM, { delayBetweenLoopsMs: 0 });
+      await loop.runOneIteration("goal-1", 0);
+
+      expect(knowledgeManager.detectKnowledgeGap).not.toHaveBeenCalled();
       expect(knowledgeManager.generateAcquisitionTask).not.toHaveBeenCalled();
       expect(mocks.taskLifecycle.runTaskCycle).toHaveBeenCalledOnce();
     });

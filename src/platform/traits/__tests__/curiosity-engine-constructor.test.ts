@@ -3,6 +3,7 @@ import { CuriosityEngine } from "../curiosity-engine.js";
 import type { CuriosityEngineDeps } from "../curiosity-engine.js";
 import type { Goal, Dimension } from "../../../base/types/goal.js";
 import type { CuriosityProposal, CuriosityTrigger } from "../../../base/types/curiosity.js";
+import { CuriosityConfigSchema } from "../../../base/types/curiosity.js";
 import type { StallState } from "../../../base/types/stall.js";
 import { makeGoal } from "../../../../tests/helpers/fixtures.js";
 
@@ -125,6 +126,27 @@ describe("CuriosityEngine — constructor", () => {
       },
     });
     const engine = new CuriosityEngine(deps);
+    expect(engine).toBeInstanceOf(CuriosityEngine);
+  });
+
+  it("fills default resource_budget when config omits it", async () => {
+    const parsed = CuriosityConfigSchema.parse({
+      enabled: true,
+      periodic_exploration_hours: 48,
+    });
+
+    expect(parsed.resource_budget).toEqual(DEFAULT_RESOURCE_BUDGET);
+  });
+
+  it("creates when partial config omits resource_budget", async () => {
+    const deps = createMockDeps({
+      config: {
+        enabled: true,
+        periodic_exploration_hours: 48,
+      },
+    });
+    const engine = new CuriosityEngine(deps);
+
     expect(engine).toBeInstanceOf(CuriosityEngine);
   });
 

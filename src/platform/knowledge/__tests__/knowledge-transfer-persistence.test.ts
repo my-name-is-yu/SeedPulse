@@ -7,7 +7,7 @@ import { StateManager } from "../../../base/state/state-manager.js";
 import { VectorIndex } from "../vector-index.js";
 import { MockEmbeddingClient } from "../embedding-client.js";
 import { createMockLLMClient } from "../../../../tests/helpers/mock-llm.js";
-import type { LearnedPattern } from "../../../base/types/learning.js";
+import type { CrossGoalPattern, LearnedPattern } from "../../../base/types/learning.js";
 
 function makeTmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "kt-persist-"));
@@ -25,6 +25,21 @@ function makePattern(overrides: Partial<LearnedPattern> = {}): LearnedPattern {
     embedding_id: overrides.embedding_id ?? null,
     created_at: overrides.created_at ?? new Date().toISOString(),
     last_applied_at: overrides.last_applied_at ?? null,
+  };
+}
+
+function makeCrossGoalPattern(overrides: Partial<CrossGoalPattern> = {}): CrossGoalPattern {
+  return {
+    id: overrides.id ?? "cross-pattern-1",
+    patternType: overrides.patternType ?? "success",
+    description: overrides.description ?? "Small-scope iterations recover stalled goals.",
+    sourceGoalIds: overrides.sourceGoalIds ?? ["goal_a", "goal_b"],
+    feedbackType: overrides.feedbackType ?? "scope_sizing",
+    confidence: overrides.confidence ?? 0.8,
+    applicableConditions: overrides.applicableConditions ?? ["goal is stalled"],
+    suggestedAction: overrides.suggestedAction ?? "Reduce scope and retry",
+    occurrenceCount: overrides.occurrenceCount ?? 3,
+    lastObserved: overrides.lastObserved ?? new Date().toISOString(),
   };
 }
 
@@ -219,5 +234,45 @@ describe("KnowledgeTransfer snapshot persistence", () => {
     const snapshot = await kt2.listTransferSnapshot();
     expect(snapshot.transfers).toHaveLength(1);
     expect(snapshot.transfers[0]!.candidate_id).toBe(firstPass[0]!.candidate_id);
+  });
+
+  it("persists cross-goal patterns across fresh instances", async () => {
+    const tmpDir = makeTmpDir();
+    const stateManager1 = new StateManager(tmpDir);
+    const vectorIndex1 = new VectorIndex(
+      path.join(tmpDir, "vectors.json"),
+      new MockEmbeddingClient()
+    );
+    const kt1 = new KnowledgeTransfer({
+      llmClient: createMockLLMClient([]),
+      knowledgeManager: makeMockKnowledgeManager(),
+      vectorIndex: vectorIndex1,
+      learningPipeline: makeMockLearningPipeline({}),
+      ethicsGate: makeMockEthicsGate(),
+      stateManager: stateManager1,
+    });
+
+    await kt1.listTransferSnapshot();
+    const pattern = makeCrossGoalPattern();
+    await kt1.storePattern(pattern);
+
+    const stateManager2 = new StateManager(tmpDir);
+    const vectorIndex2 = new VectorIndex(
+      path.join(tmpDir, "vectors.json"),
+      new MockEmbeddingClient()
+    );
+    const kt2 = new KnowledgeTransfer({
+      llmClient: createMockLLMClient([]),
+      knowledgeManager: makeMockKnowledgeManager(),
+      vectorIndex: vectorIndex2,
+      learningPipeline: makeMockLearningPipeline({}),
+      ethicsGate: makeMockEthicsGate(),
+      stateManager: stateManager2,
+    });
+
+    await kt2.listTransferSnapshot({ forceRefresh: true });
+    const restored = kt2.retrievePatterns({ patternType: "success" });
+    expect(restored).toHaveLength(1);
+    expect(restored[0]!.id).toBe(pattern.id);
   });
 });

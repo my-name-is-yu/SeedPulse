@@ -94,6 +94,23 @@ describe("GoalWorker", () => {
       expect(result.error).toBe("network failure");
       expect(result.totalIterations).toBe(0);
     });
+
+    it("does not convert a successful loop into worker error when onRunComplete throws", async () => {
+      const loopResult = makeLoopResult({ goalId: "g1", totalIterations: 2, finalStatus: "completed" });
+      const worker = new GoalWorker(
+        makeMockCoreLoop(loopResult) as any,
+        undefined,
+        {
+          onRunComplete: vi.fn().mockRejectedValue(new Error("state write failed")),
+        }
+      );
+
+      const result = await worker.execute("g1");
+
+      expect(result.status).toBe("completed");
+      expect(result.totalIterations).toBe(2);
+      expect(result.error).toBeUndefined();
+    });
   });
 
   // ─── 3. requestExtend() ───

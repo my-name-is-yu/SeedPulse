@@ -536,6 +536,27 @@ export async function runTaskCycleWithContext(
 ): Promise<boolean> {
   const { handleCapabilityAcquisition, incrementTransferCounter, tryGenerateReport } = callbacks;
   try {
+    const runPhase = async <T>(phase: string, fn: () => Promise<T>): Promise<T> => {
+      const phaseStart = Date.now();
+      ctx.logger?.info("CoreLoop: task-cycle phase started", { goalId, phase });
+      try {
+        const value = await fn();
+        ctx.logger?.info("CoreLoop: task-cycle phase completed", {
+          goalId,
+          phase,
+          duration_ms: Date.now() - phaseStart,
+        });
+        return value;
+      } catch (err) {
+        ctx.logger?.warn("CoreLoop: task-cycle phase failed", {
+          goalId,
+          phase,
+          duration_ms: Date.now() - phaseStart,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
+    };
     const taskStartTime = Date.now();
     const driveContext = buildDriveContext(goal);
     const adapter = ctx.deps.adapterRegistry.getAdapter(ctx.config.adapterType);
@@ -565,12 +586,13 @@ export async function runTaskCycleWithContext(
     let knowledgeContext: string | undefined;
     if (ctx.deps.knowledgeManager) {
       try {
-        const topDimension = driveScores[0]?.dimension_name ?? goal.dimensions[0]?.name;
-        if (topDimension) {
-          let entries = await ctx.deps.knowledgeManager.getRelevantKnowledge(goalId, topDimension);
+        await runPhase("collect-knowledge-context", async () => {
+          const topDimension = driveScores[0]?.dimension_name ?? goal.dimensions[0]?.name;
+          if (!topDimension) return;
+          let entries = await ctx.deps.knowledgeManager!.getRelevantKnowledge(goalId, topDimension);
 
           if (activationFlags?.semanticContext) {
-            const semanticEntries = await ctx.deps.knowledgeManager.searchKnowledge(
+            const semanticEntries = await ctx.deps.knowledgeManager!.searchKnowledge(
               `${goal.title} ${goal.description} ${topDimension}`,
               5
             ).catch(() => []);
@@ -585,7 +607,7 @@ export async function runTaskCycleWithContext(
                 ).catch(() => null)
               : null;
             if (graph) {
-              const allEntries = await ctx.deps.knowledgeManager.loadKnowledge(goalId).catch(() => []);
+              const allEntries = await ctx.deps.knowledgeManager!.loadKnowledge(goalId).catch(() => []);
               const expanded = expandKnowledgeEntriesWithGraph(entries, allEntries, graph);
               entries = mergeUniqueKnowledgeEntries(entries, expanded.relatedEntries, 10);
               contradictionWarnings = expanded.contradictionWarnings;
@@ -602,7 +624,7 @@ export async function runTaskCycleWithContext(
                 .join("\n")}`;
             }
           }
-        }
+        });
       } catch {
         // Knowledge retrieval failure is non-fatal
       }
@@ -610,18 +632,20 @@ export async function runTaskCycleWithContext(
 
     if (activationFlags?.crossGoalLessons && ctx.deps.memoryLifecycleManager) {
       try {
-        const topDimension = driveScores[0]?.dimension_name ?? goal.dimensions[0]?.name ?? "";
-        const lessons = await ctx.deps.memoryLifecycleManager.searchCrossGoalLessons(
-          `${goal.title} ${goal.description} ${topDimension}`,
-          3
-        );
-        if (lessons.length > 0) {
-          const lessonsBlock = [
-            "Cross-goal lessons:",
-            ...lessons.map((lesson, index) => `${index + 1}. ${lesson.lesson}`),
-          ].join("\n");
-          knowledgeContext = knowledgeContext ? `${knowledgeContext}\n\n${lessonsBlock}` : lessonsBlock;
-        }
+        await runPhase("collect-cross-goal-lessons", async () => {
+          const topDimension = driveScores[0]?.dimension_name ?? goal.dimensions[0]?.name ?? "";
+          const lessons = await ctx.deps.memoryLifecycleManager!.searchCrossGoalLessons(
+            `${goal.title} ${goal.description} ${topDimension}`,
+            3
+          );
+          if (lessons.length > 0) {
+            const lessonsBlock = [
+              "Cross-goal lessons:",
+              ...lessons.map((lesson, index) => `${index + 1}. ${lesson.lesson}`),
+            ].join("\n");
+            knowledgeContext = knowledgeContext ? `${knowledgeContext}\n\n${lessonsBlock}` : lessonsBlock;
+          }
+        });
       } catch {
         // Non-fatal: proceed without cross-goal lessons.
       }
@@ -630,55 +654,57 @@ export async function runTaskCycleWithContext(
     // Tier-aware memory selection: use highDissatisfactionDimensions and dynamic budget
     if (ctx.deps.memoryLifecycleManager) {
       try {
-        const dimensions = goal.dimensions.map((d) => d.name);
-        const maxDissatisfaction = driveScores.length > 0
-          ? Math.max(...driveScores.map((s) => s.dissatisfaction))
-          : 0;
-        const satisfiedDimensions = goal.dimensions
-          .filter((d) => !result.completionJudgment?.blocking_dimensions.includes(d.name))
-          .map((d) => d.name);
-        const tierAwareMemory = await ctx.deps.memoryLifecycleManager.selectForWorkingMemoryTierAware(
-          goalId,
-          dimensions,
-          [],
-          10,
-          [goalId],
-          [],
-          satisfiedDimensions,
-          highDissatisfactionDimensions,
-          maxDissatisfaction
-        );
-
-        if (activationFlags?.semanticWorkingMemory) {
-          const topDimension = driveScores[0]?.dimension_name ?? goal.dimensions[0]?.name ?? "";
-          const semanticMemory = await ctx.deps.memoryLifecycleManager.selectForWorkingMemorySemantic(
+        await runPhase("select-working-memory", async () => {
+          const dimensions = goal.dimensions.map((d) => d.name);
+          const maxDissatisfaction = driveScores.length > 0
+            ? Math.max(...driveScores.map((s) => s.dissatisfaction))
+            : 0;
+          const satisfiedDimensions = goal.dimensions
+            .filter((d) => !result.completionJudgment?.blocking_dimensions.includes(d.name))
+            .map((d) => d.name);
+          const tierAwareMemory = await ctx.deps.memoryLifecycleManager!.selectForWorkingMemoryTierAware(
             goalId,
-            `${goal.title} ${goal.description} ${topDimension}`,
             dimensions,
             [],
-            5,
-            driveScores.map((score) => ({
-              dimension: score.dimension_name,
-              dissatisfaction: score.dissatisfaction,
-              deadline: score.deadline,
-            }))
+            10,
+            [goalId],
+            [],
+            satisfiedDimensions,
+            highDissatisfactionDimensions,
+            maxDissatisfaction
           );
-          const mergedEntries = mergeWorkingMemorySelections(
-            tierAwareMemory.shortTerm,
-            semanticMemory.shortTerm,
-            5
-          );
-          if (mergedEntries.length > 0) {
-            const memoryBlock = [
-              "Working memory:",
-              ...mergedEntries.map(
-                (entry, index) =>
-                  `${index + 1}. [${entry.data_type}] ${JSON.stringify(entry.data)}`
-              ),
-            ].join("\n");
-            knowledgeContext = knowledgeContext ? `${knowledgeContext}\n\n${memoryBlock}` : memoryBlock;
+
+          if (activationFlags?.semanticWorkingMemory) {
+            const topDimension = driveScores[0]?.dimension_name ?? goal.dimensions[0]?.name ?? "";
+            const semanticMemory = await ctx.deps.memoryLifecycleManager!.selectForWorkingMemorySemantic(
+              goalId,
+              `${goal.title} ${goal.description} ${topDimension}`,
+              dimensions,
+              [],
+              5,
+              driveScores.map((score) => ({
+                dimension: score.dimension_name,
+                dissatisfaction: score.dissatisfaction,
+                deadline: score.deadline,
+              }))
+            );
+            const mergedEntries = mergeWorkingMemorySelections(
+              tierAwareMemory.shortTerm,
+              semanticMemory.shortTerm,
+              5
+            );
+            if (mergedEntries.length > 0) {
+              const memoryBlock = [
+                "Working memory:",
+                ...mergedEntries.map(
+                  (entry, index) =>
+                    `${index + 1}. [${entry.data_type}] ${JSON.stringify(entry.data)}`
+                ),
+              ].join("\n");
+              knowledgeContext = knowledgeContext ? `${knowledgeContext}\n\n${memoryBlock}` : memoryBlock;
+            }
           }
-        }
+        });
       } catch {
         // Memory selection failure is non-fatal
       }
@@ -688,7 +714,7 @@ export async function runTaskCycleWithContext(
     let existingTasks: string[] | undefined;
     if (adapter.listExistingTasks) {
       try {
-        existingTasks = await adapter.listExistingTasks();
+        existingTasks = await runPhase("list-existing-tasks", () => adapter.listExistingTasks!());
       } catch {
         // Non-fatal: proceed without existing tasks context
       }
@@ -699,7 +725,9 @@ export async function runTaskCycleWithContext(
     if (ctx.deps.contextProvider) {
       try {
         const topDimension = driveScores[0]?.dimension_name ?? goal.dimensions[0]?.name ?? "";
-        workspaceContext = await ctx.deps.contextProvider(goalId, topDimension);
+        workspaceContext = await runPhase("build-workspace-context", () =>
+          ctx.deps.contextProvider!(goalId, topDimension)
+        );
       } catch {
         // Non-fatal: proceed without workspace context
       }

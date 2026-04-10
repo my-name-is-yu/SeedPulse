@@ -30,7 +30,7 @@ import {
   cmdCapabilityList,
   cmdCapabilityRemove,
 } from "./commands/config.js";
-import { cmdStart, cmdStop, cmdCron, cmdDaemonStatus } from "./commands/daemon.js";
+import { cmdStart, cmdStop, cmdCron, cmdDaemonStatus, cmdDaemonPing } from "./commands/daemon.js";
 import { cmdSuggest, cmdImprove } from "./commands/suggest.js";
 import { cmdSetup } from "./commands/setup.js";
 import { cmdKnowledgeList, cmdKnowledgeSearch, cmdKnowledgeStats } from "./commands/knowledge.js";
@@ -275,13 +275,17 @@ export async function dispatchCommand(
       return 0;
     }
 
+    if (daemonSubcommand === "ping") {
+      return await cmdDaemonPing(argv.slice(2));
+    }
+
     if (daemonSubcommand === "cron") {
       await cmdCron(argv.slice(2));
       return 0;
     }
 
     logger.error(`Unknown daemon subcommand: "${daemonSubcommand ?? ""}"`);
-    logger.error("Available: daemon start, daemon stop, daemon status, daemon cron");
+    logger.error("Available: daemon start, daemon stop, daemon status, daemon ping, daemon cron");
     return 1;
   }
 

@@ -1,14 +1,33 @@
+import * as path from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { buildTaskGenerationPrompt } from "../task/task-prompt-builder.js";
-import type { StateManager } from "../../../base/state/state-manager.js";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    access: vi.fn(),
+    readFile: vi.fn(),
+  };
+});
 
 // Mock issue-context-fetcher so dynamic import in buildTaskGenerationPrompt is controlled
 vi.mock("../context/issue-context-fetcher.js", () => ({
   fetchIssueContext: vi.fn(async () => ""),
 }));
 
+import * as fsp from "node:fs/promises";
+import { buildTaskGenerationPrompt } from "../task/task-prompt-builder.js";
 import { fetchIssueContext } from "../context/issue-context-fetcher.js";
+import type { StateManager } from "../../../base/state/state-manager.js";
+
 const mockFetchIssueContext = vi.mocked(fetchIssueContext);
+const mockAccess = vi.mocked(fsp.access);
+const mockReadFile = vi.mocked(fsp.readFile);
+const packageJsonContents = JSON.stringify({
+  name: "pulseed",
+  version: "0.4.3",
+  description: "AI agent orchestrator that gives existing agents the drive to persist — set a goal, and PulSeed observes, delegates, verifies, and loops until done.",
+});
 
 // Minimal Goal shape used in tests
 function makeGoal(overrides: {
@@ -40,6 +59,24 @@ function makeMockStateManager(goals: Record<string, ReturnType<typeof makeGoal>>
     readRaw: vi.fn(async () => null),
   } as unknown as StateManager;
 }
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockAccess.mockImplementation(async (filePath: unknown) => {
+    if (typeof filePath === "string" && path.basename(filePath) === "package.json") {
+      return undefined;
+    }
+
+    throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+  });
+  mockReadFile.mockImplementation(async (filePath: unknown) => {
+    if (typeof filePath === "string" && path.basename(filePath) === "package.json") {
+      return packageJsonContents;
+    }
+
+    throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+  });
+});
 
 describe("buildTaskGenerationPrompt — parent goal chain", () => {
   it("includes parent goal chain section when goal has parent_id", async () => {
@@ -192,5 +229,28 @@ describe("buildTaskGenerationPrompt — referenced issue section", () => {
     const prompt = await buildTaskGenerationPrompt(sm, "g-no-issue", "coverage");
 
     expect(prompt).not.toContain("## Referenced Issue");
+  });
+
+  it("memoizes repo and issue context across repeated prompt builds", async () => {
+    const goal = makeGoal({ id: "g-cache", title: "Cached prompt goal #301", description: "Confirm prompt context is reused" });
+    const sm = makeMockStateManager({ "g-cache": goal });
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue("/tmp/pulseed-cache-test");
+
+    try {
+      const prompt1 = await buildTaskGenerationPrompt(sm, "g-cache", "coverage");
+
+      expect(mockAccess).toHaveBeenCalledTimes(1);
+      expect(mockReadFile).toHaveBeenCalledTimes(1);
+      expect(mockFetchIssueContext).toHaveBeenCalledTimes(1);
+
+      const prompt2 = await buildTaskGenerationPrompt(sm, "g-cache", "coverage");
+
+      expect(prompt2).toBe(prompt1);
+      expect(mockAccess).toHaveBeenCalledTimes(1);
+      expect(mockReadFile).toHaveBeenCalledTimes(1);
+      expect(mockFetchIssueContext).toHaveBeenCalledTimes(1);
+    } finally {
+      cwdSpy.mockRestore();
+    }
   });
 });

@@ -29,6 +29,7 @@ export interface SupervisorDeps {
   driveSystem: DriveSystem;
   stateManager: StateManager;
   logger?: Logger;
+  onCycleComplete?: (goalId: string, result: WorkerResult) => Promise<void> | void;
   onGoalComplete?: (goalId: string, result: WorkerResult) => Promise<void> | void;
   onEscalation?: (goalId: string, crashCount: number, lastError: string) => void;
 }
@@ -88,7 +89,18 @@ export class LoopSupervisor {
   async start(initialGoalIds: string[]): Promise<void> {
     const workerCfg: GoalWorkerConfig = { iterationsPerCycle: this.config.iterationsPerCycle };
     for (let i = 0; i < this.config.concurrency; i++) {
-      this.workers.push(new GoalWorker(this.deps.coreLoopFactory(), workerCfg));
+      this.workers.push(new GoalWorker(this.deps.coreLoopFactory(), workerCfg, {
+        onRunComplete: async (loopResult, cumulativeIterations) => {
+          await this.deps.onCycleComplete?.(loopResult.goalId, {
+            goalId: loopResult.goalId,
+            status: loopResult.finalStatus,
+            totalIterations: cumulativeIterations,
+            durationMs: 0,
+            error: loopResult.errorMessage,
+          });
+          this.persistState();
+        },
+      }));
     }
 
     this.running = true;
@@ -123,7 +135,7 @@ export class LoopSupervisor {
         workerId: w.id,
         goalId: w.getCurrentGoalId(),
         startedAt: w.getStartedAt(),
-        iterations: 0,
+        iterations: w.getIterations(),
       })),
       crashCounts: Object.fromEntries(this.crashCounts),
       suspendedGoals: [...this.suspendedGoals],
@@ -139,12 +151,24 @@ export class LoopSupervisor {
     const workerCfg: GoalWorkerConfig = { iterationsPerCycle: this.config.iterationsPerCycle };
     this.workers = [];
     for (let i = 0; i < this.config.concurrency; i++) {
-      this.workers.push(new GoalWorker(coreLoopFactory(), workerCfg));
+      this.workers.push(new GoalWorker(coreLoopFactory(), workerCfg, {
+        onRunComplete: async (loopResult, cumulativeIterations) => {
+          await this.deps.onCycleComplete?.(loopResult.goalId, {
+            goalId: loopResult.goalId,
+            status: loopResult.finalStatus,
+            totalIterations: cumulativeIterations,
+            durationMs: 0,
+            error: loopResult.errorMessage,
+          });
+          this.persistState();
+        },
+      }));
     }
   }
 
   activateGoal(goalId: string): void {
     this.stoppedGoals.delete(goalId);
+    this.suspendedGoals.delete(goalId);
     this.enqueueGoalActivation(goalId);
   }
 
@@ -224,6 +248,7 @@ export class LoopSupervisor {
 
         this.activeGoals.set(goalId, worker);
         const execution = this.executeWorker(worker, dispatch);
+        this.persistState();
         this.runningExecutions.push(execution);
         execution.finally(() => {
           const idx = this.runningExecutions.indexOf(execution);
@@ -349,6 +374,9 @@ export class LoopSupervisor {
 
         return;
       }
+
+      this.crashCounts.delete(goalId);
+      this.suspendedGoals.delete(goalId);
 
       try {
         await this.deps.onGoalComplete?.(goalId, result);
@@ -492,9 +520,6 @@ export class LoopSupervisor {
       const state: SupervisorState = JSON.parse(raw);
       for (const [goalId, count] of Object.entries(state.crashCounts)) {
         this.crashCounts.set(goalId, count);
-      }
-      for (const goalId of state.suspendedGoals) {
-        this.suspendedGoals.add(goalId);
       }
     } catch {
       // Corrupt or missing state — start fresh

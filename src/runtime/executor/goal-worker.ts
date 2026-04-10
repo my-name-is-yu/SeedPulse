@@ -25,11 +25,15 @@ export class GoalWorker {
   private status: WorkerStatus = 'idle';
   private currentGoalId: string | null = null;
   private startedAt: number = 0;
+  private currentIterations: number = 0;
   private extendRequested: boolean = false;
 
   constructor(
     private readonly coreLoop: CoreLoop,
-    private readonly config: GoalWorkerConfig = { iterationsPerCycle: 5 }
+    private readonly config: GoalWorkerConfig = { iterationsPerCycle: 5 },
+    private readonly hooks?: {
+      onRunComplete?: (result: LoopResult, cumulativeIterations: number) => Promise<void> | void;
+    }
   ) {
     this.id = randomUUID();
   }
@@ -38,6 +42,7 @@ export class GoalWorker {
     this.status = 'running';
     this.currentGoalId = goalId;
     this.startedAt = Date.now();
+    this.currentIterations = 0;
     this.extendRequested = false;
 
     try {
@@ -49,6 +54,12 @@ export class GoalWorker {
           maxIterations: this.config.iterationsPerCycle,
         });
         cumulativeIterations += lastResult.totalIterations;
+        this.currentIterations = cumulativeIterations;
+        try {
+          await this.hooks?.onRunComplete?.(lastResult, cumulativeIterations);
+        } catch {
+          // Bookkeeping callbacks must not turn a successful loop into a worker crash.
+        }
       } while (this.extendRequested);
 
       this.status = 'idle';
@@ -70,6 +81,7 @@ export class GoalWorker {
       };
     } finally {
       this.currentGoalId = null;
+      this.currentIterations = 0;
       if (this.status === 'running') {
         this.status = 'idle';
       }
@@ -90,6 +102,10 @@ export class GoalWorker {
 
   getStartedAt(): number {
     return this.startedAt;
+  }
+
+  getIterations(): number {
+    return this.currentIterations;
   }
 
   isIdle(): boolean {

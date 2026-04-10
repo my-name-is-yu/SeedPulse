@@ -19,6 +19,8 @@ export interface RuntimeWatchdogOptions {
   leaderLockManager: LeaderLockManager;
   logger: Pick<Logger, "info" | "warn" | "error">;
   startChild: () => WatchdogChildProcess;
+  healthProbe?: () => Promise<{ ok: boolean; detail?: string }>;
+  healthProbeFailureThreshold?: number;
   pollIntervalMs?: number;
   heartbeatTimeoutMs?: number;
   startupGraceMs?: number;
@@ -31,7 +33,7 @@ interface ChildExitResult {
   code: number | null;
   signal: NodeJS.Signals | null;
   healthy: boolean;
-  reason: "exit" | "heartbeat_timeout";
+  reason: "exit" | "heartbeat_timeout" | "health_probe_failed";
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
@@ -51,6 +53,8 @@ export class RuntimeWatchdog {
   private readonly leaderLockManager: LeaderLockManager;
   private readonly logger: Pick<Logger, "info" | "warn" | "error">;
   private readonly startChild: () => WatchdogChildProcess;
+  private readonly healthProbe?: () => Promise<{ ok: boolean; detail?: string }>;
+  private readonly healthProbeFailureThreshold: number;
   private readonly pollIntervalMs: number;
   private readonly heartbeatTimeoutMs: number;
   private readonly startupGraceMs: number;
@@ -67,6 +71,8 @@ export class RuntimeWatchdog {
     this.leaderLockManager = options.leaderLockManager;
     this.logger = options.logger;
     this.startChild = options.startChild;
+    this.healthProbe = options.healthProbe;
+    this.healthProbeFailureThreshold = Math.max(1, options.healthProbeFailureThreshold ?? 3);
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? DEFAULT_HEARTBEAT_TIMEOUT_MS;
     this.startupGraceMs = options.startupGraceMs ?? DEFAULT_STARTUP_GRACE_MS;
@@ -152,8 +158,10 @@ export class RuntimeWatchdog {
     const startedAt = Date.now();
     let healthy = false;
     let unhealthyKillTriggered = false;
+    let unhealthyReason: ChildExitResult["reason"] = "exit";
     let pollInFlight = false;
     let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
+    let consecutiveHealthProbeFailures = 0;
 
     return new Promise<ChildExitResult>((resolve) => {
       const cleanup = (): void => {
@@ -171,17 +179,30 @@ export class RuntimeWatchdog {
           code,
           signal,
           healthy,
-          reason: unhealthyKillTriggered ? "heartbeat_timeout" : "exit",
+          reason: unhealthyKillTriggered ? unhealthyReason : "exit",
         });
       };
 
-      const triggerRestart = (): void => {
+      const triggerRestart = (
+        reason: Exclude<ChildExitResult["reason"], "exit">,
+        detail?: string
+      ): void => {
         if (unhealthyKillTriggered || this.stopping) return;
         unhealthyKillTriggered = true;
-        this.logger.warn("Watchdog detected stale daemon heartbeat", {
-          pid: child.pid,
-          heartbeat_timeout_ms: this.heartbeatTimeoutMs,
-        });
+        unhealthyReason = reason;
+        if (reason === "health_probe_failed") {
+          this.logger.warn("Watchdog detected unresponsive daemon command surface", {
+            pid: child.pid,
+            consecutive_failures: consecutiveHealthProbeFailures,
+            detail,
+          });
+        } else {
+          this.logger.warn("Watchdog detected stale daemon heartbeat", {
+            pid: child.pid,
+            heartbeat_timeout_ms: this.heartbeatTimeoutMs,
+            detail,
+          });
+        }
         try {
           child.kill("SIGTERM");
         } catch {
@@ -213,19 +234,46 @@ export class RuntimeWatchdog {
               typeof daemonHealth.details["pid"] === "number"
                 ? (daemonHealth.details["pid"] as number)
                 : undefined;
+            const processKpi = daemonHealth?.kpi?.process_alive;
+            const heartbeatCheckedAt = processKpi?.checked_at ?? daemonHealth?.checked_at ?? 0;
+            const processAliveHealthy =
+              daemonHealth !== null &&
+              (processKpi?.status === "ok" || processKpi === undefined);
 
             const heartbeatFresh =
               daemonHealth !== null &&
               daemonHealth.leader === true &&
               healthPid === expectedPid &&
-              now - daemonHealth.checked_at <= this.heartbeatTimeoutMs;
+              processAliveHealthy &&
+              now - heartbeatCheckedAt <= this.heartbeatTimeoutMs;
 
             const leaderFresh =
               leaderLock !== null &&
               leaderLock.pid === expectedPid &&
               leaderLock.lease_until > now;
 
-            if (heartbeatFresh && leaderFresh) {
+            const leadershipHealthy = heartbeatFresh && leaderFresh;
+            if (leadershipHealthy && this.healthProbe) {
+              const probe = await this.healthProbe();
+              if (probe.ok) {
+                consecutiveHealthProbeFailures = 0;
+                healthy = true;
+                return;
+              }
+
+              consecutiveHealthProbeFailures += 1;
+              if (now - startedAt < this.startupGraceMs) {
+                return;
+              }
+              if (consecutiveHealthProbeFailures < this.healthProbeFailureThreshold) {
+                return;
+              }
+              triggerRestart("health_probe_failed", probe.detail);
+              return;
+            }
+
+            if (leadershipHealthy) {
+              consecutiveHealthProbeFailures = 0;
               healthy = true;
               return;
             }
@@ -234,7 +282,7 @@ export class RuntimeWatchdog {
               return;
             }
 
-            triggerRestart();
+            triggerRestart("heartbeat_timeout");
           } catch (error) {
             this.logger.warn("Watchdog failed to poll daemon heartbeat", {
               error: error instanceof Error ? error.message : String(error),

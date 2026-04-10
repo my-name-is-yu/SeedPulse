@@ -169,6 +169,7 @@ import { GoalNegotiator, EthicsRejectedError } from "../../../orchestrator/goal/
 import { GoalRefiner } from "../../../orchestrator/goal/goal-refiner.js";
 import { getPulseedVersion } from "../../../base/utils/pulseed-meta.js";
 import { ensureProviderConfig } from "../ensure-api-key.js";
+import { DaemonClient } from "../../../runtime/daemon/client.js";
 import type { LoopResult } from "../../../orchestrator/loop/core-loop.js";
 import type { Goal } from "../../../base/types/goal.js";
 import { makeTempDir } from "../../../../tests/helpers/temp-dir.js";
@@ -304,12 +305,28 @@ describe("unknown subcommand", async () => {
   // No-argument case now launches TUI (feat/default-tui), cannot test in vitest
 
   it("exits with code 0 for --help", async () => {
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const code = await runCLI("--help");
+    const output = consoleSpy.mock.calls[0]?.[0] as string;
     expect(code).toBe(0);
+    expect(output).toContain("pulseed daemon ping");
+    consoleSpy.mockRestore();
   });
 
   it("exits with code 0 for help subcommand", async () => {
     const code = await runCLI("help");
+    expect(code).toBe(0);
+  });
+
+  it("dispatches daemon ping through the registry", async () => {
+    fs.writeFileSync(path.join(tmpDir, "daemon.json"), JSON.stringify({ event_server_port: 43123 }));
+    vi.spyOn(DaemonClient.prototype, "getHealth").mockResolvedValue({
+      status: "ok",
+      uptime: 5,
+    });
+
+    const code = await runCLI("daemon", "ping");
+
     expect(code).toBe(0);
   });
 });

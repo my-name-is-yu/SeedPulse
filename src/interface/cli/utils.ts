@@ -46,6 +46,7 @@ Usage:
   pulseed start --goal <id>            Start daemon mode for one or more goals
   pulseed stop                         Stop the running daemon
   pulseed daemon status                Show running daemon status
+  pulseed daemon ping                  Check daemon responsiveness
   pulseed cron --goal <id>             Print crontab entry for a goal
   pulseed config show                  Show current configuration
   pulseed config set <key> <value>     Set a configuration value

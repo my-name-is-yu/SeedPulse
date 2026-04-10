@@ -29,6 +29,11 @@ function makeDeps(tmpDir: string, overrides: Partial<DaemonDeps> = {}): DaemonDe
   };
 
   const mockDriveSystem = {
+    getGoalActivationSnapshot: vi.fn(async (goalId: string) => ({
+      goalId,
+      shouldActivate: false,
+      schedule: null,
+    })),
     shouldActivate: vi.fn().mockReturnValue(false),
     getSchedule: vi.fn().mockResolvedValue(null),
     prioritizeGoals: vi.fn().mockImplementation((ids: string[]) => ids),
@@ -372,6 +377,56 @@ describe("DaemonRunner durable runtime wiring", () => {
         }),
       ])
     );
+  });
+
+  it("does not enqueue schedule activations without a goal_id", async () => {
+    const mockEventServer = {
+      setEnvelopeHook: vi.fn(),
+      setCommandEnvelopeHook: vi.fn(),
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      startFileWatcher: vi.fn(),
+      stopFileWatcher: vi.fn(),
+      getPort: vi.fn().mockReturnValue(41700),
+      setActiveWorkersProvider: vi.fn(),
+    };
+    const mockScheduleEngine = {
+      tick: vi.fn().mockResolvedValue([
+        {
+          entry_id: "entry-no-goal",
+          status: "ok",
+          layer: "cron",
+          fired_at: new Date().toISOString(),
+          duration_ms: 1,
+        },
+      ]),
+    };
+
+    const deps = makeDeps(tmpDir, {
+      eventServer: mockEventServer as any,
+      scheduleEngine: mockScheduleEngine as any,
+      config: { check_interval_ms: 50 },
+    });
+
+    const daemon = new DaemonRunner(deps);
+    currentDaemon = daemon;
+    currentStartPromise = daemon.start([]);
+
+    await waitFor(() => mockScheduleEngine.tick.mock.calls.length > 0);
+
+    const queuePath = path.join(tmpDir, "runtime", "queue.json");
+    if (fs.existsSync(queuePath)) {
+      const queue = readRuntimeQueue(tmpDir);
+      expect(Object.values(queue.records)).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            envelope: expect.objectContaining({
+              name: "schedule_activated",
+            }),
+          }),
+        ])
+      );
+    }
   });
 
   it("records cron receipts in the runtime journal and marks the task fired after dispatch", async () => {

@@ -5,16 +5,17 @@
 // are preferred over the legacy sync-style async functions below.
 
 import * as fsp from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 import { z } from "zod";
 
 /**
- * Write data to a JSON file atomically (write to .tmp, then rename).
+ * Write data to a JSON file atomically (write to a unique .tmp, then rename).
  * Creates parent directories as needed.
  */
 export async function writeJsonFileAtomic(filePath: string, data: unknown): Promise<void> {
   await fsp.mkdir(dirname(filePath), { recursive: true });
-  const tmpPath = filePath + ".tmp";
+  const tmpPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
   try {
     await fsp.writeFile(tmpPath, JSON.stringify(data, null, 2), "utf-8");
     await fsp.rename(tmpPath, filePath);

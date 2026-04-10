@@ -59,6 +59,25 @@ export interface ProactiveMaintenanceResult {
 
 export type GoalCycleScheduleSnapshotEntry = GoalActivationSnapshot;
 
+async function getGoalActivationSnapshotCompat(
+  driveSystem: DriveSystem,
+  goalId: string,
+): Promise<GoalActivationSnapshot> {
+  const candidate = driveSystem as DriveSystem & {
+    getGoalActivationSnapshot?: (goalId: string) => Promise<GoalActivationSnapshot>;
+  };
+
+  if (typeof candidate.getGoalActivationSnapshot === "function") {
+    return candidate.getGoalActivationSnapshot(goalId);
+  }
+
+  const [shouldActivate, schedule] = await Promise.all([
+    driveSystem.shouldActivate(goalId),
+    driveSystem.getSchedule(goalId),
+  ]);
+  return { goalId, shouldActivate, schedule };
+}
+
 export async function collectGoalCycleScheduleSnapshot(
   driveSystem: DriveSystem,
   goalIds: string[],
@@ -66,7 +85,7 @@ export async function collectGoalCycleScheduleSnapshot(
   const snapshot: GoalCycleScheduleSnapshotEntry[] = [];
 
   for (const goalId of goalIds) {
-    snapshot.push(await driveSystem.getGoalActivationSnapshot(goalId));
+    snapshot.push(await getGoalActivationSnapshotCompat(driveSystem, goalId));
   }
 
   return snapshot;
@@ -84,7 +103,7 @@ export async function determineActiveGoalsForCycle(
   for (const goalId of goalIds) {
     const entry =
       snapshotByGoalId.get(goalId)
-      ?? await driveSystem.getGoalActivationSnapshot(goalId);
+      ?? await getGoalActivationSnapshotCompat(driveSystem, goalId);
 
     if (entry.shouldActivate) {
       eligibleIds.push(goalId);
@@ -169,7 +188,9 @@ export async function processScheduleEntriesForDaemon(params: {
       if (!goalId) {
         logger.warn("schedule_activated envelope missing goal_id", {
           entry_id: (result as Record<string, unknown>)["entry_id"],
+          layer: (result as Record<string, unknown>)["layer"],
         });
+        continue;
       }
 
       const envelope = createEnvelope({
@@ -392,7 +413,7 @@ export async function getMaxGapScoreForGoals(
     }
 
     try {
-      const fallbackEntry = await driveSystem.getGoalActivationSnapshot(goalId);
+      const fallbackEntry = await getGoalActivationSnapshotCompat(driveSystem, goalId);
       const schedule = fallbackEntry.schedule;
       const score = (schedule as Record<string, unknown>)["last_gap_score"];
       if (typeof score === "number" && score > max) {

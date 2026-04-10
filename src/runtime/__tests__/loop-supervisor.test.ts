@@ -30,6 +30,29 @@ async function waitFor(
   throw new Error("Timed out waiting for condition");
 }
 
+async function pollForJsonMatch<T>(
+  filePath: string,
+  predicate: (value: T) => boolean,
+  timeoutMs = 2_000,
+  intervalMs = 20
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      if (fs.existsSync(filePath)) {
+        const value = JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
+        if (predicate(value)) {
+          return value;
+        }
+      }
+    } catch {
+      // Retry until stable.
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`Timed out waiting for matching JSON in file: ${filePath}`);
+}
+
 function makeSupervisor(
   coreLoopImpl?: (...args: any[]) => Promise<LoopResult> | never,
   extra: Record<string, unknown> = {},
@@ -185,6 +208,27 @@ describe("LoopSupervisor", () => {
     }
   });
 
+  it("resets crash counts after a successful run", async () => {
+    let runCount = 0;
+    const { supervisor, runtimeRoot } = makeSupervisor(async (goalId: string) => {
+      runCount += 1;
+      if (runCount === 1) {
+        throw new Error("transient");
+      }
+      return makeLoopResult({ goalId });
+    });
+
+    try {
+      await supervisor.start(["g-reset"]);
+      await waitFor(() => runCount >= 2, 3_000);
+      await supervisor.shutdown();
+
+      expect(supervisor.getState().crashCounts["g-reset"]).toBeUndefined();
+    } finally {
+      fs.rmSync(runtimeRoot, { recursive: true, force: true });
+    }
+  });
+
   // ─── 5. shutdown() ───
 
   it("shutdown() resolves after workers complete", async () => {
@@ -219,6 +263,58 @@ describe("LoopSupervisor", () => {
       const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
       expect(state).toHaveProperty("workers");
       expect(state).toHaveProperty("crashCounts");
+    } finally {
+      fs.rmSync(runtimeRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not restore suspended goals from a previous supervisor process", async () => {
+    const { runtimeRoot, deps } = makeSupervisor();
+    const stateFile = path.join(runtimeRoot, "supervisor-state.json");
+    fs.writeFileSync(
+      stateFile,
+      JSON.stringify({
+        workers: [],
+        crashCounts: { "g-suspended": 3 },
+        suspendedGoals: ["g-suspended"],
+        updatedAt: Date.now(),
+      })
+    );
+
+    const recoveredSupervisor = new LoopSupervisor(deps, {
+      concurrency: 1,
+      pollIntervalMs: 20,
+      maxCrashCount: 3,
+      crashBackoffBaseMs: 50,
+      stateFilePath: stateFile,
+      claimLeaseMs: 200,
+      leaseRenewIntervalMs: 50,
+    });
+
+    try {
+      await recoveredSupervisor.start(["g-suspended"]);
+      await waitFor(() => deps.coreLoopFactory().run.mock.calls.some((call: unknown[]) => call[0] === "g-suspended"));
+      await recoveredSupervisor.shutdown();
+
+      expect(recoveredSupervisor.getState().suspendedGoals).not.toContain("g-suspended");
+    } finally {
+      fs.rmSync(runtimeRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("persists active worker state while work is in flight", async () => {
+    const { supervisor, stateFile, runtimeRoot } = makeSupervisor(async (goalId: string) => {
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      return makeLoopResult({ goalId, totalIterations: 2 });
+    });
+    try {
+      await supervisor.start(["g-live"]);
+      const state = await pollForJsonMatch<{ workers: Array<{ goalId: string | null; startedAt: number }> }>(
+        stateFile,
+        (value) => value.workers.some((worker) => worker.goalId === "g-live" && worker.startedAt > 0)
+      );
+      expect(state.workers.some((worker) => worker.goalId === "g-live")).toBe(true);
+      await supervisor.shutdown();
     } finally {
       fs.rmSync(runtimeRoot, { recursive: true, force: true });
     }

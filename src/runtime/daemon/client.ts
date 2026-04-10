@@ -27,6 +27,20 @@ export interface DaemonSnapshot {
   last_outbox_seq: number;
 }
 
+export interface DaemonHealth {
+  status?: string;
+  uptime?: number;
+  [key: string]: unknown;
+}
+
+export interface DaemonHealthProbeResult {
+  ok: boolean;
+  port: number;
+  latency_ms: number;
+  health?: DaemonHealth;
+  error?: string;
+}
+
 type EventHandler = (data: unknown) => void;
 
 export class DaemonClient {
@@ -257,9 +271,14 @@ export class DaemonClient {
     return this.get(`/goals/${encodeURIComponent(goalId)}`);
   }
 
+  async getHealth(): Promise<DaemonHealth> {
+    const health = await this.get("/health");
+    return (health && typeof health === "object" ? health : { status: String(health) }) as DaemonHealth;
+  }
+
   async healthCheck(): Promise<boolean> {
     try {
-      await this.get("/health");
+      await this.getHealth();
       return true;
     } catch {
       return false;
@@ -341,6 +360,31 @@ export class DaemonClient {
 
 // ─── Convenience: detect running daemon ───
 
+export async function probeDaemonHealth(config: Pick<DaemonClientConfig, "host" | "port">): Promise<DaemonHealthProbeResult> {
+  const startedAt = Date.now();
+  const client = new DaemonClient({
+    host: config.host,
+    port: config.port,
+  });
+
+  try {
+    const health = await client.getHealth();
+    return {
+      ok: true,
+      port: config.port,
+      latency_ms: Date.now() - startedAt,
+      health,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      port: config.port,
+      latency_ms: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export async function isDaemonRunning(baseDir: string): Promise<{ running: boolean; port: number }> {
   const fs = await import("node:fs/promises");
   const path = await import("node:path");
@@ -374,9 +418,8 @@ export async function isDaemonRunning(baseDir: string): Promise<{ running: boole
     }
 
     // Verify EventServer is actually responding
-    const client = new DaemonClient({ host: "127.0.0.1", port });
-    const healthy = await client.healthCheck();
-    return { running: healthy, port };
+    const probe = await probeDaemonHealth({ host: "127.0.0.1", port });
+    return { running: probe.ok, port };
   } catch {
     return { running: false, port: DEFAULT_PORT };
   }

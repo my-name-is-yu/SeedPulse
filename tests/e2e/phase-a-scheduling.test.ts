@@ -422,10 +422,10 @@ describe("Phase A — DaemonRunner proactive tick", () => {
     const llmResponse = JSON.stringify({ action: "sleep" });
     const mockLLM = createMockLLMClient([llmResponse, llmResponse, llmResponse]);
 
-    // Run 3 goal cycles via coreLoopOverride — stop after the third.
+    // Run one goal cycle via coreLoopOverride and stop immediately.
     // With proactive_mode=true and a 60s cooldown, the proactive tick cannot fire
-    // (goals are active in this test, so proactiveTick is also not called on active cycles).
-    // The key invariant: LLM is never called because goals are always active AND cooldown is long.
+    // during the short daemon lifetime.
+    // The key invariant: LLM is never called because cooldown is still active.
     let cycleCount = 0;
     let daemonRef: DaemonRunner | null = null;
     ({ runner: daemonRef, logger: builtLogger } = buildDaemonRunner(tempDir, stateManager, {
@@ -438,7 +438,7 @@ describe("Phase A — DaemonRunner proactive tick", () => {
       coreLoopOverride: {
         run: async (goalId: string): Promise<LoopResult> => {
           cycleCount++;
-          if (cycleCount >= 3) daemonRef?.stop();
+          daemonRef?.stop();
           return {
             goalId,
             totalIterations: 1,
@@ -453,7 +453,8 @@ describe("Phase A — DaemonRunner proactive tick", () => {
 
     await daemonRef.start(["cooldown-goal"]);
 
-    // Proactive tick is suppressed both because goals were active AND because cooldown is 60s.
+    expect(cycleCount).toBe(1);
+    // Proactive tick is suppressed because cooldown is 60s.
     // LLM should not have been called.
     expect(mockLLM.callCount).toBe(0);
   });

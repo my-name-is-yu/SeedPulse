@@ -8,6 +8,7 @@ import type { ObservationMethod } from "../../../base/types/core.js";
 import type { ILLMClient } from "../../../base/llm/llm-client.js";
 import type { IDataSourceAdapter } from "../data-source-adapter.js";
 import type { DataSourceConfig } from "../../../base/types/data-source.js";
+import type { IDimensionPreChecker } from "../dimension-pre-checker.js";
 import { makeTempDir } from "../../../../tests/helpers/temp-dir.js";
 import { makeGoal } from "../../../../tests/helpers/fixtures.js";
 
@@ -198,6 +199,44 @@ describe("ObservationEngine LLM observation", () => {
       await engine.observe("goal-llm-called", [defaultMethod]);
 
       expect(mockLLMClient.sendMessage).toHaveBeenCalled();
+    });
+
+    it("skips repeated LLM observation when preChecker reports no change", async () => {
+      const mockLLMClient = createMockLLMClient(0.65, "progress noted");
+      const preChecker: IDimensionPreChecker = {
+        check: vi.fn().mockResolvedValue({ changed: false }),
+      };
+      const engine = new ObservationEngine(
+        stateManager,
+        [],
+        mockLLMClient,
+        undefined,
+        { gitContextFetcher: fakeGitContextFetcher },
+        undefined,
+        preChecker
+      );
+
+      const goal = makeGoal({ id: "goal-llm-skip" });
+      goal.dimensions[0] = {
+        ...goal.dimensions[0]!,
+        history: [
+          {
+            timestamp: new Date().toISOString(),
+            value: 0.65,
+            confidence: 0.8,
+            source_observation_id: "obs-1",
+          },
+        ],
+      };
+      await stateManager.saveGoal(goal);
+
+      await engine.observe("goal-llm-skip", [defaultMethod]);
+
+      expect(preChecker.check).toHaveBeenCalled();
+      expect(mockLLMClient.sendMessage).not.toHaveBeenCalled();
+      const log = await engine.getObservationLog("goal-llm-skip");
+      expect(log.entries.length).toBe(1);
+      expect(log.entries[0]?.raw_result).toContain("cached:");
     });
   });
 

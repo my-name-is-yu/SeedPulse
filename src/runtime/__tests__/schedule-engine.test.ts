@@ -560,6 +560,84 @@ describe("Heartbeat execution", () => {
     expect(history[0]!.failure_kind).toBe("permanent");
   });
 
+  it("persists next_fire_at before history recording so a history failure does not replay cadence", async () => {
+    const entry = await engine.addEntry({
+      name: "persist-before-history",
+      layer: "heartbeat",
+      trigger: { type: "interval", seconds: 60, jitter_factor: 0 },
+      enabled: true,
+      heartbeat: {
+        check_type: "custom",
+        check_config: { command: "echo ok" },
+        failure_threshold: 3,
+        timeout_ms: 5000,
+      },
+    });
+
+    const entries = engine.getEntries();
+    entries[0]!.next_fire_at = new Date(Date.now() - 1000).toISOString();
+    await engine.saveEntries();
+    await engine.loadEntries();
+
+    (vi.spyOn(engine as any, "recordHistory") as any).mockImplementation(
+      async () => Promise.reject(new Error("history unavailable"))
+    );
+
+    await expect(engine.tick()).rejects.toThrow("history unavailable");
+
+    const reloaded = new ScheduleEngine({ baseDir: tempDir });
+    await reloaded.loadEntries();
+    const persisted = reloaded.getEntries().find((candidate) => candidate.id === entry.id)!;
+    expect(new Date(persisted.next_fire_at).getTime()).toBeGreaterThan(Date.now());
+    expect(persisted.last_fired_at).not.toBeNull();
+  });
+
+  it("persists retry_state before history recording so retry cadence survives crashes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+
+    const entry = await engine.addEntry({
+      name: "retry-persist-before-history",
+      layer: "heartbeat",
+      trigger: { type: "interval", seconds: 60, jitter_factor: 0 },
+      enabled: true,
+      heartbeat: {
+        check_type: "custom",
+        check_config: { command: "exit 1" },
+        failure_threshold: 3,
+        timeout_ms: 5000,
+      },
+      retry_policy: {
+        enabled: true,
+        initial_delay_ms: 10_000,
+        max_delay_ms: 60_000,
+        multiplier: 2,
+        jitter_factor: 0,
+        max_attempts: 3,
+        max_retry_window_ms: 120_000,
+        retryable_failure_kinds: ["transient"],
+      },
+    });
+
+    const entries = engine.getEntries();
+    entries[0]!.next_fire_at = new Date("2026-04-07T23:59:00.000Z").toISOString();
+    await engine.saveEntries();
+    await engine.loadEntries();
+
+    (vi.spyOn(engine as any, "recordHistory") as any).mockImplementation(
+      async () => Promise.reject(new Error("history unavailable"))
+    );
+
+    await expect(engine.tick()).rejects.toThrow("history unavailable");
+
+    const reloaded = new ScheduleEngine({ baseDir: tempDir });
+    await reloaded.loadEntries();
+    const persisted = reloaded.getEntries().find((candidate) => candidate.id === entry.id)!;
+    expect(persisted.retry_state).not.toBeNull();
+    expect(persisted.retry_state!.attempts).toBe(1);
+    expect(persisted.retry_state!.next_retry_at).toBe("2026-04-08T00:00:10.000Z");
+  });
+
   it("tick routes cron entry without config to error (Phase 3)", async () => {
     const entry = await engine.addEntry({
       name: "cron-entry",

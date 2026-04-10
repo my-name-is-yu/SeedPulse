@@ -520,6 +520,10 @@ describe("TaskLifecycle", async () => {
 
       // current_value must advance
       expect(qualityDim!.current_value).toBe(0.35);
+
+      const storedTask = await stateManager.readRaw(`tasks/${task.goal_id}/${task.id}.json`) as Record<string, unknown>;
+      expect(storedTask.verification_verdict).toBe("partial");
+      expect(storedTask.verification_evidence).toEqual(["Some progress made", "Partially done"]);
     });
 
     it("fail verdict does NOT modify goal dimension current_value", async () => {

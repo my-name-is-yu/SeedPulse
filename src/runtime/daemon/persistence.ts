@@ -41,14 +41,31 @@ export async function restoreInterruptedGoals(
   logger: Logger,
 ): Promise<string[]> {
   const saved = await loadDaemonStateFile(baseDir);
-  if (!saved?.interrupted_goals?.length) {
+  if (!saved) {
     return goalIds;
   }
 
-  const merged = Array.from(new Set([...goalIds, ...saved.interrupted_goals]));
+  const recoverableGoals = new Set<string>(saved.interrupted_goals ?? []);
+  const shouldRecoverActiveGoals =
+    recoverableGoals.size === 0 &&
+    saved.active_goals.length > 0 &&
+    saved.status !== "stopped";
+
+  if (shouldRecoverActiveGoals) {
+    for (const goalId of saved.active_goals) {
+      recoverableGoals.add(goalId);
+    }
+  }
+
+  if (recoverableGoals.size === 0) {
+    return goalIds;
+  }
+
+  const merged = Array.from(new Set([...goalIds, ...recoverableGoals]));
   if (merged.length > goalIds.length) {
     logger.info("Restored interrupted goals from previous run", {
-      interrupted: saved.interrupted_goals,
+      interrupted: [...recoverableGoals],
+      source: shouldRecoverActiveGoals ? "active_goals" : "interrupted_goals",
       merged,
     });
   }
