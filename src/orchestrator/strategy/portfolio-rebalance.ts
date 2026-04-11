@@ -274,9 +274,9 @@ export function adjustAllocations(
  * Handle expiry of a WaitStrategy.
  *
  * When wait_until has passed:
- * - Gap improved: return null
- * - Gap unchanged: activate fallback strategy if one exists
- * - Gap worsened: return rebalance trigger
+ * - Gap improved: complete the WaitStrategy
+ * - Gap unchanged: activate fallback strategy if one exists, otherwise trigger rebalance
+ * - Gap worsened: terminate the WaitStrategy and trigger rebalance
  *
  * @param isWaitStrategy - predicate to detect WaitStrategy instances
  * @param getGap - get current gap for a dimension of a goal
@@ -300,15 +300,14 @@ export async function handleWaitStrategyExpiry(
 
   if (now < waitUntil) return null;
 
-  const startGap = strategy.gap_snapshot_at_start;
-  if (startGap === null) return null;
-
   const currentGap = await getGap(goalId, strategy.primary_dimension);
   if (currentGap === null) return null;
 
+  const startGap = strategy.gap_snapshot_at_start ?? currentGap;
   const gapDelta = currentGap - startGap;
 
   if (gapDelta < 0) {
+    await updateState(strategyId, "completed");
     return null;
   }
 
@@ -320,11 +319,19 @@ export async function handleWaitStrategyExpiry(
       );
       if (fallback && fallback.state === "candidate") {
         await updateState(fallback.id, "active");
+        await updateState(strategyId, "terminated");
+        return null;
       }
     }
-    return null;
+    await updateState(strategyId, "terminated");
+    return {
+      type: "stall_detected",
+      strategy_id: strategyId,
+      details: `WaitStrategy expired with no gap improvement: ${startGap.toFixed(3)} → ${currentGap.toFixed(3)}`,
+    };
   }
 
+  await updateState(strategyId, "terminated");
   return {
     type: "stall_detected",
     strategy_id: strategyId,

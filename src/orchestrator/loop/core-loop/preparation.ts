@@ -22,11 +22,7 @@ export interface PhaseCtx {
   config: ResolvedLoopConfig;
   logger: Logger | undefined;
   toolExecutor?: ToolExecutor;
-  /**
-   * Optional TimeHorizonEngine for canAffordWait gate in rebalancePortfolio (Gap 1).
-   * When present, WaitStrategy processing is skipped if the engine reports the goal
-   * cannot afford to wait given the remaining time budget.
-   */
+  /** Optional TimeHorizonEngine for adaptive pacing and wait activation budget checks. */
   timeHorizonEngine?: import("../../../platform/time/time-horizon-engine.js").ITimeHorizonEngine;
 }
 

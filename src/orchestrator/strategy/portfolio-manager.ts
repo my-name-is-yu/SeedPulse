@@ -2,6 +2,7 @@ import { StrategyManager } from "./strategy-manager.js";
 import { StateManager } from "../../base/state/state-manager.js";
 import { StrategySchema, parseStrategy } from "../../base/types/strategy.js";
 import type { Strategy, Portfolio } from "../../base/types/strategy.js";
+import type { StrategyState } from "../../base/types/core.js";
 import { PortfolioConfigSchema } from "../../base/types/portfolio.js";
 import type {
   PortfolioConfig,
@@ -371,9 +372,9 @@ export class PortfolioManager {
    * Handle expiry of a WaitStrategy.
    *
    * When wait_until has passed:
-   * - Gap improved: return null (let the wait strategy continue its evaluation)
-   * - Gap unchanged: activate fallback strategy if one exists
-   * - Gap worsened: return rebalance trigger
+   * - Gap improved: complete the WaitStrategy
+   * - Gap unchanged: activate fallback strategy if one exists, otherwise trigger rebalance
+   * - Gap worsened: terminate the WaitStrategy and trigger rebalance
    */
   async handleWaitStrategyExpiry(
     goalId: string,
@@ -391,7 +392,7 @@ export class PortfolioManager {
       strategy,
       (s) => this.isWaitStrategy(s),
       (gId, dim) => this.getCurrentGapForDimension(gId, dim),
-      (sId, state) => this.strategyManager.updateState(sId, state as "active"),
+      (sId, state) => this.strategyManager.updateState(sId, state as StrategyState),
       async (gId) => (await this.strategyManager.getPortfolio(gId))?.strategies ?? []
     );
   }

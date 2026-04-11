@@ -6,9 +6,24 @@ import { isWaitStrategy } from "./portfolio-allocation.js";
 import type { Strategy } from "../../base/types/strategy.js";
 import { redistributeAllocation } from "./strategy-helpers.js";
 import { StrategyManagerBase } from "./strategy-manager-base.js";
+import { getCurrentGapForDimension } from "./portfolio-rebalance.js";
 
 export { VALID_TRANSITIONS, StrategyArraySchema, buildGenerationPrompt, redistributeAllocation, detectStrategyGap } from "./strategy-helpers.js";
 export { StrategyManagerBase } from "./strategy-manager-base.js";
+
+export interface WaitStrategyActivationContext {
+  getCurrentGap?: (
+    goalId: string,
+    dimension: string
+  ) => number | null | Promise<number | null>;
+  canAffordWait?: (input: {
+    strategy: Strategy;
+    waitHours: number;
+    currentGap: number;
+    initialGap: number;
+    startedAt: string;
+  }) => boolean | Promise<boolean>;
+}
 
 /**
  * StrategyManager manages strategy lifecycle for a goal:
@@ -32,7 +47,11 @@ export class StrategyManager extends StrategyManagerBase {
    * Allocates resources equally, respecting min=0.1 and max=0.7 per strategy.
    * Single strategy receives allocation=1.0.
    */
-  async activateMultiple(goalId: string, strategyIds: string[]): Promise<Strategy[]> {
+  async activateMultiple(
+    goalId: string,
+    strategyIds: string[],
+    activationContext?: WaitStrategyActivationContext
+  ): Promise<Strategy[]> {
     if (strategyIds.length === 0) {
       throw new Error(`activateMultiple: strategyIds must not be empty`);
     }
@@ -53,6 +72,8 @@ export class StrategyManager extends StrategyManagerBase {
       alloc = Math.min(Math.max(raw, MIN), MAX);
     }
 
+    const waitBaselines = new Map<string, number>();
+
     // Validate all strategies before mutating to avoid partial state
     for (const id of strategyIds) {
       const s = portfolio.strategies.find((s) => s.id === id);
@@ -66,6 +87,38 @@ export class StrategyManager extends StrategyManagerBase {
           `activateMultiple: strategy "${s.id}" is not in candidate state (current: ${s.state})`
         );
       }
+
+      if (isWaitStrategy(s)) {
+        const currentGap =
+          await activationContext?.getCurrentGap?.(goalId, s.primary_dimension) ??
+          await getCurrentGapForDimension(
+            goalId,
+            s.primary_dimension,
+            (gapPath) => this.stateManager.readRaw(gapPath)
+          );
+        const baseline = s.gap_snapshot_at_start ?? currentGap ?? 1.0;
+        const waitHours = Math.max(
+          0,
+          (new Date(s.wait_until).getTime() - new Date(now).getTime()) / 3_600_000
+        );
+
+        if (activationContext?.canAffordWait) {
+          const canAfford = await activationContext.canAffordWait({
+            strategy: s,
+            waitHours,
+            currentGap: currentGap ?? baseline,
+            initialGap: baseline,
+            startedAt: now,
+          });
+          if (!canAfford) {
+            throw new Error(
+              `activateMultiple: WaitStrategy "${s.id}" cannot be activated because the goal cannot afford waiting`
+            );
+          }
+        }
+
+        waitBaselines.set(s.id, baseline);
+      }
     }
 
     const activated: Strategy[] = [];
@@ -78,7 +131,7 @@ export class StrategyManager extends StrategyManagerBase {
         state: "active",
         started_at: now,
         allocation: alloc,
-        gap_snapshot_at_start: s.gap_snapshot_at_start,
+        gap_snapshot_at_start: waitBaselines.get(s.id) ?? s.gap_snapshot_at_start,
       });
       activated.push(updated);
       return updated;

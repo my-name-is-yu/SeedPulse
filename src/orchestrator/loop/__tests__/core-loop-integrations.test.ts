@@ -21,7 +21,7 @@ import type { StallReport } from "../../../base/types/stall.js";
 import type { DriveScore } from "../../../base/types/drive.js";
 import { saveDreamConfig } from "../../../platform/dream/dream-config.js";
 import { makeTempDir } from "../../../../tests/helpers/temp-dir.js";
-import { makeGoal } from "../../../../tests/helpers/fixtures.js";
+import { makeDimension, makeGoal } from "../../../../tests/helpers/fixtures.js";
 
 function makeGapVector(goalId = "goal-1"): GapVector {
   return {
@@ -931,6 +931,40 @@ describe("CoreLoop", async () => {
 
       expect(portfolioManager.handleWaitStrategyExpiry).toHaveBeenCalledWith("goal-1", waitStrategy.id);
       expect(portfolioManager.rebalance).toHaveBeenCalledWith("goal-1", waitTrigger);
+    });
+
+    it("uses WaitStrategy.wait_until to suppress stall checks for its primary dimension", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      await mocks.stateManager.saveGoal(makeGoal({
+        dimensions: [makeDimension({ name: "dim1" })],
+      }));
+
+      const waitUntil = new Date(Date.now() + 100_000).toISOString();
+      const waitStrategy = {
+        id: "wait-strategy-1",
+        state: "active",
+        goal_id: "goal-1",
+        primary_dimension: "dim1",
+        wait_until: waitUntil,
+      };
+      mocks.strategyManager.getPortfolio.mockReturnValue({
+        goal_id: "goal-1",
+        strategies: [waitStrategy],
+        rebalance_interval: { value: 7, unit: "days" },
+        last_rebalanced_at: new Date().toISOString(),
+      });
+      mocks.stallDetector.isSuppressed.mockReturnValue(true);
+
+      const portfolioManager = createMockPortfolioManager();
+      portfolioManager.isWaitStrategy.mockReturnValue(true);
+
+      const depsWithPM = { ...deps, portfolioManager: portfolioManager as any };
+      const loop = new CoreLoop(depsWithPM, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(mocks.stallDetector.isSuppressed).toHaveBeenCalledWith(waitUntil);
+      expect(mocks.stallDetector.checkDimensionStall).not.toHaveBeenCalled();
+      expect(result.waitSuppressed).toBe(true);
     });
 
     it("portfolio rebalance errors are non-fatal", async () => {

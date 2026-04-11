@@ -759,7 +759,7 @@ describe("PortfolioManager", () => {
       expect(result).toBeNull();
     });
 
-    it("returns null when expired and gap improved", async () => {
+    it("completes the WaitStrategy when expired and gap improved", async () => {
       const wait = makeWaitStrategy({
         id: "ws1",
         state: "active",
@@ -774,9 +774,35 @@ describe("PortfolioManager", () => {
 
       const result = await pm.handleWaitStrategyExpiry("goal-1", "ws1");
       expect(result).toBeNull();
+      expect(mockStrategyManager.updateState).toHaveBeenCalledWith("ws1", "completed");
     });
 
-    it("returns rebalance trigger when expired and gap worsened", async () => {
+    it("activates fallback and terminates the WaitStrategy when expired with unchanged gap", async () => {
+      const fallback = makeStrategy({
+        id: "fallback-1",
+        state: "candidate",
+        allocation: 0,
+      });
+      const wait = makeWaitStrategy({
+        id: "ws1",
+        state: "active",
+        wait_until: new Date(Date.now() - 100_000).toISOString(),
+        gap_snapshot_at_start: 0.5,
+        primary_dimension: "quality",
+        fallback_strategy_id: fallback.id,
+      });
+      const portfolio = makePortfolio([wait, fallback]);
+      (mockStrategyManager.getPortfolio as ReturnType<typeof vi.fn>).mockReturnValue(portfolio);
+      (mockStateManager.readRaw as ReturnType<typeof vi.fn>).mockResolvedValue({ quality: 0.5 });
+
+      const result = await pm.handleWaitStrategyExpiry("goal-1", "ws1");
+
+      expect(result).toBeNull();
+      expect(mockStrategyManager.updateState).toHaveBeenNthCalledWith(1, "fallback-1", "active");
+      expect(mockStrategyManager.updateState).toHaveBeenNthCalledWith(2, "ws1", "terminated");
+    });
+
+    it("terminates and returns rebalance trigger when expired and gap worsened", async () => {
       const wait = makeWaitStrategy({
         id: "ws1",
         state: "active",
@@ -793,6 +819,7 @@ describe("PortfolioManager", () => {
       expect(result).not.toBeNull();
       expect(result!.type).toBe("stall_detected");
       expect(result!.strategy_id).toBe("ws1");
+      expect(mockStrategyManager.updateState).toHaveBeenCalledWith("ws1", "terminated");
     });
 
     it("returns null for non-existent strategy", async () => {

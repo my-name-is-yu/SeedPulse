@@ -163,6 +163,56 @@ describe("Phase 2 methods", () => {
         "not in candidate state"
       );
     });
+
+    it("blocks WaitStrategy activation when the wait budget cannot afford it", async () => {
+      const mock = createMockLLMClient([]);
+      const manager = new StrategyManager(stateManager, mock);
+      const wait = await manager.createWaitStrategy("goal-1", {
+        hypothesis: "Wait for external signal",
+        wait_reason: "Awaiting external signal",
+        wait_until: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
+        measurement_plan: "Check signal after wait",
+        fallback_strategy_id: null,
+        target_dimensions: ["quality"],
+        primary_dimension: "quality",
+      });
+
+      await expect(
+        manager.activateMultiple("goal-1", [wait.id], {
+          getCurrentGap: async () => 0.42,
+          canAffordWait: async () => false,
+        })
+      ).rejects.toThrow("cannot be activated because the goal cannot afford waiting");
+
+      const portfolio = await manager.getPortfolio("goal-1");
+      const stored = portfolio!.strategies.find((s) => s.id === wait.id);
+      expect(stored!.state).toBe("candidate");
+      expect(stored!.gap_snapshot_at_start).toBeNull();
+    });
+
+    it("captures a WaitStrategy baseline when activation succeeds", async () => {
+      const mock = createMockLLMClient([]);
+      const manager = new StrategyManager(stateManager, mock);
+      const wait = await manager.createWaitStrategy("goal-1", {
+        hypothesis: "Wait for external signal",
+        wait_reason: "Awaiting external signal",
+        wait_until: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
+        measurement_plan: "Check signal after wait",
+        fallback_strategy_id: null,
+        target_dimensions: ["quality"],
+        primary_dimension: "quality",
+      });
+
+      const activated = await manager.activateMultiple("goal-1", [wait.id], {
+        getCurrentGap: async () => 0.42,
+        canAffordWait: async ({ currentGap, initialGap }) => currentGap === 0.42 && initialGap === 0.42,
+      });
+
+      expect(activated[0]!.gap_snapshot_at_start).toBe(0.42);
+      const portfolio = await manager.getPortfolio("goal-1");
+      const stored = portfolio!.strategies.find((s) => s.id === wait.id);
+      expect(stored!.gap_snapshot_at_start).toBe(0.42);
+    });
   });
 
   describe("terminateStrategy", () => {
