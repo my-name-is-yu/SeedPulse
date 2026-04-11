@@ -228,6 +228,8 @@ describe("cmdStart", () => {
         warn: expect.any(Function),
         error: expect.any(Function),
       }),
+      undefined,
+      undefined,
     );
 
     expect(scheduleEngineArgs).toHaveLength(1);
@@ -249,6 +251,31 @@ describe("cmdStart", () => {
     );
     expect(daemonStartMock).toHaveBeenCalledWith(["goal-1"]);
     expect(watchdogStartMock).not.toHaveBeenCalled();
+  });
+
+  it("passes explicit daemon workspace into buildDeps and DaemonRunner", async () => {
+    process.env.PULSEED_WATCHDOG_CHILD = "1";
+
+    await cmdStart(
+      { getBaseDir: vi.fn().mockReturnValue("/tmp/pulseed-daemon-start-base") } as never,
+      {} as never,
+      ["--workspace", "/tmp/pulseed-workspace"]
+    );
+
+    expect(buildDepsMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      undefined,
+      expect.any(Function),
+      expect.any(Object),
+      undefined,
+      "/tmp/pulseed-workspace",
+    );
+    expect(daemonRunnerArgs[0]).toEqual(
+      expect.objectContaining({
+        config: expect.objectContaining({ workspace_path: "/tmp/pulseed-workspace" }),
+      })
+    );
   });
 
   it("launches RuntimeWatchdog on the top-level daemon start path", async () => {

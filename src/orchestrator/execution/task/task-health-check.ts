@@ -14,9 +14,9 @@ export type ShellCommandFn = (
   options: { timeout: number; cwd: string }
 ) => Promise<{ success: boolean; stdout: string; stderr: string }>;
 
-function makeHealthCheckContext(): ToolCallContext {
+function makeHealthCheckContext(cwd: string): ToolCallContext {
   return {
-    cwd: process.cwd(),
+    cwd,
     goalId: "health-check",
     trustBalance: 100,
     preApproved: true,
@@ -29,9 +29,10 @@ async function runCommandViaToolExecutor(
   toolExecutor: ToolExecutor,
   argv: string[],
   timeoutMs: number,
+  cwd: string,
 ): Promise<{ success: boolean; stdout: string; stderr: string }> {
   const command = argv.join(" ");
-  const ctx = makeHealthCheckContext();
+  const ctx = makeHealthCheckContext(cwd);
   const result = await toolExecutor.execute(
     "shell",
     { command, timeoutMs },
@@ -62,17 +63,18 @@ async function runCommandViaToolExecutor(
 export async function runPostExecutionHealthCheck(
   runShellCommandFn: ShellCommandFn,
   toolExecutor?: ToolExecutor,
+  cwd = process.cwd(),
 ): Promise<{ healthy: boolean; output: string }> {
   const runCmd = toolExecutor
     ? (argv: string[], opts: { timeout: number; cwd: string }) =>
-        runCommandViaToolExecutor(toolExecutor, argv, opts.timeout)
+        runCommandViaToolExecutor(toolExecutor, argv, opts.timeout, opts.cwd)
     : runShellCommandFn;
 
   // Run build check
   try {
     const buildResult = await runCmd(["npm", "run", "build"], {
       timeout: 60000,
-      cwd: process.cwd(),
+      cwd,
     });
     if (!buildResult.success) {
       return {
@@ -88,7 +90,7 @@ export async function runPostExecutionHealthCheck(
   try {
     const testResult = await runCmd(
       ["npx", "vitest", "run", "--reporter=dot"],
-      { timeout: 120000, cwd: process.cwd() }
+      { timeout: 120000, cwd }
     );
     if (!testResult.success) {
       return {

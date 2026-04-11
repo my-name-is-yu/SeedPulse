@@ -49,6 +49,8 @@ describe("CLI buildDeps tool wiring", () => {
   it("wires ToolExecutor into CLI runtime and executes a read-only tool", async () => {
     const stateManager = new StateManager(tempDir);
     const characterConfigManager = new CharacterConfigManager(stateManager);
+    const workspaceDir = fs.mkdtempSync(path.join(tempDir, "workspace-"));
+    fs.writeFileSync(path.join(workspaceDir, "package.json"), "{}\n", "utf-8");
     const deps = await buildDeps(
       stateManager,
       characterConfigManager,
@@ -56,7 +58,7 @@ describe("CLI buildDeps tool wiring", () => {
       undefined,
       undefined,
       undefined,
-      process.cwd(),
+      workspaceDir,
     );
 
     expect(deps.toolRegistry.get("glob")).toBeDefined();
@@ -65,14 +67,18 @@ describe("CLI buildDeps tool wiring", () => {
     const coreLoopDeps = (deps.coreLoop as unknown as { deps: Record<string, unknown> }).deps;
     expect(coreLoopDeps["toolExecutor"]).toBe(deps.toolExecutor);
     expect(coreLoopDeps["toolRegistry"]).toBe(deps.toolRegistry);
+    expect(coreLoopDeps["learningPipeline"]).toBe(deps.learningPipeline);
     expect((coreLoopDeps["observationEngine"] as { toolExecutor?: unknown }).toolExecutor).toBe(deps.toolExecutor);
     expect((coreLoopDeps["taskLifecycle"] as { toolExecutor?: unknown }).toolExecutor).toBe(deps.toolExecutor);
+    expect((coreLoopDeps["taskLifecycle"] as { knowledgeTransfer?: unknown }).knowledgeTransfer).toBe(deps.knowledgeTransfer);
+    expect((coreLoopDeps["taskLifecycle"] as { revertCwd?: unknown }).revertCwd).toBe(workspaceDir);
+    expect((coreLoopDeps["taskLifecycle"] as { healthCheckCwd?: unknown }).healthCheckCwd).toBe(workspaceDir);
 
     const result = await deps.toolExecutor.execute(
       "glob",
       { pattern: "package.json", path: "." },
       {
-        cwd: process.cwd(),
+        cwd: workspaceDir,
         goalId: "cli-setup-tools",
         trustBalance: 100,
         preApproved: true,

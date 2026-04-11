@@ -195,6 +195,21 @@ describe("buildPlist", () => {
     expect(xml).toContain("<string>5000</string>");
   });
 
+  it("includes --workspace when workspace is provided", () => {
+    const xml = buildPlist({
+      nodePath: "/usr/local/bin/node",
+      cliRunnerPath: "/app/dist/cli/cli-runner.js",
+      goalIds: ["g1"],
+      stdoutLog: "/logs/out.log",
+      stderrLog: "/logs/err.log",
+      workingDir: "/work/project",
+      workspace: "/work/project",
+    });
+
+    expect(xml).toContain("<string>--workspace</string>");
+    expect(xml).toContain("<string>/work/project</string>");
+  });
+
   it("escapes special XML characters in paths", () => {
     const xml = buildPlist({
       nodePath: "/usr/local/bin/node",
@@ -291,6 +306,26 @@ describe("cmdInstall", () => {
     );
     expect(execFileNoThrow).toHaveBeenCalledWith("launchctl", ["load", PLIST_PATH]);
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining(PLIST_PATH));
+    logSpy.mockRestore();
+  });
+
+  it("writes explicit workspace into launchd arguments and WorkingDirectory", async () => {
+    Object.defineProperty(process, "platform", { value: "darwin", writable: true });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const code = await cmdInstall(["--goal", "goal-1", "--workspace", "/tmp/pulseed-workspace"]);
+
+    expect(code).toBe(0);
+    expect(fs.writeFileSync).toHaveBeenCalledWith(
+      PLIST_PATH,
+      expect.stringContaining("<string>--workspace</string>"),
+      "utf8"
+    );
+    expect(fs.writeFileSync).toHaveBeenCalledWith(
+      PLIST_PATH,
+      expect.stringContaining("<string>/tmp/pulseed-workspace</string>"),
+      "utf8"
+    );
     logSpy.mockRestore();
   });
 

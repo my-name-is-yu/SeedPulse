@@ -518,6 +518,7 @@ describe("TaskLifecycle — post-execution health check", () => {
 
   it("runPostExecutionHealthCheck uses ToolExecutor.execute(shell) when provided", async () => {
     const executeCalls: Array<{ toolName: string; input: unknown }> = [];
+    const cwd = "/tmp/pulseed-health-workspace";
     const mockExecutor: ToolExecutor = {
       execute: vi.fn().mockImplementation((toolName: string, input: unknown) => {
         executeCalls.push({ toolName, input });
@@ -534,6 +535,7 @@ describe("TaskLifecycle — post-execution health check", () => {
     const result = await runPostExecutionHealthCheck(
       async () => { throw new Error("should not be called"); },
       mockExecutor,
+      cwd,
     );
 
     expect(result.healthy).toBe(true);
@@ -544,6 +546,7 @@ describe("TaskLifecycle — post-execution health check", () => {
     // trusted=true is set in context (checked via the execute mock receiving it)
     const firstCtx = (mockExecutor.execute as ReturnType<typeof vi.fn>).mock.calls[0]![2];
     expect(firstCtx.trusted).toBe(true);
+    expect(firstCtx.cwd).toBe(cwd);
   });
 
   // ─────────────────────────────────────────────

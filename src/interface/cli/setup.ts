@@ -42,6 +42,8 @@ import { KnowledgeManager } from "../../platform/knowledge/knowledge-manager.js"
 import { VectorIndex } from "../../platform/knowledge/vector-index.js";
 import { OpenAIEmbeddingClient, MockEmbeddingClient } from "../../platform/knowledge/embedding-client.js";
 import type { IEmbeddingClient } from "../../platform/knowledge/embedding-client.js";
+import { LearningPipeline } from "../../platform/knowledge/learning/learning-pipeline.js";
+import { KnowledgeTransfer } from "../../platform/knowledge/transfer/knowledge-transfer.js";
 import { CharacterConfigManager } from "../../platform/traits/character-config.js";
 import * as GapCalculator from "../../platform/drive/gap-calculator.js";
 import * as DriveScorer from "../../platform/drive/drive-scorer.js";
@@ -56,7 +58,10 @@ import { formatOperationError } from "./utils.js";
 import { ToolRegistry, ToolExecutor, ToolPermissionManager, ConcurrencyController, createBuiltinTools } from "../../tools/index.js";
 import { isSafeBashCommand } from "../tui/bash-mode.js";
 
-export function createCliDataSourceAdapter(cfg: DataSourceConfig): IDataSourceAdapter | null {
+export function createCliDataSourceAdapter(
+  cfg: DataSourceConfig,
+  workspacePath = process.cwd(),
+): IDataSourceAdapter | null {
   if (cfg.type === "file") {
     return new FileDataSourceAdapter(cfg);
   }
@@ -76,7 +81,7 @@ export function createCliDataSourceAdapter(cfg: DataSourceConfig): IDataSourceAd
     const adapter = new ShellDataSourceAdapter(
       cfg.id,
       (cfg.connection.commands ?? {}) as Record<string, import("../../adapters/datasources/shell-datasource.js").ShellCommandSpec>,
-      cfg.connection?.path ?? process.cwd()
+      cfg.connection?.path ?? workspacePath
     );
     if (cfg.scope_goal_id) {
       (adapter.config as Record<string, unknown>).scope_goal_id = cfg.scope_goal_id;
@@ -96,6 +101,7 @@ export async function buildDeps(
   onProgress?: (event: ProgressEvent) => void,
   workspacePath?: string,
 ) {
+  const resolvedWorkspacePath = workspacePath ?? process.cwd();
   const characterConfig = await characterConfigManager.load();
   const llmClient = await buildLLMClient();
   const trustManager = new TrustManager(stateManager);
@@ -142,7 +148,7 @@ export async function buildDeps(
       const files = (await fsp.readdir(dsDir)).filter(f => f.endsWith('.json'));
       for (const file of files) {
         const cfg = await readJsonFile<DataSourceConfig>(path.join(dsDir, file));
-        const adapter = createCliDataSourceAdapter(cfg);
+        const adapter = createCliDataSourceAdapter(cfg, resolvedWorkspacePath);
         if (adapter) {
           dataSources.push(adapter);
         } else {
@@ -155,7 +161,7 @@ export async function buildDeps(
   }
 
   const contextProvider = createWorkspaceContextProvider(
-    { workDir: workspacePath ?? process.cwd() },
+    { workDir: resolvedWorkspacePath },
     async (goalId: string) => {
       try {
         const goal = await stateManager.loadGoal(goalId);
@@ -265,6 +271,22 @@ export async function buildDeps(
     vectorIndex,
     embeddingClient,
   );
+  const learningPipeline = new LearningPipeline(
+    llmClient,
+    vectorIndex ?? null,
+    stateManager,
+  );
+  const knowledgeTransfer = new KnowledgeTransfer({
+    llmClient,
+    knowledgeManager,
+    vectorIndex: vectorIndex ?? null,
+    learningPipeline,
+    ethicsGate,
+    stateManager,
+  });
+  learningPipeline.setKnowledgeTransfer(knowledgeTransfer);
+  reportingEngine.setKnowledgeTransfer(knowledgeTransfer);
+
   registerBuiltinTools({
     adapterRegistry,
     knowledgeManager,
@@ -285,8 +307,11 @@ export async function buildDeps(
       hookManager,
       adapterRegistry,
       knowledgeManager,
+      knowledgeTransfer,
       memoryLifecycle: memoryLifecycleManager,
       toolExecutor,
+      revertCwd: resolvedWorkspacePath,
+      healthCheckCwd: resolvedWorkspacePath,
     },
   });
 
@@ -344,6 +369,7 @@ export async function buildDeps(
     memoryLifecycleManager,
     driveScoreAdapter,
     knowledgeManager,
+    learningPipeline,
     hookManager,
     logger,
     contextProvider,
@@ -376,6 +402,8 @@ export async function buildDeps(
     hookManager,
     memoryLifecycleManager,
     knowledgeManager,
+    learningPipeline,
+    knowledgeTransfer,
     toolExecutor,
     toolRegistry,
   };

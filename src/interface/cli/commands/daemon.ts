@@ -67,7 +67,7 @@ export async function cmdStart(
   characterConfigManager: CharacterConfigManager,
   args: string[]
 ): Promise<void> {
-  let values: { "api-key"?: string; config?: string; goal?: string[]; detach?: boolean; "check-interval-ms"?: string; "iterations-per-cycle"?: string };
+  let values: { "api-key"?: string; config?: string; goal?: string[]; detach?: boolean; "check-interval-ms"?: string; "iterations-per-cycle"?: string; workspace?: string };
   try {
     ({ values } = parseArgs({
       args,
@@ -78,9 +78,10 @@ export async function cmdStart(
         detach: { type: "boolean", short: "d" },
         "check-interval-ms": { type: "string" },
         "iterations-per-cycle": { type: "string" },
+        workspace: { type: "string" },
       },
       strict: false,
-    }) as { values: { "api-key"?: string; config?: string; goal?: string[]; detach?: boolean; "check-interval-ms"?: string; "iterations-per-cycle"?: string } });
+    }) as { values: { "api-key"?: string; config?: string; goal?: string[]; detach?: boolean; "check-interval-ms"?: string; "iterations-per-cycle"?: string; workspace?: string } });
   } catch (err) {
     getCliLogger().error(formatOperationError("parse start command arguments", err));
     values = {};
@@ -136,6 +137,10 @@ export async function cmdStart(
     }
     daemonConfig = daemonConfig ?? {};
     daemonConfig.iterations_per_cycle = parsed;
+  }
+  if (values.workspace) {
+    daemonConfig = daemonConfig ?? {};
+    daemonConfig.workspace_path = path.resolve(values.workspace);
   }
 
   const resolvedDaemonConfig = DaemonConfigSchema.parse(daemonConfig ?? {});
@@ -246,6 +251,8 @@ export async function cmdStart(
     undefined,
     approvalBridge,
     logger,
+    undefined,
+    resolvedDaemonConfig.workspace_path,
   );
 
   // Load notifier plugins and wire NotificationDispatcher
@@ -301,6 +308,8 @@ export async function cmdStart(
       undefined,
       approvalBridge,
       logger,
+      undefined,
+      resolvedDaemonConfig.workspace_path,
     );
     freshDeps.reportingEngine.setNotificationDispatcher(notificationDispatcher);
 

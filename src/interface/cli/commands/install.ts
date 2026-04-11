@@ -28,6 +28,7 @@ export function buildPlist(opts: {
   stdoutLog: string;
   stderrLog: string;
   workingDir: string;
+  workspace?: string;
   envPath?: string;
   pulseedHome?: string;
 }): string {
@@ -40,6 +41,9 @@ export function buildPlist(opts: {
   }
   if (opts.intervalMs !== undefined) {
     programArgs.push("--check-interval-ms", String(opts.intervalMs));
+  }
+  if (opts.workspace) {
+    programArgs.push("--workspace", opts.workspace);
   }
 
   const argEntries = programArgs
@@ -103,7 +107,7 @@ export async function cmdInstall(args: string[]): Promise<number> {
     return 1;
   }
 
-  let values: { goal?: string[]; config?: string; interval?: string };
+  let values: { goal?: string[]; config?: string; interval?: string; workspace?: string };
   try {
     ({ values } = parseArgs({
       args,
@@ -111,9 +115,10 @@ export async function cmdInstall(args: string[]): Promise<number> {
         goal: { type: "string", multiple: true },
         config: { type: "string" },
         interval: { type: "string" },
+        workspace: { type: "string" },
       },
       strict: false,
-    }) as { values: { goal?: string[]; config?: string; interval?: string } });
+    }) as { values: { goal?: string[]; config?: string; interval?: string; workspace?: string } });
   } catch {
     console.error("Failed to parse arguments");
     return 1;
@@ -139,7 +144,7 @@ export async function cmdInstall(args: string[]): Promise<number> {
   const logsDir = path.join(home, ".pulseed", "logs");
   const stdoutLog = path.join(logsDir, "launchd-stdout.log");
   const stderrLog = path.join(logsDir, "launchd-stderr.log");
-  const workingDir = process.cwd();
+  const workingDir = path.resolve(values.workspace ?? process.cwd());
 
   const plistContent = buildPlist({
     nodePath,
@@ -150,6 +155,7 @@ export async function cmdInstall(args: string[]): Promise<number> {
     stdoutLog,
     stderrLog,
     workingDir,
+    workspace: workingDir,
     envPath: process.env["PATH"],
     pulseedHome: process.env["PULSEED_HOME"],
   });

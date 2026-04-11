@@ -113,6 +113,8 @@ export interface TaskLifecycleOptions {
   toolExecutor?: ToolExecutor;
   /** Optional explicit workspace root for git-based revert operations. */
   revertCwd?: string;
+  /** Optional explicit workspace root for post-execution health checks. */
+  healthCheckCwd?: string;
 }
 
 export interface TaskLifecycleDeps extends TaskLifecycleCoreDeps {
@@ -147,6 +149,7 @@ export class TaskLifecycle {
   private readonly hookManager?: HookManager;
   private readonly toolExecutor?: ToolExecutor;
   private readonly revertCwd?: string;
+  private readonly healthCheckCwd?: string;
   private onTaskComplete?: (strategyId: string) => void;
 
   constructor(deps: TaskLifecycleDeps);
@@ -202,6 +205,7 @@ export class TaskLifecycle {
     this.hookManager = resolvedOptions?.hookManager;
     this.toolExecutor = resolvedOptions?.toolExecutor;
     this.revertCwd = resolvedOptions?.revertCwd;
+    this.healthCheckCwd = resolvedOptions?.healthCheckCwd;
   }
 
   /** Register a callback invoked when a task completes successfully (used by PortfolioManager). */
@@ -641,6 +645,7 @@ export class TaskLifecycle {
     return _runPostExecutionHealthCheck(
       this.runShellCommand.bind(this),
       this.toolExecutor,
+      this.healthCheckCwd,
     );
   }
 

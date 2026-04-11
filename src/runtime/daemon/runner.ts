@@ -76,6 +76,11 @@ import {
 import type { GoalCycleScheduleSnapshotEntry } from "./maintenance.js";
 const RUNTIME_JOURNAL_MAX_ATTEMPTS = 1_000;
 
+function resolveResidentWorkspaceDir(configuredPath?: string): string {
+  const trimmed = configuredPath?.trim();
+  return trimmed ? path.resolve(trimmed) : process.cwd();
+}
+
 function gatherResidentWorkspaceContext(workspaceDir: string, seedDescription?: string): string {
   const parts: string[] = [`Workspace: ${workspaceDir}`];
   const seed = seedDescription?.trim();
@@ -1219,7 +1224,7 @@ export class DaemonRunner {
       typeof details?.["title"] === "string" ? details["title"].trim() : "";
 
     try {
-      const workspaceDir = process.cwd();
+      const workspaceDir = resolveResidentWorkspaceDir(this.config.workspace_path);
       const workspaceContext = gatherResidentWorkspaceContext(workspaceDir, hintedDescription);
       const existingTitles = await this.loadExistingGoalTitles();
       const suggestions = await this.goalNegotiator.suggestGoals(workspaceContext, {

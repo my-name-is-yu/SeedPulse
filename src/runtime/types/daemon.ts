@@ -10,6 +10,7 @@ export const DaemonConfigSchema = z.object({
   pid_file: z.string().default("pulseed.pid"),
   log_dir: z.string().default("logs"),
   runtime_root: z.string().optional(),
+  workspace_path: z.string().optional(),
   log_rotation: z.object({
     max_size_mb: z.number().positive().default(10),
     max_files: z.number().int().positive().default(5),
