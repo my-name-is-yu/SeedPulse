@@ -172,6 +172,22 @@ describe("purgeOldDecisions", () => {
     expect(remaining[0]!.id).toBe("recent-record");
   });
 
+  it("reprojects Soil decision page after purging the last old record", async () => {
+    const oldTimestamp = new Date(Date.now() - 91 * 24 * 60 * 60 * 1000).toISOString();
+
+    await manager.recordDecision(
+      makeDecisionRecord({ goal_type: "coding", id: "old-only-record", timestamp: oldTimestamp })
+    );
+    const decisionPage = path.join(tempDir, "soil", "decision", "recent.md");
+    expect(fs.readFileSync(decisionPage, "utf-8")).toContain("old-only-record");
+
+    const purged = await manager.purgeOldDecisions();
+    expect(purged).toBe(1);
+    const content = fs.readFileSync(decisionPage, "utf-8");
+    expect(content).toContain("Records: 0");
+    expect(content).not.toContain("old-only-record");
+  });
+
   it("returns 0 when no records exist", async () => {
     const purged = await manager.purgeOldDecisions();
     expect(purged).toBe(0);

@@ -180,8 +180,6 @@ describe("DaemonRunner durable approval restart", () => {
     daemon = null;
     startPromise = null;
     tmpDir = null;
-    process.removeAllListeners("SIGINT");
-    process.removeAllListeners("SIGTERM");
   });
 
   it("keeps pending approvals across daemon restart when runtime_journal_v2 is enabled", async () => {

@@ -18,6 +18,10 @@ export { TaskGetTool } from "../query/TaskGetTool/TaskGetTool.js";
 export { ConfigTool } from "../query/ConfigTool/ConfigTool.js";
 export { PluginStateTool } from "../query/PluginStateTool/PluginStateTool.js";
 export { ArchitectureTool } from "../query/ArchitectureTool/ArchitectureTool.js";
+export { SoilQueryTool } from "../query/SoilQueryTool/SoilQueryTool.js";
+export { SoilDoctorTool } from "../execution/SoilDoctorTool/SoilDoctorTool.js";
+export { SoilImportTool } from "../execution/SoilImportTool/SoilImportTool.js";
+export { SoilRebuildTool } from "../execution/SoilRebuildTool/SoilRebuildTool.js";
 export { WebSearchTool, createWebSearchClient } from "../network/WebSearchTool/WebSearchTool.js";
 export type { ISearchClient, SearchResult } from "../network/WebSearchTool/WebSearchTool.js";
 export { ToolSearchTool } from "../query/ToolSearchTool/ToolSearchTool.js";
@@ -80,6 +84,10 @@ import { TaskGetTool } from "../query/TaskGetTool/TaskGetTool.js";
 import { ConfigTool } from "../query/ConfigTool/ConfigTool.js";
 import { PluginStateTool } from "../query/PluginStateTool/PluginStateTool.js";
 import { ArchitectureTool } from "../query/ArchitectureTool/ArchitectureTool.js";
+import { SoilQueryTool } from "../query/SoilQueryTool/SoilQueryTool.js";
+import { SoilDoctorTool } from "../execution/SoilDoctorTool/SoilDoctorTool.js";
+import { SoilImportTool } from "../execution/SoilImportTool/SoilImportTool.js";
+import { SoilRebuildTool } from "../execution/SoilRebuildTool/SoilRebuildTool.js";
 import { WebSearchTool, createWebSearchClient } from "../network/WebSearchTool/WebSearchTool.js";
 import { ToolSearchTool } from "../query/ToolSearchTool/ToolSearchTool.js";
 import { EnvTool } from "../system/EnvTool/EnvTool.js";
@@ -179,7 +187,7 @@ export function createBuiltinTools(deps?: BuiltinToolDeps): ITool[] {
     tools.push(new MemoryRecallTool(deps.knowledgeManager));
   }
 
-  tools.push(new ConfigTool(), new ArchitectureTool());
+  tools.push(new ConfigTool(), new ArchitectureTool(), new SoilQueryTool(), new SoilDoctorTool(), new SoilImportTool());
 
   if (deps?.pluginLoader) {
     tools.push(new PluginStateTool(deps.pluginLoader));
@@ -197,6 +205,7 @@ export function createBuiltinTools(deps?: BuiltinToolDeps): ITool[] {
       new UpdateGoalTool(deps.stateManager),
       new ArchiveGoalTool(deps.stateManager),
       new DeleteGoalTool(deps.stateManager),
+      new SoilRebuildTool(deps.stateManager),
     );
   }
 

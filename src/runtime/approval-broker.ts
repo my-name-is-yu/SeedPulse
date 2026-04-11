@@ -29,6 +29,8 @@ interface PendingApprovalSession {
   record: ApprovalRecord;
   resolve?: (approved: boolean) => void;
   timer: ReturnType<typeof setTimeout>;
+  ready?: Promise<void>;
+  finalizing?: boolean;
 }
 
 export class ApprovalBroker {
@@ -105,11 +107,25 @@ export class ApprovalBroker {
       payload: { task },
     };
 
-    await this.store.savePending(record);
-
-    return new Promise<boolean>((resolve) => {
-      this.trackPending(record, resolve);
-      this.emitApprovalRequired(record, false);
+    return new Promise<boolean>((resolve, reject) => {
+      const ready = this.store.savePending(record).then(
+        () => {
+          const session = this.pending.get(approvalId);
+          if (session && !session.finalizing) {
+            this.emitApprovalRequired(record, false);
+          }
+        },
+        (err) => {
+          const session = this.pending.get(approvalId);
+          if (session) {
+            clearTimeout(session.timer);
+            this.pending.delete(approvalId);
+          }
+          reject(err);
+        }
+      );
+      this.trackPending(record, resolve, ready);
+      void ready.catch(() => undefined);
     });
   }
 
@@ -128,11 +144,16 @@ export class ApprovalBroker {
 
   getPendingApprovalEvents(): ApprovalRequiredEvent[] {
     return [...this.pending.values()]
+      .filter(({ finalizing }) => !finalizing)
       .map(({ record }) => this.toApprovalRequiredEvent(record, true))
       .sort((a, b) => a.expiresAt - b.expiresAt);
   }
 
-  private trackPending(record: ApprovalRecord, resolve?: (approved: boolean) => void): void {
+  private trackPending(
+    record: ApprovalRecord,
+    resolve?: (approved: boolean) => void,
+    ready?: Promise<void>
+  ): void {
     const existing = this.pending.get(record.approval_id);
     if (existing) {
       clearTimeout(existing.timer);
@@ -153,7 +174,7 @@ export class ApprovalBroker {
       });
     }, msUntilExpiry);
 
-    this.pending.set(record.approval_id, { record, resolve, timer });
+    this.pending.set(record.approval_id, { record, resolve, timer, ready });
   }
 
   private async finalizeApproval(
@@ -166,8 +187,18 @@ export class ApprovalBroker {
     }
   ): Promise<ApprovalRecord | null> {
     const session = this.pending.get(approvalId);
-    if (session) {
-      clearTimeout(session.timer);
+    if (session?.ready) {
+      session.finalizing = true;
+      try {
+        await session.ready;
+      } catch {
+        return null;
+      }
+    }
+
+    const currentSession = this.pending.get(approvalId);
+    if (currentSession) {
+      clearTimeout(currentSession.timer);
       this.pending.delete(approvalId);
     }
 
@@ -180,7 +211,7 @@ export class ApprovalBroker {
       return null;
     }
 
-    session?.resolve?.(resolution.approved);
+    currentSession?.resolve?.(resolution.approved);
     this.broadcast?.("approval_resolved", {
       requestId: approvalId,
       goalId: resolved.goal_id,

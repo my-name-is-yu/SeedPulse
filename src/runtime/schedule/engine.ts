@@ -34,6 +34,7 @@ import type { ILLMClient } from "../../base/llm/llm-client.js";
 import type { HookManager } from "../hook-manager.js";
 import type { MemoryLifecycleManager } from "../../platform/knowledge/memory/memory-lifecycle.js";
 import type { KnowledgeManager } from "../../platform/knowledge/knowledge-manager.js";
+import { projectSchedulesToSoil, rebuildSoilIndex } from "../../platform/soil/index.js";
 
 const SCHEDULES_FILE = "schedules.json";
 const DEFAULT_RETRY_POLICY: ScheduleRetryPolicy = {
@@ -135,11 +136,24 @@ export class ScheduleEngine {
     }
     const result = ScheduleEntryListSchema.safeParse(raw);
     this.entries = result.success ? result.data : [];
+    await this.projectCurrentSchedulesToSoil();
     return this.entries;
   }
 
   async saveEntries(): Promise<void> {
     await writeJsonFileAtomic(this.schedulesPath, this.entries);
+    await this.projectCurrentSchedulesToSoil();
+  }
+
+  private async projectCurrentSchedulesToSoil(): Promise<void> {
+    try {
+      await projectSchedulesToSoil({ entries: this.entries, baseDir: this.baseDir });
+      await rebuildSoilIndex({ rootDir: path.join(this.baseDir, "soil") });
+    } catch (error) {
+      this.logger.warn("Failed to project schedules into Soil", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   getEntries(): ScheduleEntry[] {

@@ -58,7 +58,22 @@ class MockAdapter implements IAdapter {
 // ─── Helpers ───
 
 function removeTempDir(dir: string): void {
-  fs.rmSync(dir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
+  try {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOTEMPTY" && code !== "EBUSY" && code !== "EPERM") {
+      throw err;
+    }
+    const retry = setTimeout(() => {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      } catch {
+        // Best-effort cleanup for macOS temp-dir races after the assertion path has completed.
+      }
+    }, 250);
+    retry.unref?.();
+  }
 }
 
 function makeGoal(id: string): Goal {

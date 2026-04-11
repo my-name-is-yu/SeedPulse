@@ -220,8 +220,6 @@ describe("DaemonRunner durable runtime", () => {
       currentStartPromise = null;
     }
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-    process.removeAllListeners("SIGINT");
-    process.removeAllListeners("SIGTERM");
   });
 
   it("constructs with minimal deps and partial config overrides", () => {
