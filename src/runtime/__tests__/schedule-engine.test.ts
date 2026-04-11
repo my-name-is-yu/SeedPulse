@@ -58,6 +58,32 @@ describe("ScheduleEngine", () => {
     expect(loaded[0]!.name).toBe("http-check");
   });
 
+  it("projects current schedules into Soil on save and reload", async () => {
+    await engine.addEntry({
+      name: "soil-visible-schedule",
+      layer: "heartbeat",
+      trigger: { type: "interval", seconds: 30, jitter_factor: 0 },
+      enabled: true,
+      heartbeat: {
+        check_type: "custom",
+        check_config: { command: "echo ok" },
+        failure_threshold: 3,
+        timeout_ms: 5000,
+      },
+    });
+
+    const soilPath = path.join(tempDir, "soil", "schedule", "current.md");
+    expect(fs.existsSync(soilPath)).toBe(true);
+    expect(fs.readFileSync(soilPath, "utf-8")).toContain("soil-visible-schedule");
+
+    fs.rmSync(path.join(tempDir, "soil"), { recursive: true, force: true });
+    const engine2 = new ScheduleEngine({ baseDir: tempDir });
+    await engine2.loadEntries();
+
+    expect(fs.existsSync(soilPath)).toBe(true);
+    expect(fs.readFileSync(soilPath, "utf-8")).toContain("soil-visible-schedule");
+  });
+
   it("removes an entry", async () => {
     const entry = await engine.addEntry({
       name: "to-remove",

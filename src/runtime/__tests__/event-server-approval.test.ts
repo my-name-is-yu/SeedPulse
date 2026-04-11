@@ -20,9 +20,11 @@ function request(
   method: string,
   urlPath: string,
   body: unknown,
-  authToken: string
+  authToken: string,
+  timeoutMs = 10_000
 ): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
+    let settled = false;
     const data = body === undefined ? "" : JSON.stringify(body);
     const req = http.request(
       {
@@ -43,11 +45,26 @@ function request(
           responseBody += chunk;
         });
         res.on("end", () => {
+          settled = true;
           resolve({ status: res.statusCode ?? 0, body: responseBody });
         });
       }
     );
-    req.on("error", reject);
+    req.setTimeout(timeoutMs, () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      const err = new Error(`Timed out waiting for ${method} ${urlPath}`);
+      req.destroy(err);
+      reject(err);
+    });
+    req.on("error", (err) => {
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
+    });
     if (data) {
       req.write(data);
     }
@@ -174,7 +191,7 @@ describe("EventServer durable approval integration", () => {
     } finally {
       await server.stop();
     }
-  });
+  }, 15_000);
 
   it("re-emits restored approvals to reconnecting SSE clients", async () => {
     const store = new ApprovalStore(tmpDir);

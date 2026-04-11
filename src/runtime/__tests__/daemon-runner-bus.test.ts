@@ -105,8 +105,6 @@ describe("DaemonRunner durable runtime wiring", () => {
       currentStartPromise = null;
     }
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-    process.removeAllListeners("SIGINT");
-    process.removeAllListeners("SIGTERM");
   });
 
   it("accepts gateway ingress into the runtime journal and dispatches external events", async () => {

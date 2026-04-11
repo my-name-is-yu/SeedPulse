@@ -7,5 +7,5 @@ export function makeTempDir(prefix = "pulseed-test-"): string {
 }
 
 export function cleanupTempDir(dir: string): void {
-  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

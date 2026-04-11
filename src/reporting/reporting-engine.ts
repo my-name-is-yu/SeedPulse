@@ -18,6 +18,7 @@ import type {
   NotificationContext,
   NotificationType,
 } from "./reporting-types.js";
+import { projectReportToSoil, rebuildSoilIndex } from "../platform/soil/index.js";
 
 // ─── ReportingEngine ───
 
@@ -280,6 +281,16 @@ export class ReportingEngine {
     const goalId = report.goal_id ?? "_global";
     const relativePath = `reports/${goalId}/${report.id}.json`;
     await this.stateManager.writeRaw(relativePath, report);
+    try {
+      const baseDir = this.stateManager.getBaseDir();
+      await projectReportToSoil({ report, baseDir });
+      await rebuildSoilIndex({ rootDir: path.join(baseDir, "soil") });
+    } catch (error) {
+      // Soil is a derived projection; runtime JSON remains the write truth.
+      console.warn(
+        `[soil] Failed to project report ${report.id}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   // ─── getReport ───

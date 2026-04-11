@@ -70,6 +70,57 @@ describe("ApprovalBroker", () => {
     );
   });
 
+  it("resolves requests when approval arrives while pending save is in flight", async () => {
+    tmpDir = makeTempDir();
+
+    let markSaveStarted: () => void = () => undefined;
+    let releaseSave: () => void = () => undefined;
+    const saveStarted = new Promise<void>((resolve) => {
+      markSaveStarted = resolve;
+    });
+    const saveGate = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    class SlowApprovalStore extends ApprovalStore {
+      override async savePending(record: ApprovalRecord): Promise<ApprovalRecord> {
+        markSaveStarted();
+        await saveGate;
+        return super.savePending(record);
+      }
+    }
+
+    const store = new SlowApprovalStore(tmpDir);
+    const broadcast = vi.fn();
+    const broker = new ApprovalBroker({
+      store,
+      broadcast,
+      createId: () => "approval-race",
+    });
+
+    const request = broker.requestApproval("goal-1", {
+      id: "task-race",
+      description: "Approve while saving",
+      action: "race",
+    });
+
+    await saveStarted;
+    const resolved = broker.resolveApproval("approval-race", true, "http");
+    await Promise.resolve();
+    expect(broker.getPendingApprovalEvents()).toEqual([]);
+    releaseSave();
+
+    await expect(resolved).resolves.toBe(true);
+    await expect(request).resolves.toBe(true);
+    expect(broadcast).not.toHaveBeenCalledWith(
+      "approval_required",
+      expect.objectContaining({ requestId: "approval-race" })
+    );
+    expect(broadcast).toHaveBeenCalledWith(
+      "approval_resolved",
+      expect.objectContaining({ requestId: "approval-race", approved: true })
+    );
+  });
+
   it("restores pending approvals from durable storage", async () => {
     tmpDir = makeTempDir();
     const store = new ApprovalStore(tmpDir);

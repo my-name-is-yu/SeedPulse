@@ -1,4 +1,5 @@
 import { z } from "zod";
+import * as path from "node:path";
 import { StateManager } from "../../base/state/state-manager.js";
 import type { ILLMClient } from "../../base/llm/llm-client.js";
 import type { IPromptGateway } from "../../prompt/gateway.js";
@@ -57,6 +58,12 @@ import {
   AgentMemoryStoreSchema,
 } from "./types/agent-memory.js";
 import type { AgentMemoryEntry, AgentMemoryType } from "./types/agent-memory.js";
+import {
+  projectAgentMemoryToSoil,
+  projectDomainKnowledgeToSoil,
+  projectSharedKnowledgeToSoil,
+  rebuildSoilIndex,
+} from "../soil/index.js";
 
 
 // Re-export for backward compatibility
@@ -165,6 +172,7 @@ export class KnowledgeManager {
         `goals/${goalId}/domain_knowledge.json`,
         validated
       );
+      await this._projectDomainKnowledgeToSoil(goalId, validated);
     } catch (err) {
       if (this.vectorIndex) {
         await this.vectorIndex.remove(parsed.entry_id);
@@ -317,6 +325,7 @@ export class KnowledgeManager {
     }
 
     await this.stateManager.writeRaw(SHARED_KB_PATH, all);
+    await this._projectSharedKnowledgeToSoil(all);
     return merged;
   }
 
@@ -491,6 +500,7 @@ export class KnowledgeManager {
     }
 
     await this.stateManager.writeRaw(AGENT_MEMORY_PATH, store);
+    await this._projectAgentMemoryToSoil(store);
     return saved;
   }
 
@@ -598,6 +608,7 @@ export class KnowledgeManager {
 
     store.entries.splice(idx, 1);
     await this.stateManager.writeRaw(AGENT_MEMORY_PATH, store);
+    await this._projectAgentMemoryToSoil(store);
     return true;
   }
 
@@ -723,6 +734,7 @@ export class KnowledgeManager {
     if (compiled.length > 0) {
       store.last_consolidated_at = now;
       await this.stateManager.writeRaw(AGENT_MEMORY_PATH, store);
+      await this._projectAgentMemoryToSoil(store);
     }
 
     return { compiled, archived: archivedIds.size };
@@ -749,6 +761,7 @@ export class KnowledgeManager {
 
     if (count > 0) {
       await this.stateManager.writeRaw(AGENT_MEMORY_PATH, store);
+      await this._projectAgentMemoryToSoil(store);
     }
     return count;
   }
@@ -808,6 +821,42 @@ export class KnowledgeManager {
 
   private async _loadDomainKnowledge(goalId: string): Promise<DomainKnowledge> {
     return loadDomainKnowledge(this.stateManager, goalId);
+  }
+
+  private async _projectDomainKnowledgeToSoil(goalId: string, domainKnowledge: DomainKnowledge): Promise<void> {
+    try {
+      const baseDir = this.stateManager.getBaseDir();
+      await projectDomainKnowledgeToSoil({ baseDir, goalId, domainKnowledge });
+      await rebuildSoilIndex({ rootDir: path.join(baseDir, "soil") });
+    } catch (error) {
+      console.warn(
+        `[soil] Failed to project domain knowledge for ${goalId}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  private async _projectSharedKnowledgeToSoil(entries: SharedKnowledgeEntry[]): Promise<void> {
+    try {
+      const baseDir = this.stateManager.getBaseDir();
+      await projectSharedKnowledgeToSoil({ baseDir, entries });
+      await rebuildSoilIndex({ rootDir: path.join(baseDir, "soil") });
+    } catch (error) {
+      console.warn(
+        `[soil] Failed to project shared knowledge: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  private async _projectAgentMemoryToSoil(store: import('./types/agent-memory.js').AgentMemoryStore): Promise<void> {
+    try {
+      const baseDir = this.stateManager.getBaseDir();
+      await projectAgentMemoryToSoil({ baseDir, store });
+      await rebuildSoilIndex({ rootDir: path.join(baseDir, "soil") });
+    } catch (error) {
+      console.warn(
+        `[soil] Failed to project agent memory: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
 

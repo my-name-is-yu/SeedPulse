@@ -35,6 +35,7 @@ Overview of PulSeed's design documentation, organized by subsystem.
 | [Knowledge Transfer](knowledge/knowledge-transfer.md) | Cross-goal knowledge sharing and reuse |
 | [Learning Pipeline](knowledge/learning-pipeline.md) | Outcome-based learning and pattern extraction |
 | [Hypothesis Verification](knowledge/hypothesis-verification.md) | PIVOT/REFINE decision mechanism for stalled strategies |
+| [Soil System](knowledge/soil-system.md) | Human-readable derived memory surface, local index, and Soil tools |
 
 ## Execution — Task and Strategy Management
 

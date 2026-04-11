@@ -130,8 +130,6 @@ describe("DaemonRunner — Graceful Shutdown + Crash Recovery", () => {
       currentStartPromise = null;
     }
     fs.rmSync(tmpDir, { recursive: true, force: true , maxRetries: 3, retryDelay: 100 });
-    process.removeAllListeners("SIGINT");
-    process.removeAllListeners("SIGTERM");
   });
 
   // ─── Graceful Shutdown ───
@@ -332,9 +330,8 @@ describe("DaemonRunner — Graceful Shutdown + Crash Recovery", () => {
       await waitForDaemonRunning(tmpDir);
 
       // The new marker (state: "running") should exist, not the old "clean_shutdown" one
-      const currentMarker = readMarker(tmpDir);
-      expect(currentMarker).not.toBeNull();
-      expect(currentMarker!.state).toBe("running");
+      const currentMarker = await waitForMarkerState(tmpDir, "running");
+      expect(currentMarker.state).toBe("running");
 
       daemon.stop();
       await startPromise;

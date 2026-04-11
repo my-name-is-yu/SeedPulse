@@ -7,6 +7,7 @@ import type { ILLMClient } from "../../base/llm/llm-client.js";
 import type { IPromptGateway } from "../../prompt/gateway.js";
 import type { StateManager } from "../../base/state/state-manager.js";
 import { writeJsonFileAtomic } from "../../base/utils/json-io.js";
+import { projectDecisionsToSoil, rebuildSoilIndex } from "../soil/index.js";
 
 // ─── LLM response schema ───
 
@@ -43,6 +44,7 @@ export async function recordDecision(
   const filename = `${toSave.goal_id}-${toSave.timestamp.replace(/[:.]/g, "-")}.json`;
   const filePath = path.join(decisionsDir, filename);
   await writeJsonFileAtomic(filePath, toSave);
+  await projectDecisionDirectoryToSoil(deps);
 }
 
 /**
@@ -181,6 +183,7 @@ export async function updateDecisionOutcome(
   const { filePath, record } = matches[0]!;
   const updated = DecisionRecordSchema.parse({ ...record, outcome });
   await writeJsonFileAtomic(filePath, updated);
+  await projectDecisionDirectoryToSoil(deps);
 }
 
 /**
@@ -213,7 +216,37 @@ export async function purgeOldDecisions(deps: DecisionDeps): Promise<number> {
       // Skip invalid files
     }
   }
+  if (purged > 0) {
+    await projectDecisionDirectoryToSoil(deps);
+  }
   return purged;
+}
+
+async function projectDecisionDirectoryToSoil(deps: DecisionDeps): Promise<void> {
+  try {
+    const baseDir = deps.stateManager.getBaseDir();
+    const decisionsDir = path.join(baseDir, "decisions");
+    const files = await fsp.readdir(decisionsDir).catch(() => []);
+    const records: DecisionRecord[] = [];
+    for (const file of files) {
+      if (!file.endsWith(".json")) {
+        continue;
+      }
+      try {
+        const content = await fsp.readFile(path.join(decisionsDir, file), "utf-8");
+        const raw = JSON.parse(content) as unknown;
+        records.push(DecisionRecordSchema.parse(raw));
+      } catch {
+        // Skip invalid decision files; SoilDoctor can report source issues separately.
+      }
+    }
+    await projectDecisionsToSoil({ baseDir, records });
+    await rebuildSoilIndex({ rootDir: path.join(baseDir, "soil") });
+  } catch (error) {
+    console.warn(
+      `[soil] Failed to project decision history: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
 }
 
 /**
