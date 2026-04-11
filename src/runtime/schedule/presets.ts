@@ -46,6 +46,10 @@ export const DreamConsolidationPresetInputSchema = SchedulePresetBaseSchema.exte
   context_sources: z.array(z.string()).default([]),
 });
 
+export const SoilPublishPresetInputSchema = SchedulePresetBaseSchema.extend({
+  preset: z.literal("soil_publish"),
+});
+
 export const GoalProbePresetInputSchema = SchedulePresetBaseSchema.extend({
   preset: z.literal("goal_probe"),
   data_source_id: z.string().min(1),
@@ -62,6 +66,7 @@ export const SchedulePresetInputSchema = z.discriminatedUnion("preset", [
   DailyBriefPresetInputSchema,
   WeeklyReviewPresetInputSchema,
   DreamConsolidationPresetInputSchema,
+  SoilPublishPresetInputSchema,
   GoalProbePresetInputSchema,
 ]);
 
@@ -98,6 +103,13 @@ const PRESET_DEFINITIONS: Record<SchedulePresetKey, SchedulePresetDefinition> = 
     description: "Runs overnight consolidation for memory and stale knowledge cleanup.",
     defaultTrigger: { type: "cron", expression: "0 2 * * *", timezone: "UTC" },
     dependencyHints: ["memory_lifecycle", "knowledge_manager"],
+  },
+  soil_publish: {
+    key: "soil_publish",
+    title: "Soil snapshot publish",
+    description: "Publishes configured read-only Soil snapshots to external viewers.",
+    defaultTrigger: { type: "interval", seconds: 24 * 60 * 60, jitter_factor: 0 },
+    dependencyHints: ["soil_publish_config"],
   },
   goal_probe: {
     key: "goal_probe",
@@ -190,6 +202,19 @@ export function buildSchedulePresetEntry(input: SchedulePresetInput): CreateSche
           output_format: "report",
           report_type: "dream_consolidation",
           max_tokens: 1200,
+        },
+      };
+    case "soil_publish":
+      return {
+        ...base,
+        layer: "cron",
+        cron: {
+          job_kind: "soil_publish",
+          prompt_template: "Publish configured Soil snapshots.",
+          context_sources: [],
+          output_format: "report",
+          report_type: "soil_publish",
+          max_tokens: 0,
         },
       };
     case "goal_probe":

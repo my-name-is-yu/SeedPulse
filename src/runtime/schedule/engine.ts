@@ -35,6 +35,8 @@ import type { HookManager } from "../hook-manager.js";
 import type { MemoryLifecycleManager } from "../../platform/knowledge/memory/memory-lifecycle.js";
 import type { KnowledgeManager } from "../../platform/knowledge/knowledge-manager.js";
 import { projectSchedulesToSoil, rebuildSoilIndex } from "../../platform/soil/index.js";
+import { hasConfiguredSoilPublishProvider } from "../../platform/soil/publish/index.js";
+import { buildSchedulePresetEntry } from "./presets.js";
 
 const SCHEDULES_FILE = "schedules.json";
 const DEFAULT_RETRY_POLICY: ScheduleRetryPolicy = {
@@ -143,6 +145,21 @@ export class ScheduleEngine {
   async saveEntries(): Promise<void> {
     await writeJsonFileAtomic(this.schedulesPath, this.entries);
     await this.projectCurrentSchedulesToSoil();
+  }
+
+  async ensureSoilPublishSchedule(): Promise<ScheduleEntry | null> {
+    const configured = await hasConfiguredSoilPublishProvider({ baseDir: this.baseDir });
+    if (!configured) {
+      return null;
+    }
+    const existing = this.entries.find((entry) =>
+      entry.layer === "cron" &&
+      (entry.cron?.job_kind === "soil_publish" || entry.metadata?.preset_key === "soil_publish")
+    );
+    if (existing) {
+      return existing;
+    }
+    return this.addEntry(buildSchedulePresetEntry({ preset: "soil_publish" }));
   }
 
   private async projectCurrentSchedulesToSoil(): Promise<void> {

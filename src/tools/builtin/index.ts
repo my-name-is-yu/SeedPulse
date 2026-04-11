@@ -21,6 +21,8 @@ export { ArchitectureTool } from "../query/ArchitectureTool/ArchitectureTool.js"
 export { SoilQueryTool } from "../query/SoilQueryTool/SoilQueryTool.js";
 export { SoilDoctorTool } from "../execution/SoilDoctorTool/SoilDoctorTool.js";
 export { SoilImportTool } from "../execution/SoilImportTool/SoilImportTool.js";
+export { SoilOpenTool } from "../execution/SoilOpenTool/SoilOpenTool.js";
+export { SoilPublishTool } from "../execution/SoilPublishTool/SoilPublishTool.js";
 export { SoilRebuildTool } from "../execution/SoilRebuildTool/SoilRebuildTool.js";
 export { WebSearchTool, createWebSearchClient } from "../network/WebSearchTool/WebSearchTool.js";
 export type { ISearchClient, SearchResult } from "../network/WebSearchTool/WebSearchTool.js";
@@ -87,6 +89,8 @@ import { ArchitectureTool } from "../query/ArchitectureTool/ArchitectureTool.js"
 import { SoilQueryTool } from "../query/SoilQueryTool/SoilQueryTool.js";
 import { SoilDoctorTool } from "../execution/SoilDoctorTool/SoilDoctorTool.js";
 import { SoilImportTool } from "../execution/SoilImportTool/SoilImportTool.js";
+import { SoilOpenTool } from "../execution/SoilOpenTool/SoilOpenTool.js";
+import { SoilPublishTool } from "../execution/SoilPublishTool/SoilPublishTool.js";
 import { SoilRebuildTool } from "../execution/SoilRebuildTool/SoilRebuildTool.js";
 import { WebSearchTool, createWebSearchClient } from "../network/WebSearchTool/WebSearchTool.js";
 import { ToolSearchTool } from "../query/ToolSearchTool/ToolSearchTool.js";
@@ -187,7 +191,15 @@ export function createBuiltinTools(deps?: BuiltinToolDeps): ITool[] {
     tools.push(new MemoryRecallTool(deps.knowledgeManager));
   }
 
-  tools.push(new ConfigTool(), new ArchitectureTool(), new SoilQueryTool(), new SoilDoctorTool(), new SoilImportTool());
+  tools.push(
+    new ConfigTool(),
+    new ArchitectureTool(),
+    new SoilQueryTool(),
+    new SoilDoctorTool(),
+    new SoilImportTool(),
+    new SoilOpenTool(),
+    new SoilPublishTool(),
+  );
 
   if (deps?.pluginLoader) {
     tools.push(new PluginStateTool(deps.pluginLoader));

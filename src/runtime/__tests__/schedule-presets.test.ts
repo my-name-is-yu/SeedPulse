@@ -12,6 +12,7 @@ describe("schedule-presets", () => {
       "daily_brief",
       "weekly_review",
       "dream_consolidation",
+      "soil_publish",
       "goal_probe",
     ]);
   });
@@ -61,6 +62,27 @@ describe("schedule-presets", () => {
           threshold_value: 0.8,
           baseline_window: 7,
         }),
+      }),
+    }));
+  });
+
+  it("builds the soil publish preset as a 24h cron entry", () => {
+    const entry = buildSchedulePresetEntry(SchedulePresetInputSchema.parse({
+      preset: "soil_publish",
+    }));
+
+    expect(entry).toEqual(expect.objectContaining({
+      name: "Soil snapshot publish",
+      layer: "cron",
+      trigger: { type: "interval", seconds: 86400, jitter_factor: 0 },
+      metadata: expect.objectContaining({
+        source: "preset",
+        preset_key: "soil_publish",
+      }),
+      cron: expect.objectContaining({
+        job_kind: "soil_publish",
+        report_type: "soil_publish",
+        max_tokens: 0,
       }),
     }));
   });

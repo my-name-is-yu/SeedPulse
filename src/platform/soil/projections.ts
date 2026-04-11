@@ -197,6 +197,75 @@ function scheduleBody(entries: ScheduleEntry[]): string {
   return lines.join("\n");
 }
 
+function schedulePurpose(entry: ScheduleEntry): string {
+  if (entry.cron) {
+    if (entry.cron.job_kind === "reflection") {
+      return entry.cron.reflection_kind ? `reflection:${entry.cron.reflection_kind}` : "reflection";
+    }
+    if (entry.cron.job_kind === "soil_publish") {
+      return "soil snapshot publish";
+    }
+    return summaryFromText(entry.cron.prompt_template, 120);
+  }
+  if (entry.probe) {
+    return `probe ${entry.probe.data_source_id}${entry.probe.probe_dimension ? `/${entry.probe.probe_dimension}` : ""}`;
+  }
+  if (entry.heartbeat) {
+    return `heartbeat ${entry.heartbeat.check_type}`;
+  }
+  if (entry.goal_trigger) {
+    return `goal trigger ${entry.goal_trigger.goal_id}`;
+  }
+  return entry.metadata?.note ?? "none";
+}
+
+function scheduleOutputHint(entry: ScheduleEntry): string {
+  if (entry.cron) {
+    return [
+      entry.cron.output_format,
+      entry.cron.report_type ? `report:${entry.cron.report_type}` : undefined,
+    ].filter(Boolean).join(" / ");
+  }
+  if (entry.probe) {
+    return entry.probe.llm_on_change ? "probe change + optional LLM note" : "probe change";
+  }
+  if (entry.heartbeat) {
+    return "health status";
+  }
+  if (entry.goal_trigger) {
+    return `run goal ${entry.goal_trigger.goal_id}`;
+  }
+  return "none";
+}
+
+function activeScheduleBody(entries: ScheduleEntry[]): string {
+  const active = [...entries]
+    .filter((entry) => entry.enabled)
+    .sort((left, right) => left.next_fire_at.localeCompare(right.next_fire_at));
+  const lines = [
+    "# Active schedules",
+    "",
+    `Active: ${active.length}`,
+    `Total: ${entries.length}`,
+    "",
+    "| Name | Layer | Trigger | Next fire | Purpose | Output hint | Last fired |",
+    "| --- | --- | --- | --- | --- | --- | --- |",
+  ];
+
+  for (const entry of active) {
+    lines.push(
+      `| ${entry.name} | ${entry.layer} | ${scheduleTriggerSummary(entry)} | ${entry.next_fire_at} | ${schedulePurpose(entry)} | ${scheduleOutputHint(entry)} | ${entry.last_fired_at ?? ""} |`
+    );
+  }
+
+  if (active.length === 0) {
+    lines.push("| none | | | | | | |");
+  }
+
+  lines.push("");
+  return lines.join("\n");
+}
+
 export async function projectSchedulesToSoil(input: ProjectSchedulesToSoilInput): Promise<void> {
   const generatedAt = nowIso(input.clock);
   const sourcePath = path.join(input.baseDir, "schedules.json");
@@ -211,7 +280,7 @@ export async function projectSchedulesToSoil(input: ProjectSchedulesToSoilInput)
     .sort()
     .at(0) ?? generatedAt;
 
-  const frontmatter = baseFrontmatter({
+  const currentFrontmatter = baseFrontmatter({
     soilId: "schedule/current",
     title: "Current schedules",
     kind: "schedule",
@@ -225,9 +294,28 @@ export async function projectSchedulesToSoil(input: ProjectSchedulesToSoilInput)
     domain: "schedule",
     renderedFrom: "schedule-engine",
   });
+  const activeFrontmatter = baseFrontmatter({
+    soilId: "schedule/active",
+    title: "Active schedules",
+    kind: "schedule",
+    route: "schedule",
+    createdAt,
+    updatedAt,
+    generatedAt,
+    sourcePath,
+    sourceHash,
+    summary: `${enabledCount} active schedules`,
+    domain: "schedule",
+    renderedFrom: "schedule-engine",
+  });
+  const compiler = SoilCompiler.create({ rootDir: soilRootFromBaseDir(input) }, { clock: input.clock });
 
-  await SoilCompiler.create({ rootDir: soilRootFromBaseDir(input) }, { clock: input.clock }).write({
-    frontmatter,
+  await compiler.write({
+    frontmatter: currentFrontmatter,
     body: scheduleBody(input.entries),
+  });
+  await compiler.write({
+    frontmatter: activeFrontmatter,
+    body: activeScheduleBody(input.entries),
   });
 }

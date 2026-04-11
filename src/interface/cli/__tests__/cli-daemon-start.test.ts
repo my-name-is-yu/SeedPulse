@@ -7,6 +7,7 @@ const {
   daemonStartMock,
   watchdogStartMock,
   scheduleLoadEntriesMock,
+  scheduleEnsureSoilPublishScheduleMock,
   pluginLoadAllMock,
   setRealtimeSinkMock,
   eventServerBroadcastMock,
@@ -19,6 +20,7 @@ const {
   daemonStartMock: vi.fn().mockResolvedValue(undefined),
   watchdogStartMock: vi.fn().mockResolvedValue(undefined),
   scheduleLoadEntriesMock: vi.fn().mockResolvedValue(undefined),
+  scheduleEnsureSoilPublishScheduleMock: vi.fn().mockResolvedValue(null),
   pluginLoadAllMock: vi.fn().mockResolvedValue(undefined),
   setRealtimeSinkMock: vi.fn(),
   eventServerBroadcastMock: vi.fn(),
@@ -98,6 +100,7 @@ vi.mock("../../../runtime/schedule/engine.js", () => ({
     scheduleEngineArgs.push(args);
     return {
       loadEntries: scheduleLoadEntriesMock,
+      ensureSoilPublishSchedule: scheduleEnsureSoilPublishScheduleMock,
     };
   }),
 }));
@@ -146,6 +149,7 @@ describe("cmdStart", () => {
     daemonStartMock.mockClear();
     watchdogStartMock.mockClear();
     scheduleLoadEntriesMock.mockClear();
+    scheduleEnsureSoilPublishScheduleMock.mockClear();
     pluginLoadAllMock.mockClear();
     setRealtimeSinkMock.mockClear();
     eventServerBroadcastMock.mockClear();

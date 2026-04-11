@@ -43,7 +43,7 @@ describe("Soil projections", () => {
     }
   });
 
-  it("projects current schedules into soil/schedule/current.md", async () => {
+  it("projects current and active schedules into soil/schedule markdown", async () => {
     const baseDir = makeTempDir("soil-schedule-projection-");
     try {
       const entry = ScheduleEntrySchema.parse({
@@ -83,6 +83,13 @@ describe("Soil projections", () => {
       expect(page?.frontmatter.summary).toBe("1/1 schedules enabled");
       expect(page?.body).toContain("Daily brief");
       expect(page?.body).toContain("cron 0 9 * * * (Asia/Tokyo)");
+
+      const activePage = await readSoilMarkdownFile(path.join(baseDir, "soil", "schedule", "active.md"));
+      expect(activePage?.frontmatter.soil_id).toBe("schedule/active");
+      expect(activePage?.frontmatter.summary).toBe("1 active schedules");
+      expect(activePage?.body).toContain("Daily brief");
+      expect(activePage?.body).toContain("2026-04-12T09:00:00.000Z");
+      expect(activePage?.body).toContain("reflection:morning_planning");
     } finally {
       cleanupTempDir(baseDir);
     }

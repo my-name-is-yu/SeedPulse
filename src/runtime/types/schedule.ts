@@ -36,7 +36,7 @@ export const ReflectionJobKindSchema = z.enum([
 export type ReflectionJobKind = z.infer<typeof ReflectionJobKindSchema>;
 
 export const CronConfigSchema = z.object({
-  job_kind: z.enum(["prompt", "reflection"]).default("prompt"),
+  job_kind: z.enum(["prompt", "reflection", "soil_publish"]).default("prompt"),
   reflection_kind: ReflectionJobKindSchema.optional(),
   prompt_template: z.string(),
   context_sources: z.array(z.string()).default([]),

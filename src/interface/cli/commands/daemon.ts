@@ -291,6 +291,7 @@ export async function cmdStart(
     knowledgeManager: deps.knowledgeManager,
   });
   await scheduleEngine.loadEntries();
+  await scheduleEngine.ensureSoilPublishSchedule();
 
   const refreshResidentDeps = async () => {
     const freshDeps = await buildDeps(
@@ -316,6 +317,7 @@ export async function cmdStart(
       knowledgeManager: freshDeps.knowledgeManager,
     });
     await freshScheduleEngine.loadEntries();
+    await freshScheduleEngine.ensureSoilPublishSchedule();
 
     return {
       coreLoop: freshDeps.coreLoop,

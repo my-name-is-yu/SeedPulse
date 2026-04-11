@@ -1830,6 +1830,44 @@ describe("Cron execution (Phase 3)", () => {
     expect(memoryLifecycle.compressToLongTerm).toHaveBeenCalled();
     expect(fs.existsSync(path.join(tempDir, "reflections"))).toBe(true);
   });
+
+  it("executeCron runs soil_publish jobs without an LLM", async () => {
+    const eng = new ScheduleEngine({ baseDir: tempDir });
+    const entry = await eng.addEntry(makeCronEntry({
+      cron: {
+        job_kind: "soil_publish",
+        prompt_template: "Publish Soil snapshots",
+        context_sources: [],
+        output_format: "report",
+        report_type: "soil_publish",
+        max_tokens: 0,
+      },
+    }));
+
+    const result = await (eng as any).executeCron(entry);
+
+    expect(result.status).toBe("ok");
+    expect(result.output_summary).toContain("Soil publish completed");
+  });
+
+  it("ensures one 24h soil_publish schedule only when publish is configured", async () => {
+    const eng = new ScheduleEngine({ baseDir: tempDir });
+    await eng.loadEntries();
+    expect(await eng.ensureSoilPublishSchedule()).toBeNull();
+
+    fs.mkdirSync(path.join(tempDir, "soil"), { recursive: true });
+    fs.writeFileSync(path.join(tempDir, "soil", "publish.json"), JSON.stringify({
+      notion: { enabled: true, token: "secret", parentPageId: "parent" },
+    }), "utf-8");
+
+    const first = await eng.ensureSoilPublishSchedule();
+    const second = await eng.ensureSoilPublishSchedule();
+
+    expect(first?.cron?.job_kind).toBe("soil_publish");
+    expect(first?.trigger).toEqual({ type: "interval", seconds: 86400, jitter_factor: 0 });
+    expect(second?.id).toBe(first?.id);
+    expect(eng.getEntries().filter((entry) => entry.cron?.job_kind === "soil_publish")).toHaveLength(1);
+  });
 });
 
 // ─── Phase 3: GoalTrigger execution ───

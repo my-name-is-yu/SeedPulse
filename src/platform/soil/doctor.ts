@@ -23,6 +23,7 @@ export interface SoilDoctorFinding {
     | "checksum-mismatch"
     | "watermark-mismatch"
     | "missing-index"
+    | "missing-required-page"
     | "index-page-count-mismatch"
     | "index-checksum-mismatch";
   severity: "error" | "warn";
@@ -221,6 +222,8 @@ export class SoilDoctor {
       }
     }
 
+    findings.push(...(await this.checkRequiredPages(pages)));
+
     return {
       rootDir: this.config.rootDir,
       totalPages: pages.length,
@@ -232,6 +235,35 @@ export class SoilDoctor {
     const pages: ScannedPage[] = [];
     await this.walk(this.config.rootDir, pages);
     return pages;
+  }
+
+  private async checkRequiredPages(pages: ScannedPage[]): Promise<SoilDoctorFinding[]> {
+    const findings: SoilDoctorFinding[] = [];
+    const existing = new Set(pages.map((page) => page.relativePath));
+    const requiredPages = [
+      { relativePath: "index.md", severity: "error" as const, message: "Required Soil entry page is missing: index.md" },
+      {
+        relativePath: "schedule/active.md",
+        severity: "warn" as const,
+        message: "Required active schedule page is missing: schedule/active.md",
+      },
+    ];
+
+    for (const page of requiredPages) {
+      if (existing.has(page.relativePath)) {
+        continue;
+      }
+      const absolutePath = path.join(this.config.rootDir, page.relativePath);
+      findings.push({
+        code: "missing-required-page",
+        severity: page.severity,
+        relativePath: page.relativePath,
+        absolutePath,
+        message: page.message,
+      });
+    }
+
+    return findings;
   }
 
   private async walk(dir: string, pages: ScannedPage[]): Promise<void> {

@@ -93,14 +93,15 @@ describe("SoilDoctorTool", () => {
 
   describe("call", () => {
     it("returns an empty report for a clean soil root", async () => {
-      await seedPage();
+      await seedPage({ soil_id: "index", kind: "index", route: "index", title: "Soil" });
+      await seedPage({ soil_id: "schedule/active", kind: "schedule", route: "schedule", title: "Active schedules" });
       await rebuildSoilIndex({ rootDir });
 
       const result = await tool.call({ rootDir }, makeContext());
 
       expect(result.success).toBe(true);
       const data = result.data as { report: { findingCount: number; errorCount: number; warnCount: number; totalPages: number }; findings: unknown[] };
-      expect(data.report.totalPages).toBe(1);
+      expect(data.report.totalPages).toBe(2);
       expect(data.report.findingCount).toBe(0);
       expect(data.report.errorCount).toBe(0);
       expect(data.report.warnCount).toBe(0);

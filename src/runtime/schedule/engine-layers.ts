@@ -24,6 +24,7 @@ import {
   runWeeklyReview,
 } from "../../reflection/index.js";
 import { DreamAnalyzer } from "../../platform/dream/dream-analyzer.js";
+import { publishSoilSnapshots } from "../../platform/soil/index.js";
 
 interface LayerDeps {
   baseDir?: string;
@@ -237,6 +238,33 @@ export async function executeCron(entry: ScheduleEntry, deps: LayerDeps): Promis
         });
       }
       return executeReflectionCron(entry, deps, firedAt, start, cfg.reflection_kind);
+    }
+
+    if (cfg.job_kind === "soil_publish") {
+      if (!deps.baseDir) {
+        return ScheduleResultSchema.parse({
+          entry_id: entry.id,
+          status: "error",
+          duration_ms: 0,
+          error_message: "Soil publish cron requires baseDir",
+          fired_at: firedAt,
+          failure_kind: "permanent",
+        });
+      }
+      const result = await publishSoilSnapshots({ baseDir: deps.baseDir, provider: "all" });
+      const pageResults = result.providers.flatMap((provider) => provider.pages);
+      const errors = pageResults.filter((page) => page.status === "error");
+      const published = pageResults.filter((page) => page.status === "published");
+      const skipped = pageResults.filter((page) => page.status === "skipped");
+      return ScheduleResultSchema.parse({
+        entry_id: entry.id,
+        status: errors.length > 0 ? "error" : "ok",
+        duration_ms: Date.now() - start,
+        error_message: errors.length > 0 ? `${errors.length} Soil publish page(s) failed` : undefined,
+        fired_at: firedAt,
+        failure_kind: errors.length > 0 ? "transient" : undefined,
+        output_summary: `Soil publish completed: ${published.length} published, ${skipped.length} skipped, ${errors.length} errors`,
+      });
     }
 
     // Gather context from data sources

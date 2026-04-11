@@ -12,3 +12,5 @@ export * from "./projections.js";
 export * from "./content-projections.js";
 export * from "./runtime-rebuild.js";
 export * from "./importer.js";
+export * from "./open.js";
+export * from "./publish/index.js";

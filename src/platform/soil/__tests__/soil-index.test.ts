@@ -174,4 +174,23 @@ describe("Soil index snapshot", () => {
       cleanupTempDir(rootDir);
     }
   });
+
+  it("reports missing required Soil entry pages", async () => {
+    const rootDir = makeTempDir("soil-required-pages-");
+    try {
+      const report = await SoilDoctor.create({ rootDir }).inspect();
+      expect(report.findings).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          code: "missing-required-page",
+          relativePath: "index.md",
+        }),
+        expect.objectContaining({
+          code: "missing-required-page",
+          relativePath: "schedule/active.md",
+        }),
+      ]));
+    } finally {
+      cleanupTempDir(rootDir);
+    }
+  });
 });
