@@ -20,12 +20,7 @@
 
 ### PulSeedtion for Applying This to PulSeed
 
-<<<<<<< HEAD
-PulSeed's current `CoreLoop` plus bounded `AgentLoop` execution model is structurally sound, but has the following issues:
-=======
 PulSeed's orchestration runtime is structurally sound, but the following questions remain important:
->>>>>>> e49c85c9 (implement native agentloop and coreloop phases)
-
 1. **No defined action after stall detection** — Even when StallDetector determines "it has stalled," CoreLoop has only limited branching
 2. **Zero meta-knowledge for strategy decisions** — There is no record of which strategies were effective for similar goals in the past, and no way to look that up
 3. **Cannot distinguish convergence from stagnation** — An absolute threshold check on `gap < threshold` alone cannot handle the case where progress is "close but not quite there"

@@ -151,6 +151,7 @@ import type { ToolRegistry } from "../registry.js";
 import type { PluginLoader } from "../../runtime/plugin-loader.js";
 import type { ScheduleEngine } from "../../runtime/schedule/engine.js";
 import type { TrustManager } from "../../platform/traits/trust-manager.js";
+import type { IEmbeddingClient } from "../../platform/knowledge/embedding-client.js";
 
 export interface BuiltinToolDeps {
   stateManager?: StateManager;
@@ -163,6 +164,8 @@ export interface BuiltinToolDeps {
   observationEngine?: ObservationEngine;
   llmCall?: (prompt: string) => Promise<string>;
   scheduleEngine?: ScheduleEngine;
+  embeddingClient?: IEmbeddingClient | null;
+  embeddingModel?: string;
 }
 
 /** All built-in tools, sorted alphabetically by name. */
@@ -208,7 +211,11 @@ export function createBuiltinTools(deps?: BuiltinToolDeps): ITool[] {
   tools.push(
     new ConfigTool(),
     new ArchitectureTool(),
-    new SoilQueryTool(),
+    new SoilQueryTool(
+      deps && "embeddingClient" in deps
+        ? { embeddingClient: deps.embeddingClient ?? null, embeddingModel: deps.embeddingModel }
+        : {}
+    ),
     new SoilDoctorTool(),
     new SoilImportTool(),
     new SoilOpenTool(),

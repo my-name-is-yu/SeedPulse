@@ -17,12 +17,7 @@ Under long-term operation, PulSeed continuously accumulates the following data:
 
 | Data type | Source | Growth rate |
 |-----------|--------|------------|
-<<<<<<< HEAD
-| Experience log | Each CoreLoop iteration plus bounded AgentLoop execution summaries | 1 entry per loop / run |
-=======
-| Experience log | CoreLoop iterations and task execution outcomes, including bounded agent runs and verification evidence | 1 entry per loop/task outcome |
->>>>>>> e49c85c9 (implement native agentloop and coreloop phases)
-| Observation history | ObservationEngine periodic and event-driven observations | dimensions × observation frequency |
+| Experience log | CoreLoop iterations and task execution outcomes, including bounded agent runs and verification evidence | 1 entry per loop/task outcome || Observation history | ObservationEngine periodic and event-driven observations | dimensions × observation frequency |
 | Knowledge base | Results of KnowledgeManager research tasks | Multiple entries per research task |
 | Strategy history | Strategy execution results from StrategyManager/PortfolioManager | 1 entry per strategy change |
 | Task history | Past tasks from TaskLifecycle | 1 entry per task |
@@ -120,12 +115,7 @@ Long-term Memory
 
 ### 3.1 Experience Log
 
-<<<<<<< HEAD
-Records of CoreLoop iteration results and bounded AgentLoop execution outcomes. The data source for the learning pipeline in `mechanism.md` §4.
-=======
 Records of CoreLoop iteration outcomes, task execution, verification evidence, and related bounded agent activity. These records feed the learning pipeline and Soil projections.
->>>>>>> e49c85c9 (implement native agentloop and coreloop phases)
-
 | Layer | What is retained | Format |
 |-------|----------------|--------|
 | Working | Summary of the last 2–3 loops of experience relevant to the current task | Text summary |

@@ -177,12 +177,7 @@ The command passes conversation history to the LLM as the primary source for goa
 Parses `pulseed chat [task]` and delegates to ChatRunner.
 
 - If `task` argument is present: non-interactive, single turn
-<<<<<<< HEAD
-- If `task` is absent: open interactive REPL backed by TUI chat component (`src/interface/tui/chat.tsx` — no changes needed)
-=======
-- If `task` is absent: open interactive REPL backed by the TUI chat component (`src/interface/tui/chat.tsx`)
->>>>>>> e49c85c9 (implement native agentloop and coreloop phases)
-- Flags: `--adapter <name>`, `--resume [id]` (Phase 2), `--timeout <ms>`
+- If `task` is absent: open interactive REPL backed by the TUI chat component (`src/interface/tui/chat.tsx`)- Flags: `--adapter <name>`, `--resume [id]` (Phase 2), `--timeout <ms>`
 
 ### 5.5 Context Provider Extension (`src/observation/context-provider.ts`)
 

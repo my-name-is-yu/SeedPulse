@@ -13,14 +13,23 @@ import {
   createSoilConfig,
   loadSoilIndexSnapshot,
   querySoilIndexSnapshot,
+  SqliteSoilRepository,
 } from "../../../platform/soil/index.js";
 import { DESCRIPTION } from "./prompt.js";
 import { ALIASES, MAX_OUTPUT_CHARS, PERMISSION_LEVEL, READ_ONLY, TAGS, TOOL_NAME } from "./constants.js";
 import type { SoilPageRecord, SoilQueryHit } from "../../../platform/soil/retriever.js";
+import type { SoilCandidate, SoilPage } from "../../../platform/soil/contracts.js";
+import {
+  OllamaEmbeddingClient,
+  OpenAIEmbeddingClient,
+  type IEmbeddingClient,
+} from "../../../platform/knowledge/embedding-client.js";
 
 const LIMIT_MAX = 50;
 const DIRECT_BODY_MAX_CHARS = 4000;
 const DIRECT_SNIPPET_MAX_CHARS = 280;
+const DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small";
+const DEFAULT_OLLAMA_EMBEDDING_MODEL = "nomic-embed-text";
 
 export const SoilQueryInputSchema = z
   .object({
@@ -65,12 +74,49 @@ export interface SoilQueryOutput {
   query: string | null;
   soilId: string | null;
   path: string | null;
-  retrievalSource: "index" | "manifest";
+  retrievalSource: "sqlite" | "index" | "manifest";
   warnings: string[];
   pages: SoilQueryPageItem[];
   hits: SoilQueryHitItem[];
   pageCount: number;
   hitCount: number;
+}
+
+export interface SoilQueryToolOptions {
+  embeddingClient?: IEmbeddingClient | null;
+  embeddingModel?: string;
+}
+
+interface QueryEmbeddingConfig {
+  client: IEmbeddingClient;
+  model?: string;
+}
+
+interface SqliteQueryResult {
+  hits: SoilQueryHitItem[];
+  warnings: string[];
+}
+
+function createDefaultQueryEmbeddingConfig(): QueryEmbeddingConfig | null {
+  const provider = process.env["SOIL_EMBEDDING_PROVIDER"]?.toLowerCase();
+  const model = process.env["SOIL_EMBEDDING_MODEL"];
+  if (provider === "ollama") {
+    const ollamaModel = model ?? process.env["OLLAMA_EMBEDDING_MODEL"] ?? DEFAULT_OLLAMA_EMBEDDING_MODEL;
+    return {
+      client: new OllamaEmbeddingClient(ollamaModel, process.env["OLLAMA_BASE_URL"]),
+      model: ollamaModel,
+    };
+  }
+
+  const apiKey = process.env["OPENAI_API_KEY"];
+  if (!apiKey) {
+    return null;
+  }
+  const openaiModel = model ?? process.env["OPENAI_EMBEDDING_MODEL"] ?? DEFAULT_OPENAI_EMBEDDING_MODEL;
+  return {
+    client: new OpenAIEmbeddingClient(apiKey, openaiModel, process.env["OPENAI_BASE_URL"]),
+    model: openaiModel,
+  };
 }
 
 function toSummaryItem(record: SoilPageRecord): SoilQueryPageItem {
@@ -129,6 +175,40 @@ function toIndexHitItem(hit: Awaited<ReturnType<typeof querySoilIndexSnapshot>>[
   };
 }
 
+function metadataString(metadata: Record<string, unknown>, key: string): string | null {
+  const value = metadata[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function toSqliteHitItem(candidate: SoilCandidate, page: SoilPage | undefined): SoilQueryHitItem {
+  const title = metadataString(candidate.metadata_json, "title") ?? page?.soil_id ?? candidate.soil_id;
+  const summary = metadataString(candidate.metadata_json, "summary");
+  return {
+    soilId: page?.soil_id ?? candidate.soil_id,
+    relativePath: page?.relative_path ?? `${candidate.soil_id}.md`,
+    title,
+    kind: page?.kind ?? "knowledge",
+    route: page?.route ?? "knowledge",
+    status: page?.status ?? "confirmed",
+    summary,
+    score: candidate.score,
+    snippet: candidate.snippet ?? undefined,
+  };
+}
+
+function resolveSqlitePage(candidate: SoilCandidate, pages: SoilPage[] | undefined): SoilPage | undefined {
+  if (!pages || pages.length === 0) {
+    return undefined;
+  }
+  if (candidate.page_id) {
+    const matched = pages.find((page) => page.page_id === candidate.page_id);
+    if (matched) {
+      return matched;
+    }
+  }
+  return pages[0];
+}
+
 function dedupeByKey<T>(records: T[], keyFn: (record: T) => string): T[] {
   const seen = new Set<string>();
   const deduped: T[] = [];
@@ -144,6 +224,17 @@ function dedupeByKey<T>(records: T[], keyFn: (record: T) => string): T[] {
 }
 
 export class SoilQueryTool implements ITool<SoilQueryInput, SoilQueryOutput> {
+  private readonly queryEmbedding: QueryEmbeddingConfig | null;
+
+  constructor(options: SoilQueryToolOptions = {}) {
+    this.queryEmbedding =
+      "embeddingClient" in options
+        ? options.embeddingClient
+          ? { client: options.embeddingClient, model: options.embeddingModel }
+          : null
+        : createDefaultQueryEmbeddingConfig();
+  }
+
   readonly metadata: ToolMetadata = {
     name: TOOL_NAME,
     aliases: [...ALIASES],
@@ -183,17 +274,24 @@ export class SoilQueryTool implements ITool<SoilQueryInput, SoilQueryOutput> {
       }
 
       if (parsedInput.query) {
-        const indexSnapshot = await loadSoilIndexSnapshot({ rootDir: parsedInput.rootDir });
+        const sqliteResult = await this.querySqlite(parsedInput);
+        warnings.push(...sqliteResult.warnings);
+        if (sqliteResult.hits.length > 0) {
+          retrievalSource = "sqlite";
+          hits.push(...sqliteResult.hits);
+        }
+
+        const indexSnapshot = hits.length === 0 ? await loadSoilIndexSnapshot({ rootDir: parsedInput.rootDir }) : null;
         const freshness = indexSnapshot
           ? await checkSoilIndexFresh({ rootDir: parsedInput.rootDir })
           : null;
-        if (indexSnapshot && freshness?.fresh) {
+        if (hits.length === 0 && indexSnapshot && freshness?.fresh) {
           retrievalSource = "index";
           const queried = await querySoilIndexSnapshot(parsedInput.query, parsedInput.limit, { rootDir: parsedInput.rootDir });
           for (const hit of queried) {
             hits.push(toIndexHitItem(hit));
           }
-        } else {
+        } else if (hits.length === 0) {
           warnings.push(
             freshness
               ? `Soil index stale (${freshness.reason}); fell back to Markdown manifest scan.`
@@ -280,6 +378,56 @@ export class SoilQueryTool implements ITool<SoilQueryInput, SoilQueryOutput> {
       }
     }
     return dedupeByKey(records, (record) => `${record.soilId}:${record.relativePath}`);
+  }
+
+  private async querySqlite(input: SoilQueryInput): Promise<SqliteQueryResult> {
+    if (!input.query) {
+      return { hits: [], warnings: [] };
+    }
+    let repository: SqliteSoilRepository | null = null;
+    const warnings: string[] = [];
+    try {
+      repository = await SqliteSoilRepository.create({ rootDir: input.rootDir });
+      const embedding = await this.embedQuery(input.query);
+      if (embedding.warning) {
+        warnings.push(embedding.warning);
+      }
+      const candidates = await repository.searchHybrid({
+        query: input.query,
+        limit: input.limit ?? 10,
+        ...(embedding.vector ? { query_embedding: embedding.vector } : {}),
+        ...(embedding.model ? { query_embedding_model: embedding.model } : {}),
+      });
+      if (candidates.length === 0) {
+        return { hits: [], warnings };
+      }
+      const pages = await repository.loadPagesForRecords(candidates.map((candidate) => candidate.record_id));
+      return {
+        hits: candidates.map((candidate) => toSqliteHitItem(candidate, resolveSqlitePage(candidate, pages.get(candidate.record_id)))),
+        warnings,
+      };
+    } catch {
+      return { hits: [], warnings };
+    } finally {
+      repository?.close();
+    }
+  }
+
+  private async embedQuery(query: string): Promise<{ vector: number[] | null; model?: string; warning?: string }> {
+    if (!this.queryEmbedding) {
+      return { vector: null };
+    }
+    try {
+      return {
+        vector: await this.queryEmbedding.client.embed(query),
+        model: this.queryEmbedding.model,
+      };
+    } catch (err) {
+      return {
+        vector: null,
+        warning: `Soil query embedding failed; used lexical-only SQLite search (${err instanceof Error ? err.message : String(err)}).`,
+      };
+    }
   }
 
   async checkPermissions(_input: SoilQueryInput, _context: ToolCallContext): Promise<PermissionCheckResult> {

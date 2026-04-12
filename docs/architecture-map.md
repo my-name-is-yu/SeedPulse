@@ -1,134 +1,8 @@
 # Architecture Map
 
-<<<<<<< HEAD
-Implementation-facing baseline: [docs/design/current-baseline.md](design/current-baseline.md)
-
----
-=======
 This is the public architecture map for the current codebase.
->>>>>>> e49c85c9 (implement native agentloop and coreloop phases)
-
 ## 1. Top-level picture
 
-<<<<<<< HEAD
-PulSeed is a **task discovery engine**. It takes on the user's long-term goals ("I want to double revenue," "I want to live happily with my dog"), observes the real world, and keeps discovering "what should be done next" from the gap with the goal. PulSeed itself executes nothing. It delegates discovered tasks to AI agents, verifies the results, and runs the loop again. Until the goal is achieved — days or years, however long it takes.
-
----
-
-## 2. Overall Architecture Diagram
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                              User                                    │
-│   Goals: "Double revenue" / "Live happily with my dog"               │
-│   Constraints: "Don't share customer data" / "Respect vet's judgment"│
-│   Capability grants: API keys, sensors, DB access, permissions       │
-└───────────────┬─────────────────────────────┬───────────────────────┘
-                │ Goal setting, constraints,   │ Reports, approval requests
-                │ capability grants            │
-                ↓                               ↑
-┌───────────────────────────────────────────────────────────────────────┐
-│                                                                       │
-│                      PulSeed (Task Discovery Engine)                  │
-│                                                                       │
-│  ┌──────────────────────────────────────────────────────────────┐     │
-│  │              Goal Negotiation                                 │     │
-│  │   Ethics Gate (Step 0) → Receive goal → Dimension            │     │
-│  │   decomposition → Baseline observation                       │     │
-│  │   → Feasibility evaluation → Accept / Counter-propose /      │     │
-│  │     Cautionary flag                                           │     │
-│  └──────────────────────────┬───────────────────────────────────┘     │
-│                              ↓ Agreed-upon goal                       │
-│  ┌──────────────────────────────────────────────────────────────┐     │
-│  │              Goal Tree (Recursive Goal Tree)                  │     │
-│  │     Top-level goal                                            │     │
-│  │      ├── Sub-goal A ── Each node holds its own state vector  │     │
-│  │      │    ├── Sub-goal A-1                                    │     │
-│  │      │    └── Sub-goal A-2                                    │     │
-│  │      ├── Sub-goal B                                           │     │
-│  │      └── Sub-goal C                                           │     │
-│  └──────────────────────────┬───────────────────────────────────┘     │
-│                              ↓ Loop runs at each node                 │
-│  ┌──────────────────────────────────────────────────────────────┐     │
-│  │                    Core Loop                                  │     │
-│  │                                                               │     │
-│  │   ┌────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐ │     │
-│  │   │Observe │──→│  Gap     │──→│  Drive   │──→│  Task    │ │     │
-│  │   │(3-layer│    │Calculation│   │ Scoring  │   │Generation│ │     │
-│  │   └────────┘    └──────────┘    └──────────┘    └────┬─────┘ │     │
-│  │       ↑                                               │       │     │
-│  │       │         ┌──────────┐    ┌──────────┐          │       │     │
-│  │       └─────────│  Result  │←───│ Session  │←─────────┘       │     │
-│  │                 │Verification│   │Execution │                  │     │
-│  │                 │ (3-layer) │    └──────────┘                  │     │
-│  │                 └──────────┘                                   │     │
-│  └──────────────────────────────────────────────────────────────┘     │
-│                                                                       │
-│  ┌─────────── Knowledge / Capability Layer ───────────────────────┐   │
-│  │  KnowledgeManager (knowledge acquisition, conflict detection)  │   │
-│  │  CapabilityDetector                                            │   │
-│  └──────────────────────────────────────────────────────────────┘     │
-│                                                                       │
-│  ┌─────────── Portfolio Management ───────────────────────────────┐   │
-│  │  PortfolioManager (parallel multi-strategy execution,          │   │
-│  │  effectiveness measurement, automatic rebalancing)             │   │
-│  └──────────────────────────────────────────────────────────────┘     │
-│                                                                       │
-│  ┌─────────── Cross-Cutting Mechanisms ───────────────────────────┐   │
-│  │  Trust & Safety │ Satisficing │ Stall Detection │ Curiosity    │   │
-│  │  │ Execution Boundary                                          │   │
-│  │  CharacterConfigManager (Layer 11, 4-axis parameter injection) │   │
-│  │  CuriosityEngine (Layer 11, 5 trigger conditions,              │   │
-│  │    autonomous curiosity goal generation)                       │   │
-│  │  EmbeddingClient, VectorIndex, KnowledgeGraph,                 │   │
-│  │  GoalDependencyGraph (Layer 12, semantic embedding infra)      │   │
-│  └──────────────────────────────────────────────────────────────┘     │
-│                                                                       │
-│  ┌─────────── External Connections / Goal Tree Layer ─────────────┐   │
-│  │  Layer 13: CapabilityDetector (autonomous capability           │   │
-│  │            acquisition)                                        │   │
-│  │            DataSourceAdapter (external world connection)       │   │
-│  │  Layer 14: GoalTreeManager (N-level goal decomposition,        │   │
-│  │            aggregation, pruning)                               │   │
-│  │            StateAggregator (child node state aggregation,      │   │
-│  │            completion cascade)                                 │   │
-│  │            TreeLoopOrchestrator (parallel node loop execution) │   │
-│  │            CrossGoalPortfolio (cross-goal priority and         │   │
-│  │            resource allocation)                                │   │
-│  │            StrategyTemplateRegistry (strategy template mgmt)  │   │
-│  │            LearningPipeline (4-trigger learning, cross-goal    │   │
-│  │            pattern sharing)                                    │   │
-│  │            KnowledgeTransfer (cross-goal knowledge and         │   │
-│  │            strategy transfer)                                  │   │
-│  └──────────────────────────────────────────────────────────────┘     │
-│                                                                       │
-│  ┌─────────── Infrastructure ──────────────────────────────────────┐  │
-│  │  Drive System (4 triggers) │ Context Management │ State         │  │
-│  │  Persistence (JSON)                                             │  │
-│  └──────────────────────────────────────────────────────────────┘     │
-│                                                                       │
-│  ┌─────────── TUI Layer (src/interface/tui/) ─────────────────────┐   │
-│  │  App │ Dashboard │ Chat │ ApprovalOverlay │ HelpOverlay │       │   │
-│  │  ReportView │ IntentRecognizer                                  │   │
-│  └──────────────────────────────────────────────────────────────┘     │
-│                                                                       │
-└───────────────────────────────────┬───────────────────────────────────┘
-                                    │ Task delegation
-                                    ↓
-┌───────────────────────────────────────────────────────────────────────┐
-│                        Execution Layer (Existing Systems)             │
-│                                                                       │
-│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────────────┐ │
-│  │ CLI Agents │ │ LLM API    │ │ Custom     │ │ Humans             │ │
-│  │(code impl) │ │(analysis/  │ │ Agents     │ │ (approval/judgment)│ │
-│  │            │ │ summaries) │ │            │ │                    │ │
-│  └────────────┘ └────────────┘ └────────────┘ └────────────────────┘ │
-│                                                                       │
-│  ┌────────────────────────────────────────────────────────────────┐  │
-│  │ Data Sources: sensors, DB, Analytics, CRM, external APIs, IoT  │  │
-│  └────────────────────────────────────────────────────────────────┘  │
-└───────────────────────────────────────────────────────────────────────┘
-=======
 ```text
 user / daemon / chat / tui
           |
@@ -152,9 +26,7 @@ agentic core phases      task lifecycle
               tools
                 |
                 v
-   state / memory / Soil / external world
->>>>>>> e49c85c9 (implement native agentloop and coreloop phases)
-```
+   state / memory / Soil / external world```
 
 ## 2. Directory-level map
 

@@ -20,6 +20,10 @@ export function getDefaultSoilIndexPath(rootDir?: string): string {
   return path.join(rootDir ?? getDefaultSoilRootDir(), ".index", "soil.db");
 }
 
+export function getDefaultSoilSqliteIndexPath(rootDir?: string): string {
+  return path.join(rootDir ?? getDefaultSoilRootDir(), ".index", "soil.sqlite");
+}
+
 export function resolveSoilRootDir(rootDir?: string): string {
   if (!rootDir) {
     return getDefaultSoilRootDir();

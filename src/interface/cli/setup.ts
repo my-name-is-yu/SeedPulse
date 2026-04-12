@@ -121,7 +121,13 @@ export async function buildDeps(
   const toolRegistry = new ToolRegistry();
   const registerBuiltinTools = (deps?: Parameters<typeof createBuiltinTools>[0]) => {
     for (const tool of createBuiltinTools(deps)) {
-      if (!toolRegistry.get(tool.metadata.name)) {
+      const existing = toolRegistry.get(tool.metadata.name);
+      if (existing && tool.metadata.name === "soil_query" && deps?.embeddingClient) {
+        toolRegistry.unregister(tool.metadata.name);
+        toolRegistry.register(tool);
+        continue;
+      }
+      if (!existing) {
         toolRegistry.register(tool);
       }
     }
@@ -241,8 +247,9 @@ export async function buildDeps(
   const pulseedBaseDir = getPulseedDirPath();
 
   // --- Embedding + Vector infrastructure ---
+  const openAiEmbeddingModel = process.env["OPENAI_EMBEDDING_MODEL"] ?? "text-embedding-3-small";
   const embeddingClient: IEmbeddingClient = process.env["OPENAI_API_KEY"]
-    ? new OpenAIEmbeddingClient(process.env["OPENAI_API_KEY"])
+    ? new OpenAIEmbeddingClient(process.env["OPENAI_API_KEY"], openAiEmbeddingModel)
     : new MockEmbeddingClient();
 
   let vectorIndex: VectorIndex | undefined;
@@ -307,6 +314,8 @@ export async function buildDeps(
 
   registerBuiltinTools({
     adapterRegistry,
+    embeddingClient: process.env["OPENAI_API_KEY"] ? embeddingClient : undefined,
+    embeddingModel: process.env["OPENAI_API_KEY"] ? openAiEmbeddingModel : undefined,
     knowledgeManager,
     observationEngine,
     sessionManager,

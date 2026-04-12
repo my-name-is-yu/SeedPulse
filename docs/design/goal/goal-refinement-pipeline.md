@@ -131,16 +131,9 @@ The prompt includes available data sources from ObservationEngine so the LLM can
 ### 3.4 Where It Lives
 
 ```
-<<<<<<< HEAD
-src/orchestrator/goal/goal-refiner.ts          # NEW — GoalRefiner class
-src/orchestrator/goal/refiner-prompts.ts       # NEW — leaf test prompt builder
-src/base/types/goal-refiner.ts                 # NEW — RefineConfig, LeafTestResult, RefineResult schemas
-=======
 src/orchestrator/goal/goal-refiner.ts     # GoalRefiner class
 src/orchestrator/goal/refiner-prompts.ts  # leaf test prompt builder
-src/base/types/goal-refiner.ts            # RefineConfig, LeafTestResult, RefineResult schemas
->>>>>>> e49c85c9 (implement native agentloop and coreloop phases)
-```
+src/base/types/goal-refiner.ts            # RefineConfig, LeafTestResult, RefineResult schemas```
 
 **GoalRefiner** composes:
 - `GoalNegotiator` — reuses `evaluateQualitatively()` and `runCapabilityCheckStep()` for feasibility validation on leaf dimensions
@@ -186,12 +179,7 @@ Each step is independently testable and deployable. No breaking changes until st
 
 2. **Add leaf test** — `src/orchestrator/goal/refiner-prompts.ts` with `buildLeafTestPrompt()`. Unit-testable with mock LLM. No integration yet.
 
-<<<<<<< HEAD
-3. **Add GoalRefiner** — `src/orchestrator/goal/goal-refiner.ts` implementing `refine()`. Calls GoalNegotiator and GoalTreeManager internally. Integration tests against mock LLM.
-=======
 3. **Add GoalRefiner** — `src/orchestrator/goal/goal-refiner.ts` implementing `refine()`. Calls GoalNegotiator and GoalTreeManager internally. Integration tests against mock LLM. Old paths still work.
->>>>>>> e49c85c9 (implement native agentloop and coreloop phases)
-
 4. **Wire CLI** — `goal add` calls `refine()` by default. `--negotiate` and `--tree` flags become aliases / deprecated. `--no-refine` skips refinement entirely.
 
 5. **Wire CoreLoop** — `tree-loop-runner` calls `refine()` instead of raw `decomposeGoal()`. Add `reRefineLeaf()` path to stall handler.

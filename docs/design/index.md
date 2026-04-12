@@ -2,25 +2,6 @@
 
 Overview of PulSeed's design documentation, organized by subsystem.
 
-<<<<<<< HEAD
-## Read This First
-
-Start here when you need the current implementation-facing design:
-
-- [Current Design Baseline](current-baseline.md)
-- [Architecture Map](../architecture-map.md)
-- [Runtime](../runtime.md)
-- [Module Map](../module-map.md)
-
-These four documents should answer "how the system is shaped now." The rest of `docs/design/` is primarily subsystem detail, rationale, and future design work.
-
-## How To Read These Docs
-
-- Public docs in `docs/` are the user/contributor-facing explanation of the current system.
-- `current-baseline.md` is the engineering baseline for current implementation.
-- The subsystem docs below may mix current behavior, near-term design, and future proposals.
-- If a design note conflicts with code, prefer the code and update the design note.
-=======
 ## Current Reading Guide
 
 These design docs include a mix of:
@@ -49,8 +30,6 @@ PulSeed is currently best understood as:
 - tools and Soil as shared substrate across both loops
 
 If a lower-level design document still describes PulSeed as a single flat loop only, treat that as historical simplification rather than the exact current runtime shape.
->>>>>>> e49c85c9 (implement native agentloop and coreloop phases)
-
 ## Core — Loop and State Management
 
 | Document | Description |

@@ -14,3 +14,6 @@ export * from "./runtime-rebuild.js";
 export * from "./importer.js";
 export * from "./open.js";
 export * from "./publish/index.js";
+export * from "./contracts.js";
+export * from "./ddl.js";
+export * from "./sqlite-repository.js";

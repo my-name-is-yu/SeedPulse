@@ -101,12 +101,7 @@ npx pulseed <subcommand>
 ```bash
 PULSEED_LLM_PROVIDER=openai \
 OPENAI_API_KEY=sk-... \
-<<<<<<< HEAD
-node dist/interface/cli/cli-runner.js status
-=======
-node dist/interface/cli/cli-runner.js goal list
->>>>>>> e49c85c9 (implement native agentloop and coreloop phases)
-```
+node dist/interface/cli/cli-runner.js goal list```
 
 If the command starts without errors and displays the goal list (even if empty), the connection is working.
 
@@ -130,12 +125,7 @@ node dist/interface/cli/cli-runner.js goal list
 ```bash
 PULSEED_LLM_PROVIDER=openai \
 OPENAI_API_KEY=sk-... \
-<<<<<<< HEAD
-node dist/interface/cli/cli-runner.js run
-=======
-node dist/interface/cli/cli-runner.js run --goal <goal-id>
->>>>>>> e49c85c9 (implement native agentloop and coreloop phases)
-```
+node dist/interface/cli/cli-runner.js run --goal <goal-id>```
 
 This executes one CoreLoop run. Depending on the goal state, PulSeed may observe, score, run bounded core phases, execute a task, and verify the outcome.
 
@@ -163,12 +153,7 @@ Run:
 ```bash
 PULSEED_LLM_PROVIDER=openai \
 OPENAI_API_KEY=sk-... \
-<<<<<<< HEAD
-node dist/interface/cli/cli-runner.js run
-=======
-node dist/interface/cli/cli-runner.js run --goal <goal-id>
->>>>>>> e49c85c9 (implement native agentloop and coreloop phases)
-```
+node dist/interface/cli/cli-runner.js run --goal <goal-id>```
 
 The Codex adapter internally executes:
 

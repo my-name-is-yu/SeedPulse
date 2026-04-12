@@ -28,16 +28,7 @@ What setup does:
 ## 3. Create a goal
 
 ```bash
-<<<<<<< HEAD
-git clone https://github.com/my-name-is-yu/PulSeed.git
-cd PulSeed
-npm install
-npm run build
-node dist/interface/cli/cli-runner.js --help
-=======
-pulseed goal add "Increase test coverage to 90%"
->>>>>>> e49c85c9 (implement native agentloop and coreloop phases)
-```
+pulseed goal add "Increase test coverage to 90%"```
 
 This stores a goal with measurable dimensions and enough state for the CoreLoop to continue later.
 
@@ -77,29 +68,11 @@ Use these to inspect the current goal state, latest report, and task history.
 
 ## 6. Use chat mode
 
-<<<<<<< HEAD
-`pulseed run` starts PulSeed's core loop for the selected goal and keeps iterating until completion, stall, explicit stop, or the active iteration budget is exhausted:
-
-The current runtime combines:
-
-- **CoreLoop** — long-lived control for observation, prioritization, completion checks, stall handling, and re-planning
-- **AgentLoop** — bounded execution where the model chooses tools, reads results, and works toward a final answer or task outcome
-
-The exact step shape varies by goal and execution path, but the common flow is:
-
-1. **Observe and refresh evidence**
-2. **Calculate gaps and priorities**
-3. **Choose the next task or bounded execution step**
-4. **Execute with adapters or tools**
-5. **Verify outcomes and update persisted state**
-=======
 ```bash
 pulseed chat
 ```
 
 Chat mode is no longer just a command router. It can run through the native AgentLoop with tools when the configured provider supports it.
->>>>>>> e49c85c9 (implement native agentloop and coreloop phases)
-
 Current chat characteristics:
 
 - tool-using bounded turns

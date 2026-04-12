@@ -1,16 +1,6 @@
 # Module Map
 
-<<<<<<< HEAD
-Implementation-facing baseline: [docs/design/current-baseline.md](design/current-baseline.md)
-
-> This document is a guide for Claude Code to immediately determine "which files to touch."
-> Use it to quickly identify target files based on the type of change needed.
->
-> Note: the detailed tables below predate parts of the current `src/base` / `src/orchestrator` / `src/platform` / `src/interface` split. Use `docs/design/current-baseline.md` and the live code layout as the source of truth when a path here disagrees with the repository.
-=======
 This is the current public module map for the reorganized codebase.
->>>>>>> e49c85c9 (implement native agentloop and coreloop phases)
-
 It is intentionally oriented around stable directories and major entry points rather than an exhaustive per-file inventory.
 
 ## 1. Public entry points

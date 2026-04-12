@@ -24,12 +24,7 @@ Claude Code's KAIROS subsystem is a proactive "assistant mode" that transforms a
 - `sleep_progress` is ephemeral (not sent to API) to avoid context pollution
 
 **What PulSeed should do:**
-<<<<<<< HEAD
-- PulSeed already has a structured `CoreLoop` plus a bounded `AgentLoop` for tool-using execution
-=======
-- PulSeed already has a long-lived CoreLoop with observation, scoring, task lifecycle, and bounded agentic phases
->>>>>>> e49c85c9 (implement native agentloop and coreloop phases)
-- **Add idle-tick injection** between CoreLoop cycles: when no active tasks exist, inject a `<tick>` to the LLM asking "given current goals and state, what should I proactively work on?"
+- PulSeed already has a long-lived CoreLoop with observation, scoring, task lifecycle, and bounded agentic phases- **Add idle-tick injection** between CoreLoop cycles: when no active tasks exist, inject a `<tick>` to the LLM asking "given current goals and state, what should I proactively work on?"
 - This bridges the gap between PulSeed's structured loop and CC's freeform initiative
 - Implement `SleepScheduler` — adaptive sleep duration based on:
   - Time of day (night = longer sleep)
@@ -179,12 +174,7 @@ Claude Code's KAIROS subsystem is a proactive "assistant mode" that transforms a
 
 | Capability | Claude Code | PulSeed | Comparison |
 |-----------|-------------|---------|------------|
-<<<<<<< HEAD
-| Core loop | Reactive (user→response) + KAIROS tick | CoreLoop + AgentLoop + bounded core phases | **PulSeed stronger** — structured, goal-driven |
-=======
-| Core runtime | Reactive (user→response) + KAIROS tick | CoreLoop + AgentLoop + bounded core phases | **PulSeed stronger** — structured, goal-driven |
->>>>>>> e49c85c9 (implement native agentloop and coreloop phases)
-| Multi-agent | Coordinator/Swarm/Fork patterns | AdapterLayer + multi-strategy portfolio | **Comparable** — different abstraction level |
+| Core runtime | Reactive (user→response) + KAIROS tick | CoreLoop + AgentLoop + bounded core phases | **PulSeed stronger** — structured, goal-driven || Multi-agent | Coordinator/Swarm/Fork patterns | AdapterLayer + multi-strategy portfolio | **Comparable** — different abstraction level |
 | Session persistence | `~/.claude/sessions/` | `~/.pulseed/` state files | **Comparable** |
 | Knowledge/Memory | Auto-memory + MEMORY.md + dream | KnowledgeManager + VectorIndex + hierarchical memory | **PulSeed stronger** — semantic, hierarchical |
 | Trust/Safety | Permission modes + EthicsGate-like hooks | TrustManager + EthicsGate + approval flows | **PulSeed stronger** — quantified trust balance |

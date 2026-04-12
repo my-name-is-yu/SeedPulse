@@ -99,12 +99,7 @@ Common layout: left sidebar (nav, 120px fixed) + main area
 
 **Top — Goal list table**: Goal name (link), Gap % (progress bar, background `#1a1a1a`), Trust score (number + color: red <0, gray 0-20, green >20), strategy status badge, last updated
 
-<<<<<<< HEAD
-**Middle — Active sessions**: Adapter name + runtime type (`core_loop` / `agent_loop`) + phase or step label, elapsed time
-=======
 **Middle — Active sessions**: runtime type, goal/task, adapter or native agent loop, bounded execution status, elapsed time
->>>>>>> e49c85c9 (implement native agentloop and coreloop phases)
-
 **Bottom — Decision timeline (last 10 items)**: Timestamp + goal name + decision type (PIVOT/REFINE/ESCALATE) + one-line summary
 
 ### 5.2 Goal Detail (`/goals/:id`)

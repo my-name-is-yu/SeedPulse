@@ -260,12 +260,7 @@ task.intended_direction is assigned by task-generation.ts (not yet implemented â
 **Current limitation**: The `task.intended_direction` field does not exist in the current task schema. Enabling this guard requires a schema addition.
 
 **Implementation locations**:
-<<<<<<< HEAD
-- Add `intended_direction?: "increase" | "decrease" | "neutral"` to `src/base/types/tasks.ts`
-=======
-- Add `intended_direction?: "increase" | "decrease" | "neutral"` to `src/types/tasks.ts`
->>>>>>> e49c85c9 (implement native agentloop and coreloop phases)
-- Add assignment instructions to the prompt in `src/orchestrator/execution/task/task-generation.ts`
+- Add `intended_direction?: "increase" | "decrease" | "neutral"` to `src/types/tasks.ts`- Add assignment instructions to the prompt in `src/orchestrator/execution/task/task-generation.ts`
 - Add the check inside the application loop in `src/orchestrator/execution/task/task-verifier.ts`
 
 **Behavior when guard fires**:
