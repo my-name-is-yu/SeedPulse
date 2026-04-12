@@ -202,6 +202,58 @@ describe("lintAgentMemory", () => {
   });
 
   describe("autoRepair=true", () => {
+    it("flags low-confidence findings instead of repairing when below threshold", async () => {
+      const newer = makeEntry({ id: "e1", key: "pref-editor", value: "vim", updated_at: "2026-03-01T00:00:00.000Z" });
+      const older = makeEntry({ id: "e2", key: "pref-editor-2", value: "emacs", updated_at: "2026-01-01T00:00:00.000Z" });
+      const { km, archiveAgentMemory } = makeKM([newer, older]);
+
+      const finding = {
+        type: "contradiction",
+        entry_ids: ["e1", "e2"],
+        description: "Different editors",
+        confidence: 0.6,
+        suggested_action: "auto_resolve_newest",
+      };
+      const llmCall = makeLlmCall(JSON.stringify({ findings: [finding] }));
+
+      const result = await lintAgentMemory({
+        km,
+        llmCall,
+        autoRepair: true,
+        minAutoRepairConfidence: 0.8,
+      });
+
+      expect(archiveAgentMemory).not.toHaveBeenCalled();
+      expect(result.repairs_applied).toBe(0);
+      expect(result.entries_flagged).toBe(2);
+    });
+
+    it("flags high-confidence findings when suggested action is review-only", async () => {
+      const newer = makeEntry({ id: "e1", key: "pref-editor", value: "vim", updated_at: "2026-03-01T00:00:00.000Z" });
+      const older = makeEntry({ id: "e2", key: "pref-editor-2", value: "emacs", updated_at: "2026-01-01T00:00:00.000Z" });
+      const { km, archiveAgentMemory } = makeKM([newer, older]);
+
+      const finding = {
+        type: "contradiction",
+        entry_ids: ["e1", "e2"],
+        description: "Different editors",
+        confidence: 0.95,
+        suggested_action: "flag_review",
+      };
+      const llmCall = makeLlmCall(JSON.stringify({ findings: [finding] }));
+
+      const result = await lintAgentMemory({
+        km,
+        llmCall,
+        autoRepair: true,
+        minAutoRepairConfidence: 0.8,
+      });
+
+      expect(archiveAgentMemory).not.toHaveBeenCalled();
+      expect(result.repairs_applied).toBe(0);
+      expect(result.entries_flagged).toBe(2);
+    });
+
     it("contradiction: archives older entries, keeps newest", async () => {
       const newer = makeEntry({ id: "e1", key: "pref-editor", value: "vim", updated_at: "2026-03-01T00:00:00.000Z" });
       const older = makeEntry({ id: "e2", key: "pref-editor-2", value: "emacs", updated_at: "2026-01-01T00:00:00.000Z" });

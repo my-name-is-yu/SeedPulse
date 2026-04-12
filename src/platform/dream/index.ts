@@ -3,3 +3,7 @@ export * from "./dream-config.js";
 export * from "./dream-analyzer.js";
 export * from "./dream-log-collector.js";
 export * from "./dream-activation.js";
+export * from "./dream-activation-artifacts.js";
+export * from "./dream-event-workflows.js";
+export * from "./dream-soil-mutation.js";
+export * from "./dream-soil-sync.js";

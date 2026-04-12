@@ -10,6 +10,7 @@ import {
   SoilMutationSchema,
   SoilPageMemberSchema,
   SoilPageSchema,
+  SoilRecordFilterSchema,
   SoilRecordSchema,
   SoilSearchRequestSchema,
   type SoilCandidate,
@@ -18,6 +19,7 @@ import {
   type SoilPage,
   type SoilPageMember,
   type SoilRecord,
+  type SoilRecordFilterInput,
   type SoilRepository,
   type SoilSearchRequest,
   type SoilSearchRequestInput,
@@ -260,6 +262,8 @@ function hasExplicitMetadataFilter(request: SoilSearchRequest): boolean {
       recordFilter.statuses?.length ||
       recordFilter.goal_ids?.length ||
       recordFilter.task_ids?.length ||
+      recordFilter.source_types?.length ||
+      recordFilter.source_ids?.length ||
       recordFilter.valid_at ||
       recordFilter.updated_after ||
       recordFilter.updated_before ||
@@ -301,6 +305,14 @@ function buildRecordFilterSql(request: SoilSearchRequest, params: unknown[]): st
   if (filter.task_ids?.length) {
     clauses.push(`r.task_id IN (${filter.task_ids.map(() => "?").join(", ")})`);
     params.push(...filter.task_ids);
+  }
+  if (filter.source_types?.length) {
+    clauses.push(`r.source_type IN (${filter.source_types.map(() => "?").join(", ")})`);
+    params.push(...filter.source_types);
+  }
+  if (filter.source_ids?.length) {
+    clauses.push(`r.source_id IN (${filter.source_ids.map(() => "?").join(", ")})`);
+    params.push(...filter.source_ids);
   }
   if (filter.valid_at) {
     clauses.push("(r.valid_from IS NULL OR r.valid_from <= ?)");
@@ -661,6 +673,22 @@ export class SqliteSoilRepository implements SoilRepository {
     });
 
     tx();
+  }
+
+  async loadRecords(input: SoilRecordFilterInput = {}): Promise<SoilRecord[]> {
+    const record_filter = SoilRecordFilterSchema.parse(input);
+    const params: unknown[] = [];
+    const where = buildRecordFilterSql(
+      SoilSearchRequestSchema.parse({ query: "__load_records__", direct_lookup: false, record_filter }),
+      params
+    );
+    const rows = this.db.prepare(`
+      SELECT *
+      FROM soil_records r
+      ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
+      ORDER BY r.record_key, r.version
+    `).all(...params) as SoilRowRecord[];
+    return rows.map((row) => toRecord(row));
   }
 
   async queueReindex(recordIds: string[], reason: string): Promise<void> {

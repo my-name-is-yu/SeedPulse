@@ -1,74 +1,146 @@
 # Dream Mode Design
 
-> Dream Mode is PulSeed's offline learning cycle. It persists operational traces, mines recurring patterns, consolidates them into reusable knowledge, and feeds the resulting artifacts back into runtime execution.
+> Dream Mode is PulSeed's offline memory and knowledge compiler. It collects execution traces, triages them into candidates, consolidates repeated signals into typed records, and emits bounded activation artifacts for runtime consumers. Dream is not the online search path and it is not Soil retrieval.
 
 ---
 
 ## 1. Purpose
 
-PulSeed's live loop is optimized for forward progress: observe, decide, act, and verify. That loop produces useful evidence such as iteration outcomes, verification results, strategy pivots, stalls, and trust changes, but much of that evidence is transient unless it is explicitly persisted.
+PulSeed's live loop is optimized for execution: observe, decide, act, verify, and continue. That loop produces evidence such as iteration outcomes, failures, strategy shifts, decisions, and trust changes. Without an offline compiler, that evidence decays into logs that are expensive to read and hard to reuse.
 
-Dream Mode adds the missing offline cycle:
+Dream Mode exists to turn those traces into durable memory and knowledge products:
 
-1. collect runtime traces that would otherwise disappear
-2. identify high-signal events while the system is awake
-3. analyze accumulated traces for repeated patterns and lessons
-4. consolidate findings into durable knowledge and compact summaries
-5. make those outputs available to future runtime decisions
+1. collect raw traces with bounded retention
+2. triage high-signal events into candidates
+3. analyze candidates for repeated patterns, lessons, and deltas
+4. consolidate the result into typed runtime updates
+5. activate a bounded subset of that knowledge in runtime, behind explicit gates
 
-The design goal is not background logging for its own sake. Dream Mode exists to improve later task generation, strategy selection, retrieval quality, and recovery from repeated failure modes.
+Dream is therefore a compiler and curator. It improves later task generation, strategy selection, recovery from repeated failure modes, and long-term memory quality. It does not answer ad hoc runtime queries and it does not sit in the Soil query path.
 
 ---
 
-## 2. Design Constraints
+## 2. System Boundary
 
-Dream Mode follows a few hard constraints:
-
-- runtime behavior must continue to work when Dream Mode is disabled
-- offline processing must degrade safely when data is incomplete or malformed
-- logs and derived artifacts must be incrementally processable
-- each activation path must be independently flaggable and measurable
-- public design docs should describe the reusable architecture, not depend on private research notes
-
-Dependency direction stays one-way:
+The boundary is intentionally simple:
 
 ```text
-runtime systems -> emit traces / trigger dream runs
-Dream Mode -> reads traces, writes artifacts
-runtime systems -> optionally consume Dream outputs through gated integrations
+runtime systems -> emit traces and signals
+Dream -> reads traces, produces typed records and activation artifacts
+runtime stores -> remain authoritative for writes
+Soil -> stores typed retrieval records and serves online retrieval / projection
+runtime systems -> consume Dream outputs only through explicit gates
 ```
 
-This keeps Dream Mode additive. Core execution does not require Dream Mode internals to function.
+Runtime stores remain authoritative for writes. Soil remains the online retrieval surface. Dream is the coordinator that derives update intent from traces, commits durable truth through the owning runtime store, and then emits Soil-compatible retrieval and projection updates from that committed state. It does not replace Soil or bypass the runtime write owner.
+
+At the design level, Dream writes in two directions:
+
+- typed runtime updates, including knowledge records and tombstones
+- Soil-compatible mutations that can be applied as versioned upserts, supersedes, and reindex requests
+
+That write contract should be expressed as a small, typed mutation surface. The important behavior is not the storage primitive itself, but that Dream can express record creation, replacement, deletion, and reindex intent without hand-editing projection files.
 
 ---
 
 ## 3. Architecture Overview
 
-Dream Mode has four phases. The first three belong to the offline Dream pipeline. The fourth phase activates the resulting knowledge in the live system.
+Dream Mode has four phases. The first three belong to the offline compiler. The fourth phase activates the resulting knowledge in the live system.
 
 ```text
 Normal runtime
-  -> iteration logs, session summaries, event stream, importance buffer
+  -> traces, session summaries, importance signals, bounded events
 
-DreamEngine
-  -> Phase 1: log collection and importance tagging
-  -> Phase 2: analysis pipeline
+Dream compiler
+  -> Phase 1: collection
+  -> Phase 2: triage and analysis
   -> Phase 3: consolidation
 
 Runtime activation
-  -> Phase 4: retrieval and policy-shaping integrations
+  -> Phase 4: feature-gated consumption of Dream artifacts
 ```
 
 Two execution tiers are supported:
 
-- `light`: small-budget, recent-data, importance-first analysis for idle windows
-- `deep`: larger-budget, full-corpus analysis and consolidation for scheduled runs
+- `light`: recent-data, importance-first, bounded-cost runs for quick feedback
+- `deep`: broader corpus, stronger synthesis, consolidation, and archival work
 
-`light` runs are intended to surface immediate lessons cheaply. `deep` runs are intended to perform broader mining, consolidation, archival work, and higher-value knowledge generation.
+`light` runs should be cheap and frequent. `deep` runs should be scheduled or explicitly triggered when the system can spend more budget and is expected to produce more durable changes.
 
 ---
 
-## 4. Phase 1: Log Collection
+## 4. Data Products
+
+Dream works with five kinds of products. Keeping them separate is important for idempotency and for long-running operation.
+
+### 4.1 Raw Traces
+
+Append-only operational evidence such as:
+
+- iteration logs
+- session summaries
+- bounded runtime events
+- importance buffer entries
+- analysis watermarks and processing cursors
+
+Raw traces are input material, not runtime truth.
+
+### 4.2 Candidates
+
+Intermediate items produced by triage and analysis:
+
+- repeated failure candidates
+- pattern candidates
+- decision candidates
+- workflow candidates
+- schedule or trigger candidates
+- evidence bundles for follow-up review
+
+Candidates are disposable until consolidated.
+
+### 4.3 Consolidated Records
+
+Typed knowledge records that are safe to persist and project:
+
+- fact
+- workflow
+- preference
+- observation
+- decision
+- reflection
+
+These records are versioned and can supersede earlier versions.
+
+### 4.4 Activation Artifacts
+
+Bounded outputs that runtime can consume without pulling the whole Dream corpus:
+
+- evidence packs
+- learned pattern hints
+- strategy templates
+- decision heuristics
+- semantic context bundles
+- knowledge acquisition suggestions
+
+These artifacts must be small enough to load on demand and cheap enough to ignore when inactive.
+
+### 4.5 Reports
+
+Human-readable outputs for inspection and control:
+
+- run summaries
+- consolidation summaries
+- retention reports
+- coverage gaps
+- failure isolation reports
+
+Reports help operators see what Dream did, what it skipped, and what remains to be consolidated.
+
+---
+
+## 5. Phases
+
+### 5.1 Phase 1: Collection
 
 Phase 1 establishes durable raw inputs for later Dream work.
 
@@ -77,61 +149,55 @@ Primary responsibilities:
 - persist compact per-iteration logs from the core loop
 - persist compact session summaries
 - persist a bounded event stream for selected runtime events
-- collect high-signal `ImportanceEntry` items during normal execution
-- rotate logs and maintain processing watermarks
+- collect high-signal importance entries during normal execution
+- maintain watermarks and retention bounds
+- keep collection append-only where possible
 
-Representative artifacts:
+Collection should be cheap enough to run continuously. The only goal here is to preserve enough evidence for later processing without letting logs grow without control.
 
-- per-goal iteration logs under the goal state area
-- shared Dream session log
-- shared Dream importance buffer
-- Dream watermark state for incremental processing
+### 5.2 Phase 2: Triage and Analysis
 
-Phase 1 is intentionally simple. It favors append-only storage and stable schemas over rich in-memory objects so later phases can read the data incrementally and recover cleanly after interruption.
-
----
-
-## 5. Phase 2: Analysis Pipeline
-
-Phase 2 is the main offline analysis layer. It reads unprocessed logs, prioritizes important items, and turns operational history into reusable pattern candidates.
+Phase 2 reads only unprocessed material and turns it into candidates.
 
 Core behaviors:
 
-- ingest only new log material since the last successful watermark
-- prioritize high-importance items before regular batches
-- batch iteration windows instead of analyzing isolated events
-- estimate token cost before LLM-backed analysis
-- stop early and mark the run partial when budget is exhausted
+- ingest only new material since the last successful watermark
+- triage importance first, then regular batches
+- analyze windows rather than isolated events
+- estimate cost before LLM-backed synthesis
+- stop early when the run budget is exhausted
+- isolate failures so a bad batch does not poison the whole run
 
 Typical outputs:
 
-- learned pattern candidates suitable for the learning pipeline
-- schedule or trigger suggestions
-- analysis metrics for Dream reports
+- candidate patterns
+- candidate workflows
+- candidate decisions or reflections
+- schedule suggestions
+- evidence packs
+- analysis metrics
 
 Analysis should prefer fewer, richer synthesis calls over many shallow calls. The main objective is to discover repeatable structure such as recurring task patterns, strategy effectiveness, stall precursors, observation reliability issues, and verification bottlenecks.
 
----
+### 5.3 Phase 3: Consolidation
 
-## 6. Phase 3: Consolidation
-
-Phase 3 reduces operational sprawl and promotes repeated signals into durable knowledge.
+Phase 3 promotes repeated signals into durable knowledge and writes Soil-compatible updates.
 
 Consolidation responsibilities include:
 
-- retention and archival of large runtime traces
-- extraction of reusable lessons before pruning
-- cross-goal transfer where evidence supports it
-- synthesis of searchable summaries and reports
-- metrics per consolidation category so runs are observable
+- deduping near-identical candidates
+- versioned upsert of records
+- superseding older truth when a stronger version exists
+- writing tombstones for removed or invalidated material
+- recording retention and archival actions
+- queuing reindex work when embeddings or derived chunks change
+- producing reports for operators and later review
 
-This phase should wrap existing memory and knowledge APIs where possible rather than duplicating them. Dream Mode is a coordinator and synthesizer, not a replacement for the repository's core memory systems.
+This phase should be the main place where Dream becomes useful to Soil. The output is not a log dump; it is a typed update set that can be applied safely and repeatedly.
 
----
+### 5.4 Phase 4: Activation
 
-## 7. Phase 4: Knowledge Activation
-
-Phase 4 is separate from the Dream pipeline itself. It modifies runtime consumers so the system can use Dream outputs during normal execution.
+Phase 4 is separate from the compiler itself. It lets runtime consumers use Dream outputs during normal execution.
 
 Activation points include:
 
@@ -139,91 +205,200 @@ Activation points include:
 - working-memory selection
 - task generation
 - strategy proposal and evaluation
-- cross-goal lesson retrieval
-- optional recovery paths for detected knowledge gaps
+- recovery paths for repeated failure modes
+- optional knowledge-gap handling
 
-Every activation is gated by its own feature flag and defaults to off. This keeps rollout measurable and allows each retrieval or heuristic path to be evaluated independently.
-
----
-
-## 8. Key Data Products
-
-Dream Mode works with three layers of data:
-
-### 8.1 Raw Traces
-
-- iteration logs
-- session summaries
-- bounded runtime events
-- importance buffer entries
-
-### 8.2 Intermediate Analysis Outputs
-
-- iteration windows
-- pattern candidates
-- schedule suggestions
-- per-run metrics and status
-
-### 8.3 Consolidated Knowledge
-
-- learned patterns
-- reports and searchable summaries
-- reusable strategy templates or heuristics
-- archive and retention outputs
-
-The transition between these layers should stay explicit. Raw traces are not runtime context by default; they must first be analyzed or consolidated into smaller, interpretable artifacts.
+Every activation is gated by its own feature flag and should default to off. The runtime should only read bounded evidence packs or small activation artifacts. There must be no hidden hard dependency on Dream for core execution.
 
 ---
 
-## 9. Operational Model
+## 6. Dream to Soil Write Contract
 
-Dream Mode can be triggered in multiple ways:
+Dream should commit typed truth through the owning runtime store first, then emit Soil-compatible retrieval records and projections from that committed truth. Soil pages remain projections; retrieval records mirror durable truth and version history for search.
 
-- manual CLI invocation
-- scheduled nightly or periodic runs
-- daemon-driven idle windows
-- importance-threshold-triggered light runs
+The design contract is:
 
-Operational expectations:
+1. Dream derives an update set from trace evidence.
+2. The owning runtime store commits typed records, supersedes links, and tombstones.
+3. Dream emits Soil-compatible retrieval/projection mutation intent from the committed state.
+4. Dream requests reindexing only when derived search material changes.
+5. Soil applies the retrieval/projection mutation and keeps search current.
 
-- malformed lines in append-only logs are skipped with warnings, not fatal
-- watermarks advance only after downstream persistence succeeds
+If no runtime store exists yet for a record class, the implementation must define that owner before treating Soil as persistence. Soil should not become the accidental write truth for new Dream output types.
+
+The contract should support a small set of fields that matter for long-running correctness:
+
+- `record_key`
+- `version`
+- `supersedes_record_id`
+- `valid_from`
+- `valid_to`
+- `status`
+- `is_active`
+- `confidence`
+- `importance`
+- `source_reliability`
+- `updated_at`
+
+Semantics:
+
+- `record_key` identifies the logical entity across versions
+- `version` increases when the same logical entity is restated or refined
+- `supersedes_record_id` links a newer record to the record it replaces
+- `valid_from` and `valid_to` capture temporal truth
+- `status` and `is_active` control retrieval visibility
+- `confidence` describes how strong the evidence is
+- `importance` describes how likely the record is to matter later
+- `source_reliability` describes how much to trust the source
+
+Versioned upsert is the default write pattern. Tombstones are used when a record should stop participating in retrieval or should be preserved only as history. Reindex requests are queued when chunk text, embeddings, or other derived search material changes.
+
+Dream should not edit projection files directly. It should emit updates that the storage layer can apply and then project into Soil pages and indexes.
+
+---
+
+## 7. Mapping From Existing Memory Types
+
+Dream needs to bridge the current agent memory vocabulary into Soil-compatible types without losing history.
+
+| Existing memory type | Dream output type | Notes |
+| --- | --- | --- |
+| `fact` | `fact` record | Stable claims, environment facts, durable task facts |
+| `procedure` | `workflow` record | Repeatable steps, playbooks, failure recovery sequences |
+| `preference` | `preference` record | User, project, or system preferences that remain useful across runs |
+| `observation` | `observation` record | Time-bounded evidence, signals, or measured runtime facts |
+
+Dream should also produce:
+
+- `decision` records for durable choices and tradeoffs
+- `reflection` records for abstractions, lessons, and postmortems
+- workflow or pattern records for learned procedures and reusable heuristics
+
+The current `raw / compiled / archived` lifecycle should be treated as an implementation detail of the pipeline, not as the long-term record model. The long-term model is the typed record set plus version history and tombstones.
+
+---
+
+## 8. Long-Running Operation
+
+Dream is expected to run for months or years without manual reset. The design must therefore assume that logs grow, evidence changes, and earlier conclusions can be superseded.
+
+Operational requirements:
+
+- logs must be bounded by rotation and retention rules
+- watermarks must move forward only after downstream writes succeed
 - partial runs are valid outcomes when the budget is exhausted
-- log rotation should bound file growth without losing the newest material
+- repeated runs must be idempotent against the same watermark range
+- versioned upsert must prevent duplicate truth from accumulating
+- tombstones must preserve deletion history without keeping deleted items active
+- reindex jobs must be trackable and replayable
+- metrics must distinguish collection, analysis, consolidation, and activation failures
+- failure isolation must prevent one bad batch from blocking the rest of the system
 
-This design favors resumability over all-or-nothing execution.
+Dream should treat malformed or incomplete input as a recoverable condition. A single broken trace line, stale candidate, or failed synthesis call must not stop the pipeline.
+
+Suggested operational controls:
+
+- per-run budget caps
+- per-phase timeouts
+- per-batch failure isolation
+- watermark checkpoints
+- replayable runs from a known cursor
+- health metrics for backlog, lag, and artifact growth
+
+This is the main difference between a useful compiler and a one-off report generator.
 
 ---
 
-## 10. Relationship to Existing Systems
+## 9. Runtime Activation
 
-Dream Mode is most valuable when it complements existing PulSeed subsystems:
+Runtime activation is the part of Dream that affects live behavior. It must remain narrow and predictable.
 
-- the core loop emits the most important execution traces
-- observation, verification, strategy, and stall handling provide high-signal importance events
-- the learning pipeline persists pattern-level outputs
-- memory and knowledge subsystems own retention, transfer, and retrieval behavior
-- runtime context builders and task or strategy managers consume Dream outputs only through explicit activation gates
+Activation principles:
 
-This separation prevents Dream Mode from becoming a hidden dependency while still allowing it to improve future execution quality.
+- feature-gated by capability, not by a single global switch
+- bounded evidence packs only, never unbounded trace loading
+- separate flags for strategy hints, semantic context, workflow hints, decision heuristics, and knowledge-gap recovery
+- no hidden hard dependency on Dream for core task execution
+- runtime should degrade cleanly to the base system when Dream artifacts are absent
+
+Activation is not a search endpoint. Runtime consumers should read prepared artifacts, not scan raw Dream logs.
+
+The intended flow is:
+
+1. Dream emits a consolidated artifact.
+2. Runtime consumers check the relevant activation flag.
+3. Runtime loads a bounded evidence pack or typed artifact.
+4. Runtime uses the artifact for context or policy shaping.
+5. Runtime proceeds even if the artifact is missing or stale.
+
+This keeps Dream additive and makes rollout measurable.
 
 ---
 
-## 11. Rollout Guidance
+## 10. Relationship to Soil
+
+Soil is the online retrieval and projection layer. Dream is the offline compiler that prepares Soil-compatible updates.
+
+The relationship should stay asymmetric:
+
+- Soil serves online reads
+- Dream produces typed writes and consolidation artifacts
+- Soil pages are projections, not the canonical truth store
+- Dream can request reindexing, but it should not own query-time retrieval
+
+This separation matters for scale. Soil can optimize retrieval paths, indexing, and projection rules while Dream focuses on evidence selection, consolidation, and semantic improvement.
+
+Dream should be allowed to produce the following Soil-facing effects:
+
+- versioned record upserts
+- supersedes links
+- tombstones
+- chunk updates
+- projection inputs and page records through the Soil projection layer
+- reindex requests
+
+Dream should not be allowed to require runtime search to make progress. Offline compilation must remain valid even if the online retrieval surface is temporarily degraded.
+
+---
+
+## 11. Legacy and Compatibility
+
+`src/platform/dream/*` is the canonical Dream surface.
+
+`src/reflection/dream-consolidation.ts` should be treated as legacy compatibility until it is migrated into the platform Dream path. It may remain as a bridge during rollout, but it should not become the preferred long-term entry point.
+
+The design target is a single Dream system with:
+
+- one collection path
+- one analysis path
+- one consolidation path
+- one activation policy surface
+
+Compatibility layers are acceptable during migration, but the public design should point new work toward the platform Dream path.
+
+---
+
+## 12. Rollout Priorities
 
 Recommended rollout order:
 
-1. ship Phase 1 persistence first
-2. add offline analysis with strict budgets and dry-run support
-3. consolidate into existing knowledge systems
-4. enable runtime activation one capability at a time
+1. build the Dream to typed-records and Soil mutation contract
+2. make consolidation perform real versioned writes, tombstones, and reindex requests
+3. keep activation narrow and feature-gated
+4. improve activation quality after the write path is stable
+
+The priority is to make Dream materially improve memory quality first. Activation quality matters, but it is downstream of having reliable records, stable versioning, and correct consolidation.
 
 For each step, measure:
 
-- gap convergence
-- stall frequency and recovery rate
-- retrieval relevance
-- cost of Dream runs
-- artifact growth and retention quality
+- backlog and watermark lag
+- partial run rate
+- write idempotency
+- supersede rate
+- tombstone rate
+- reindex queue depth
+- activation hit rate
+- activation artifact size
+- retrieval relevance after consolidation
 
-Dream Mode is successful only if offline processing leads to better future execution, not just more stored files.
+Dream is successful only if offline processing leads to better future execution, not just more stored files.

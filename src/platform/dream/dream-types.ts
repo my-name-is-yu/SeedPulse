@@ -175,6 +175,7 @@ export const DreamLogConfigSchema = z.object({
     semanticContext: z.boolean().default(false),
     autoAcquireKnowledge: z.boolean().default(false),
     learnedPatternHints: z.boolean().default(false),
+    workflowHints: z.boolean().default(false),
     strategyTemplates: z.boolean().default(false),
     decisionHeuristics: z.boolean().default(false),
     graphTraversal: z.boolean().default(false),
@@ -206,9 +207,12 @@ export const DreamLogConfigSchema = z.object({
     strategyHistory: z.object({ enabled: z.boolean().default(true) }).default({}),
     verificationArtifacts: z.object({ enabled: z.boolean().default(true) }).default({}),
     archive: z.object({ enabled: z.boolean().default(true) }).default({}),
+    legacyReflectionCompatibility: z.object({ enabled: z.boolean().default(true) }).default({}),
     knowledgeOptimization: z.object({
       enabled: z.boolean().default(true),
       redundancySimilarityThreshold: z.number().min(0).max(1).default(0.95),
+      autoRepairAgentMemory: z.boolean().default(true),
+      minAutoRepairConfidence: z.number().min(0).max(1).default(0.8),
     }).default({}),
   }).default({}),
 });
@@ -334,11 +338,89 @@ export const ConsolidationCategoryResultSchema = z.object({
 
 export type ConsolidationCategoryResult = z.infer<typeof ConsolidationCategoryResultSchema>;
 
+export const DreamActivationArtifactTypeSchema = z.enum([
+  "pattern_hint_pack",
+  "workflow_hint_pack",
+  "decision_heuristic_pack",
+  "verification_recovery_pack",
+  "semantic_context_pack",
+  "knowledge_gap_pack",
+]);
+
+export type DreamActivationArtifactType = z.infer<typeof DreamActivationArtifactTypeSchema>;
+
+export const DreamActivationArtifactSchema = z.object({
+  artifact_id: z.string().min(1),
+  type: DreamActivationArtifactTypeSchema,
+  source: z.string().min(1),
+  scope: z.object({
+    goal_id: z.string().optional(),
+    goal_type: z.string().optional(),
+    task_category: z.string().optional(),
+    strategy_id: z.string().optional(),
+  }).default({}),
+  summary: z.string().min(1),
+  payload: z.record(z.string(), z.unknown()).default({}),
+  evidence_refs: z.array(z.string()).default([]),
+  confidence: z.number().min(0).max(1),
+  valid_from: z.string(),
+  valid_to: z.string().nullable().default(null),
+});
+
+export type DreamActivationArtifact = z.infer<typeof DreamActivationArtifactSchema>;
+
+export const DreamActivationArtifactFileSchema = z.object({
+  version: z.literal("dream-activation-artifacts-v1").default("dream-activation-artifacts-v1"),
+  generated_at: z.string(),
+  artifacts: z.array(DreamActivationArtifactSchema).default([]),
+});
+
+export type DreamActivationArtifactFile = z.infer<typeof DreamActivationArtifactFileSchema>;
+
+export const DreamOperationalReportSchema = z.object({
+  run_id: z.string(),
+  watermarks: z.object({
+    advanced: z.number().int().nonnegative().default(0),
+    unchanged: z.number().int().nonnegative().default(0),
+    lagging_sources: z.array(z.string()).default([]),
+  }).default({}),
+  consolidation: z.object({
+    records_created: z.number().int().nonnegative().default(0),
+    records_updated: z.number().int().nonnegative().default(0),
+    records_superseded: z.number().int().nonnegative().default(0),
+    tombstones_written: z.number().int().nonnegative().default(0),
+    artifacts_created: z.number().int().nonnegative().default(0),
+  }).default({}),
+  backlog: z.object({
+    iteration_lines_pending: z.number().int().nonnegative().default(0),
+    event_lines_pending: z.number().int().nonnegative().default(0),
+    importance_entries_pending: z.number().int().nonnegative().default(0),
+  }).default({}),
+  artifact_growth: z.object({
+    workflows: z.number().int().nonnegative().default(0),
+    activation_artifacts: z.number().int().nonnegative().default(0),
+  }).default({}),
+  failures: z.array(z.object({
+    category: z.string(),
+    source_ref: z.string().nullable().default(null),
+    reason: z.string(),
+  })).default([]),
+  legacy_reflection: z.object({
+    goals_consolidated: z.number().int().nonnegative().default(0),
+    entries_compressed: z.number().int().nonnegative().default(0),
+    stale_entries_found: z.number().int().nonnegative().default(0),
+    revalidation_tasks_created: z.number().int().nonnegative().default(0),
+  }).default({}),
+});
+
+export type DreamOperationalReport = z.infer<typeof DreamOperationalReportSchema>;
+
 export const DreamReportSchema = z.object({
   timestamp: z.string(),
   tier: DreamTierSchema,
   status: z.enum(["completed", "partial", "failed"]),
   categories: z.array(ConsolidationCategoryResultSchema).default([]),
+  operational: DreamOperationalReportSchema.optional(),
   summary: z.string(),
 });
 

@@ -10,6 +10,7 @@ import type { StrategyTemplate } from "../../orchestrator/strategy/types/cross-p
 import { StrategyTemplateSchema } from "../../orchestrator/strategy/types/cross-portfolio.js";
 import type { Strategy } from "../../orchestrator/strategy/types/strategy.js";
 import { loadDreamConfig } from "./dream-config.js";
+import { loadDreamWorkflowRecords, type DreamWorkflowRecord } from "./dream-event-workflows.js";
 
 export interface DreamActivationRuntimeState {
   flags: Awaited<ReturnType<typeof loadDreamConfig>>["activation"];
@@ -122,6 +123,60 @@ export function formatPatternHints(patterns: LearnedPattern[]): string {
       (pattern, index) =>
         `${index + 1}. [${pattern.type}] ${pattern.description} (confidence ${pattern.confidence.toFixed(2)})`
     ),
+  ].join("\n");
+}
+
+export async function loadDreamWorkflows(baseDir: string): Promise<DreamWorkflowRecord[]> {
+  return loadDreamWorkflowRecords(baseDir);
+}
+
+export function selectWorkflowHints(
+  workflows: DreamWorkflowRecord[],
+  query: string,
+  context: {
+    goalId?: string;
+    targetDimension?: string;
+  } = {},
+  limit = 2
+): DreamWorkflowRecord[] {
+  return [...workflows]
+    .map((workflow) => {
+      const goalMatch = context.goalId && workflow.applicability.goal_ids.includes(context.goalId) ? 0.35 : 0;
+      const dimensionText = context.targetDimension ?? "";
+      const score =
+        workflow.confidence * 0.55 +
+        Math.min(workflow.evidence_count, 5) * 0.04 +
+        Math.min(workflow.success_count, 3) * 0.04 +
+        goalMatch +
+        scoreTextOverlap(
+          `${query} ${dimensionText}`,
+          [
+            workflow.title,
+            workflow.description,
+            workflow.type,
+            workflow.applicability.signals.join(" "),
+            workflow.failure_modes.join(" "),
+            workflow.recovery_steps.join(" "),
+          ].join(" ")
+        ) * 0.45;
+      return { workflow, score };
+    })
+    .filter(({ score }) => score >= 0.25)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(({ workflow }) => workflow);
+}
+
+export function formatWorkflowHints(workflows: DreamWorkflowRecord[]): string {
+  if (workflows.length === 0) return "";
+  return [
+    "Workflow recovery hints:",
+    ...workflows.map((workflow, index) => {
+      const steps = workflow.steps.slice(0, 3).join(" -> ");
+      const recovery = workflow.recovery_steps.slice(0, 2).join(" -> ");
+      const evidence = `${workflow.evidence_count} evidence`;
+      return `${index + 1}. [${workflow.type}] ${workflow.title} (confidence ${workflow.confidence.toFixed(2)}, ${evidence})${steps ? ` Steps: ${steps}.` : ""}${recovery ? ` Recovery: ${recovery}.` : ""}`;
+    }),
   ].join("\n");
 }
 

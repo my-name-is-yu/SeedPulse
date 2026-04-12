@@ -63,9 +63,12 @@ import type { TaskAgentLoopRunner } from "../agent-loop/task-agent-loop-runner.j
 import { taskAgentLoopResultToAgentResult } from "../agent-loop/task-agent-loop-result.js";
 import {
   formatPatternHints,
+  formatWorkflowHints,
   loadDreamActivationState,
+  loadDreamWorkflows,
   loadLearnedPatterns,
   selectPatternHints,
+  selectWorkflowHints,
 } from "../../../platform/dream/dream-activation.js";
 
 export type { TaskCycleResult } from "./task-execution-types.js";
@@ -260,28 +263,41 @@ export class TaskLifecycle {
   ): Promise<{ task: Task | null; tokensUsed: number }> {
     let resolvedKnowledgeContext = knowledgeContext;
     try {
-      const dreamActivation = await loadDreamActivationState(this.stateManager.getBaseDir());
-      if (dreamActivation.flags.learnedPatternHints) {
+      const baseDir = this.stateManager.getBaseDir();
+      const dreamActivation = await loadDreamActivationState(baseDir);
+      if (dreamActivation.flags.learnedPatternHints || dreamActivation.flags.workflowHints) {
         const goal = await this.stateManager.loadGoal(goalId);
-        const patterns = await loadLearnedPatterns(this.stateManager.getBaseDir(), goalId);
-        const hints = selectPatternHints(
-          patterns,
-          [
-            goal?.title ?? "",
-            goal?.description ?? "",
-            targetDimension,
-            knowledgeContext ?? "",
-          ].join(" ")
-        );
-        const formattedHints = formatPatternHints(hints);
-        if (formattedHints) {
-          resolvedKnowledgeContext = resolvedKnowledgeContext
-            ? `${resolvedKnowledgeContext}\n\n${formattedHints}`
-            : formattedHints;
+        const query = [
+          goal?.title ?? "",
+          goal?.description ?? "",
+          targetDimension,
+          knowledgeContext ?? "",
+        ].join(" ");
+
+        if (dreamActivation.flags.learnedPatternHints) {
+          const patterns = await loadLearnedPatterns(baseDir, goalId);
+          const hints = selectPatternHints(patterns, query);
+          const formattedHints = formatPatternHints(hints);
+          if (formattedHints) {
+            resolvedKnowledgeContext = resolvedKnowledgeContext
+              ? `${resolvedKnowledgeContext}\n\n${formattedHints}`
+              : formattedHints;
+          }
+        }
+
+        if (dreamActivation.flags.workflowHints) {
+          const workflows = await loadDreamWorkflows(baseDir);
+          const hints = selectWorkflowHints(workflows, query, { goalId, targetDimension });
+          const formattedHints = formatWorkflowHints(hints);
+          if (formattedHints) {
+            resolvedKnowledgeContext = resolvedKnowledgeContext
+              ? `${resolvedKnowledgeContext}\n\n${formattedHints}`
+              : formattedHints;
+          }
         }
       }
     } catch {
-      // Non-fatal: proceed without learned pattern hints.
+      // Non-fatal: proceed without Dream activation hints.
     }
 
     return _generateTask(

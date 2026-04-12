@@ -16,6 +16,7 @@ import type { HookManager } from "../hook-manager.js";
 import type { Logger } from "../logger.js";
 import type { MemoryLifecycleManager } from "../../platform/knowledge/memory/memory-lifecycle.js";
 import type { KnowledgeManager } from "../../platform/knowledge/knowledge-manager.js";
+import { lintAgentMemory } from "../../platform/knowledge/knowledge-manager-lint.js";
 import { detectChange } from "../change-detector.js";
 import {
   runDreamConsolidation,
@@ -24,6 +25,9 @@ import {
   runWeeklyReview,
 } from "../../reflection/index.js";
 import { DreamAnalyzer } from "../../platform/dream/dream-analyzer.js";
+import { DreamConsolidator, type DreamLegacyConsolidationReport } from "../../platform/dream/dream-consolidator.js";
+import { createRuntimeDreamSoilSyncService } from "../../platform/dream/dream-soil-sync.js";
+import type { DreamReport, DreamTier } from "../../platform/dream/dream-types.js";
 import { publishSoilSnapshots } from "../../platform/soil/index.js";
 
 interface LayerDeps {
@@ -102,6 +106,81 @@ function withTokenAccountingClient(
   };
 }
 
+async function runPlatformDreamConsolidation(
+  deps: LayerDeps,
+  tier: DreamTier
+): Promise<DreamReport | null> {
+  if (!deps.baseDir) {
+    return null;
+  }
+
+  try {
+    const consolidator = new DreamConsolidator({
+      baseDir: deps.baseDir,
+      logger: deps.logger as Logger,
+      syncService: createRuntimeDreamSoilSyncService(),
+      memoryQualityService: deps.knowledgeManager && deps.llmClient
+        ? {
+            run: async (input) => {
+              const result = await lintAgentMemory({
+                km: deps.knowledgeManager!,
+                llmCall: async (prompt) => {
+                  const response = await deps.llmClient!.sendMessage(
+                    [{ role: "user", content: prompt }],
+                    { max_tokens: 2000, model_tier: "light" }
+                  );
+                  return response.content;
+                },
+                autoRepair: input.autoRepair,
+                minAutoRepairConfidence: input.minAutoRepairConfidence,
+              });
+              return {
+                findings: result.findings.length,
+                contradictionsFound: result.findings.filter((finding) => finding.type === "contradiction").length,
+                stalenessFound: result.findings.filter((finding) => finding.type === "staleness").length,
+                redundancyFound: result.findings.filter((finding) => finding.type === "redundancy").length,
+                repairsApplied: result.repairs_applied,
+                entriesFlagged: result.entries_flagged,
+              };
+            },
+          }
+        : undefined,
+      legacyConsolidationService: tier === "deep" && deps.stateManager
+        ? {
+            run: () => runDreamConsolidation({
+              stateManager: deps.stateManager!,
+              memoryLifecycle: deps.memoryLifecycle,
+              knowledgeManager: deps.knowledgeManager,
+              baseDir: deps.baseDir!,
+            }),
+          }
+        : undefined,
+    });
+    return await consolidator.run({ tier });
+  } catch (error) {
+    deps.logger.warn("Platform Dream consolidation failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+function legacyReportFromPlatformDream(report: DreamReport | null): DreamLegacyConsolidationReport | null {
+  const category = report?.categories.find((result) => result.category === "legacyReflectionCompatibility");
+  if (!category || category.status !== "completed") {
+    return null;
+  }
+  const legacy = report?.operational?.legacy_reflection;
+  return legacy
+    ? {
+        goals_consolidated: legacy.goals_consolidated,
+        entries_compressed: legacy.entries_compressed,
+        stale_entries_found: legacy.stale_entries_found,
+        revalidation_tasks_created: legacy.revalidation_tasks_created,
+      }
+    : null;
+}
+
 async function executeReflectionCron(
   entry: ScheduleEntry,
   deps: LayerDeps,
@@ -166,12 +245,15 @@ async function executeReflectionCron(
           });
           await analyzer.runDeep();
         }
-        report = await runDreamConsolidation({
-          stateManager: deps.stateManager,
-          memoryLifecycle: deps.memoryLifecycle,
-          knowledgeManager: deps.knowledgeManager,
-          baseDir: deps.baseDir,
-        }) as unknown as Record<string, unknown>;
+        {
+          const platformReport = await runPlatformDreamConsolidation(deps, "deep");
+          report = (legacyReportFromPlatformDream(platformReport) ?? await runDreamConsolidation({
+            stateManager: deps.stateManager,
+            memoryLifecycle: deps.memoryLifecycle,
+            knowledgeManager: deps.knowledgeManager,
+            baseDir: deps.baseDir,
+          })) as unknown as Record<string, unknown>;
+        }
         break;
     }
 

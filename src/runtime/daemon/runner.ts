@@ -20,9 +20,12 @@ import { CronScheduler } from "../cron-scheduler.js";
 import { ScheduleEngine } from "../schedule/engine.js";
 import type { MemoryLifecycleManager } from "../../platform/knowledge/memory/memory-lifecycle.js";
 import type { KnowledgeManager } from "../../platform/knowledge/knowledge-manager.js";
+import { lintAgentMemory } from "../../platform/knowledge/knowledge-manager-lint.js";
 import { DreamAnalyzer } from "../../platform/dream/dream-analyzer.js";
+import { DreamConsolidator, type DreamLegacyConsolidationReport } from "../../platform/dream/dream-consolidator.js";
 import { DreamScheduleSuggestionStore } from "../../platform/dream/dream-schedule-suggestions.js";
-import type { DreamRunReport, DreamTier } from "../../platform/dream/dream-types.js";
+import { createRuntimeDreamSoilSyncService } from "../../platform/dream/dream-soil-sync.js";
+import type { DreamReport, DreamRunReport, DreamTier } from "../../platform/dream/dream-types.js";
 import { runDreamConsolidation } from "../../reflection/dream-consolidation.js";
 import { generateCronEntry } from "./signals.js";
 import { rotateDaemonLog, calculateAdaptiveInterval as calcAdaptiveInterval } from "./health.js";
@@ -1393,6 +1396,76 @@ export class DaemonRunner {
     return analyzer.run({ tier });
   }
 
+  private async runPlatformDreamConsolidation(tier: DreamTier): Promise<DreamReport | null> {
+    try {
+      const knowledgeManager = this.knowledgeManager;
+      const llmClient = this.llmClient;
+      const consolidator = new DreamConsolidator({
+        baseDir: this.baseDir,
+        logger: this.logger,
+        syncService: createRuntimeDreamSoilSyncService(),
+        memoryQualityService: knowledgeManager && llmClient
+          ? {
+              run: async (input) => {
+                const result = await lintAgentMemory({
+                  km: knowledgeManager,
+                  llmCall: async (prompt) => {
+                    const response = await llmClient.sendMessage(
+                      [{ role: "user", content: prompt }],
+                      { max_tokens: 2000, model_tier: "light" }
+                    );
+                    return response.content;
+                  },
+                  autoRepair: input.autoRepair,
+                  minAutoRepairConfidence: input.minAutoRepairConfidence,
+                });
+                return {
+                  findings: result.findings.length,
+                  contradictionsFound: result.findings.filter((finding) => finding.type === "contradiction").length,
+                  stalenessFound: result.findings.filter((finding) => finding.type === "staleness").length,
+                  redundancyFound: result.findings.filter((finding) => finding.type === "redundancy").length,
+                  repairsApplied: result.repairs_applied,
+                  entriesFlagged: result.entries_flagged,
+                };
+              },
+            }
+          : undefined,
+        legacyConsolidationService: tier === "deep"
+          ? {
+              run: () => runDreamConsolidation({
+                stateManager: this.stateManager,
+                memoryLifecycle: this.memoryLifecycle,
+                knowledgeManager: this.knowledgeManager,
+                baseDir: this.baseDir,
+              }),
+            }
+          : undefined,
+      });
+      return await consolidator.run({ tier });
+    } catch (error) {
+      this.logger.warn("Platform Dream consolidation failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  private legacyReportFromPlatformDream(report: DreamReport | null): DreamLegacyConsolidationReport | null {
+    const category = report?.categories.find((result) => result.category === "legacyReflectionCompatibility");
+    if (!category || category.status !== "completed") {
+      return null;
+    }
+    const legacy = report?.operational?.legacy_reflection;
+    return legacy
+      ? {
+          goals_consolidated: legacy.goals_consolidated,
+          entries_compressed: legacy.entries_compressed,
+          stale_entries_found: legacy.stale_entries_found,
+          revalidation_tasks_created: legacy.revalidation_tasks_created,
+        }
+      : null;
+  }
+
   private async triggerResidentDreamMaintenance(details?: Record<string, unknown>, tier: DreamTier = "deep"): Promise<void> {
     try {
       const appliedBeforeAnalysis = await this.tryApplyPendingDreamSuggestion();
@@ -1410,13 +1483,14 @@ export class DaemonRunner {
 
       const analysisReport = await this.runDreamAnalysis(tier);
       const appliedAfterAnalysis = tier === "deep" ? await this.tryApplyPendingDreamSuggestion() : null;
+      const platformReport = await this.runPlatformDreamConsolidation(tier);
       const consolidationReport = tier === "deep"
-        ? await runDreamConsolidation({
-          stateManager: this.stateManager,
-          memoryLifecycle: this.memoryLifecycle,
-          knowledgeManager: this.knowledgeManager,
-          baseDir: this.baseDir,
-        })
+        ? this.legacyReportFromPlatformDream(platformReport) ?? await runDreamConsolidation({
+            stateManager: this.stateManager,
+            memoryLifecycle: this.memoryLifecycle,
+            knowledgeManager: this.knowledgeManager,
+            baseDir: this.baseDir,
+          })
         : null;
       const requestedGoalId =
         typeof details?.["goal_id"] === "string" ? details["goal_id"].trim() : "";

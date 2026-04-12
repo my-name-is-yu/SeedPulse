@@ -180,12 +180,15 @@ export const SoilRecordFilterSchema = z.object({
   statuses: z.array(SoilRecordStatusSchema).optional(),
   goal_ids: z.array(z.string().min(1)).optional(),
   task_ids: z.array(z.string().min(1)).optional(),
+  source_types: z.array(z.string().min(1)).optional(),
+  source_ids: z.array(z.string().min(1)).optional(),
   active_only: z.boolean().default(true),
   valid_at: z.string().datetime().optional(),
   updated_after: z.string().datetime().optional(),
   updated_before: z.string().datetime().optional(),
 });
 export type SoilRecordFilter = z.infer<typeof SoilRecordFilterSchema>;
+export type SoilRecordFilterInput = z.input<typeof SoilRecordFilterSchema>;
 
 export const SoilSearchRequestSchema = z.object({
   query: z.string().min(1),
@@ -240,6 +243,7 @@ export interface SoilWriteRepository {
 }
 
 export interface SoilSearchRepository {
+  loadRecords(filter?: SoilRecordFilterInput): Promise<SoilRecord[]>;
   lookupDirect(request: SoilSearchRequestInput): Promise<SoilSearchResult>;
   searchHybrid(request: SoilSearchRequestInput): Promise<SoilCandidate[]>;
   searchLexical(request: SoilSearchRequestInput): Promise<SoilCandidate[]>;

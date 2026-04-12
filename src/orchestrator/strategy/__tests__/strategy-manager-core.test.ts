@@ -94,6 +94,7 @@ const STRATEGY_TEMPLATES_ACTIVATION = {
   semanticContext: false,
   autoAcquireKnowledge: false,
   learnedPatternHints: false,
+  workflowHints: false,
   strategyTemplates: true,
   decisionHeuristics: false,
   graphTraversal: false,

@@ -38,6 +38,9 @@ CREATE INDEX IF NOT EXISTS soil_records_lookup_idx
 CREATE INDEX IF NOT EXISTS soil_records_validity_idx
   ON soil_records(valid_from, valid_to);
 
+CREATE INDEX IF NOT EXISTS soil_records_source_idx
+  ON soil_records(source_type, source_id, updated_at);
+
 CREATE TABLE IF NOT EXISTS soil_chunks (
   chunk_id TEXT PRIMARY KEY,
   record_id TEXT NOT NULL REFERENCES soil_records(record_id) ON DELETE CASCADE,
@@ -145,4 +148,3 @@ export const SOIL_QUERY_BUDGETS = {
   rerankTopK: 20,
   maxLimit: 100,
 } as const;
-

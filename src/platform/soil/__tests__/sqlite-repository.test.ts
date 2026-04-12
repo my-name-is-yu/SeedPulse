@@ -1207,4 +1207,72 @@ describe("SqliteSoilRepository", () => {
     expect(candidates).toHaveLength(1);
     expect(candidates[0]?.chunk_id).toBe("chunk-dup");
   });
+
+  it("loads records by source metadata including inactive versions", async () => {
+    await repo.applyMutation({
+      records: [
+        {
+          record_id: "dream-rec-v1",
+          record_key: "learned-pattern:pat-1:goal-a",
+          version: 1,
+          record_type: "reflection",
+          soil_id: "learning/learned-patterns/strategy-selection",
+          title: "Pattern",
+          summary: "Old pattern",
+          canonical_text: "Old pattern",
+          goal_id: "goal-a",
+          task_id: null,
+          status: "confirmed",
+          confidence: 0.8,
+          importance: 0.7,
+          source_reliability: 0.7,
+          valid_from: "2026-04-12T00:00:00.000Z",
+          valid_to: null,
+          supersedes_record_id: null,
+          is_active: true,
+          source_type: "learned_pattern",
+          source_id: "pat-1",
+          metadata_json: {},
+          created_at: "2026-04-12T00:00:00.000Z",
+          updated_at: "2026-04-12T00:00:00.000Z",
+        },
+        {
+          record_id: "dream-rec-v2",
+          record_key: "learned-pattern:pat-1:goal-a",
+          version: 2,
+          record_type: "reflection",
+          soil_id: "learning/learned-patterns/strategy-selection",
+          title: "Pattern",
+          summary: "New pattern",
+          canonical_text: "New pattern",
+          goal_id: "goal-a",
+          task_id: null,
+          status: "confirmed",
+          confidence: 0.9,
+          importance: 0.8,
+          source_reliability: 0.7,
+          valid_from: "2026-04-12T01:00:00.000Z",
+          valid_to: null,
+          supersedes_record_id: "dream-rec-v1",
+          is_active: true,
+          source_type: "learned_pattern",
+          source_id: "pat-1",
+          metadata_json: {},
+          created_at: "2026-04-12T01:00:00.000Z",
+          updated_at: "2026-04-12T01:00:00.000Z",
+        },
+      ],
+    });
+
+    const records = await repo.loadRecords({
+      active_only: false,
+      source_types: ["learned_pattern"],
+      source_ids: ["pat-1"],
+    });
+
+    expect(records.map((record) => [record.record_id, record.is_active])).toEqual([
+      ["dream-rec-v1", false],
+      ["dream-rec-v2", true],
+    ]);
+  });
 });

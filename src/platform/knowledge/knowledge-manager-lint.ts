@@ -36,13 +36,25 @@ function buildUserPrompt(entries: AgentMemoryEntry[]): string {
   return `Analyze these ${entries.length} compiled memory entries for contradictions, staleness, and redundancy:\n\n${JSON.stringify(formatted, null, 2)}`;
 }
 
+function actionMatchesAutoRepair(finding: z.infer<typeof LintFindingSchema>): boolean {
+  switch (finding.type) {
+    case "contradiction":
+      return finding.suggested_action === "auto_resolve_newest";
+    case "staleness":
+      return finding.suggested_action === "mark_stale";
+    case "redundancy":
+      return finding.suggested_action === "merge";
+  }
+}
+
 export async function lintAgentMemory(opts: {
   km: KnowledgeManager;
   llmCall: (prompt: string) => Promise<string>;
   autoRepair?: boolean;
+  minAutoRepairConfidence?: number;
   categories?: string[];
 }): Promise<LintResult> {
-  const { km, llmCall, autoRepair = false, categories } = opts;
+  const { km, llmCall, autoRepair = false, minAutoRepairConfidence = 0, categories } = opts;
 
   // 1. Load compiled entries (listAgentMemory has no status filter — filter manually)
   const allEntries = await km.listAgentMemory({ limit: 10000, include_archived: false });
@@ -85,9 +97,13 @@ export async function lintAgentMemory(opts: {
 
   // 3. Apply repairs if autoRepair is enabled
   let repairsApplied = 0;
+  const flaggedIds = new Set<string>();
 
   for (const finding of allFindings) {
-    if (!autoRepair) {
+    if (!autoRepair || finding.confidence < minAutoRepairConfidence || !actionMatchesAutoRepair(finding)) {
+      for (const id of finding.entry_ids) {
+        flaggedIds.add(id);
+      }
       continue;
     }
 
@@ -138,8 +154,6 @@ export async function lintAgentMemory(opts: {
       }
     }
   }
-
-  const flaggedIds = new Set(autoRepair ? [] : allFindings.flatMap((f) => f.entry_ids));
 
   return {
     findings: allFindings,
