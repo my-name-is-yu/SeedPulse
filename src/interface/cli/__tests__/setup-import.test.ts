@@ -195,6 +195,26 @@ describe("setup import apply", () => {
 });
 
 describe("setup import flow", () => {
+  it("does not prompt when no import sources are detected", async () => {
+    vi.resetModules();
+    const confirmMock = vi.fn();
+    vi.doMock("@clack/prompts", () => ({
+      confirm: confirmMock,
+      select: vi.fn(),
+      note: vi.fn(),
+      multiselect: vi.fn(),
+      log: { info: vi.fn() },
+      isCancel: vi.fn(() => false),
+    }));
+    vi.doMock("../commands/setup/import/discovery.js", () => ({
+      detectSetupImportSources: () => [],
+    }));
+
+    const { stepSetupImport } = await import("../commands/setup/import/flow.js");
+    await expect(stepSetupImport()).resolves.toBeUndefined();
+    expect(confirmMock).not.toHaveBeenCalled();
+  });
+
   it("asks which provider defaults to use when multiple provider configs are selected", async () => {
     vi.resetModules();
     const confirmMock = vi.fn(async () => true);
@@ -276,6 +296,70 @@ describe("setup import flow", () => {
       2,
       expect.objectContaining({
         message: expect.stringContaining("Which provider settings"),
+      })
+    );
+  });
+
+  it("respects manual item selection and does not seed skipped provider defaults", async () => {
+    vi.resetModules();
+    const confirmMock = vi.fn(async () => true);
+    const selectMock = vi.fn(async () => "choose");
+    const multiselectMock = vi.fn(async () => ["openclaw-skill"]);
+    const sources: SetupImportSource[] = [
+      {
+        id: "openclaw",
+        label: "OpenClaw",
+        rootDir: "/tmp/openclaw",
+        items: [
+          {
+            id: "openclaw-provider",
+            source: "openclaw",
+            sourceLabel: "OpenClaw",
+            kind: "provider",
+            label: "openai / gpt-5.4-mini / agent_loop",
+            decision: "import",
+            reason: "provider defaults",
+            providerSettings: {
+              provider: "openai",
+              model: "gpt-5.4-mini",
+              adapter: "agent_loop",
+            },
+          },
+          {
+            id: "openclaw-skill",
+            source: "openclaw",
+            sourceLabel: "OpenClaw",
+            kind: "skill",
+            label: "review",
+            decision: "import",
+            reason: "SKILL.md found",
+            sourcePath: "/tmp/openclaw/skills/review",
+          },
+        ],
+      },
+    ];
+
+    vi.doMock("@clack/prompts", () => ({
+      confirm: confirmMock,
+      select: selectMock,
+      note: vi.fn(),
+      multiselect: multiselectMock,
+      log: { info: vi.fn() },
+      isCancel: vi.fn(() => false),
+    }));
+    vi.doMock("../commands/setup/import/discovery.js", () => ({
+      detectSetupImportSources: () => sources,
+    }));
+
+    const { stepSetupImport } = await import("../commands/setup/import/flow.js");
+    const selection = await stepSetupImport();
+
+    expect(selection?.providerSettings).toBeUndefined();
+    expect(selection?.items.find((item) => item.id === "openclaw-provider")?.decision).toBe("skip");
+    expect(selection?.items.find((item) => item.id === "openclaw-skill")?.decision).toBe("import");
+    expect(multiselectMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Select items to import:",
       })
     );
   });
