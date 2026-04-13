@@ -1,7 +1,8 @@
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createSoilConfig, type SoilConfig, type SoilConfigInput } from "./config.js";
+import Database from "better-sqlite3";
+import { createSoilConfig, getDefaultSoilSqliteIndexPath, type SoilConfig, type SoilConfigInput } from "./config.js";
 import { computeSoilChecksum } from "./checksum.js";
 import { parseSoilMarkdownLoose } from "./io.js";
 import { loadSoilIndexSnapshot } from "./index-store.js";
@@ -25,7 +26,9 @@ export interface SoilDoctorFinding {
     | "missing-index"
     | "missing-required-page"
     | "index-page-count-mismatch"
-    | "index-checksum-mismatch";
+    | "index-checksum-mismatch"
+    | "typed-store-projection-gap"
+    | "typed-store-unreadable";
   severity: "error" | "warn";
   soilId?: string;
   relativePath: string;
@@ -223,6 +226,7 @@ export class SoilDoctor {
     }
 
     findings.push(...(await this.checkRequiredPages(pages)));
+    findings.push(...(await this.checkTypedStoreProjectionGap(pages)));
 
     return {
       rootDir: this.config.rootDir,
@@ -264,6 +268,98 @@ export class SoilDoctor {
     }
 
     return findings;
+  }
+
+  private async checkTypedStoreProjectionGap(pages: ScannedPage[]): Promise<SoilDoctorFinding[]> {
+    const sqlitePath = await this.resolveTypedStoreSqlitePath();
+    if (sqlitePath === null) {
+      return [];
+    }
+
+    let db: Database.Database | null = null;
+    try {
+      db = new Database(sqlitePath, { readonly: true, fileMustExist: true });
+      const activeRecordCount = this.countSqliteRows(db, "soil_records", "is_active = 1");
+      const typedPageCount = this.countSqliteRows(db, "soil_pages");
+
+      if (activeRecordCount > 0 && typedPageCount === 0) {
+        return [{
+          code: "typed-store-projection-gap",
+          severity: "warn",
+          relativePath: path.relative(this.config.rootDir, sqlitePath) || sqlitePath,
+          absolutePath: sqlitePath,
+          message: "Typed Soil store has active records but no projected pages; Obsidian/Notion snapshot publish only sees Markdown pages",
+          details: {
+            active_record_count: activeRecordCount,
+            typed_page_count: typedPageCount,
+            markdown_page_count: pages.length,
+          },
+        }];
+      }
+
+      if (typedPageCount > pages.length) {
+        return [{
+          code: "typed-store-projection-gap",
+          severity: "warn",
+          relativePath: path.relative(this.config.rootDir, sqlitePath) || sqlitePath,
+          absolutePath: sqlitePath,
+          message: "Typed Soil store has more pages than the Markdown tree; Obsidian/Notion snapshot publish may miss typed-store-only pages",
+          details: {
+            active_record_count: activeRecordCount,
+            typed_page_count: typedPageCount,
+            markdown_page_count: pages.length,
+          },
+        }];
+      }
+
+      return [];
+    } catch (error) {
+      return [{
+        code: "typed-store-unreadable",
+        severity: "warn",
+        relativePath: path.relative(this.config.rootDir, sqlitePath) || sqlitePath,
+        absolutePath: sqlitePath,
+        message: "Typed Soil store could not be inspected",
+        details: { error: error instanceof Error ? error.message : String(error) },
+      }];
+    } finally {
+      db?.close();
+    }
+  }
+
+  private countSqliteRows(db: Database.Database, tableName: "soil_records" | "soil_pages", where?: string): number {
+    const row = db
+      .prepare(`SELECT COUNT(*) AS count FROM ${tableName}${where ? ` WHERE ${where}` : ""}`)
+      .get() as { count: number };
+    return row.count;
+  }
+
+  private async resolveTypedStoreSqlitePath(): Promise<string | null> {
+    const candidates = Array.from(new Set([
+      this.config.indexPath,
+      getDefaultSoilSqliteIndexPath(this.config.rootDir),
+    ]));
+
+    for (const candidate of candidates) {
+      if (await this.isSqliteDatabase(candidate)) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  private async isSqliteDatabase(filePath: string): Promise<boolean> {
+    let handle: Awaited<ReturnType<typeof fsp.open>> | null = null;
+    try {
+      handle = await fsp.open(filePath, "r");
+      const buffer = Buffer.alloc(16);
+      const result = await handle.read(buffer, 0, buffer.length, 0);
+      return result.bytesRead === buffer.length && buffer.toString("utf-8") === "SQLite format 3\0";
+    } catch {
+      return false;
+    } finally {
+      await handle?.close();
+    }
   }
 
   private async walk(dir: string, pages: ScannedPage[]): Promise<void> {

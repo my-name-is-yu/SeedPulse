@@ -14,7 +14,7 @@ import {
   selectTargetDimension as _selectTargetDimension,
   type DimensionSelectionOptions,
 } from "../context/dimension-selector.js";
-import type { Task, VerificationResult } from "../../../base/types/task.js";
+import { VerificationResultSchema, type Task, type VerificationResult } from "../../../base/types/task.js";
 import type { GapVector } from "../../../base/types/gap.js";
 import type { DriveContext } from "../../../base/types/drive.js";
 import type { Dimension } from "../../../base/types/goal.js";
@@ -583,6 +583,39 @@ export class TaskLifecycle {
       attempt: task.consecutive_failure_count + 1,
     });
 
+    if (this.adapterRegistry && !this.adapterRegistry.isAvailable(adapter.adapterType)) {
+      const reason = `Adapter circuit breaker is open for "${adapter.adapterType}"`;
+      const now = new Date().toISOString();
+      const blockedTask = {
+        ...task,
+        status: "error" as const,
+        completed_at: now,
+        execution_output: reason,
+      };
+      await this.stateManager.writeRaw(`tasks/${task.goal_id}/${task.id}.json`, blockedTask);
+      await appendTaskOutcomeEvent(this.stateManager, {
+        task: blockedTask,
+        type: "failed",
+        attempt: task.consecutive_failure_count + 1,
+        reason,
+      });
+      this.logger?.warn(`[task] skipped: ${reason}`, { taskId: task.id });
+
+      return {
+        task: blockedTask,
+        verificationResult: VerificationResultSchema.parse({
+          task_id: task.id,
+          verdict: "fail",
+          confidence: 1,
+          evidence: [{ layer: "mechanical", description: reason, confidence: 1 }],
+          dimension_updates: [],
+          timestamp: now,
+        }),
+        action: "discard",
+        tokensUsed: taskCycleTokens,
+      };
+    }
+
     // 4. Execute task
     this.logger?.debug(`[DEBUG-TL] Executing task ${task.id} via adapter ${adapter.adapterType}`);
     void this.hookManager?.emit("PreExecute", { goal_id: goalId, data: { task_id: task.id } });
@@ -704,6 +737,7 @@ export class TaskLifecycle {
     return {
       guardrailRunner: this.guardrailRunner,
       toolExecutor: this.toolExecutor,
+      adapterRegistry: this.adapterRegistry,
       stateManager: this.stateManager,
       sessionManager: this.sessionManager,
       logger: this.logger,

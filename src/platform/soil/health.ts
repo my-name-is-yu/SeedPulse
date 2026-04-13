@@ -50,9 +50,11 @@ function doctorFindingCode(finding: SoilDoctorFinding): SoilMemoryLintFindingCod
     case "watermark-mismatch":
     case "index-checksum-mismatch":
     case "index-page-count-mismatch":
+    case "typed-store-projection-gap":
       return "stale_page";
     case "missing-index":
     case "unsafe-path":
+    case "typed-store-unreadable":
       return "schema_incompatible";
   }
 }

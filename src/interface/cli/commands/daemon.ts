@@ -68,7 +68,7 @@ export async function cmdStart(
   characterConfigManager: CharacterConfigManager,
   args: string[]
 ): Promise<void> {
-  let values: { "api-key"?: string; config?: string; goal?: string[]; detach?: boolean; "check-interval-ms"?: string; "iterations-per-cycle"?: string; workspace?: string };
+  let values: { "api-key"?: string; config?: string; goal?: string[]; detach?: boolean; "check-interval-ms"?: string; "iterations-per-cycle"?: string; "max-concurrent-goals"?: string; workspace?: string };
   try {
     ({ values } = parseArgs({
       args,
@@ -79,10 +79,11 @@ export async function cmdStart(
         detach: { type: "boolean", short: "d" },
         "check-interval-ms": { type: "string" },
         "iterations-per-cycle": { type: "string" },
+        "max-concurrent-goals": { type: "string" },
         workspace: { type: "string" },
       },
       strict: false,
-    }) as { values: { "api-key"?: string; config?: string; goal?: string[]; detach?: boolean; "check-interval-ms"?: string; "iterations-per-cycle"?: string; workspace?: string } });
+    }) as { values: { "api-key"?: string; config?: string; goal?: string[]; detach?: boolean; "check-interval-ms"?: string; "iterations-per-cycle"?: string; "max-concurrent-goals"?: string; workspace?: string } });
   } catch (err) {
     getCliLogger().error(formatOperationError("parse start command arguments", err));
     values = {};
@@ -138,6 +139,15 @@ export async function cmdStart(
     }
     daemonConfig = daemonConfig ?? {};
     daemonConfig.iterations_per_cycle = parsed;
+  }
+  if (values["max-concurrent-goals"]) {
+    const parsed = parseInt(values["max-concurrent-goals"], 10);
+    if (isNaN(parsed) || parsed <= 0) {
+      getCliLogger().error("--max-concurrent-goals must be a positive integer");
+      process.exit(1);
+    }
+    daemonConfig = daemonConfig ?? {};
+    daemonConfig.max_concurrent_goals = parsed;
   }
   if (values.workspace) {
     daemonConfig = daemonConfig ?? {};
@@ -652,6 +662,7 @@ export async function cmdDaemonStatus(_args: string[]): Promise<void> {
   lines.push("Config:");
   lines.push(`  Interval:      ${intervalMin}m (adaptive sleep: ${adaptiveSleep})`);
   lines.push(`  Iterations:    ${cfg.iterations_per_cycle} per cycle`);
+  lines.push(`  Concurrency:   ${cfg.max_concurrent_goals} goal${cfg.max_concurrent_goals === 1 ? "" : "s"}`);
   lines.push(`  Proactive:     ${proactive}`);
   lines.push("  Runtime:       durable auto-recovery");
   if (cfg.runtime_root) {

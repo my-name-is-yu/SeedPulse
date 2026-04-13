@@ -176,7 +176,11 @@ export class PipelineExecutor {
     let plan = "";
     try {
       const adapter = this.selectAdapter(stage);
-      const result = await adapter.execute(planTask);
+      const result = await this.executeAdapterWithCircuitBreaker(adapter, planTask);
+      if (!result.success) {
+        this.logger?.warn("[PipelineExecutor] Plan generation failed", { error: result.error ?? "unknown failure" });
+        return { approved: false, plan: "" };
+      }
       plan = result.output;
     } catch (err) {
       this.logger?.warn("[PipelineExecutor] Plan generation failed", { error: err instanceof Error ? err.message : String(err) });
@@ -243,12 +247,7 @@ export class PipelineExecutor {
         : { ...baseTask, prompt: `${baseTask.prompt}\n\nPREVIOUS ATTEMPT FAILED: ${lastError}\nPlease try again.` };
 
       let result: AgentResult;
-      try {
-        result = await currentAdapter.execute(retryTask);
-      } catch (err) {
-        lastError = err instanceof Error ? err.message : String(err);
-        result = { success: false, output: "", error: lastError, exit_code: null, elapsed_ms: 0, stopped_reason: "error" };
-      }
+      result = await this.executeAdapterWithCircuitBreaker(currentAdapter, retryTask);
 
       if (this.mapResultToVerdict(result) !== "fail") {
         return this.makeStageResult(stageIndex, stage, idempotencyKey, result.success, result.output);
@@ -262,6 +261,40 @@ export class PipelineExecutor {
   }
 
   // ─── Private helpers ───
+
+  private async executeAdapterWithCircuitBreaker(adapter: IAdapter, task: AgentTask): Promise<AgentResult> {
+    if (!this.adapterRegistry.isAvailable(adapter.adapterType)) {
+      return {
+        success: false,
+        output: "",
+        error: `Adapter circuit breaker is open for "${adapter.adapterType}"`,
+        exit_code: null,
+        elapsed_ms: 0,
+        stopped_reason: "error",
+      };
+    }
+
+    let result: AgentResult;
+    try {
+      result = await adapter.execute(task);
+    } catch (err) {
+      result = {
+        success: false,
+        output: "",
+        error: err instanceof Error ? err.message : String(err),
+        exit_code: null,
+        elapsed_ms: 0,
+        stopped_reason: "error",
+      };
+    }
+
+    if (result.success) {
+      this.adapterRegistry.recordSuccess(adapter.adapterType);
+    } else {
+      this.adapterRegistry.recordFailure(adapter.adapterType);
+    }
+    return result;
+  }
 
   private makeStageResult(
     stageIndex: number,

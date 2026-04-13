@@ -559,6 +559,7 @@ export class DaemonRunner {
           },
         },
         {
+          concurrency: this.config.max_concurrent_goals,
           iterationsPerCycle: this.config.iterations_per_cycle,
           stateFilePath: path.join(this.runtimeRoot!, "supervisor-state.json"),
         }

@@ -1,6 +1,6 @@
 import type { Logger } from "../../../runtime/logger.js";
 import type { Task } from "../../../base/types/task.js";
-import type { AgentResult, IAdapter } from "../adapter-layer.js";
+import type { AdapterRegistry, AgentResult, IAdapter } from "../adapter-layer.js";
 import type { GuardrailRunner } from "../../../platform/traits/guardrail-runner.js";
 import type { ToolExecutor } from "../../../tools/executor.js";
 import { executeTask as executeTaskDirect } from "./task-executor.js";
@@ -13,6 +13,7 @@ interface ExecuteTaskWithGuardsParams {
   workspaceContext?: string;
   guardrailRunner?: GuardrailRunner;
   toolExecutor?: ToolExecutor;
+  adapterRegistry?: AdapterRegistry;
   stateManager: StateManager;
   sessionManager: SessionManager;
   logger?: Logger;
@@ -28,6 +29,7 @@ export async function executeTaskWithGuards(
     workspaceContext,
     guardrailRunner,
     toolExecutor,
+    adapterRegistry,
     stateManager,
     sessionManager,
     logger,
@@ -97,6 +99,7 @@ export async function executeTaskWithGuards(
     adapter,
     workspaceContext
   );
+  recordAdapterCircuitOutcome(adapterRegistry, adapter.adapterType, result);
 
   if (guardrailRunner) {
     const afterResult = await guardrailRunner.run("after_tool", {
@@ -118,6 +121,19 @@ export async function executeTaskWithGuards(
   }
 
   return result;
+}
+
+function recordAdapterCircuitOutcome(
+  adapterRegistry: AdapterRegistry | undefined,
+  adapterType: string,
+  result: AgentResult
+): void {
+  if (!adapterRegistry) return;
+  if (result.stopped_reason === "error" || result.stopped_reason === "timeout") {
+    adapterRegistry.recordFailure(adapterType);
+    return;
+  }
+  adapterRegistry.recordSuccess(adapterType);
 }
 
 export async function verifyExecutionWithGitDiff(

@@ -29,6 +29,9 @@ describe("RunAdapterTool", () => {
   beforeEach(() => {
     registry = {
       getAdapter: vi.fn(),
+      isAvailable: vi.fn().mockReturnValue(true),
+      recordSuccess: vi.fn(),
+      recordFailure: vi.fn(),
     } as unknown as AdapterRegistry;
     tool = new RunAdapterTool(registry);
   });
@@ -67,6 +70,7 @@ describe("RunAdapterTool", () => {
     expect(result.success).toBe(true);
     expect(result.summary).toContain("claude");
     expect(mockAdapter.execute).toHaveBeenCalledOnce();
+    expect(registry.recordSuccess).toHaveBeenCalledWith("claude");
   });
 
   it("returns failure when adapter result is unsuccessful", async () => {
@@ -80,6 +84,35 @@ describe("RunAdapterTool", () => {
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("timeout");
+    expect(registry.recordFailure).toHaveBeenCalledWith("claude");
+  });
+
+  it("records failure when adapter execution throws", async () => {
+    const mockAdapter = { execute: vi.fn().mockRejectedValue(new Error("boom")) };
+    vi.mocked(registry.getAdapter).mockReturnValue(mockAdapter as any);
+
+    const result = await tool.call(
+      { adapter_id: "claude", task_description: "do x" },
+      makeContext(),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("boom");
+    expect(registry.recordFailure).toHaveBeenCalledWith("claude");
+  });
+
+  it("does not execute adapter when circuit breaker is open", async () => {
+    const mockAdapter = { execute: vi.fn().mockResolvedValue(mockResult) };
+    vi.mocked(registry.isAvailable).mockReturnValue(false);
+    vi.mocked(registry.getAdapter).mockReturnValue(mockAdapter as any);
+
+    const result = await tool.call(
+      { adapter_id: "claude", task_description: "do x" },
+      makeContext(),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("circuit breaker");
+    expect(mockAdapter.execute).not.toHaveBeenCalled();
+    expect(registry.getAdapter).not.toHaveBeenCalled();
   });
 
   it("handles registry error gracefully", async () => {

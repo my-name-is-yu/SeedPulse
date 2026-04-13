@@ -55,7 +55,7 @@ function formatSummary(answers: SetupAnswers): string {
     `Model:     ${answers.model}`,
     `Adapter:   ${answers.adapter}`,
     `API Key:   ${maskKey(answers.apiKey)}`,
-    `Daemon:    ${answers.startDaemon ? `yes (port ${answers.daemonPort})` : "no"}`,
+    `Daemon:    ${answers.startDaemon ? `configured (port ${answers.daemonPort})` : "not configured"}`,
     `Notify:    ${notificationChannels}`,
   ].join("\n");
 }
@@ -403,7 +403,7 @@ export async function runSetupWizard(): Promise<number> {
     } catch {
       p.log.warn("Could not save daemon port to daemon.json");
     }
-    p.log.info("Daemon port " + finalAnswers.daemonPort + " saved.");
+    p.log.info("Daemon port " + finalAnswers.daemonPort + " saved. Start it later with pulseed daemon start or pulseed start --goal <goal-id>.");
   }
 
   if (finalAnswers.notificationConfig) {

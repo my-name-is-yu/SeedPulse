@@ -34,14 +34,30 @@ export class RunAdapterTool implements ITool<RunAdapterInput, unknown> {
 
   async call(input: RunAdapterInput, _context: ToolCallContext): Promise<ToolResult> {
     const startTime = Date.now();
+    let shouldRecordAdapterFailure = false;
     try {
+      if (!this.adapterRegistry.isAvailable(input.adapter_id)) {
+        return {
+          success: false,
+          data: null,
+          summary: `Adapter ${input.adapter_id} skipped: circuit breaker is open`,
+          error: `Adapter circuit breaker is open for "${input.adapter_id}"`,
+          durationMs: Date.now() - startTime,
+        };
+      }
       const adapter = this.adapterRegistry.getAdapter(input.adapter_id);
+      shouldRecordAdapterFailure = true;
       const task: AgentTask = {
         prompt: input.task_description,
         timeout_ms: 60_000,
         adapter_type: input.adapter_id,
       };
       const result = await adapter.execute(task);
+      if (result.success) {
+        this.adapterRegistry.recordSuccess(input.adapter_id);
+      } else {
+        this.adapterRegistry.recordFailure(input.adapter_id);
+      }
       return {
         success: result.success,
         data: result,
@@ -52,6 +68,9 @@ export class RunAdapterTool implements ITool<RunAdapterInput, unknown> {
         durationMs: Date.now() - startTime,
       };
     } catch (err) {
+      if (shouldRecordAdapterFailure) {
+        this.adapterRegistry.recordFailure(input.adapter_id);
+      }
       return {
         success: false,
         data: null,

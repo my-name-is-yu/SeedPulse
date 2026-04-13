@@ -7,6 +7,7 @@ import { SoilCompiler } from "../compiler.js";
 import { SoilRetriever } from "../retriever.js";
 import { SoilDoctor } from "../doctor.js";
 import { readSoilMarkdownFile } from "../io.js";
+import { SqliteSoilRepository } from "../sqlite-repository.js";
 
 function fixedClock(): Date {
   return new Date("2026-04-11T10:00:00.000Z");
@@ -220,6 +221,62 @@ describe("Soil doctor", () => {
 
       expect(result.frontmatter.checksum).not.toBeUndefined();
     } finally {
+      cleanupTempDir(rootDir);
+    }
+  });
+
+  it("warns when typed Soil records have not been projected to publishable pages", async () => {
+    const rootDir = makeTempDir("soil-doctor-typed-gap-");
+    const indexPath = path.join(rootDir, ".index", "custom-soil-store.db");
+    let repo: SqliteSoilRepository | null = null;
+    try {
+      repo = await SqliteSoilRepository.create({ rootDir, indexPath });
+      await repo.applyMutation({
+        records: [{
+          record_id: "rec-memory",
+          record_key: "memory.preference",
+          version: 1,
+          record_type: "preference",
+          soil_id: "memory/preferences/rec-memory",
+          title: "Preferred editor",
+          summary: "Use Obsidian as the memory viewer.",
+          canonical_text: "Use Obsidian as the memory viewer.",
+          goal_id: null,
+          task_id: null,
+          status: "active",
+          confidence: 0.9,
+          importance: 0.7,
+          source_reliability: null,
+          valid_from: null,
+          valid_to: null,
+          supersedes_record_id: null,
+          is_active: true,
+          source_type: "knowledge",
+          source_id: "memory-preference",
+          metadata_json: {},
+          created_at: "2026-04-11T09:00:00.000Z",
+          updated_at: "2026-04-11T09:00:00.000Z",
+        }],
+        chunks: [{
+          chunk_id: "chunk-memory",
+          record_id: "rec-memory",
+          soil_id: "memory/preferences/rec-memory",
+          chunk_index: 0,
+          chunk_kind: "paragraph",
+          heading_path_json: [],
+          chunk_text: "Use Obsidian as the memory viewer.",
+          token_count: 7,
+          checksum: "memory",
+          created_at: "2026-04-11T09:00:00.000Z",
+        }],
+      });
+      repo.close();
+      repo = null;
+
+      const report = await SoilDoctor.create({ rootDir, indexPath }).inspect();
+      expect(report.findings.some((finding) => finding.code === "typed-store-projection-gap")).toBe(true);
+    } finally {
+      repo?.close();
       cleanupTempDir(rootDir);
     }
   });

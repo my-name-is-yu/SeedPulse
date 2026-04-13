@@ -2,11 +2,13 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getPulseedDirPath, getLogsDir, getGoalsDir } from "../../../base/utils/paths.js";
+import yaml from "js-yaml";
+import { getPulseedDirPath, getLogsDir, getGoalsDir, getPluginsDir } from "../../../base/utils/paths.js";
 import { execFileNoThrow } from "../../../base/utils/execFileNoThrow.js";
 import { getCliRunnerBuildPath } from "../../../base/utils/pulseed-meta.js";
 import { readJsonFileOrNull } from "../../../base/utils/json-io.js";
 import { DaemonConfigSchema } from "../../../base/types/daemon.js";
+import { PluginManifestSchema } from "../../../base/types/plugin.js";
 import { PIDManager } from "../../../runtime/pid-manager.js";
 import { probeDaemonHealth } from "../../../runtime/daemon/client.js";
 import {
@@ -84,6 +86,19 @@ function formatLivePingDetail(latencyMs: number, error?: string): string {
   return error ? `live ping failed (${latency}; ${error})` : `live ping ok (${latency})`;
 }
 
+function formatOctalMode(mode: number): string {
+  return `0${(mode & 0o777).toString(8)}`;
+}
+
+function isGroupOrWorldAccessible(mode: number): boolean {
+  return (mode & 0o077) !== 0;
+}
+
+function formatNameList(names: string[], limit = 5): string {
+  const shown = names.slice(0, limit).join(", ");
+  return names.length > limit ? `${shown}, +${names.length - limit} more` : shown;
+}
+
 // ─── Individual checks ───
 
 export function checkNodeVersion(): CheckResult {
@@ -159,6 +174,137 @@ export function checkApiKey(baseDir?: string): CheckResult {
     status: "fail",
     detail: "ANTHROPIC_API_KEY / OPENAI_API_KEY not set (checked env + provider.json)",
   };
+}
+
+export function checkStateDirectoryPermissions(baseDir?: string): CheckResult {
+  const dir = baseDir ?? getPulseedDirPath();
+  const displayDir = dir.replace(process.env["HOME"] ?? "", "~");
+
+  if (!fs.existsSync(dir)) {
+    return { name: "State permissions", status: "warn", detail: `${displayDir} not found` };
+  }
+
+  try {
+    const mode = fs.statSync(dir).mode;
+    if (isGroupOrWorldAccessible(mode)) {
+      return {
+        name: "State permissions",
+        status: "warn",
+        detail: `${displayDir} is ${formatOctalMode(mode)}; recommended 0700`,
+      };
+    }
+    return { name: "State permissions", status: "pass", detail: `${displayDir} is ${formatOctalMode(mode)}` };
+  } catch {
+    return { name: "State permissions", status: "warn", detail: `${displayDir} could not be inspected` };
+  }
+}
+
+export function checkProviderConfigPermissions(baseDir?: string): CheckResult {
+  const dir = baseDir ?? getPulseedDirPath();
+  const configPath = path.join(dir, "provider.json");
+  const displayPath = configPath.replace(process.env["HOME"] ?? "", "~");
+
+  if (!fs.existsSync(configPath)) {
+    return { name: "Provider permissions", status: "warn", detail: `${displayPath} not found` };
+  }
+
+  let hasStoredApiKey = false;
+  try {
+    const content = fs.readFileSync(configPath, "utf-8");
+    const parsed = JSON.parse(content) as unknown;
+    hasStoredApiKey =
+      parsed !== null &&
+      typeof parsed === "object" &&
+      typeof (parsed as Record<string, unknown>)["api_key"] === "string" &&
+      ((parsed as Record<string, string>)["api_key"] ?? "").length > 0;
+  } catch {
+    return { name: "Provider permissions", status: "warn", detail: `${displayPath} could not be parsed` };
+  }
+
+  if (!hasStoredApiKey) {
+    return { name: "Provider permissions", status: "pass", detail: "no api_key stored in provider.json" };
+  }
+
+  try {
+    const mode = fs.statSync(configPath).mode;
+    if (isGroupOrWorldAccessible(mode)) {
+      return {
+        name: "Provider permissions",
+        status: "warn",
+        detail: `${displayPath} is ${formatOctalMode(mode)}; recommended 0600 because it stores api_key`,
+      };
+    }
+    return { name: "Provider permissions", status: "pass", detail: `${displayPath} is ${formatOctalMode(mode)}` };
+  } catch {
+    return { name: "Provider permissions", status: "warn", detail: `${displayPath} could not be inspected` };
+  }
+}
+
+export function checkPluginPermissionWarnings(baseDir?: string): CheckResult {
+  const pluginsDir = getPluginsDir(baseDir ?? getPulseedDirPath());
+
+  if (!fs.existsSync(pluginsDir)) {
+    return { name: "Plugin permissions", status: "pass", detail: "no plugins installed" };
+  }
+
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(pluginsDir, { withFileTypes: true });
+  } catch {
+    return { name: "Plugin permissions", status: "warn", detail: "could not read plugins directory" };
+  }
+
+  const shellPlugins: string[] = [];
+  let unreadableManifestCount = 0;
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    const pluginDir = path.join(pluginsDir, entry.name);
+    const yamlPath = path.join(pluginDir, "plugin.yaml");
+    const jsonPath = path.join(pluginDir, "plugin.json");
+
+    let raw: unknown;
+    try {
+      if (fs.existsSync(yamlPath)) {
+        raw = yaml.load(fs.readFileSync(yamlPath, "utf-8"));
+      } else if (fs.existsSync(jsonPath)) {
+        raw = JSON.parse(fs.readFileSync(jsonPath, "utf-8"));
+      } else {
+        continue;
+      }
+    } catch {
+      unreadableManifestCount += 1;
+      continue;
+    }
+
+    const parsed = PluginManifestSchema.safeParse(raw);
+    if (!parsed.success) {
+      unreadableManifestCount += 1;
+      continue;
+    }
+    if (parsed.data.permissions.shell) {
+      shellPlugins.push(parsed.data.name);
+    }
+  }
+
+  if (shellPlugins.length > 0) {
+    return {
+      name: "Plugin permissions",
+      status: "warn",
+      detail: `${shellPlugins.length} plugin${shellPlugins.length === 1 ? "" : "s"} request shell permission: ${formatNameList(shellPlugins)}`,
+    };
+  }
+
+  if (unreadableManifestCount > 0) {
+    return {
+      name: "Plugin permissions",
+      status: "warn",
+      detail: `${unreadableManifestCount} plugin manifest${unreadableManifestCount === 1 ? "" : "s"} could not be inspected`,
+    };
+  }
+
+  return { name: "Plugin permissions", status: "pass", detail: "no shell-capable plugins found" };
 }
 
 export function checkGoals(baseDir?: string): CheckResult {
@@ -450,6 +596,9 @@ export async function cmdDoctor(_args: string[]): Promise<number> {
     checkPulseedDir(baseDir),
     checkProviderConfig(baseDir),
     checkApiKey(baseDir),
+    checkStateDirectoryPermissions(baseDir),
+    checkProviderConfigPermissions(baseDir),
+    checkPluginPermissionWarnings(baseDir),
     checkGoals(baseDir),
     checkLogDirectory(baseDir),
     checkBuild(),

@@ -23,6 +23,9 @@ import {
   checkPulseedDir,
   checkProviderConfig,
   checkApiKey,
+  checkStateDirectoryPermissions,
+  checkProviderConfigPermissions,
+  checkPluginPermissionWarnings,
   checkGoals,
   checkLogDirectory,
   checkBuild,
@@ -139,6 +142,127 @@ describe("checkApiKey", () => {
     const result = checkApiKey(tmpDir);
     expect(result.status).toBe("pass");
     expect(result.detail).toContain("provider.json");
+  });
+});
+
+describe("checkStateDirectoryPermissions", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = makeTempDir("pulseed-doctor-state-perms-");
+  });
+
+  afterEach(() => {
+    fs.chmodSync(tmpDir, 0o700);
+    cleanupTempDir(tmpDir);
+  });
+
+  it("passes when the state directory is private", () => {
+    fs.chmodSync(tmpDir, 0o700);
+    const result = checkStateDirectoryPermissions(tmpDir);
+    expect(result.status).toBe("pass");
+    expect(result.detail).toContain("0700");
+  });
+
+  it("warns when the state directory is group/world accessible", () => {
+    fs.chmodSync(tmpDir, 0o755);
+    const result = checkStateDirectoryPermissions(tmpDir);
+    expect(result.status).toBe("warn");
+    expect(result.detail).toContain("recommended 0700");
+  });
+});
+
+describe("checkProviderConfigPermissions", () => {
+  let tmpDir: string;
+  let providerPath: string;
+
+  beforeEach(() => {
+    tmpDir = makeTempDir("pulseed-doctor-provider-perms-");
+    providerPath = path.join(tmpDir, "provider.json");
+  });
+
+  afterEach(() => {
+    if (fs.existsSync(providerPath)) {
+      fs.chmodSync(providerPath, 0o600);
+    }
+    cleanupTempDir(tmpDir);
+  });
+
+  it("passes when provider.json stores no api_key", () => {
+    fs.writeFileSync(providerPath, JSON.stringify({ model: "gpt-4" }));
+    fs.chmodSync(providerPath, 0o644);
+    const result = checkProviderConfigPermissions(tmpDir);
+    expect(result.status).toBe("pass");
+    expect(result.detail).toContain("no api_key");
+  });
+
+  it("passes when provider.json stores api_key and is private", () => {
+    fs.writeFileSync(providerPath, JSON.stringify({ api_key: "sk-test" }));
+    fs.chmodSync(providerPath, 0o600);
+    const result = checkProviderConfigPermissions(tmpDir);
+    expect(result.status).toBe("pass");
+    expect(result.detail).toContain("0600");
+  });
+
+  it("warns when provider.json stores api_key and is group/world accessible", () => {
+    fs.writeFileSync(providerPath, JSON.stringify({ api_key: "sk-test" }));
+    fs.chmodSync(providerPath, 0o644);
+    const result = checkProviderConfigPermissions(tmpDir);
+    expect(result.status).toBe("warn");
+    expect(result.detail).toContain("recommended 0600");
+  });
+});
+
+describe("checkPluginPermissionWarnings", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = makeTempDir("pulseed-doctor-plugin-perms-");
+  });
+
+  afterEach(() => {
+    cleanupTempDir(tmpDir);
+  });
+
+  it("passes when no plugins are installed", () => {
+    const result = checkPluginPermissionWarnings(tmpDir);
+    expect(result.status).toBe("pass");
+    expect(result.detail).toContain("no plugins");
+  });
+
+  it("warns when an installed plugin requests shell permission", () => {
+    const pluginDir = path.join(tmpDir, "plugins", "shell-runner");
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginDir, "plugin.yaml"),
+      [
+        "name: shell-runner",
+        "version: 1.0.0",
+        "type: adapter",
+        "capabilities:",
+        "  - run_shell",
+        "description: Runs shell commands",
+        "config_schema: {}",
+        "dependencies: []",
+        "permissions:",
+        "  shell: true",
+        "",
+      ].join("\n")
+    );
+
+    const result = checkPluginPermissionWarnings(tmpDir);
+    expect(result.status).toBe("warn");
+    expect(result.detail).toContain("shell-runner");
+  });
+
+  it("warns when a plugin manifest cannot be inspected", () => {
+    const pluginDir = path.join(tmpDir, "plugins", "broken");
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.writeFileSync(path.join(pluginDir, "plugin.yaml"), "{");
+
+    const result = checkPluginPermissionWarnings(tmpDir);
+    expect(result.status).toBe("warn");
+    expect(result.detail).toContain("could not be inspected");
   });
 });
 

@@ -68,7 +68,7 @@ export async function stepDaemon(): Promise<{ start: boolean; port: number }> {
 
   const start = guardCancel(
     await p.confirm({
-      message: "Start PulSeed as a background daemon after setup?",
+      message: "Configure PulSeed background daemon settings for later use?",
       initialValue: false,
     })
   );

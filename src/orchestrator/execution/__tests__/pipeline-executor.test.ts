@@ -189,6 +189,52 @@ describe("PipelineExecutor", () => {
     expect(executeMock).toHaveBeenCalledTimes(2);
   });
 
+  it("does not execute a stage when the adapter circuit is open", async () => {
+    for (let i = 0; i < 5; i++) {
+      registry.recordFailure("mock");
+    }
+
+    const executor = new PipelineExecutor(deps);
+    const result = await executor.run(
+      "task-open-circuit",
+      makeAgentTask(),
+      { stages: [{ role: "implementor" }], fail_fast: true },
+    );
+
+    expect(adapter.execute).not.toHaveBeenCalled();
+    expect(result.status).toBe("failed");
+    expect(result.final_verdict).toBe("fail");
+  });
+
+  it("records adapter failures when stage execution throws", async () => {
+    const throwingAdapter: IAdapter = {
+      adapterType: "mock",
+      execute: vi.fn(async () => {
+        throw new Error("boom");
+      }),
+    };
+    const reg = new AdapterRegistry();
+    reg.register(throwingAdapter);
+    const localDeps: PipelineExecutorDeps = {
+      stateManager: stateManager as unknown as PipelineExecutorDeps["stateManager"],
+      adapterRegistry: reg,
+    };
+
+    const executor = new PipelineExecutor(localDeps);
+    await executor.run(
+      "task-throw",
+      makeAgentTask(),
+      { stages: [{ role: "implementor" }], fail_fast: true },
+    );
+
+    expect(throwingAdapter.execute).toHaveBeenCalledOnce();
+    expect(reg.getCircuitState("mock")).toBe("closed");
+    for (let i = 0; i < 4; i++) {
+      reg.recordFailure("mock");
+    }
+    expect(reg.getCircuitState("mock")).toBe("open");
+  });
+
   // ─── 4. State persistence ───
 
   it("calls writeRaw after each stage completion", async () => {
