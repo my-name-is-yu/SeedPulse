@@ -16,6 +16,7 @@ import { Logger } from "../../../runtime/logger.js";
 import { DaemonRunner } from "../../../runtime/daemon/runner.js";
 import { PIDManager } from "../../../runtime/pid-manager.js";
 import { EventServer } from "../../../runtime/event/server.js";
+import { IngressGateway } from "../../../runtime/gateway/index.js";
 import { CronScheduler } from "../../../runtime/cron-scheduler.js";
 import { ScheduleEngine } from "../../../runtime/schedule/engine.js";
 import { RuntimeWatchdog } from "../../../runtime/watchdog.js";
@@ -277,6 +278,7 @@ export async function cmdStart(
     { port: resolvedDaemonConfig.event_server_port, eventsDir: getEventsDir(daemonBaseDir) },
     logger
   );
+  const gateway = new IngressGateway(logger);
   notificationDispatcher.setRealtimeSink(async (report) => {
     eventServer.broadcast("notification_report", report);
   });
@@ -352,6 +354,7 @@ export async function cmdStart(
     reportingEngine: deps.reportingEngine,
     config: resolvedDaemonConfig,
     eventServer,
+    gateway,
     llmClient: deps.llmClient,
     cronScheduler,
     scheduleEngine,

@@ -14,7 +14,7 @@ import {
 import type { Provider } from "../setup-shared.js";
 import { guardCancel } from "./utils.js";
 
-export async function stepRootPreset(): Promise<RootPresetKey> {
+export async function stepRootPreset(initialPreset?: RootPresetKey): Promise<RootPresetKey> {
   const preset = guardCancel(
     await p.select({
       message: "Select a communication style for your agent:",
@@ -35,39 +35,73 @@ export async function stepRootPreset(): Promise<RootPresetKey> {
           hint: ROOT_PRESETS.caveman.description,
         },
       ],
+      initialValue: initialPreset,
     })
   );
   return preset;
 }
 
-export async function stepProvider(): Promise<Provider> {
+export async function stepProvider(initialProvider?: Provider): Promise<Provider> {
   const detectedKeys = detectApiKeys();
   const options = PROVIDERS.map((prov) => {
-    const detected = detectedKeys[prov] ? ` (${ENV_KEY_NAMES[prov]} detected)` : "";
-    return { value: prov, label: `${PROVIDER_LABELS[prov]}${detected}` };
+    const hints = [
+      detectedKeys[prov] ? `${ENV_KEY_NAMES[prov]} detected` : undefined,
+      prov === initialProvider ? "current" : undefined,
+    ].filter(Boolean);
+    return {
+      value: prov,
+      label: PROVIDER_LABELS[prov],
+      hint: hints.join(", ") || undefined,
+    };
   });
 
-  const provider = guardCancel(await p.select({ message: "Select LLM provider:", options }));
+  const provider = guardCancel(
+    await p.select({
+      message: "Select LLM provider:",
+      options,
+      initialValue: initialProvider,
+    })
+  );
   return provider;
 }
 
-export async function stepModel(provider: Provider): Promise<string> {
+export async function stepModel(provider: Provider, initialModel?: string): Promise<string> {
   const models = getModelsForProvider(provider);
   const recommended = RECOMMENDED_MODELS[provider];
 
   const options = models.map((model) => ({
     value: model,
     label: model,
-    hint: model === recommended ? "recommended" : undefined,
+    hint: [
+      model === recommended ? "recommended" : undefined,
+      model === initialModel ? "current" : undefined,
+    ].filter(Boolean).join(", ") || undefined,
   }));
-  options.push({ value: "__custom__", label: "Custom model name", hint: undefined });
+  options.push({
+    value: "__custom__",
+    label: "Custom model name",
+    hint: initialModel && !models.includes(initialModel) ? `current: ${initialModel}` : undefined,
+  });
 
-  const choice = guardCancel(await p.select({ message: "Select model:", options }));
+  const initialValue = initialModel
+    ? models.includes(initialModel)
+      ? initialModel
+      : "__custom__"
+    : undefined;
+
+  const choice = guardCancel(
+    await p.select({
+      message: "Select model:",
+      options,
+      initialValue,
+    })
+  );
 
   if (choice === "__custom__") {
     const custom = guardCancel(
       await p.text({
         message: "Enter model name:",
+        initialValue: initialModel && !models.includes(initialModel) ? initialModel : undefined,
         validate: (value) => {
           if (!value || !value.trim()) return "Model name cannot be empty.";
           return undefined;
@@ -114,7 +148,8 @@ export async function runCodexOAuthLogin(): Promise<string | undefined> {
 
 export async function stepApiKey(
   provider: Provider,
-  detectedKeys: Record<string, boolean>
+  detectedKeys: Record<string, boolean>,
+  existingApiKey?: string
 ): Promise<string | undefined> {
   const envKeyName = ENV_KEY_NAMES[provider];
   if (!envKeyName) return undefined;
@@ -122,6 +157,27 @@ export async function stepApiKey(
   if (detectedKeys[provider]) {
     p.log.info(`Using ${envKeyName} from environment.`);
     return process.env[envKeyName];
+  }
+
+  if (existingApiKey) {
+    const keyChoice = guardCancel(
+      await p.select({
+        message: `${envKeyName} is already configured. What should setup do?`,
+        options: [
+          {
+            value: "keep" as const,
+            label: `Keep existing key (${existingApiKey.slice(0, 4)}...${existingApiKey.slice(-4)})`,
+            hint: "use current config",
+          },
+          {
+            value: "replace" as const,
+            label: "Replace key",
+          },
+        ],
+        initialValue: "keep" as const,
+      })
+    );
+    if (keyChoice === "keep") return existingApiKey;
   }
 
   if (provider === "openai") {

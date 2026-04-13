@@ -45,19 +45,24 @@ export async function stepExistingConfig(): Promise<"keep" | "modify" | "reset" 
       message: "What would you like to do?",
       options: [
         { value: "keep" as const, label: "Keep current config", hint: "exit wizard" },
-        { value: "modify" as const, label: "Modify", hint: "continue with current values as defaults" },
-        { value: "reset" as const, label: "Reset", hint: "start fresh" },
+        {
+          value: "modify" as const,
+          label: "Update provider settings",
+          hint: "reuse current provider/model/adapter as defaults",
+        },
+        { value: "reset" as const, label: "Run full setup again", hint: "recreate identity and optional settings" },
       ],
     })
   );
   return choice;
 }
 
-export async function stepUserName(): Promise<string> {
+export async function stepUserName(initialName?: string): Promise<string> {
   const name = guardCancel(
     await p.text({
       message: "What should I call you?",
       placeholder: "Your name",
+      initialValue: initialName,
       validate: (v) => {
         if (!v || !v.trim()) return "Name cannot be empty.";
         return undefined;
@@ -67,13 +72,14 @@ export async function stepUserName(): Promise<string> {
   return name;
 }
 
-export async function stepSeedyName(): Promise<string> {
+export async function stepSeedyName(initialName?: string): Promise<string> {
   p.note(SEEDY_PIXEL + "\n\n" + "Hi! I'm your new agent companion.", "Meet your agent");
 
   const name = guardCancel(
     await p.text({
       message: "What should your agent be called?",
       placeholder: "Seedy",
+      initialValue: initialName,
       defaultValue: "Seedy",
     })
   );

@@ -1,7 +1,6 @@
 import * as p from "@clack/prompts";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { homedir } from "node:os";
 import { getPulseedDirPath } from "../../../../base/utils/paths.js";
 import { DEFAULT_SEED, DEFAULT_USER } from "../../../../base/config/identity-loader.js";
 import { findAvailablePort, isPortAvailable, DEFAULT_PORT, getProcessOnPort } from "../../../../runtime/port-utils.js";
@@ -13,7 +12,7 @@ import type { RootPresetKey } from "../presets/root-presets.js";
 import { guardCancel } from "./utils.js";
 
 export async function stepDaemon(): Promise<{ start: boolean; port: number }> {
-  const baseDir = path.join(homedir(), ".pulseed");
+  const baseDir = getPulseedDirPath();
 
   const { running: alreadyRunning, port: currentPort } = await isDaemonRunning(baseDir);
 

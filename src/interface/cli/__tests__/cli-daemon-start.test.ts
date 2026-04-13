@@ -246,6 +246,7 @@ describe("cmdStart", () => {
     expect(daemonRunnerArgs[0]).toEqual(
       expect.objectContaining({
         eventServer: eventServerInstances[0],
+        gateway: expect.any(Object),
         reportingEngine: expect.any(Object),
       })
     );
