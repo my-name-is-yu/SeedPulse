@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NotificationConfig } from "../../../runtime/types/notification.js";
+import type { SetupImportSelection } from "../commands/setup/import/types.js";
 
 const confirmMock = vi.fn();
 const textMock = vi.fn();
@@ -58,6 +59,8 @@ describe("setup notification step", () => {
     vi.doUnmock("../../../runtime/daemon/client.js");
     vi.doUnmock("node:child_process");
     vi.doUnmock("node:fs");
+    vi.doUnmock("../commands/setup/import/flow.js");
+    vi.doUnmock("../commands/setup/import/apply.js");
   });
 
   it("returns null when notifications are skipped", async () => {
@@ -538,6 +541,133 @@ describe("setup notification step", () => {
     expect(logSuccessMock).toHaveBeenCalledWith(
       "Daemon and gateway started (PID: 12345) on port 41701."
     );
+  });
+
+  it("still asks for Seedy name after importing from OpenClaw", async () => {
+    const stepExistingConfigMock = vi.fn(async () => "keep");
+    const stepSeedyNameMock = vi.fn(async () => "Imported Seedy");
+    const stepProviderMock = vi.fn(async (initial?: string) => initial ?? "openai");
+    const stepModelMock = vi.fn(async (_provider: string, initial?: string) => initial ?? "gpt-5.4-mini");
+    const stepApiKeyMock = vi.fn(async (_provider: string, _detected: Record<string, boolean>, initial?: string) => initial ?? "sk-test");
+    const stepAdapterMock = vi.fn(async (_model: string, _provider: string, initial?: string) => initial ?? "agent_loop");
+    const saveProviderConfigMock = vi.fn(async () => {});
+    const applySetupImportSelectionMock = vi.fn(async () => ({
+      created_at: "2026-04-13T00:00:00.000Z",
+      sources: [{ id: "openclaw", label: "OpenClaw", rootDir: "/tmp/openclaw" }],
+      items: [],
+    }));
+
+    const importSelection: SetupImportSelection = {
+      sources: [{ id: "openclaw", label: "OpenClaw", rootDir: "/tmp/openclaw", items: [] }],
+      items: [
+        {
+          id: "openclaw:provider:config.json",
+          source: "openclaw",
+          sourceLabel: "OpenClaw",
+          kind: "provider",
+          label: "anthropic / claude-sonnet-4-6 / agent_loop",
+          decision: "import",
+          reason: "provider defaults",
+          providerSettings: {
+            provider: "anthropic",
+            model: "claude-sonnet-4-6",
+            adapter: "agent_loop",
+            apiKey: "sk-imported",
+          },
+        },
+      ],
+      providerSettings: {
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        adapter: "agent_loop",
+        apiKey: "sk-imported",
+      },
+    };
+
+    vi.doMock("../commands/setup/import/flow.js", () => ({
+      stepSetupImport: vi.fn(async () => importSelection),
+      providerConfigPatchFromImport: vi.fn((settings: NonNullable<SetupImportSelection["providerSettings"]>) => ({
+        provider: settings.provider,
+        model: settings.model,
+        adapter: settings.adapter,
+        api_key: settings.apiKey,
+      })),
+    }));
+    vi.doMock("../commands/setup/import/apply.js", () => ({
+      applySetupImportSelection: applySetupImportSelectionMock,
+    }));
+    vi.doMock("../commands/setup/steps-identity.js", () => ({
+      getBanner: () => "banner",
+      stepExistingConfig: stepExistingConfigMock,
+      stepUserName: vi.fn(async () => "User"),
+      stepSeedyName: stepSeedyNameMock,
+    }));
+    vi.doMock("../commands/setup/steps-provider.js", () => ({
+      stepRootPreset: vi.fn(async () => "default"),
+      stepProvider: stepProviderMock,
+      stepModel: stepModelMock,
+      stepApiKey: stepApiKeyMock,
+    }));
+    vi.doMock("../commands/setup/steps-adapter.js", () => ({
+      stepAdapter: stepAdapterMock,
+    }));
+    vi.doMock("../commands/setup/steps-runtime.js", () => ({
+      ensurePulseedDir: vi.fn(() => "/tmp/pulseed-test"),
+      stepDaemon: vi.fn(async () => ({ start: false, port: 41700 })),
+      writeSeedMd: vi.fn(),
+      writeRootMd: vi.fn(),
+      writeUserMd: vi.fn(),
+    }));
+    vi.doMock("../commands/setup/steps-notification.js", () => ({
+      stepNotification: vi.fn(async () => null),
+    }));
+    vi.doMock("../../../base/llm/provider-config.js", () => ({
+      MODEL_REGISTRY: {
+        "claude-sonnet-4-6": {
+          provider: "anthropic",
+          adapters: ["claude_code_cli", "claude_api", "agent_loop"],
+        },
+      },
+      loadProviderConfig: vi.fn(),
+      saveProviderConfig: saveProviderConfigMock,
+      validateProviderConfig: vi.fn(() => ({ valid: true, errors: [] })),
+    }));
+    vi.doMock("../../../base/config/identity-loader.js", () => ({
+      clearIdentityCache: vi.fn(),
+    }));
+    vi.doMock("node:fs", () => ({
+      mkdirSync: vi.fn(),
+      writeFileSync: vi.fn(),
+      existsSync: vi.fn(() => false),
+      readFileSync: vi.fn(),
+    }));
+
+    confirmMock.mockResolvedValueOnce(true);
+    selectMock
+      .mockResolvedValueOnce("continue")
+      .mockResolvedValueOnce("continue")
+      .mockResolvedValueOnce("continue")
+      .mockResolvedValueOnce("save");
+
+    const { runSetupWizard } = await import("../commands/setup-wizard.js");
+    const code = await runSetupWizard();
+
+    expect(code).toBe(0);
+    expect(stepExistingConfigMock).not.toHaveBeenCalled();
+    expect(stepSeedyNameMock).toHaveBeenCalledTimes(1);
+    expect(stepProviderMock).toHaveBeenCalledWith("anthropic");
+    expect(stepModelMock).toHaveBeenCalledWith("anthropic", "claude-sonnet-4-6");
+    expect(stepAdapterMock).toHaveBeenCalledWith("claude-sonnet-4-6", "anthropic", "agent_loop");
+    expect(stepApiKeyMock).toHaveBeenCalledWith("anthropic", expect.any(Object), "sk-imported");
+    expect(saveProviderConfigMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        adapter: "agent_loop",
+        api_key: "sk-imported",
+      })
+    );
+    expect(applySetupImportSelectionMock).toHaveBeenCalledWith("/tmp/pulseed-test", importSelection);
   });
 
   it("warns when notification config write fails", async () => {

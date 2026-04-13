@@ -19,6 +19,8 @@ import { stepAdapter } from "./setup/steps-adapter.js";
 import { stepNotification } from "./setup/steps-notification.js";
 import { stepDaemon, ensurePulseedDir, writeSeedMd, writeRootMd, writeUserMd } from "./setup/steps-runtime.js";
 import { guardCancel } from "./setup/utils.js";
+import { applySetupImportSelection } from "./setup/import/apply.js";
+import { providerConfigPatchFromImport, stepSetupImport } from "./setup/import/flow.js";
 
 type SetupAnswers = {
   userName: string;
@@ -71,7 +73,7 @@ function formatExecutionSummary(
 
 function buildProviderConfig(
   execution: Pick<SetupAnswers, "provider" | "model" | "adapter" | "apiKey">,
-  base?: ProviderConfig
+  base?: Partial<ProviderConfig>
 ): ProviderConfig {
   const config: ProviderConfig = {
     ...(base ?? {}),
@@ -88,6 +90,7 @@ function buildProviderConfig(
 
   if (base?.provider && base.provider !== execution.provider) {
     delete config.base_url;
+    delete config.openclaw;
   }
 
   return config;
@@ -230,60 +233,65 @@ export async function runSetupWizard(): Promise<number> {
     return 0;
   }
 
-  const existingChoice = await stepExistingConfig();
-  if (existingChoice === "keep") {
-    p.outro("Keeping existing configuration.");
-    return 0;
-  }
+  const importSelection = await stepSetupImport();
+  const importedProviderPatch = providerConfigPatchFromImport(importSelection?.providerSettings);
 
-  if (existingChoice === "modify") {
-    const existingConfig = await loadProviderConfig();
-    let execution = await stepExecutionConfig({
-      provider: existingConfig.provider,
-      model: existingConfig.model,
-      adapter: existingConfig.adapter,
-      apiKey: existingConfig.api_key,
-    });
-    if (!execution.adapter) return 1;
-
-    for (;;) {
-      p.note(formatExecutionSummary(execution), "Review provider settings");
-
-      const action = guardCancel(
-        await p.select({
-          message: "Save these provider settings?",
-          options: [
-            { value: "save" as const, label: "Save provider settings" },
-            { value: "edit" as const, label: "Edit provider, model, adapter" },
-            { value: "cancel" as const, label: "Cancel setup" },
-          ],
-          initialValue: "save" as const,
-        })
-      );
-
-      if (action === "save") break;
-      if (action === "cancel") {
-        p.cancel("Setup cancelled.");
-        return 0;
-      }
-      execution = await stepExecutionConfig(execution);
-      if (!execution.adapter) return 1;
+  if (!importSelection) {
+    const existingChoice = await stepExistingConfig();
+    if (existingChoice === "keep") {
+      p.outro("Keeping existing configuration.");
+      return 0;
     }
 
-    const saveResult = await validateAndSaveProviderConfig(buildProviderConfig(execution, existingConfig));
-    if (saveResult !== undefined) return saveResult;
-    p.outro("Provider settings updated.");
-    return 0;
+    if (existingChoice === "modify") {
+      const existingConfig = await loadProviderConfig();
+      let execution = await stepExecutionConfig({
+        provider: existingConfig.provider,
+        model: existingConfig.model,
+        adapter: existingConfig.adapter,
+        apiKey: existingConfig.api_key,
+      });
+      if (!execution.adapter) return 1;
+
+      for (;;) {
+        p.note(formatExecutionSummary(execution), "Review provider settings");
+
+        const action = guardCancel(
+          await p.select({
+            message: "Save these provider settings?",
+            options: [
+              { value: "save" as const, label: "Save provider settings" },
+              { value: "edit" as const, label: "Edit provider, model, adapter" },
+              { value: "cancel" as const, label: "Cancel setup" },
+            ],
+            initialValue: "save" as const,
+          })
+        );
+
+        if (action === "save") break;
+        if (action === "cancel") {
+          p.cancel("Setup cancelled.");
+          return 0;
+        }
+        execution = await stepExecutionConfig(execution);
+        if (!execution.adapter) return 1;
+      }
+
+      const saveResult = await validateAndSaveProviderConfig(buildProviderConfig(execution, existingConfig));
+      if (saveResult !== undefined) return saveResult;
+      p.outro("Provider settings updated.");
+      return 0;
+    }
   }
 
   let answers: SetupAnswers = {
     userName: "",
     agentName: "Seedy",
     rootPreset: "default",
-    provider: "openai",
-    model: "",
-    adapter: "",
-    apiKey: undefined,
+    provider: importedProviderPatch?.provider ?? "openai",
+    model: importedProviderPatch?.model ?? "",
+    adapter: importedProviderPatch?.adapter ?? "",
+    apiKey: importedProviderPatch?.api_key,
     startDaemon: false,
     daemonPort: 0,
     notificationConfig: null,
@@ -306,7 +314,7 @@ export async function runSetupWizard(): Promise<number> {
     }
 
     if (section === "execution") {
-      Object.assign(answers, await stepExecutionConfig(answers.adapter ? answers : undefined));
+      Object.assign(answers, await stepExecutionConfig(importSelection || answers.adapter ? answers : undefined));
       if (!answers.adapter) return 1;
       const next = await stepSectionNavigation(
         "Provider settings complete.",
@@ -376,7 +384,7 @@ export async function runSetupWizard(): Promise<number> {
 
   const dir = ensurePulseedDir();
 
-  const saveResult = await validateAndSaveProviderConfig(buildProviderConfig(finalAnswers));
+  const saveResult = await validateAndSaveProviderConfig(buildProviderConfig(finalAnswers, importedProviderPatch));
   if (saveResult !== undefined) return saveResult;
   writeSeedMd(dir, finalAnswers.agentName);
   writeRootMd(dir, finalAnswers.rootPreset);
@@ -405,6 +413,20 @@ export async function runSetupWizard(): Promise<number> {
       fs.writeFileSync(notifPath, JSON.stringify(finalAnswers.notificationConfig, null, 2));
     } catch (err) {
       p.log.warn(`Could not save notification config: ${err}`);
+    }
+  }
+
+  if (importSelection) {
+    try {
+      const report = await applySetupImportSelection(dir, importSelection);
+      const appliedCount = report.items.filter((item) => item.status === "applied").length;
+      const failedCount = report.items.filter((item) => item.status === "failed").length;
+      p.log.info(
+        `Imported ${appliedCount} item${appliedCount === 1 ? "" : "s"}` +
+          (failedCount > 0 ? ` (${failedCount} failed; see import report).` : ".")
+      );
+    } catch (err) {
+      p.log.warn(`Configuration saved, but import side effects failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
