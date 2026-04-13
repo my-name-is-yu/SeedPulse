@@ -3,7 +3,9 @@ import * as path from "node:path";
 
 /**
  * Per-goal advisory locking using lockfiles.
- * Lock path: <baseDir>/goals/<goalId>/.lock/
+ * Lock path: <baseDir>/locks/goals/<goalId>.lock/
+ * Transition compatibility: also acquire <baseDir>/goals/<goalId>/.lock
+ * when the legacy goal directory already exists.
  * Uses mkdir as atomic primitive (POSIX: EEXIST = lock held).
  */
 
@@ -14,11 +16,25 @@ export interface LockOptions {
 }
 
 function lockPath(goalId: string, baseDir: string): string {
+  return path.join(baseDir, "locks", "goals", `${goalId}.lock`);
+}
+
+function legacyLockPath(goalId: string, baseDir: string): string {
   return path.join(baseDir, "goals", goalId, ".lock");
 }
 
 function pidFilePath(lockDir: string): string {
   return path.join(lockDir, "pid");
+}
+
+async function pathExists(dir: string): Promise<boolean> {
+  try {
+    await fsp.access(dir);
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw err;
+  }
 }
 
 async function isProcessAlive(pid: number): Promise<boolean> {
@@ -69,20 +85,19 @@ async function clearStaleLock(lockDir: string): Promise<void> {
   }
 }
 
-/** Acquire an advisory lock for the given goalId. Throws if timeout exceeded. */
-export async function acquireLock(
-  goalId: string,
-  baseDir: string,
-  opts?: LockOptions
+async function acquireLockDir(
+  lockDir: string,
+  label: string,
+  opts?: LockOptions,
+  createParent = true
 ): Promise<void> {
   const maxRetries = opts?.maxRetries ?? 5;
   const initialDelayMs = opts?.initialDelayMs ?? 50;
   const maxTotalMs = opts?.maxTotalMs ?? 500;
 
-  const lockDir = lockPath(goalId, baseDir);
-
-  // Ensure parent dir exists
-  await fsp.mkdir(path.dirname(lockDir), { recursive: true });
+  if (createParent) {
+    await fsp.mkdir(path.dirname(lockDir), { recursive: true });
+  }
 
   const start = Date.now();
   let delay = initialDelayMs;
@@ -93,23 +108,56 @@ export async function acquireLock(
     }
 
     if (Date.now() - start >= maxTotalMs) {
-      throw new Error(`acquireLock: timeout exceeded for goal "${goalId}" after ${maxTotalMs}ms`);
+      throw new Error(`acquireLock: timeout exceeded for "${label}" after ${maxTotalMs}ms`);
     }
 
     await new Promise((resolve) => setTimeout(resolve, delay));
     delay = Math.min(delay * 2, maxTotalMs);
   }
 
-  throw new Error(`acquireLock: max retries exceeded for goal "${goalId}"`);
+  throw new Error(`acquireLock: max retries exceeded for "${label}"`);
 }
 
-/** Release the advisory lock for the given goalId. No-op if lock does not exist. */
-export async function releaseLock(goalId: string, baseDir: string): Promise<void> {
-  const lockDir = lockPath(goalId, baseDir);
+async function releaseLockDir(lockDir: string): Promise<void> {
   try {
     await fsp.rm(lockDir, { recursive: true, force: true });
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
     throw err;
   }
+}
+
+async function shouldAcquireLegacyLock(goalId: string, baseDir: string): Promise<boolean> {
+  return pathExists(path.join(baseDir, "goals", goalId));
+}
+
+/** Acquire an advisory lock for the given goalId. Throws if timeout exceeded. */
+export async function acquireLock(
+  goalId: string,
+  baseDir: string,
+  opts?: LockOptions
+): Promise<void> {
+  const legacyLockDir = legacyLockPath(goalId, baseDir);
+  const needsLegacyLock = await shouldAcquireLegacyLock(goalId, baseDir);
+  if (needsLegacyLock) {
+    try {
+      await acquireLockDir(legacyLockDir, `${goalId} legacy`, opts, false);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+  }
+
+  const stableLockDir = lockPath(goalId, baseDir);
+  try {
+    await acquireLockDir(stableLockDir, goalId, opts);
+  } catch (err) {
+    if (needsLegacyLock) await releaseLockDir(legacyLockDir);
+    throw err;
+  }
+}
+
+/** Release the advisory lock for the given goalId. No-op if lock does not exist. */
+export async function releaseLock(goalId: string, baseDir: string): Promise<void> {
+  await releaseLockDir(lockPath(goalId, baseDir));
+  await releaseLockDir(legacyLockPath(goalId, baseDir));
 }

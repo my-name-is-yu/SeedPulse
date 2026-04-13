@@ -207,14 +207,6 @@ export class StateManager {
     }
   }
 
-  private async buildAppendedObservationLog(goalId: string, entry: ObservationLogEntry): Promise<ObservationLog> {
-    const log = (await this.loadObservationLog(goalId)) ?? { goal_id: goalId, entries: [] };
-    return {
-      ...log,
-      entries: this.capHistoryEntries([...log.entries, entry]),
-    };
-  }
-
   private async writeObservationLog(
     goalId: string,
     op: string,
@@ -291,73 +283,78 @@ export class StateManager {
    */
   async archiveGoal(goalId: string, _visited = new Set<string>()): Promise<boolean> {
     if (!this.markGoalVisited(goalId, _visited)) return false;
+    let archived = false;
+    await this.goalWriteCoordinator.protectedOperation(goalId, "archive_goal", { goalId }, async () => {
+      const location = await this.resolveGoalLocation(goalId, false);
+      if (location === null) return;
 
-    const location = await this.resolveGoalLocation(goalId, false);
-    if (location === null) return false;
+      // Recursively archive children first (depth-first)
+      await this.visitChildGoals(goalId, location, _visited, (childId, visited) => this.archiveGoal(childId, visited));
 
-    // Recursively archive children first (depth-first)
-    await this.visitChildGoals(goalId, location, _visited, (childId, visited) => this.archiveGoal(childId, visited));
+      const archiveBase = path.join(this.baseDir, "archive", goalId);
+      await fsp.mkdir(archiveBase, { recursive: true });
 
-    const archiveBase = path.join(this.baseDir, "archive", goalId);
-    await fsp.mkdir(archiveBase, { recursive: true });
+      // Move goals/<goalId>/ → archive/<goalId>/goal/
+      const archiveGoalDir = path.join(archiveBase, "goal");
+      await fsp.cp(location.dir, archiveGoalDir, {
+        recursive: true,
+        filter: (source) => path.basename(source) !== ".lock",
+      });
 
-    // Move goals/<goalId>/ → archive/<goalId>/goal/
-    const archiveGoalDir = path.join(archiveBase, "goal");
-    await fsp.cp(location.dir, archiveGoalDir, { recursive: true });
-    await fsp.rm(location.dir, { recursive: true, force: true });
-
-    // Update status to "archived" in the archived goal.json (Bug 5)
-    // Use direct JSON merge instead of GoalSchema.parse() to avoid silent failure
-    // when unrelated fields fail Zod validation, which would leave status as "active".
-    const archivedGoalJsonPath = path.join(archiveGoalDir, "goal.json");
-    try {
-      const archivedRaw = await this.atomicRead<unknown>(archivedGoalJsonPath);
-      if (archivedRaw !== null && typeof archivedRaw === "object") {
-        await this.atomicWrite(archivedGoalJsonPath, { ...(archivedRaw as Record<string, unknown>), status: "archived" });
-      } else {
-        this.logger?.warn(`[StateManager] Could not update status to "archived" for "${goalId}": goal.json missing or not an object`);
+      // Update status to "archived" in the archived goal.json (Bug 5)
+      // Use direct JSON merge instead of GoalSchema.parse() to avoid silent failure
+      // when unrelated fields fail Zod validation, which would leave status as "active".
+      const archivedGoalJsonPath = path.join(archiveGoalDir, "goal.json");
+      try {
+        const archivedRaw = await this.atomicRead<unknown>(archivedGoalJsonPath);
+        if (archivedRaw !== null && typeof archivedRaw === "object") {
+          await this.atomicWrite(archivedGoalJsonPath, { ...(archivedRaw as Record<string, unknown>), status: "archived" });
+        } else {
+          this.logger?.warn(`[StateManager] Could not update status to "archived" for "${goalId}": goal.json missing or not an object`);
+        }
+      } catch (err) {
+        this.logger?.warn(`[StateManager] Could not update status to "archived" for "${goalId}": ${String(err)}`);
       }
-    } catch (err) {
-      this.logger?.warn(`[StateManager] Could not update status to "archived" for "${goalId}": ${String(err)}`);
-    }
 
-    // Move tasks/<goalId>/ → archive/<goalId>/tasks/ (if exists)
-    const tasksDir = path.join(this.baseDir, "tasks", goalId);
-    try {
-      await fsp.access(tasksDir);
-      const archiveTasksDir = path.join(archiveBase, "tasks");
-      await fsp.cp(tasksDir, archiveTasksDir, { recursive: true });
-      await fsp.rm(tasksDir, { recursive: true, force: true });
-    } catch (e: unknown) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
+      // Move tasks/<goalId>/ → archive/<goalId>/tasks/ (if exists)
+      const tasksDir = path.join(this.baseDir, "tasks", goalId);
+      try {
+        await fsp.access(tasksDir);
+        const archiveTasksDir = path.join(archiveBase, "tasks");
+        await fsp.cp(tasksDir, archiveTasksDir, { recursive: true });
+        await fsp.rm(tasksDir, { recursive: true, force: true });
+      } catch (e: unknown) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
 
-    // Move strategies/<goalId>/ → archive/<goalId>/strategies/ (if exists)
-    const strategiesDir = path.join(this.baseDir, "strategies", goalId);
-    try {
-      await fsp.access(strategiesDir);
-      const archiveStrategiesDir = path.join(archiveBase, "strategies");
-      await fsp.cp(strategiesDir, archiveStrategiesDir, { recursive: true });
-      await fsp.rm(strategiesDir, { recursive: true, force: true });
-    } catch (e: unknown) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
+      // Move strategies/<goalId>/ → archive/<goalId>/strategies/ (if exists)
+      const strategiesDir = path.join(this.baseDir, "strategies", goalId);
+      try {
+        await fsp.access(strategiesDir);
+        const archiveStrategiesDir = path.join(archiveBase, "strategies");
+        await fsp.cp(strategiesDir, archiveStrategiesDir, { recursive: true });
+        await fsp.rm(strategiesDir, { recursive: true, force: true });
+      } catch (e: unknown) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
 
-    // Move stalls/<goalId>.json → archive/<goalId>/stalls.json (if exists)
-    const stallsFile = path.join(this.baseDir, "stalls", `${goalId}.json`);
-    try {
-      await fsp.access(stallsFile);
-      const archiveStallsFile = path.join(archiveBase, "stalls.json");
-      await fsp.cp(stallsFile, archiveStallsFile);
-      await fsp.rm(stallsFile, { force: true });
-    } catch (e: unknown) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
+      // Move stalls/<goalId>.json → archive/<goalId>/stalls.json (if exists)
+      const stallsFile = path.join(this.baseDir, "stalls", `${goalId}.json`);
+      try {
+        await fsp.access(stallsFile);
+        const archiveStallsFile = path.join(archiveBase, "stalls.json");
+        await fsp.cp(stallsFile, archiveStallsFile);
+        await fsp.rm(stallsFile, { force: true });
+      } catch (e: unknown) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
 
-    // Move reports/<goalId>/ → archive/<goalId>/reports/ (if exists)
-    const reportsDir = path.join(this.baseDir, "reports", goalId);
-    try {
-      await fsp.access(reportsDir);
-      const archiveReportsDir = path.join(archiveBase, "reports");
-      await fsp.cp(reportsDir, archiveReportsDir, { recursive: true });
-      await fsp.rm(reportsDir, { recursive: true, force: true });
-    } catch (e: unknown) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
-
-    return true;
+      // Move reports/<goalId>/ → archive/<goalId>/reports/ (if exists)
+      const reportsDir = path.join(this.baseDir, "reports", goalId);
+      try {
+        await fsp.access(reportsDir);
+        const archiveReportsDir = path.join(archiveBase, "reports");
+        await fsp.cp(reportsDir, archiveReportsDir, { recursive: true });
+        await fsp.rm(reportsDir, { recursive: true, force: true });
+      } catch (e: unknown) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
+      await fsp.rm(location.dir, { recursive: true, force: true });
+      archived = true;
+    });
+    return archived;
   }
 
   /**
@@ -437,8 +434,21 @@ export class StateManager {
   async appendObservation(goalId: string, entry: ObservationLogEntry): Promise<void> {
     const parsed = ObservationLogEntrySchema.parse(entry);
     this.assertObservationGoalId(goalId, parsed);
-    const log = await this.buildAppendedObservationLog(goalId, parsed);
-    await this.writeObservationLog(goalId, "append_observation", log, false);
+    await this.goalWriteCoordinator.protectedReadModifyWrite(
+      goalId,
+      "append_observation",
+      async () => {
+        const log = (await this.loadObservationLog(goalId)) ?? { goal_id: goalId, entries: [] };
+        return {
+          ...log,
+          entries: this.capHistoryEntries([...log.entries, parsed]),
+        };
+      },
+      async (log) => {
+        const dir = await this.goalDir(goalId);
+        await this.atomicWrite(path.join(dir, "observations.json"), log);
+      }
+    );
   }
 
   // ─── Gap History ───
@@ -462,9 +472,59 @@ export class StateManager {
 
   async appendGapHistoryEntry(goalId: string, entry: GapHistoryEntry): Promise<void> {
     const parsed = GapHistoryEntrySchema.parse(entry);
-    const history = await this.loadGapHistory(goalId);
-    const trimmed = this.capHistoryEntries([...history, parsed]);
-    await this.writeGapHistory(goalId, "append_gap_entry", trimmed, false);
+    await this.goalWriteCoordinator.protectedReadModifyWrite(
+      goalId,
+      "append_gap_entry",
+      async () => {
+        const history = await this.loadGapHistory(goalId);
+        return {
+          goalId,
+          entries: this.capHistoryEntries([...history, parsed]),
+        };
+      },
+      async (payload) => {
+        const dir = await this.goalDir(goalId);
+        await this.atomicWrite(path.join(dir, "gap-history.json"), payload.entries);
+      }
+    );
+  }
+
+  async appendObservationAndSaveGoal(
+    goalId: string,
+    entry: ObservationLogEntry,
+    updateGoal: (goal: Goal) => Goal
+  ): Promise<void> {
+    const parsed = ObservationLogEntrySchema.parse(entry);
+    this.assertObservationGoalId(goalId, parsed);
+
+    await this.goalWriteCoordinator.protectedReadModifyWrite(
+      goalId,
+      "append_observation_and_save_goal",
+      async () => {
+        const goal = await this.loadGoal(goalId);
+        if (goal === null) {
+          throw new StateError(`appendObservationAndSaveGoal: goal "${goalId}" not found`);
+        }
+
+        const observationLog = (await this.loadObservationLog(goalId)) ?? { goal_id: goalId, entries: [] };
+        const updatedGoal = GoalSchema.parse(updateGoal(goal));
+        if (updatedGoal.id !== goalId) {
+          throw new StateError(`appendObservationAndSaveGoal: update changed goal id from "${goalId}" to "${updatedGoal.id}"`);
+        }
+        return {
+          observationLog: {
+            ...observationLog,
+            entries: this.capHistoryEntries([...observationLog.entries, parsed]),
+          },
+          goal: updatedGoal,
+        };
+      },
+      async (data) => {
+        const dir = await this.goalDir(goalId);
+        await this.atomicWrite(path.join(dir, "observations.json"), data.observationLog);
+        await this.atomicWrite(path.join(dir, "goal.json"), data.goal);
+      }
+    );
   }
 
   /**

@@ -57,18 +57,67 @@ export class GoalWriteCoordinator {
     data: unknown,
     writeFn: () => Promise<void>,
   ): Promise<void> {
-    if (!this.walEnabled) {
-      await this.assertWriteFence(goalId, op, data);
-      await writeFn();
-      return;
-    }
-
     await acquireLock(goalId, this.baseDir);
     try {
       await this.assertWriteFence(goalId, op, data);
+      if (!this.walEnabled) {
+        await writeFn();
+        return;
+      }
       const ts = new Date().toISOString();
       await appendWALRecord(goalId, this.baseDir, { op, data, ts });
       await writeFn();
+      await appendWALRecord(goalId, this.baseDir, {
+        op: "commit",
+        ref_ts: ts,
+        ts: new Date().toISOString(),
+      });
+      this.writeCount.set(goalId, (this.writeCount.get(goalId) || 0) + 1);
+      const count = this.writeCount.get(goalId)!;
+      if (count % 50 === 0) {
+        const fullGoal = await this.loadGoal(goalId);
+        if (fullGoal !== null) await writeSnapshot(goalId, this.baseDir, fullGoal);
+      }
+      if (count % 100 === 0) await compactWAL(goalId, this.baseDir);
+    } finally {
+      await releaseLock(goalId, this.baseDir);
+    }
+  }
+
+  /** Wrap a goal-scoped operation with lock + fence only (no WAL). */
+  async protectedOperation(
+    goalId: string,
+    op: string,
+    data: unknown,
+    run: () => Promise<void>,
+  ): Promise<void> {
+    await acquireLock(goalId, this.baseDir);
+    try {
+      await this.assertWriteFence(goalId, op, data);
+      await run();
+    } finally {
+      await releaseLock(goalId, this.baseDir);
+    }
+  }
+
+  /** Wrap a locked read-modify-write cycle with lock + WAL + snapshot cycle. */
+  async protectedReadModifyWrite<TData>(
+    goalId: string,
+    op: string,
+    buildData: () => Promise<TData>,
+    writeFn: (data: TData) => Promise<void>,
+  ): Promise<void> {
+    await acquireLock(goalId, this.baseDir);
+    try {
+      const data = await buildData();
+      await this.assertWriteFence(goalId, op, data);
+      if (!this.walEnabled) {
+        await writeFn(data);
+        return;
+      }
+      const ts = new Date().toISOString();
+      await appendWALRecord(goalId, this.baseDir, { op, data, ts });
+      await writeFn(data);
       await appendWALRecord(goalId, this.baseDir, {
         op: "commit",
         ref_ts: ts,

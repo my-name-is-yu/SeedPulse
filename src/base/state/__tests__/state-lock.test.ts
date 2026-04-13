@@ -15,7 +15,7 @@ describe("state-lock", () => {
   it("basic acquire and release round-trip", async () => {
     tmpDir = makeTempDir();
     await acquireLock("goal-1", tmpDir);
-    const lockDir = path.join(tmpDir, "goals", "goal-1", ".lock");
+    const lockDir = path.join(tmpDir, "locks", "goals", "goal-1.lock");
     expect(fs.existsSync(lockDir)).toBe(true);
     await releaseLock("goal-1", tmpDir);
     expect(fs.existsSync(lockDir)).toBe(false);
@@ -24,10 +24,26 @@ describe("state-lock", () => {
   it("pid file is written with current process pid", async () => {
     tmpDir = makeTempDir();
     await acquireLock("goal-pid", tmpDir);
-    const pidFile = path.join(tmpDir, "goals", "goal-pid", ".lock", "pid");
+    const pidFile = path.join(tmpDir, "locks", "goals", "goal-pid.lock", "pid");
     const written = await fsp.readFile(pidFile, "utf-8");
     expect(parseInt(written.trim(), 10)).toBe(process.pid);
     await releaseLock("goal-pid", tmpDir);
+  });
+
+  it("also acquires the legacy goal-dir lock when the goal directory exists", async () => {
+    tmpDir = makeTempDir();
+    await fsp.mkdir(path.join(tmpDir, "goals", "goal-legacy"), { recursive: true });
+
+    await acquireLock("goal-legacy", tmpDir);
+
+    const stableLockDir = path.join(tmpDir, "locks", "goals", "goal-legacy.lock");
+    const legacyLockDir = path.join(tmpDir, "goals", "goal-legacy", ".lock");
+    expect(fs.existsSync(stableLockDir)).toBe(true);
+    expect(fs.existsSync(legacyLockDir)).toBe(true);
+
+    await releaseLock("goal-legacy", tmpDir);
+    expect(fs.existsSync(stableLockDir)).toBe(false);
+    expect(fs.existsSync(legacyLockDir)).toBe(false);
   });
 
   it("release on non-existent lock is a no-op (does not throw)", async () => {
@@ -47,7 +63,7 @@ describe("state-lock", () => {
   it("stale lock (dead PID) is cleared and re-acquired", async () => {
     tmpDir = makeTempDir();
     // Write a fake lock with a PID that cannot be alive (PID 0 is always invalid for kill)
-    const lockDir = path.join(tmpDir, "goals", "goal-stale", ".lock");
+    const lockDir = path.join(tmpDir, "locks", "goals", "goal-stale.lock");
     await fsp.mkdir(lockDir, { recursive: true });
     await fsp.writeFile(path.join(lockDir, "pid"), "999999999", "utf-8");
 

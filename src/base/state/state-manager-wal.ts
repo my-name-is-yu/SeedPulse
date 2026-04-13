@@ -68,6 +68,18 @@ export async function replayStateManagerIntent(
       }
       break;
     }
+    case "append_observation_and_save_goal": {
+      const goal = data?.goal as Record<string, unknown> | undefined;
+      const observationLog = data?.observationLog;
+      const goalId = goal?.id as string | undefined;
+      if (goalId && observationLog && goal) {
+        const dir = path.join(baseDir, "goals", goalId);
+        await fsp.mkdir(dir, { recursive: true });
+        await atomicWrite(path.join(dir, "observations.json"), observationLog);
+        await atomicWrite(path.join(dir, "goal.json"), goal);
+      }
+      break;
+    }
     case "save_gap_history":
     case "append_gap_entry": {
       const goalId = data?.goalId as string;

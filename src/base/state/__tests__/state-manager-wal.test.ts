@@ -7,6 +7,7 @@ import { appendWALRecord } from "../state-wal.js";
 import { listSnapshots } from "../state-snapshot.js";
 import { makeTempDir, cleanupTempDir } from "../../../../tests/helpers/temp-dir.js";
 import { makeGoal } from "../../../../tests/helpers/fixtures.js";
+import type { ObservationLogEntry } from "../../types/state.js";
 
 describe("StateManager WAL integration", () => {
   let tmpDir: string;
@@ -70,6 +71,82 @@ describe("StateManager WAL integration", () => {
     const loaded = await sm.loadGoal(goalId);
     expect(loaded).not.toBeNull();
     expect(loaded!.id).toBe(goalId);
+  });
+
+  it("crash recovery replays combined observation + goal intent", async () => {
+    const goalId = "g-observation-apply";
+    const goalDir = path.join(tmpDir, "goals", goalId);
+    fs.mkdirSync(goalDir, { recursive: true });
+
+    const goal = makeGoal({
+      id: goalId,
+      dimensions: [
+        {
+          name: "dim-a",
+          label: "Dimension A",
+          current_value: 1,
+          threshold: { type: "min", value: 1 },
+          confidence: 0.9,
+          observation_method: {
+            type: "mechanical",
+            source: "test",
+            schedule: null,
+            endpoint: null,
+            confidence_tier: "mechanical",
+          },
+          last_updated: new Date().toISOString(),
+          history: [],
+          weight: 1,
+          uncertainty_weight: null,
+          state_integrity: "ok",
+          dimension_mapping: null,
+        },
+      ],
+    });
+
+    const entry: ObservationLogEntry = {
+      observation_id: "obs-apply",
+      timestamp: new Date().toISOString(),
+      trigger: "periodic",
+      goal_id: goalId,
+      dimension_name: "dim-a",
+      layer: "mechanical",
+      method: {
+        type: "mechanical",
+        source: "test",
+        schedule: null,
+        endpoint: null,
+        confidence_tier: "mechanical",
+      },
+      raw_result: 2,
+      extracted_value: 2,
+      confidence: 0.9,
+      notes: null,
+    };
+
+    await appendWALRecord(goalId, tmpDir, {
+      op: "append_observation_and_save_goal",
+      data: {
+        observationLog: {
+          goal_id: goalId,
+          entries: [entry],
+        },
+        goal,
+      },
+      ts: new Date().toISOString(),
+    });
+
+    const sm = new StateManager(tmpDir, undefined, { walEnabled: true });
+    await sm.init();
+
+    const loadedGoal = await sm.loadGoal(goalId);
+    expect(loadedGoal).not.toBeNull();
+    expect(loadedGoal!.dimensions[0]!.current_value).toBe(1);
+
+    const loadedLog = await sm.loadObservationLog(goalId);
+    expect(loadedLog).not.toBeNull();
+    expect(loadedLog!.entries).toHaveLength(1);
+    expect(loadedLog!.entries[0]!.observation_id).toBe("obs-apply");
   });
 
   it("snapshot is created every 50 writes", async () => {

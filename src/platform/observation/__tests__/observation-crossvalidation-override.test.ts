@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import { ObservationEngine } from "../observation-engine.js";
 import { StateManager } from "../../../base/state/state-manager.js";
 import type { ObservationMethod } from "../../../base/types/core.js";
+import type { ObservationLogEntry } from "../../../base/types/state.js";
 import type { ILLMClient } from "../../../base/llm/llm-client.js";
 import type { IDataSourceAdapter } from "../data-source-adapter.js";
 import type { DataSourceConfig } from "../../../base/types/data-source.js";
@@ -425,5 +426,121 @@ describe("observation-apply value bounds validation", () => {
 
     // Value should be clamped to 20 (2x threshold value of 10)
     expect(dim!.current_value).toBe(20);
+  });
+
+  it("serializes concurrent applyObservation calls without dropping goal updates", async () => {
+    const goal = makeGoal({
+      id: "goal-apply-concurrent",
+      dimensions: [
+        {
+          name: "dim-a",
+          label: "Dimension A",
+          current_value: 0,
+          threshold: { type: "min", value: 10 },
+          confidence: 0.90,
+          observation_method: {
+            type: "llm_review",
+            source: "llm",
+            schedule: null,
+            endpoint: null,
+            confidence_tier: "independent_review",
+          },
+          last_updated: new Date().toISOString(),
+          history: [],
+          weight: 1.0,
+          uncertainty_weight: null,
+          state_integrity: "ok",
+          dimension_mapping: null,
+        },
+        {
+          name: "dim-b",
+          label: "Dimension B",
+          current_value: 0,
+          threshold: { type: "min", value: 10 },
+          confidence: 0.90,
+          observation_method: {
+            type: "llm_review",
+            source: "llm",
+            schedule: null,
+            endpoint: null,
+            confidence_tier: "independent_review",
+          },
+          last_updated: new Date().toISOString(),
+          history: [],
+          weight: 1.0,
+          uncertainty_weight: null,
+          state_integrity: "ok",
+          dimension_mapping: null,
+        },
+      ],
+    });
+    await stateManager.saveGoal(goal);
+
+    let releaseFence: () => void = () => {
+      throw new Error("releaseFence was not initialized");
+    };
+    let resolveFirstFence: () => void = () => {};
+    const firstEnteredFence = new Promise<void>((resolve) => {
+      resolveFirstFence = resolve;
+    });
+    let fenceCalls = 0;
+    stateManager.setWriteFence("goal-apply-concurrent", async () => {
+      fenceCalls += 1;
+      if (fenceCalls === 1) {
+        resolveFirstFence();
+        await new Promise<void>((resolve) => {
+          releaseFence = resolve;
+        });
+      }
+    });
+
+    const entryA: ObservationLogEntry = {
+      observation_id: "obs-apply-a",
+      timestamp: new Date().toISOString(),
+      trigger: "periodic",
+      goal_id: "goal-apply-concurrent",
+      dimension_name: "dim-a",
+      layer: "independent_review",
+      method: defaultMethod,
+      raw_result: 3,
+      extracted_value: 3,
+      confidence: 0.9,
+      notes: null,
+    };
+
+    const entryB: ObservationLogEntry = {
+      observation_id: "obs-apply-b",
+      timestamp: new Date().toISOString(),
+      trigger: "periodic",
+      goal_id: "goal-apply-concurrent",
+      dimension_name: "dim-b",
+      layer: "independent_review",
+      method: defaultMethod,
+      raw_result: 4,
+      extracted_value: 4,
+      confidence: 0.9,
+      notes: null,
+    };
+
+    const first = applyObservation("goal-apply-concurrent", entryA, stateManager, {});
+    await firstEnteredFence;
+    const second = applyObservation("goal-apply-concurrent", entryB, stateManager, {});
+
+    expect(fenceCalls).toBe(1);
+    releaseFence();
+
+    await Promise.all([first, second]);
+
+    const updated = await stateManager.loadGoal("goal-apply-concurrent");
+    const dimA = updated!.dimensions.find((dim) => dim.name === "dim-a");
+    const dimB = updated!.dimensions.find((dim) => dim.name === "dim-b");
+    expect(dimA!.current_value).toBe(3);
+    expect(dimB!.current_value).toBe(4);
+
+    const log = await stateManager.loadObservationLog("goal-apply-concurrent");
+    expect(log!.entries.map((entry) => entry.observation_id)).toEqual([
+      "obs-apply-a",
+      "obs-apply-b",
+    ]);
   });
 });

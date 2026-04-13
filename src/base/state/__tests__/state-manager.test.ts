@@ -428,6 +428,70 @@ describe("StateManager", async () => {
       expect(loaded!.entries[1].observation_id).toBe("obs-b");
     });
 
+    it("serializes concurrent appendObservation calls without losing entries", async () => {
+      await manager.saveGoal(makeGoal({ id: "append-obs-concurrent" }));
+
+      let releaseFence: () => void = () => {
+        throw new Error("releaseFence was not initialized");
+      };
+      let resolveFirstFence: () => void = () => {};
+      const firstEnteredFence = new Promise<void>((resolve) => {
+        resolveFirstFence = resolve;
+      });
+      let fenceCalls = 0;
+      manager.setWriteFence("append-obs-concurrent", async () => {
+        fenceCalls += 1;
+        if (fenceCalls === 1) {
+          resolveFirstFence();
+          await new Promise<void>((resolve) => {
+            releaseFence = resolve;
+          });
+        }
+      });
+
+      const entry1: ObservationLogEntry = {
+        observation_id: "obs-concurrent-a",
+        timestamp: new Date().toISOString(),
+        trigger: "periodic",
+        goal_id: "append-obs-concurrent",
+        dimension_name: "dim1",
+        layer: "mechanical",
+        method: {
+          type: "api_query",
+          source: "api",
+          schedule: null,
+          endpoint: null,
+          confidence_tier: "mechanical",
+        },
+        raw_result: 10,
+        extracted_value: 10,
+        confidence: 0.9,
+        notes: null,
+      };
+
+      const entry2: ObservationLogEntry = {
+        ...entry1,
+        observation_id: "obs-concurrent-b",
+        extracted_value: 20,
+      };
+
+      const first = manager.appendObservation("append-obs-concurrent", entry1);
+      await firstEnteredFence;
+      const second = manager.appendObservation("append-obs-concurrent", entry2);
+
+      expect(fenceCalls).toBe(1);
+      releaseFence();
+
+      await Promise.all([first, second]);
+
+      const loaded = await manager.loadObservationLog("append-obs-concurrent");
+      expect(loaded!.entries).toHaveLength(2);
+      expect(loaded!.entries.map((entry) => entry.observation_id)).toEqual([
+        "obs-concurrent-a",
+        "obs-concurrent-b",
+      ]);
+    }, 30_000);
+
     it("rejects appendObservation when entry goal_id does not match", async () => {
       await manager.saveGoal(makeGoal({ id: "append-obs-mismatch" }));
 
@@ -506,6 +570,54 @@ describe("StateManager", async () => {
       expect(loaded[0].gap_vector[0].normalized_weighted_gap).toBe(0.8);
       expect(loaded[1].gap_vector[0].normalized_weighted_gap).toBe(0.6);
     });
+
+    it("serializes concurrent appendGapHistoryEntry calls without losing entries", async () => {
+      await manager.saveGoal(makeGoal({ id: "gap-append-concurrent" }));
+
+      let releaseFence: () => void = () => {
+        throw new Error("releaseFence was not initialized");
+      };
+      let resolveFirstFence: () => void = () => {};
+      const firstEnteredFence = new Promise<void>((resolve) => {
+        resolveFirstFence = resolve;
+      });
+      let fenceCalls = 0;
+      manager.setWriteFence("gap-append-concurrent", async () => {
+        fenceCalls += 1;
+        if (fenceCalls === 1) {
+          resolveFirstFence();
+          await new Promise<void>((resolve) => {
+            releaseFence = resolve;
+          });
+        }
+      });
+
+      const entry1: GapHistoryEntry = {
+        iteration: 1,
+        timestamp: new Date().toISOString(),
+        gap_vector: [{ dimension_name: "d", normalized_weighted_gap: 0.8 }],
+        confidence_vector: [{ dimension_name: "d", confidence: 0.5 }],
+      };
+
+      const entry2: GapHistoryEntry = {
+        iteration: 2,
+        timestamp: new Date().toISOString(),
+        gap_vector: [{ dimension_name: "d", normalized_weighted_gap: 0.6 }],
+        confidence_vector: [{ dimension_name: "d", confidence: 0.7 }],
+      };
+
+      const first = manager.appendGapHistoryEntry("gap-append-concurrent", entry1);
+      await firstEnteredFence;
+      const second = manager.appendGapHistoryEntry("gap-append-concurrent", entry2);
+
+      expect(fenceCalls).toBe(1);
+      releaseFence();
+
+      await Promise.all([first, second]);
+
+      const loaded = await manager.loadGapHistory("gap-append-concurrent");
+      expect(loaded.map((entry) => entry.iteration)).toEqual([1, 2]);
+    }, 30_000);
 
     it("returns empty array for non-existent gap history", async () => {
       expect(await manager.loadGapHistory("nonexistent")).toEqual([]);
@@ -898,6 +1010,43 @@ describe("StateManager", async () => {
       // Reports moved
       expect(fs.existsSync(path.join(archiveBase, "reports", "report.json"))).toBe(true);
       expect(fs.existsSync(reportsDir)).toBe(false);
+    });
+
+    it("serializes concurrent archiveGoal calls on the same goal", async () => {
+      const goalId = "archive-locked";
+      await manager.saveGoal(makeGoal({ id: goalId }));
+
+      let releaseFence: () => void = () => {
+        throw new Error("releaseFence was not initialized");
+      };
+      let resolveFirstFence: () => void = () => {};
+      const firstEnteredFence = new Promise<void>((resolve) => {
+        resolveFirstFence = resolve;
+      });
+      let fenceCalls = 0;
+      manager.setWriteFence(goalId, async () => {
+        fenceCalls += 1;
+        if (fenceCalls === 1) {
+          resolveFirstFence();
+          await new Promise<void>((resolve) => {
+            releaseFence = resolve;
+          });
+        }
+      });
+
+      const first = manager.archiveGoal(goalId);
+      await firstEnteredFence;
+      const second = manager.archiveGoal(goalId);
+
+      expect(fenceCalls).toBe(1);
+      releaseFence();
+
+      await expect(first).resolves.toBe(true);
+      await expect(second).resolves.toBe(false);
+
+      const archiveBase = path.join(tmpDir, "archive", goalId);
+      expect(fs.existsSync(path.join(archiveBase, "goal", "goal.json"))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, "goals", goalId))).toBe(false);
     });
 
     it("returns false for non-existent goal", async () => {
