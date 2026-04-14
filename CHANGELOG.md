@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.9] - 2026-04-14
+
+### Added
+- Added guarded release automation that verifies `main`, checks release tags, runs docs/build/test checks, commits package metadata, and pushes release tags.
+- Added persistent chat session resume and history support in the chat runtime (#677)
+
+### Changed
+- Removed the stale Web UI/API surface, Web API tests, `pulseed chat` CLI subcommand, and the unused OpenClaw plugin package (#678)
+- Bumped the package version to `0.4.9`
+
+### Fixed
+- Made `archiveGoal` crash-resilient when state writes fail partway through archiving (#675)
+- Validated `openai_api` adapter API keys during provider configuration loading (#676)
+
+## [0.4.8] - 2026-04-14
+
+### Added
+- Added Telegram setup import support and home chat store wiring for Telegram onboarding (#669)
+- Added CLI approval command handling and binary E2E coverage for CLI startup paths (#674)
+
+### Changed
+- Improved setup migration, Telegram onboarding, daemon command routing, and CLI usability papercuts (#669, #674)
+- Renamed the npm publish workflow to the release publish workflow path.
+- Bumped the package version to `0.4.8`
+
+### Fixed
+- Fixed CLI setup, daemon startup, provider import, and API key handling edge cases covered by expanded CLI tests (#669, #674)
+
 ## [0.4.7] - 2026-04-14
 
 ### Added
