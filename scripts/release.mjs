@@ -37,6 +37,7 @@ if (remoteTagExists(tagName)) {
 }
 
 run('npm', ['version', version, '--no-git-tag-version']);
+run('git', ['add', 'package.json', 'package-lock.json']);
 run('npm', ['run', 'check:docs']);
 run('npm', ['run', 'build']);
 run('npm', ['test']);

@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - Made `archiveGoal` crash-resilient when state writes fail partway through archiving (#675)
 - Validated `openai_api` adapter API keys during provider configuration loading (#676)
+- Staged release package metadata before verification so protected-file test cleanup cannot restore the previous version during release.
 
 ## [0.4.8] - 2026-04-14
 
