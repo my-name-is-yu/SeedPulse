@@ -22,6 +22,12 @@ import {
   type ScheduleResult,
   type ScheduleTriggerInput,
 } from "../types/schedule.js";
+import {
+  CronConfigSchema,
+  GoalTriggerConfigSchema,
+  HeartbeatConfigSchema,
+  ProbeConfigSchema,
+} from "../types/schedule.js";
 import { executeCron, executeGoalTrigger, executeProbe } from "./engine-layers.js";
 import {
   ScheduleHistoryStore,
@@ -37,6 +43,7 @@ import type { KnowledgeManager } from "../../platform/knowledge/knowledge-manage
 import { projectSchedulesToSoil, rebuildSoilIndex } from "../../platform/soil/index.js";
 import { hasConfiguredSoilPublishProvider } from "../../platform/soil/publish/index.js";
 import { buildSchedulePresetEntry } from "./presets.js";
+import { ExternalScheduleEntrySchema, type ExternalScheduleEntry, type IScheduleSource } from "./source.js";
 
 const SCHEDULES_FILE = "schedules.json";
 const DEFAULT_RETRY_POLICY: ScheduleRetryPolicy = {
@@ -186,6 +193,142 @@ export class ScheduleEngine {
 
   getEntries(): ScheduleEntry[] {
     return this.entries;
+  }
+
+  getBaseDir(): string {
+    return this.baseDir;
+  }
+
+  async syncExternalSources(sources: IScheduleSource[]): Promise<{
+    added: number;
+    updated: number;
+    disabled: number;
+    skipped: number;
+    errors: Array<{ source_id: string; message: string }>;
+  }> {
+    const seenKeys = new Set<string>();
+    const reconciledSourceIds = new Set<string>();
+    const errors: Array<{ source_id: string; message: string }> = [];
+    let added = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    for (const source of sources) {
+      try {
+        const health = await source.healthCheck();
+        if (!health.healthy) {
+          errors.push({ source_id: source.id, message: health.error ?? "source is unhealthy" });
+          continue;
+        }
+
+        const rawEntries = await source.fetchEntries();
+        const sourceIdsFromFetchedEntries = new Set<string>([source.id]);
+        let sourceHadEntryErrors = false;
+
+        for (const raw of rawEntries) {
+          const parsed = ExternalScheduleEntrySchema.safeParse(raw);
+          if (!parsed.success) {
+            sourceHadEntryErrors = true;
+            skipped++;
+            errors.push({ source_id: source.id, message: parsed.error.message });
+            continue;
+          }
+
+          const external = parsed.data;
+          sourceIdsFromFetchedEntries.add(external.source_id);
+          const entryInput = this.buildExternalScheduleEntryInput(external);
+          if (!entryInput) {
+            sourceHadEntryErrors = true;
+            skipped++;
+            errors.push({ source_id: external.source_id, message: `missing ${external.layer} config for ${external.external_id}` });
+            continue;
+          }
+
+          const key = this.externalEntryKey(external.source_id, external.external_id);
+          seenKeys.add(key);
+          const existingIndex = this.entries.findIndex((entry) =>
+            entry.metadata?.source === "external" &&
+            entry.metadata.external_source_id === external.source_id &&
+            entry.metadata.external_id === external.external_id
+          );
+
+          if (existingIndex === -1) {
+            this.entries.push(ScheduleEntrySchema.parse({
+              ...entryInput,
+              id: randomUUID(),
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              last_fired_at: null,
+              next_fire_at: this.computeNextFireAt(entryInput.trigger),
+              consecutive_failures: 0,
+              last_escalation_at: null,
+              baseline_results: [],
+              total_executions: 0,
+              total_tokens_used: 0,
+            }));
+            added++;
+            continue;
+          }
+
+          const existing = this.entries[existingIndex]!;
+          const candidate = ScheduleEntrySchema.parse({
+            ...existing,
+            ...entryInput,
+            id: existing.id,
+            created_at: existing.created_at,
+            updated_at: existing.updated_at,
+            next_fire_at: JSON.stringify(existing.trigger) === JSON.stringify(entryInput.trigger)
+              ? existing.next_fire_at
+              : this.computeNextFireAt(entryInput.trigger),
+          });
+          if (JSON.stringify(existing) !== JSON.stringify(candidate)) {
+            this.entries[existingIndex] = ScheduleEntrySchema.parse({
+              ...candidate,
+              updated_at: new Date().toISOString(),
+            });
+            updated++;
+          }
+        }
+
+        if (!sourceHadEntryErrors) {
+          for (const sourceId of sourceIdsFromFetchedEntries) {
+            reconciledSourceIds.add(sourceId);
+          }
+        }
+      } catch (error) {
+        errors.push({ source_id: source.id, message: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    let disabled = 0;
+    this.entries = this.entries.map((entry) => {
+      if (
+        entry.metadata?.source !== "external" ||
+        !entry.enabled ||
+        !entry.metadata.external_source_id ||
+        !reconciledSourceIds.has(entry.metadata.external_source_id)
+      ) {
+        return entry;
+      }
+
+      const key = this.externalEntryKey(entry.metadata.external_source_id, entry.metadata.external_id ?? "");
+      if (seenKeys.has(key)) {
+        return entry;
+      }
+
+      disabled++;
+      return ScheduleEntrySchema.parse({
+        ...entry,
+        enabled: false,
+        updated_at: new Date().toISOString(),
+      });
+    });
+
+    if (added > 0 || updated > 0 || disabled > 0) {
+      await this.saveEntries();
+    }
+
+    return { added, updated, disabled, skipped, errors };
   }
 
   // ─── Entry management ───
@@ -518,6 +661,60 @@ export class ScheduleEngine {
       knowledgeManager: this.knowledgeManager,
       logger: this.logger,
     };
+  }
+
+  private externalEntryKey(sourceId: string, externalId: string): string {
+    return `${sourceId}:${externalId}`;
+  }
+
+  private buildExternalScheduleEntryInput(external: ExternalScheduleEntry): Omit<
+    ScheduleEntryInput,
+    | "id"
+    | "created_at"
+    | "updated_at"
+    | "last_fired_at"
+    | "next_fire_at"
+    | "consecutive_failures"
+    | "last_escalation_at"
+    | "baseline_results"
+    | "total_executions"
+    | "total_tokens_used"
+    | "max_tokens_per_day"
+    | "tokens_used_today"
+    | "budget_reset_at"
+    | "escalation_timestamps"
+  > | null {
+    const base = {
+      name: external.name,
+      layer: external.layer,
+      trigger: external.trigger.type === "cron"
+        ? { type: "cron" as const, expression: external.trigger.expression!, timezone: "UTC" }
+        : { type: "interval" as const, seconds: external.trigger.seconds!, jitter_factor: 0 },
+      enabled: external.enabled,
+      metadata: {
+        source: "external" as const,
+        external_source_id: external.source_id,
+        external_id: external.external_id,
+        dependency_hints: [],
+        note: typeof external.metadata["note"] === "string" ? external.metadata["note"] : undefined,
+      },
+    };
+
+    if (external.layer === "heartbeat") {
+      const parsed = HeartbeatConfigSchema.safeParse(external.heartbeat ?? external.metadata["heartbeat"]);
+      return parsed.success ? { ...base, heartbeat: parsed.data } : null;
+    }
+    if (external.layer === "probe") {
+      const parsed = ProbeConfigSchema.safeParse(external.probe ?? external.metadata["probe"]);
+      return parsed.success ? { ...base, probe: parsed.data } : null;
+    }
+    if (external.layer === "cron") {
+      const parsed = CronConfigSchema.safeParse(external.cron ?? external.metadata["cron"]);
+      return parsed.success ? { ...base, cron: parsed.data } : null;
+    }
+
+    const parsed = GoalTriggerConfigSchema.safeParse(external.goal_trigger ?? external.metadata["goal_trigger"]);
+    return parsed.success ? { ...base, goal_trigger: parsed.data } : null;
   }
 
   private async executeEntry(entry: ScheduleEntry): Promise<ScheduleResult> {

@@ -8,6 +8,14 @@ import { StateManager } from "../../base/state/state-manager.js";
 import { buildAdapterRegistry, buildLLMClient } from "../../base/llm/provider-factory.js";
 import { loadProviderConfig } from "../../base/llm/provider-config.js";
 import { TrustManager } from "../../platform/traits/trust-manager.js";
+import { ObservationEngine } from "../../platform/observation/observation-engine.js";
+import { KnowledgeManager } from "../../platform/knowledge/knowledge-manager.js";
+import { GoalDependencyGraph } from "../../orchestrator/goal/goal-dependency-graph.js";
+import { SessionManager } from "../../orchestrator/execution/session-manager.js";
+import { ScheduleEngine } from "../../runtime/schedule/engine.js";
+import { PluginLoader } from "../../runtime/plugin-loader.js";
+import { NotifierRegistry } from "../../runtime/notifier-registry.js";
+import { buildCliDataSourceRegistry } from "../cli/data-source-bootstrap.js";
 import {
   ConcurrencyController,
   createBuiltinTools,
@@ -319,7 +327,50 @@ async function createGlobalCrossPlatformChatSessionManager(): Promise<CrossPlatf
   const adapter = adapterRegistry.getAdapter(providerConfig.adapter);
   const toolRegistry = new ToolRegistry();
   const trustManager = new TrustManager(stateManager);
-  for (const tool of createBuiltinTools({ stateManager, trustManager, registry: toolRegistry })) {
+  const dataSourceRegistry = await buildCliDataSourceRegistry();
+  const observationEngine = new ObservationEngine(
+    stateManager,
+    dataSourceRegistry.getAllSources(),
+    llmClient,
+  );
+  const knowledgeManager = new KnowledgeManager(stateManager, llmClient);
+  const goalDependencyGraph = new GoalDependencyGraph(stateManager, llmClient);
+  await goalDependencyGraph.init();
+  const sessionManager = new SessionManager(stateManager, goalDependencyGraph);
+  const scheduleEngine = new ScheduleEngine({
+    baseDir: stateManager.getBaseDir(),
+    dataSourceRegistry,
+    llmClient,
+    stateManager,
+    knowledgeManager,
+  });
+  await scheduleEngine.loadEntries();
+  const pluginLoader = new PluginLoader(
+    adapterRegistry,
+    dataSourceRegistry,
+    new NotifierRegistry(),
+    undefined,
+    undefined,
+    (dataSource) => {
+      if (!observationEngine.getDataSources().some((source) => source.sourceId === dataSource.sourceId)) {
+        observationEngine.addDataSource(dataSource);
+      }
+    }
+  );
+  await pluginLoader.loadAll().catch(() => []);
+  await scheduleEngine.syncExternalSources(pluginLoader.getScheduleSources()).catch(() => undefined);
+
+  for (const tool of createBuiltinTools({
+    stateManager,
+    trustManager,
+    registry: toolRegistry,
+    adapterRegistry,
+    knowledgeManager,
+    observationEngine,
+    sessionManager,
+    scheduleEngine,
+    pluginLoader,
+  })) {
     toolRegistry.register(tool);
   }
 

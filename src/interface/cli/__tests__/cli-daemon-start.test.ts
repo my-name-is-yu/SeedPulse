@@ -8,6 +8,7 @@ const {
   watchdogStartMock,
   scheduleLoadEntriesMock,
   scheduleEnsureSoilPublishScheduleMock,
+  scheduleSyncExternalSourcesMock,
   pluginLoadAllMock,
   setRealtimeSinkMock,
   eventServerBroadcastMock,
@@ -23,6 +24,7 @@ const {
   watchdogStartMock: vi.fn().mockResolvedValue(undefined),
   scheduleLoadEntriesMock: vi.fn().mockResolvedValue(undefined),
   scheduleEnsureSoilPublishScheduleMock: vi.fn().mockResolvedValue(null),
+  scheduleSyncExternalSourcesMock: vi.fn().mockResolvedValue({ added: 0, updated: 0, disabled: 0, skipped: 0, errors: [] }),
   pluginLoadAllMock: vi.fn().mockResolvedValue(undefined),
   setRealtimeSinkMock: vi.fn(),
   eventServerBroadcastMock: vi.fn(),
@@ -112,6 +114,7 @@ vi.mock("../../../runtime/schedule/engine.js", () => ({
     scheduleEngineArgs.push(args);
     return {
       loadEntries: scheduleLoadEntriesMock,
+      syncExternalSources: scheduleSyncExternalSourcesMock,
       ensureSoilPublishSchedule: scheduleEnsureSoilPublishScheduleMock,
     };
   }),
@@ -121,6 +124,7 @@ vi.mock("../../../runtime/plugin-loader.js", () => ({
   PluginLoader: vi.fn().mockImplementation(function () {
     return {
       loadAll: pluginLoadAllMock,
+      getScheduleSources: vi.fn().mockReturnValue([]),
     };
   }),
 }));
@@ -163,6 +167,7 @@ describe("cmdStart", () => {
     watchdogStartMock.mockClear();
     scheduleLoadEntriesMock.mockClear();
     scheduleEnsureSoilPublishScheduleMock.mockClear();
+    scheduleSyncExternalSourcesMock.mockClear();
     pluginLoadAllMock.mockClear();
     setRealtimeSinkMock.mockClear();
     eventServerBroadcastMock.mockClear();
@@ -187,6 +192,12 @@ describe("cmdStart", () => {
       hookManager: { id: "hook-manager" },
       memoryLifecycleManager: { id: "memory" },
       knowledgeManager: { id: "knowledge" },
+      adapterRegistry: { id: "adapter-registry" },
+      dataSourceRegistry: { id: "data-source-registry" },
+      observationEngine: {
+        getDataSources: vi.fn().mockReturnValue([]),
+        addDataSource: vi.fn(),
+      },
     });
   });
 

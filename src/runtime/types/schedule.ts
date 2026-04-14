@@ -64,9 +64,11 @@ export const GoalTriggerConfigSchema = z.object({
 export type GoalTriggerConfig = z.infer<typeof GoalTriggerConfigSchema>;
 
 export const ScheduleEntryMetadataSchema = z.object({
-  source: z.enum(["manual", "preset", "dream"]).default("manual"),
+  source: z.enum(["manual", "preset", "dream", "external"]).default("manual"),
   preset_key: z.string().optional(),
   dream_suggestion_id: z.string().optional(),
+  external_source_id: z.string().optional(),
+  external_id: z.string().optional(),
   dependency_hints: z.array(z.string()).default([]),
   note: z.string().optional(),
 });

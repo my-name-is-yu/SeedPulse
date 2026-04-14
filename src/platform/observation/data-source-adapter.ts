@@ -441,6 +441,10 @@ export class DataSourceRegistry {
     return Array.from(this.sources.keys()).sort();
   }
 
+  getAllSources(): IDataSourceAdapter[] {
+    return Array.from(this.sources.values());
+  }
+
   remove(id: string): void {
     if (!this.sources.has(id)) {
       throw new Error(

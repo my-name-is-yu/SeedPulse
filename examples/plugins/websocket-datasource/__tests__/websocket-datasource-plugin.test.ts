@@ -55,7 +55,7 @@ vi.mock("ws", () => ({
 // ─── Import after mock ───
 
 import { WebSocketDataSourceAdapter } from "../src/index.js";
-import type { DataSourceConfig } from "../../../../src/types/data-source.js";
+import type { DataSourceConfig } from "pulseed";
 
 // ─── Helpers ───
 

@@ -10,6 +10,7 @@ import {
 import { DreamScheduleSuggestionStore } from "../../../platform/dream/dream-schedule-suggestions.js";
 import type { ScheduleTriggerInput } from "../../../runtime/types/schedule.js";
 import { scheduleEdit } from "./schedule/edit.js";
+import { scheduleCost } from "./schedule/cost.js";
 import { scheduleHistory } from "./schedule/history.js";
 import { scheduleRunNow } from "./schedule/run-now.js";
 import { getScheduleOrPrintError } from "./schedule/shared.js";
@@ -46,6 +47,8 @@ export async function cmdSchedule(
       return await scheduleRunNow(stateManager, characterConfigManager, engine, argv.slice(1));
     case "history":
       return await scheduleHistory(engine, argv.slice(1));
+    case "cost":
+      return await scheduleCost(engine, argv.slice(1));
     case "remove":
       return await scheduleRemove(engine, argv.slice(1));
     case "presets":
@@ -53,7 +56,7 @@ export async function cmdSchedule(
     case "suggestions":
       return await scheduleSuggestions(baseDir, engine, argv.slice(1));
     default:
-      console.log("Usage: pulseed schedule <list|show|add|edit|pause|resume|run|history|remove|presets|suggestions>");
+      console.log("Usage: pulseed schedule <list|show|add|edit|pause|resume|run|history|cost|remove|presets|suggestions>");
       console.log("  list                              List all schedule entries");
       console.log("  show <id>                         Show one schedule entry as JSON");
       console.log("  add                               Add a heartbeat entry or preset");
@@ -62,6 +65,7 @@ export async function cmdSchedule(
       console.log("  resume <id>                       Re-enable a paused schedule entry");
       console.log("  run <id>                          Run a schedule entry immediately");
       console.log("  history <id> [--limit <n>]        Show recent execution history");
+      console.log("  cost [--period <7d|24h|2w>]       Show schedule token usage for a period");
       console.log("  remove <id>                       Remove a schedule entry");
       console.log("  presets                           List reusable schedule presets");
       console.log("  suggestions <list|apply|reject|dismiss>  Review dream-generated suggestions");

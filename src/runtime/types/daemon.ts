@@ -25,6 +25,14 @@ export const DaemonConfigSchema = z.object({
   iterations_per_cycle: z.number().int().positive().default(10), // max CoreLoop iterations per daemon cycle
   max_concurrent_goals: z.number().int().positive().default(4), // max goals the supervisor may execute at once
   event_server_port: z.number().int().nonnegative().default(41700), // EventServer HTTP port (0 = OS-assigned, safe for tests)
+  gateway: z.object({
+    slack: z.object({
+      enabled: z.boolean().default(false),
+      signing_secret: z.string().optional(),
+      path: z.string().default("/slack/events"),
+      channel_goal_map: z.record(z.string()).default({}),
+    }).default({}),
+  }).default({}),
   proactive_mode: z.boolean().default(false),
   proactive_interval_ms: z.number().default(3_600_000), // 1 hour minimum between proactive ticks
   goal_review_interval_ms: z.number().int().nonnegative().default(7 * 24 * 60 * 60 * 1000), // weekly goal review cadence

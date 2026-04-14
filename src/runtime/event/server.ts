@@ -18,6 +18,7 @@ import type { OutboxStore, OutboxRecord } from "../store/index.js";
 import { RuntimeControlOperationKindSchema } from "../store/index.js";
 import { EventServerSnapshotReader } from "./server-snapshot-reader.js";
 import { EventServerSseManager } from "./server-sse.js";
+import type { SlackChannelAdapter } from "../gateway/slack-channel-adapter.js";
 
 export interface EventServerConfig {
   host?: string; // default: "127.0.0.1" (localhost only!)
@@ -73,6 +74,8 @@ export class EventServer {
   private envelopeHook?: (eventData: Record<string, unknown>) => void | Promise<void>;
   private commandEnvelopeHook?: (envelope: Envelope) => void | Promise<void>;
   private activeWorkersProvider?: ActiveWorkersProvider;
+  private slackChannelAdapter?: SlackChannelAdapter;
+  private slackEventsPath = "/slack/events";
 
   constructor(driveSystem: DriveSystem, config?: EventServerConfig, logger?: Logger) {
     this.driveSystem = driveSystem;
@@ -406,6 +409,11 @@ export class EventServer {
     this.activeWorkersProvider = provider;
   }
 
+  setSlackChannelAdapter(adapter: SlackChannelAdapter, eventsPath = "/slack/events"): void {
+    this.slackChannelAdapter = adapter;
+    this.slackEventsPath = eventsPath.startsWith("/") ? eventsPath : `/${eventsPath}`;
+  }
+
   private handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
     const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
     const urlPath = requestUrl.pathname;
@@ -414,6 +422,11 @@ export class EventServer {
     if (req.method === "GET" && urlPath === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok", uptime: process.uptime() }));
+      return;
+    }
+
+    if (req.method === "POST" && this.slackChannelAdapter && urlPath === this.slackEventsPath) {
+      void this.handlePostSlackEvents(req, res);
       return;
     }
 
@@ -888,6 +901,32 @@ export class EventServer {
     } catch (err) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "Invalid schedule run request", details: String(err) }));
+    }
+  }
+
+  private async handlePostSlackEvents(
+    req: http.IncomingMessage,
+    res: http.ServerResponse
+  ): Promise<void> {
+    if (!this.slackChannelAdapter) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Slack adapter is not configured" }));
+      return;
+    }
+
+    try {
+      const body = await readBody(req);
+      const headers = Object.fromEntries(
+        Object.entries(req.headers)
+          .filter((entry): entry is [string, string | string[]] => entry[1] !== undefined)
+          .map(([key, value]) => [key.toLowerCase(), Array.isArray(value) ? value.join(",") : value])
+      );
+      const response = this.slackChannelAdapter.handleRequest(body, headers);
+      res.writeHead(response.status, { "Content-Type": "application/json" });
+      res.end(response.body);
+    } catch (err) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Invalid Slack event request", details: String(err) }));
     }
   }
 

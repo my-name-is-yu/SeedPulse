@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { JiraDataSourceAdapter } from "../src/index.js";
-import type { DataSourceConfig } from "../../../../src/types/data-source.js";
+import type { DataSourceConfig } from "pulseed";
 
 // ─── Helpers ───
 

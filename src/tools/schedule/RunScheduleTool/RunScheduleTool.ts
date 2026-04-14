@@ -9,6 +9,7 @@ import type {
 } from "../../types.js";
 import type { ScheduleEngine, RunScheduleNowResult } from "../../../runtime/schedule/engine.js";
 import type { ScheduleEntry } from "../../../runtime/types/schedule.js";
+import { DaemonClient, isDaemonRunning } from "../../../runtime/daemon/client.js";
 import { resolveScheduleEntry } from "../../../runtime/schedule/entry-resolver.js";
 import { DESCRIPTION } from "./prompt.js";
 import { TAGS, CATEGORY as _CATEGORY, READ_ONLY, PERMISSION_LEVEL } from "./constants.js";
@@ -60,6 +61,42 @@ export class RunScheduleTool implements ITool<RunScheduleInput, RunScheduleOutpu
           error: `Schedule not found: ${input.schedule_id}`,
           durationMs: Date.now() - startTime,
         };
+      }
+
+      const getBaseDir = this.scheduleEngine.getBaseDir;
+      if (typeof getBaseDir === "function") {
+        const baseDir = getBaseDir.call(this.scheduleEngine);
+        const daemon = await isDaemonRunning(baseDir);
+        if (daemon.running) {
+          const client = new DaemonClient({
+            host: "127.0.0.1",
+            port: daemon.port,
+            authToken: daemon.authToken,
+            baseDir,
+          });
+          await client.runScheduleNow(existingEntry.id, {
+            allowEscalation: input.allow_escalation,
+          });
+          return {
+            success: true,
+            data: {
+              entry: existingEntry,
+              reason: "manual_run",
+              result: {
+                entry_id: existingEntry.id,
+                status: "ok",
+                duration_ms: Date.now() - startTime,
+                fired_at: new Date().toISOString(),
+                layer: existingEntry.layer,
+                tokens_used: 0,
+                escalated_to: null,
+                output_summary: "Requested daemon-resident schedule run",
+              },
+            },
+            summary: `Requested daemon schedule run: ${existingEntry.name}`,
+            durationMs: Date.now() - startTime,
+          };
+        }
       }
 
       const run = await this.scheduleEngine.runEntryNow(existingEntry.id, {

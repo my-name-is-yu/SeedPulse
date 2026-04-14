@@ -14,6 +14,11 @@ export const ExternalScheduleEntrySchema = z.object({
     (t) => (t.type === 'cron' ? !!t.expression : !!t.seconds),
     { message: 'cron trigger requires expression, interval trigger requires seconds' }
   ),
+  enabled: z.boolean().default(true),
+  heartbeat: z.unknown().optional(),
+  probe: z.unknown().optional(),
+  cron: z.unknown().optional(),
+  goal_trigger: z.unknown().optional(),
   metadata: z.record(z.unknown()).default({}), // source-specific data
   synced_at: z.string().datetime(),
 });

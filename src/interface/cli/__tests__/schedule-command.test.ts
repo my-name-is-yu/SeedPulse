@@ -98,6 +98,61 @@ describe("cmdSchedule", () => {
     }
   });
 
+  it("prints schedule token cost from history", async () => {
+    const tempDir = makeTempDir("schedule-command-cost-");
+    try {
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const engine = new ScheduleEngine({ baseDir: tempDir });
+      await engine.loadEntries();
+      const entry = await engine.addEntry({
+        name: "Daily digest",
+        layer: "cron",
+        trigger: { type: "interval", seconds: 3600 },
+        metadata: {
+          source: "manual",
+          dependency_hints: [],
+        },
+        cron: {
+          job_kind: "prompt",
+          prompt_template: "Summarize work",
+          context_sources: [],
+          output_format: "notification",
+          max_tokens: 500,
+        },
+      });
+      const now = new Date().toISOString();
+      await fs.writeFile(
+        path.join(tempDir, "schedule-history.json"),
+        JSON.stringify([
+          {
+            id: "11111111-1111-4111-8111-111111111111",
+            entry_id: entry.id,
+            entry_name: entry.name,
+            layer: entry.layer,
+            reason: "manual_run",
+            attempt: 0,
+            scheduled_for: now,
+            started_at: now,
+            finished_at: now,
+            retry_at: null,
+            status: "ok",
+            duration_ms: 10,
+            fired_at: now,
+            tokens_used: 42,
+            escalated_to: null,
+          },
+        ]),
+        "utf8",
+      );
+
+      await cmdSchedule(makeStateManager(tempDir), ["cost", "--period", "7d"]);
+
+      expect(logSpy.mock.calls.flat().join("\n")).toContain("tokens:     42");
+    } finally {
+      cleanupTempDir(tempDir);
+    }
+  });
+
   it("pauses, resumes, and edits a schedule entry", async () => {
     const tempDir = makeTempDir("schedule-command-lifecycle-");
     try {

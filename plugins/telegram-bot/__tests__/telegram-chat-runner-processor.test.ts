@@ -13,6 +13,7 @@ const mockBuildAdapterRegistry = vi.hoisted(() => vi.fn().mockResolvedValue({
   getAdapter: vi.fn().mockReturnValue({ adapterType: "openai_api" }),
 }));
 const mockCreateBuiltinTools = vi.hoisted(() => vi.fn().mockReturnValue([]));
+const mockBuildCliDataSourceRegistry = vi.hoisted(() => vi.fn().mockResolvedValue({ getAllSources: vi.fn().mockReturnValue([]) }));
 const mockGetGlobalCrossPlatformChatSessionManager = vi.hoisted(() => vi.fn().mockResolvedValue(null));
 const mockShouldUseNativeTaskAgentLoop = vi.hoisted(() => vi.fn().mockReturnValue(false));
 const mockCreateNativeChatAgentLoopRunner = vi.hoisted(() => vi.fn());
@@ -20,6 +21,7 @@ const mockCreateNativeChatAgentLoopRunner = vi.hoisted(() => vi.fn());
 vi.mock("pulseed", () => {
   class FakeStateManager {
     init = mockInit;
+    getBaseDir = vi.fn().mockReturnValue("/tmp/pulseed");
   }
 
   class FakeChatRunner {
@@ -55,6 +57,33 @@ vi.mock("pulseed", () => {
     ToolRegistry: class {
       register = vi.fn();
     },
+    buildCliDataSourceRegistry: mockBuildCliDataSourceRegistry,
+    ObservationEngine: class {
+      getDataSources = vi.fn().mockReturnValue([]);
+      addDataSource = vi.fn();
+      constructor(_stateManager: unknown, _dataSources: unknown, _llmClient: unknown) {}
+    },
+    KnowledgeManager: class {
+      constructor(_stateManager: unknown, _llmClient: unknown) {}
+    },
+    GoalDependencyGraph: class {
+      init = vi.fn().mockResolvedValue(undefined);
+      constructor(_stateManager: unknown, _llmClient: unknown) {}
+    },
+    SessionManager: class {
+      constructor(_stateManager: unknown, _goalDependencyGraph: unknown) {}
+    },
+    ScheduleEngine: class {
+      loadEntries = vi.fn().mockResolvedValue(undefined);
+      syncExternalSources = vi.fn().mockResolvedValue(undefined);
+      constructor(_deps: unknown) {}
+    },
+    PluginLoader: class {
+      loadAll = vi.fn().mockResolvedValue([]);
+      getScheduleSources = vi.fn().mockReturnValue([]);
+      constructor(..._args: unknown[]) {}
+    },
+    NotifierRegistry: class {},
     createBuiltinTools: mockCreateBuiltinTools,
     getGlobalCrossPlatformChatSessionManager: mockGetGlobalCrossPlatformChatSessionManager,
     shouldUseNativeTaskAgentLoop: mockShouldUseNativeTaskAgentLoop,
@@ -72,6 +101,7 @@ describe("TelegramChatRunnerProcessor", () => {
     mockBuildLLMClient.mockClear();
     mockBuildAdapterRegistry.mockClear();
     mockCreateBuiltinTools.mockClear();
+    mockBuildCliDataSourceRegistry.mockClear();
     mockGetGlobalCrossPlatformChatSessionManager.mockReset();
     mockGetGlobalCrossPlatformChatSessionManager.mockResolvedValue(null);
     mockShouldUseNativeTaskAgentLoop.mockReset();

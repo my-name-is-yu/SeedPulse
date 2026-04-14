@@ -27,7 +27,7 @@ vi.mock("mysql2/promise", () => ({
 // ─── Import after mock ───
 
 import { MysqlDataSourceAdapter } from "../src/index.js";
-import type { DataSourceConfig } from "../../../../src/types/data-source.js";
+import type { DataSourceConfig } from "pulseed";
 
 // ─── Helpers ───
 

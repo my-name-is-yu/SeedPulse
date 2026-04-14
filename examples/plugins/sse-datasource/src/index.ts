@@ -9,8 +9,8 @@ import type {
   DataSourceConfig,
   DataSourceQuery,
   DataSourceResult,
-} from "../../../../src/types/data-source.js";
-import type { IDataSourceAdapter } from "../../../../src/observation/data-source-adapter.js";
+  IDataSourceAdapter,
+} from "pulseed";
 
 // ─── Adapter ───
 

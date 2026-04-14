@@ -11,6 +11,14 @@ import {
   ConcurrencyController,
   createBuiltinTools,
   getGlobalCrossPlatformChatSessionManager,
+  buildCliDataSourceRegistry,
+  ObservationEngine,
+  KnowledgeManager,
+  GoalDependencyGraph,
+  SessionManager,
+  ScheduleEngine,
+  PluginLoader,
+  NotifierRegistry,
   type ChatEventHandler,
   type IAdapter,
   type ILLMClient,
@@ -156,7 +164,46 @@ export class TelegramChatRunnerProcessor {
     const adapter = registry.getAdapter(providerConfig.adapter);
     const toolRegistry = new ToolRegistry();
     const trustManager = new TrustManager(stateManager);
-    for (const tool of createBuiltinTools({ stateManager, trustManager, registry: toolRegistry })) {
+    const dataSourceRegistry = await buildCliDataSourceRegistry(this.workspaceRoot);
+    const observationEngine = new ObservationEngine(stateManager, dataSourceRegistry.getAllSources(), llmClient);
+    const knowledgeManager = new KnowledgeManager(stateManager, llmClient);
+    const goalDependencyGraph = new GoalDependencyGraph(stateManager, llmClient);
+    await goalDependencyGraph.init();
+    const sessionManager = new SessionManager(stateManager, goalDependencyGraph);
+    const scheduleEngine = new ScheduleEngine({
+      baseDir: stateManager.getBaseDir(),
+      dataSourceRegistry,
+      llmClient,
+      stateManager,
+      knowledgeManager,
+    });
+    await scheduleEngine.loadEntries();
+    const pluginLoader = new PluginLoader(
+      registry,
+      dataSourceRegistry,
+      new NotifierRegistry(),
+      undefined,
+      undefined,
+      (dataSource) => {
+        if (!observationEngine.getDataSources().some((source) => source.sourceId === dataSource.sourceId)) {
+          observationEngine.addDataSource(dataSource);
+        }
+      }
+    );
+    await pluginLoader.loadAll().catch(() => []);
+    await scheduleEngine.syncExternalSources(pluginLoader.getScheduleSources()).catch(() => undefined);
+
+    for (const tool of createBuiltinTools({
+      stateManager,
+      trustManager,
+      registry: toolRegistry,
+      adapterRegistry: registry,
+      knowledgeManager,
+      observationEngine,
+      sessionManager,
+      scheduleEngine,
+      pluginLoader,
+    })) {
       toolRegistry.register(tool);
     }
     const permissionManager = new ToolPermissionManager({

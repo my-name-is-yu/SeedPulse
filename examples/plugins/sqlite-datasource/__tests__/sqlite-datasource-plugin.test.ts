@@ -27,7 +27,7 @@ vi.mock("better-sqlite3", () => ({
 // ─── Import after mock ───
 
 import { SqliteDataSourceAdapter } from "../src/index.js";
-import type { DataSourceConfig } from "../../../../src/types/data-source.js";
+import type { DataSourceConfig } from "pulseed";
 
 // ─── Helpers ───
 

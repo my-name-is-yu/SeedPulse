@@ -2,18 +2,11 @@
 //
 // buildDeps() wires all PulSeed dependencies for CLI subcommands.
 
-import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import { getPulseedDirPath, getDatasourcesDir } from "../../base/utils/paths.js";
-import { readJsonFile } from "../../base/utils/json-io.js";
+import * as fsp from "node:fs/promises";
+import { getPulseedDirPath } from "../../base/utils/paths.js";
 
 import { StateManager } from "../../base/state/state-manager.js";
-import type { DataSourceConfig } from "../../base/types/data-source.js";
-import type { IDataSourceAdapter } from "../../platform/observation/data-source-adapter.js";
-import { FileDataSourceAdapter, HttpApiDataSourceAdapter, PostgresDataSourceAdapter } from "../../platform/observation/data-source-adapter.js";
-import { GitHubIssueDataSourceAdapter } from "../../adapters/datasources/github-issue-datasource.js";
-import { FileExistenceDataSourceAdapter } from "../../adapters/datasources/file-existence-datasource.js";
-import { ShellDataSourceAdapter } from "../../adapters/datasources/shell-datasource.js";
 import { createWorkspaceContextProvider } from "../../platform/observation/workspace-context.js";
 import { buildLLMClient, buildAdapterRegistry } from "../../base/llm/provider-factory.js";
 import { loadProviderConfig } from "../../base/llm/provider-config.js";
@@ -66,40 +59,8 @@ import {
   type SoilPrefetchQuery,
   type SoilPrefetchResult,
 } from "../../orchestrator/execution/agent-loop/index.js";
-
-export function createCliDataSourceAdapter(
-  cfg: DataSourceConfig,
-  workspacePath = process.cwd(),
-): IDataSourceAdapter | null {
-  if (cfg.type === "file") {
-    return new FileDataSourceAdapter(cfg);
-  }
-  if (cfg.type === "http_api") {
-    return new HttpApiDataSourceAdapter(cfg);
-  }
-  if (cfg.type === "database") {
-    return new PostgresDataSourceAdapter(cfg);
-  }
-  if (cfg.type === "github_issue") {
-    return new GitHubIssueDataSourceAdapter(cfg);
-  }
-  if (cfg.type === "file_existence") {
-    return new FileExistenceDataSourceAdapter(cfg);
-  }
-  if (cfg.type === "shell") {
-    const adapter = new ShellDataSourceAdapter(
-      cfg.id,
-      (cfg.connection.commands ?? {}) as Record<string, import("../../adapters/datasources/shell-datasource.js").ShellCommandSpec>,
-      cfg.connection?.path ?? workspacePath
-    );
-    if (cfg.scope_goal_id) {
-      (adapter.config as Record<string, unknown>).scope_goal_id = cfg.scope_goal_id;
-    }
-    return adapter;
-  }
-
-  return null;
-}
+import { buildCliDataSourceRegistry } from "./data-source-bootstrap.js";
+export { createCliDataSourceAdapter } from "./data-source-bootstrap.js";
 
 export async function buildDeps(
   stateManager: StateManager,
@@ -116,8 +77,6 @@ export async function buildDeps(
   const trustManager = new TrustManager(stateManager);
   const driveSystem = new DriveSystem(stateManager);
   const adapterRegistry = await buildAdapterRegistry(llmClient);
-  const scheduleEngine = new ScheduleEngine({ baseDir: stateManager.getBaseDir() });
-  await scheduleEngine.loadEntries();
   const toolRegistry = new ToolRegistry();
   const registerBuiltinTools = (deps?: Parameters<typeof createBuiltinTools>[0]) => {
     for (const tool of createBuiltinTools(deps)) {
@@ -127,12 +86,17 @@ export async function buildDeps(
         toolRegistry.register(tool);
         continue;
       }
+      if (existing && tool.metadata.name.startsWith("schedule_") && deps?.scheduleEngine) {
+        toolRegistry.unregister(tool.metadata.name);
+        toolRegistry.register(tool);
+        continue;
+      }
       if (!existing) {
         toolRegistry.register(tool);
       }
     }
   };
-  registerBuiltinTools({ stateManager, trustManager, registry: toolRegistry, scheduleEngine });
+  registerBuiltinTools({ stateManager, trustManager, registry: toolRegistry });
   const permissionManager = new ToolPermissionManager({
     trustManager,
     allowRules: [
@@ -153,27 +117,8 @@ export async function buildDeps(
     concurrency: new ConcurrencyController(),
   });
 
-  // Read datasource configs from ~/.pulseed/datasources/
-  const dsDir = getDatasourcesDir();
-  const dataSources: IDataSourceAdapter[] = [];
-  try {
-    let dsExists = false;
-    try { await fsp.access(dsDir); dsExists = true; } catch { /* not found */ }
-    if (dsExists) {
-      const files = (await fsp.readdir(dsDir)).filter(f => f.endsWith('.json'));
-      for (const file of files) {
-        const cfg = await readJsonFile<DataSourceConfig>(path.join(dsDir, file));
-        const adapter = createCliDataSourceAdapter(cfg, resolvedWorkspacePath);
-        if (adapter) {
-          dataSources.push(adapter);
-        } else {
-          getCliLogger().warn(`[pulseed] Unsupported built-in datasource type "${cfg.type}" in ${file}; skipping`);
-        }
-      }
-    }
-  } catch (err) {
-    getCliLogger().error(formatOperationError(`load datasource configurations from "${dsDir}"`, err));
-  }
+  const dataSourceRegistry = await buildCliDataSourceRegistry(resolvedWorkspacePath, getCliLogger());
+  const dataSources = dataSourceRegistry.getAllSources();
 
   const contextProvider = createWorkspaceContextProvider(
     { workDir: resolvedWorkspacePath },
@@ -445,6 +390,21 @@ export async function buildDeps(
 
   coreLoop.setTimeHorizonEngine(new TimeHorizonEngine());
 
+  const scheduleEngine = new ScheduleEngine({
+    baseDir: stateManager.getBaseDir(),
+    logger,
+    dataSourceRegistry,
+    llmClient,
+    coreLoop,
+    stateManager,
+    reportingEngine,
+    hookManager,
+    memoryLifecycle: memoryLifecycleManager,
+    knowledgeManager,
+  });
+  await scheduleEngine.loadEntries();
+  registerBuiltinTools({ stateManager, trustManager, registry: toolRegistry, scheduleEngine });
+
   const curiosityEngine = new CuriosityEngine({
     stateManager,
     llmClient,
@@ -463,7 +423,11 @@ export async function buildDeps(
     stateManager,
     driveSystem,
     llmClient,
-    dataSourceRegistry: new Map(dataSources.map((adapter) => [adapter.sourceId, adapter])),
+    adapterRegistry,
+    dataSourceRegistry,
+    observationEngine,
+    scheduleEngine,
+    trustManager,
     hookManager,
     memoryLifecycleManager,
     knowledgeManager,

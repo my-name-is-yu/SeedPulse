@@ -45,7 +45,8 @@ export class PluginLoader {
     dataSourceRegistry: DataSourceRegistry,
     notifierRegistry: NotifierRegistry,
     pluginsDir?: string,
-    logger?: Logger
+    logger?: Logger,
+    private readonly onDataSourceRegistered?: (adapter: IDataSourceAdapter) => void
   ) {
     this.adapterRegistry = adapterRegistry;
     this.dataSourceRegistry = dataSourceRegistry;
@@ -277,6 +278,7 @@ export class PluginLoader {
         break;
       case "data_source":
         this.dataSourceRegistry.register(impl as IDataSourceAdapter);
+        this.onDataSourceRegistered?.(impl as IDataSourceAdapter);
         break;
       case "notifier":
         this.notifierRegistry.register(manifest.name, impl as INotifier);

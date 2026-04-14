@@ -179,6 +179,9 @@ export type { EmbeddingConfig, EmbeddingEntry, VectorSearchResult } from "./base
 // --- Data source ---
 export { DataSourceRegistry, FileDataSourceAdapter, HttpApiDataSourceAdapter, getNestedValue } from "./platform/observation/data-source-adapter.js";
 export type { IDataSourceAdapter } from "./platform/observation/data-source-adapter.js";
+export { createCliDataSourceAdapter, buildCliDataSourceRegistry } from "./interface/cli/data-source-bootstrap.js";
+export { ScheduleEngine } from "./runtime/schedule/engine.js";
+export type { RunScheduleNowOptions, RunScheduleNowResult } from "./runtime/schedule/engine.js";
 
 // --- Stage 14 modules ---
 export { GoalTreeManager } from "./orchestrator/goal/goal-tree-manager.js";

@@ -89,7 +89,7 @@ vi.mock("eventsource", () => ({
 // ─── Import after mock ───
 
 import { SseDataSourceAdapter } from "../src/index.js";
-import type { DataSourceConfig } from "../../../../src/types/data-source.js";
+import type { DataSourceConfig } from "pulseed";
 
 // ─── Helpers ───
 

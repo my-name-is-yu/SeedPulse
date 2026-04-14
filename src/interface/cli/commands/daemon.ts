@@ -16,7 +16,7 @@ import { Logger } from "../../../runtime/logger.js";
 import { DaemonRunner } from "../../../runtime/daemon/runner.js";
 import { PIDManager } from "../../../runtime/pid-manager.js";
 import { EventServer } from "../../../runtime/event/server.js";
-import { IngressGateway } from "../../../runtime/gateway/index.js";
+import { IngressGateway, SlackChannelAdapter } from "../../../runtime/gateway/index.js";
 import { CronScheduler } from "../../../runtime/cron-scheduler.js";
 import { ScheduleEngine } from "../../../runtime/schedule/engine.js";
 import { RuntimeWatchdog } from "../../../runtime/watchdog.js";
@@ -28,8 +28,6 @@ import { PluginLoader } from "../../../runtime/plugin-loader.js";
 import { NotifierRegistry } from "../../../runtime/notifier-registry.js";
 import { NotificationDispatcher } from "../../../runtime/notification-dispatcher.js";
 import { getNotificationConfigPath, loadNotificationConfig } from "../../../runtime/notification-routing.js";
-import { AdapterRegistry } from "../../../orchestrator/execution/adapter-layer.js";
-import { DataSourceRegistry } from "../../../platform/observation/data-source-adapter.js";
 import { getProviderRuntimeFingerprint } from "../../../base/llm/provider-config.js";
 import { buildDeps } from "../setup.js";
 import { formatOperationError } from "../utils.js";
@@ -37,6 +35,7 @@ import { getCliLogger } from "../cli-logger.js";
 import { getPulseedDirPath, getLogsDir, getEventsDir } from "../../../base/utils/paths.js";
 import { summarizeTaskOutcomeLedgers } from "../../../orchestrator/execution/task/task-outcome-ledger.js";
 import type { SupervisorState } from "../../../runtime/executor/index.js";
+import { createBuiltinTools } from "../../../tools/index.js";
 
 const WATCHDOG_CHILD_ENV = "PULSEED_WATCHDOG_CHILD";
 
@@ -286,17 +285,41 @@ export async function cmdStart(
     resolvedDaemonConfig.workspace_path,
   );
 
-  // Load notifier plugins and wire NotificationDispatcher
+  // Load plugins into the same registries used by the resident runtime.
   const notifierRegistry = new NotifierRegistry();
   const pluginsDir = path.join(os.homedir(), ".pulseed", "plugins");
-  const adapterRegistry = new AdapterRegistry();
-  const dataSourceRegistry = new DataSourceRegistry();
-  const pluginLoader = new PluginLoader(adapterRegistry, dataSourceRegistry, notifierRegistry, pluginsDir);
-  try {
-    await pluginLoader.loadAll();
-  } catch (err) {
-    getCliLogger().warn(`[daemon] Plugin loading failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
-  }
+
+  const loadPluginsIntoDeps = async (runtimeDeps: Awaited<ReturnType<typeof buildDeps>>): Promise<PluginLoader> => {
+    const pluginLoader = new PluginLoader(
+      runtimeDeps.adapterRegistry,
+      runtimeDeps.dataSourceRegistry,
+      notifierRegistry,
+      pluginsDir,
+      logger,
+      (adapter) => {
+        if (!runtimeDeps.observationEngine.getDataSources().some((source) => source.sourceId === adapter.sourceId)) {
+          runtimeDeps.observationEngine.addDataSource(adapter);
+        }
+      }
+    );
+    try {
+      await pluginLoader.loadAll();
+    } catch (err) {
+      getCliLogger().warn(`[daemon] Plugin loading failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    if (runtimeDeps.toolRegistry) {
+      for (const tool of createBuiltinTools({ pluginLoader, registry: runtimeDeps.toolRegistry })) {
+        if (!runtimeDeps.toolRegistry.get(tool.metadata.name)) {
+          runtimeDeps.toolRegistry.register(tool);
+        }
+      }
+    }
+
+    return pluginLoader;
+  };
+
+  const pluginLoader = await loadPluginsIntoDeps(deps);
   const daemonBaseDir = deps.stateManager.getBaseDir();
   const notificationConfig = await loadNotificationConfig(getNotificationConfigPath(daemonBaseDir));
   const notificationDispatcher = new NotificationDispatcher(notificationConfig, notifierRegistry);
@@ -309,6 +332,19 @@ export async function cmdStart(
     logger
   );
   const gateway = new IngressGateway(logger);
+  const slackGatewayConfig = resolvedDaemonConfig.gateway.slack;
+  if (slackGatewayConfig.enabled) {
+    if (!slackGatewayConfig.signing_secret) {
+      getCliLogger().warn("[daemon] gateway.slack.enabled is true but signing_secret is missing; Slack gateway disabled.");
+    } else {
+      const slackAdapter = new SlackChannelAdapter({
+        signingSecret: slackGatewayConfig.signing_secret,
+        channelGoalMap: slackGatewayConfig.channel_goal_map,
+      });
+      eventServer.setSlackChannelAdapter(slackAdapter, slackGatewayConfig.path);
+      gateway.registerAdapter(slackAdapter);
+    }
+  }
   notificationDispatcher.setRealtimeSink(async (report) => {
     eventServer.broadcast("notification_report", report);
   });
@@ -320,7 +356,7 @@ export async function cmdStart(
   const scheduleEngine = new ScheduleEngine({
     baseDir: daemonBaseDir,
     logger,
-    dataSourceRegistry,
+    dataSourceRegistry: deps.dataSourceRegistry,
     llmClient: deps.llmClient,
     coreLoop: deps.coreLoop,
     stateManager: deps.stateManager,
@@ -331,6 +367,7 @@ export async function cmdStart(
     knowledgeManager: deps.knowledgeManager,
   });
   await scheduleEngine.loadEntries();
+  await scheduleEngine.syncExternalSources(pluginLoader.getScheduleSources());
   await scheduleEngine.ensureSoilPublishSchedule();
 
   const refreshResidentDeps = async () => {
@@ -348,7 +385,7 @@ export async function cmdStart(
     const freshScheduleEngine = new ScheduleEngine({
       baseDir: daemonBaseDir,
       logger,
-      dataSourceRegistry,
+      dataSourceRegistry: freshDeps.dataSourceRegistry,
       llmClient: freshDeps.llmClient,
       coreLoop: freshDeps.coreLoop,
       stateManager: freshDeps.stateManager,
@@ -359,6 +396,8 @@ export async function cmdStart(
       knowledgeManager: freshDeps.knowledgeManager,
     });
     await freshScheduleEngine.loadEntries();
+    const freshPluginLoader = await loadPluginsIntoDeps(freshDeps);
+    await freshScheduleEngine.syncExternalSources(freshPluginLoader.getScheduleSources());
     await freshScheduleEngine.ensureSoilPublishSchedule();
 
     return {

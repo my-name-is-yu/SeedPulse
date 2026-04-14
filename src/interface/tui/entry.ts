@@ -92,9 +92,11 @@ async function buildDeps() {
   const { TreeLoopOrchestrator } = await import("../../orchestrator/goal/tree-loop-orchestrator.js");
   const { ScheduleEngine } = await import("../../runtime/schedule/engine.js");
   const { MemoryLifecycleManager, DriveScoreAdapter } = await import("../../platform/knowledge/memory/memory-lifecycle.js");
+  const { KnowledgeManager } = await import("../../platform/knowledge/knowledge-manager.js");
   const { CharacterConfigManager } = await import("../../platform/traits/character-config.js");
   const { ChatRunner } = await import("../../interface/chat/chat-runner.js");
   const { ToolRegistry, ToolExecutor, ToolPermissionManager, ConcurrencyController, createBuiltinTools } = await import("../../tools/index.js");
+  const { buildCliDataSourceRegistry } = await import("../cli/data-source-bootstrap.js");
   const {
     createNativeChatAgentLoopRunner,
     createNativeTaskAgentLoopRunner,
@@ -112,11 +114,15 @@ async function buildDeps() {
   const providerConfig = await loadProviderConfig();
   const trustManager = new TrustManager(stateManager);
   const driveSystem = new DriveSystem(stateManager);
-  const scheduleEngine = new ScheduleEngine({ baseDir: stateManager.getBaseDir() });
-  await scheduleEngine.loadEntries();
+  const dataSourceRegistry = await buildCliDataSourceRegistry(process.cwd(), getCliLogger());
   const toolRegistry = new ToolRegistry();
-  for (const tool of createBuiltinTools({ stateManager, trustManager, registry: toolRegistry, scheduleEngine })) {
-    toolRegistry.register(tool);
+  const registerToolIfMissing = (tool: ReturnType<typeof createBuiltinTools>[number]) => {
+    if (!toolRegistry.get(tool.metadata.name)) {
+      toolRegistry.register(tool);
+    }
+  };
+  for (const tool of createBuiltinTools({ stateManager, trustManager, registry: toolRegistry })) {
+    registerToolIfMissing(tool);
   }
 
   const contextProvider = createWorkspaceContextProvider(
@@ -149,7 +155,7 @@ async function buildDeps() {
     }
   );
 
-  const observationEngine = new ObservationEngine(stateManager, [], llmClient, contextProvider);
+  const observationEngine = new ObservationEngine(stateManager, dataSourceRegistry.getAllSources(), llmClient, contextProvider);
   const progressPredictor = new ProgressPredictor();
   const stallDetector = new StallDetector(stateManager, characterConfig, progressPredictor);
   const satisficingJudge = new SatisficingJudge(stateManager);
@@ -255,6 +261,7 @@ async function buildDeps() {
     memoryLifecycleManager = undefined;
     driveScoreAdapter = undefined;
   }
+  const knowledgeManager = new KnowledgeManager(stateManager, llmClient);
 
   const soilPrefetch = memoryLifecycleManager
     ? async (query: { query: string; rootDir: string; limit: number }) => {
@@ -337,6 +344,30 @@ async function buildDeps() {
     driveScoreAdapter,
     contextProvider,
   });
+
+  const scheduleEngine = new ScheduleEngine({
+    baseDir: stateManager.getBaseDir(),
+    dataSourceRegistry,
+    llmClient,
+    coreLoop,
+    stateManager,
+    reportingEngine,
+    memoryLifecycle: memoryLifecycleManager,
+    knowledgeManager,
+  });
+  await scheduleEngine.loadEntries();
+  for (const tool of createBuiltinTools({
+    stateManager,
+    trustManager,
+    registry: toolRegistry,
+    scheduleEngine,
+    adapterRegistry,
+    sessionManager,
+    observationEngine,
+    knowledgeManager,
+  })) {
+    registerToolIfMissing(tool);
+  }
 
   const goalNegotiator = new GoalNegotiator(
     stateManager,
@@ -502,10 +533,15 @@ async function startTUIDaemonMode(): Promise<void> {
   const stateManager = new StateManager(baseDir);
   await stateManager.init();
   const { TrustManager } = await import("../../platform/traits/trust-manager.js");
+  const { ScheduleEngine } = await import("../../runtime/schedule/engine.js");
+  const { buildCliDataSourceRegistry } = await import("../cli/data-source-bootstrap.js");
   const { ToolRegistry, ToolExecutor, ToolPermissionManager, ConcurrencyController, createBuiltinTools } = await import("../../tools/index.js");
   const trustManager = new TrustManager(stateManager);
   const toolRegistry = new ToolRegistry();
-  for (const tool of createBuiltinTools({ stateManager, trustManager })) {
+  const dataSourceRegistry = await buildCliDataSourceRegistry(process.cwd(), getCliLogger());
+  const scheduleEngine = new ScheduleEngine({ baseDir, dataSourceRegistry });
+  await scheduleEngine.loadEntries();
+  for (const tool of createBuiltinTools({ stateManager, trustManager, registry: toolRegistry, scheduleEngine })) {
     toolRegistry.register(tool);
   }
   const permissionManager = new ToolPermissionManager({

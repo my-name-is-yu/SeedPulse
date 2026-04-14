@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PagerDutyNotifier } from "../src/index.js";
-import type { NotificationEvent } from "../../../../src/types/plugin.js";
+import type { NotificationEvent } from "pulseed";
 
 // ─── Helpers ───
 
