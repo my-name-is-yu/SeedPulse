@@ -160,6 +160,36 @@ describe("DaemonClient snapshot + replay", () => {
       },
     });
   });
+
+  it("sends schedule run-now requests as daemon command envelopes", async () => {
+    const envelopes: unknown[] = [];
+    server.setCommandEnvelopeHook((envelope) => {
+      envelopes.push(envelope);
+    });
+    await server.start();
+
+    const client = new DaemonClient({
+      host: "127.0.0.1",
+      port: server.getPort(),
+      authToken: server.getAuthToken(),
+    });
+
+    await expect(client.runScheduleNow("sched-1", {
+      allowEscalation: true,
+    })).resolves.toEqual({ ok: true, scheduleId: "sched-1" });
+
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]).toMatchObject({
+      type: "command",
+      name: "schedule_run_now",
+      source: "http",
+      priority: "high",
+      payload: {
+        scheduleId: "sched-1",
+        allowEscalation: true,
+      },
+    });
+  });
 });
 
 describe("isDaemonRunning", () => {

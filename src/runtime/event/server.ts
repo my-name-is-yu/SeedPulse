@@ -477,6 +477,12 @@ export class EventServer {
       return;
     }
 
+    const scheduleRunMatch = /^\/schedules\/([^/]+)\/run$/.exec(urlPath);
+    if (req.method === "POST" && scheduleRunMatch) {
+      void this.handlePostScheduleRunNow(req, res, scheduleRunMatch[1]!);
+      return;
+    }
+
     // POST /goals/:id/start|stop|approve|chat
     const goalActionMatch = /^\/goals\/([^/]+)\/([^/]+)$/.exec(urlPath);
     if (req.method === "POST" && goalActionMatch) {
@@ -852,6 +858,36 @@ export class EventServer {
     } catch (err) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "Invalid runtime control request", details: String(err) }));
+    }
+  }
+
+  private async handlePostScheduleRunNow(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    rawScheduleId: string
+  ): Promise<void> {
+    const scheduleId = decodeURIComponent(rawScheduleId).trim();
+    if (!scheduleId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "scheduleId is required" }));
+      return;
+    }
+
+    try {
+      const body = await readBody(req);
+      const parsed = body.trim() ? JSON.parse(body) as Record<string, unknown> : {};
+      const allowEscalation = parsed["allowEscalation"] === true;
+      await this.dispatchCommandEnvelope({
+        name: "schedule_run_now",
+        priority: "high",
+        payload: { scheduleId, allowEscalation },
+      });
+      await this.broadcast("schedule_run_requested", { scheduleId, allowEscalation });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, scheduleId }));
+    } catch (err) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Invalid schedule run request", details: String(err) }));
     }
   }
 

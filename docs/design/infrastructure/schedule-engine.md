@@ -754,6 +754,9 @@ pulseed schedule resume <id>
 # Run immediately for validation
 pulseed schedule run <id>
 
+# If the daemon is resident, this queues the run into that daemon instead of
+# executing the schedule in a short-lived CLI process.
+
 # Remove
 pulseed schedule remove <id>
 

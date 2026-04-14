@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util";
 import type { StateManager } from "../../../../base/state/state-manager.js";
 import type { CharacterConfigManager } from "../../../../platform/traits/character-config.js";
+import { DaemonClient, isDaemonRunning } from "../../../../runtime/daemon/client.js";
 import { ScheduleEngine } from "../../../../runtime/schedule/engine.js";
 import type { ScheduleEntry } from "../../../../runtime/types/schedule.js";
 import { buildDeps } from "../../setup.js";
@@ -47,6 +48,27 @@ async function buildScheduleRunEngine(
   return engine;
 }
 
+async function requestDaemonRunNow(
+  stateManager: StateManager,
+  entry: ScheduleEntry,
+  allowEscalation: boolean,
+): Promise<boolean> {
+  const daemon = await isDaemonRunning(stateManager.getBaseDir());
+  if (!daemon.running) {
+    return false;
+  }
+
+  const client = new DaemonClient({
+    host: "127.0.0.1",
+    port: daemon.port,
+    authToken: daemon.authToken,
+    baseDir: stateManager.getBaseDir(),
+  });
+  await client.runScheduleNow(entry.id, { allowEscalation });
+  console.log(`Requested daemon schedule run: ${entry.id} (${entry.name})`);
+  return true;
+}
+
 export async function scheduleRunNow(
   stateManager: StateManager,
   characterConfigManager: CharacterConfigManager | undefined,
@@ -74,6 +96,9 @@ export async function scheduleRunNow(
 
   try {
     const allowEscalation = parsed.values["with-escalation"] === true;
+    const daemonAccepted = await requestDaemonRunNow(stateManager, preflightEntry, allowEscalation);
+    if (daemonAccepted) return;
+
     const runEngine = await buildScheduleRunEngine(
       stateManager,
       characterConfigManager,

@@ -170,7 +170,7 @@ Common scriptable commands:
 | `pulseed schedule edit <id>` | Edit a schedule entry's name, trigger, enabled state, or layer config |
 | `pulseed schedule pause <id>` | Pause a schedule without deleting it |
 | `pulseed schedule resume <id>` | Resume a paused schedule |
-| `pulseed schedule run <id>` | Run a schedule entry immediately for validation |
+| `pulseed schedule run <id>` | Run a schedule entry immediately, using the resident daemon when it is running |
 | `pulseed schedule history <id>` | Show recent schedule execution history |
 
 ## 10. Practical guidance

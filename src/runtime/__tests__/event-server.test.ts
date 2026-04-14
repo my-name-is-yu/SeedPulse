@@ -598,6 +598,30 @@ describe("goal action commands", () => {
     );
   });
 
+  it("sends schedule run-now requests through the command hook as command envelopes", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    server.setCommandEnvelopeHook((envelope) => {
+      seen.push(envelope as unknown as Record<string, unknown>);
+    });
+
+    const result = await makeRequest(port, "POST", "/schedules/sched-1/run", {
+      allowEscalation: true,
+    });
+
+    expect(result.status).toBe(200);
+    expect(JSON.parse(result.body)).toEqual({ ok: true, scheduleId: "sched-1" });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toEqual(
+      expect.objectContaining({
+        type: "command",
+        name: "schedule_run_now",
+        source: "http",
+        priority: "high",
+        payload: { scheduleId: "sched-1", allowEscalation: true },
+      })
+    );
+  });
+
   it("rejects approval responses for unknown requests before command accept", async () => {
     const hook = vi.fn();
     server.setCommandEnvelopeHook(hook);

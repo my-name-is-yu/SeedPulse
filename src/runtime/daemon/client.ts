@@ -47,6 +47,11 @@ export interface DaemonHealthProbeResult {
   error?: string;
 }
 
+export interface DaemonScheduleRunNowResponse {
+  ok: boolean;
+  scheduleId: string;
+}
+
 type EventHandler = (data: unknown) => void;
 
 const DAEMON_TOKEN_FILENAME = "daemon-token.json";
@@ -308,6 +313,16 @@ export class DaemonClient {
 
   async requestRuntimeControl(input: DaemonRuntimeControlRequestBody): Promise<{ ok: boolean }> {
     return this.post("/daemon/runtime-control", input);
+  }
+
+  async runScheduleNow(
+    scheduleId: string,
+    input: { allowEscalation?: boolean } = {}
+  ): Promise<DaemonScheduleRunNowResponse> {
+    return this.post(
+      `/schedules/${encodeURIComponent(scheduleId)}/run`,
+      { allowEscalation: input.allowEscalation === true }
+    ) as Promise<DaemonScheduleRunNowResponse>;
   }
 
   async getStatus(): Promise<unknown> {

@@ -28,6 +28,11 @@ export interface CommandDispatcherDeps {
     kind: RuntimeControlOperationKind,
     envelope: Envelope
   ) => Promise<void> | void;
+  onScheduleRunNow?: (
+    scheduleId: string,
+    allowEscalation: boolean,
+    envelope: Envelope
+  ) => Promise<void> | void;
 }
 
 export interface CommandDispatcherConfig {
@@ -155,6 +160,15 @@ export class CommandDispatcher {
           throw new Error("runtime_control command is missing operationId");
         }
         await this.deps.onRuntimeControl?.(operationId, kind, envelope);
+        return;
+      }
+      case "schedule_run_now": {
+        const scheduleId = this.readStringField(envelope.payload, "scheduleId");
+        const allowEscalation = this.readBooleanField(envelope.payload, "allowEscalation") ?? false;
+        if (!scheduleId) {
+          throw new Error("schedule_run_now command is missing scheduleId");
+        }
+        await this.deps.onScheduleRunNow?.(scheduleId, allowEscalation, envelope);
         return;
       }
       default:

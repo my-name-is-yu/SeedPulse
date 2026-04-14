@@ -80,6 +80,7 @@ function makeScheduleEngine(entries: ReturnType<typeof makeScheduleEntry>[] = []
     addEntry: vi.fn().mockResolvedValue(makeScheduleEntry()),
     updateEntry: vi.fn().mockResolvedValue(null),
     removeEntry: vi.fn().mockResolvedValue(false),
+    runEntryNow: vi.fn().mockResolvedValue(null),
   } as unknown as ScheduleEngine;
 }
 
@@ -137,6 +138,7 @@ describe("ChatRunner schedule integration", () => {
     expect(parsed.seenTools).toContain("list_schedules");
     expect(registry.get("create_schedule")).toBeDefined();
     expect(registry.get("list_schedules")).toBeDefined();
+    expect(registry.get("run_schedule")).toBeDefined();
   });
 
   it("runs list_schedules through the chat tool execution path", async () => {
@@ -234,6 +236,70 @@ describe("ChatRunner schedule integration", () => {
       "Creating a persistent schedule changes background automation and requires approval",
     );
     expect(vi.mocked(scheduleEngine.addEntry)).toHaveBeenCalledOnce();
+  });
+
+  it("routes run_schedule through approvalFn before executing", async () => {
+    const entry = makeScheduleEntry();
+    const scheduleEngine = makeScheduleEngine([entry]);
+    vi.mocked(scheduleEngine.runEntryNow).mockResolvedValue({
+      entry,
+      reason: "manual_run",
+      result: {
+        entry_id: entry.id,
+        status: "ok",
+        duration_ms: 2,
+        fired_at: "2026-04-08T00:00:00.000Z",
+        layer: "cron",
+        tokens_used: 0,
+        escalated_to: null,
+        output_summary: "done",
+      },
+    });
+    const registry = buildRegistry(scheduleEngine);
+    const approvalFn = vi.fn().mockResolvedValue(true);
+    const llmClient = {
+      supportsToolCalling: () => true,
+      sendMessage: vi.fn()
+        .mockResolvedValueOnce({
+          content: "",
+          tool_calls: [
+            {
+              id: "tool-call-1",
+              function: {
+                name: "run_schedule",
+                arguments: JSON.stringify({
+                  schedule_id: entry.id.slice(0, 8),
+                }),
+              },
+            },
+          ],
+          usage: { input_tokens: 1, output_tokens: 1 },
+          stop_reason: "tool_use",
+        })
+        .mockResolvedValueOnce({
+          content: "Ran schedule",
+          tool_calls: [],
+          usage: { input_tokens: 1, output_tokens: 1 },
+          stop_reason: "completed",
+        }),
+    };
+
+    const runner = new ChatRunner(makeDeps({
+      registry,
+      llmClient: llmClient as never,
+      approvalFn,
+    }));
+
+    await runner.execute("run the daily digest schedule now", "/tmp");
+
+    expect(approvalFn).toHaveBeenCalledOnce();
+    expect(approvalFn).toHaveBeenCalledWith(
+      "Running a persistent schedule may execute background automation and requires approval",
+    );
+    expect(vi.mocked(scheduleEngine.runEntryNow)).toHaveBeenCalledWith(
+      entry.id,
+      { allowEscalation: false, preserveEnabled: true },
+    );
   });
 
   it("supports preset-based schedule creation through the chat tool path", async () => {

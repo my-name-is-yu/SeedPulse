@@ -80,6 +80,7 @@ export { ListSchedulesTool } from "../schedule/ListSchedulesTool/ListSchedulesTo
 export { PauseScheduleTool } from "../schedule/PauseScheduleTool/PauseScheduleTool.js";
 export { RemoveScheduleTool } from "../schedule/RemoveScheduleTool/RemoveScheduleTool.js";
 export { ResumeScheduleTool } from "../schedule/ResumeScheduleTool/ResumeScheduleTool.js";
+export { RunScheduleTool } from "../schedule/RunScheduleTool/RunScheduleTool.js";
 export { UpdateScheduleTool } from "../schedule/UpdateScheduleTool/UpdateScheduleTool.js";
 
 import { GlobTool } from "../fs/GlobTool/GlobTool.js";
@@ -161,6 +162,7 @@ import { ListSchedulesTool } from "../schedule/ListSchedulesTool/ListSchedulesTo
 import { PauseScheduleTool } from "../schedule/PauseScheduleTool/PauseScheduleTool.js";
 import { RemoveScheduleTool } from "../schedule/RemoveScheduleTool/RemoveScheduleTool.js";
 import { ResumeScheduleTool } from "../schedule/ResumeScheduleTool/ResumeScheduleTool.js";
+import { RunScheduleTool } from "../schedule/RunScheduleTool/RunScheduleTool.js";
 import { UpdateScheduleTool } from "../schedule/UpdateScheduleTool/UpdateScheduleTool.js";
 import type { AdapterRegistry } from "../../orchestrator/execution/adapter-layer.js";
 import type { SessionManager } from "../../orchestrator/execution/session-manager.js";
@@ -317,6 +319,7 @@ export function createBuiltinTools(deps?: BuiltinToolDeps): ITool[] {
       new RemoveScheduleTool(deps.scheduleEngine),
       new PauseScheduleTool(deps.scheduleEngine),
       new ResumeScheduleTool(deps.scheduleEngine),
+      new RunScheduleTool(deps.scheduleEngine),
     );
   }
 

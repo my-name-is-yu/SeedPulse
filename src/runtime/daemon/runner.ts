@@ -18,6 +18,7 @@ import { DaemonConfigSchema, DaemonStateSchema, ResidentActivitySchema } from ".
 import type { ILLMClient } from "../../base/llm/llm-client.js";
 import { CronScheduler } from "../cron-scheduler.js";
 import { ScheduleEngine } from "../schedule/engine.js";
+import { resolveScheduleEntry } from "../schedule/entry-resolver.js";
 import type { MemoryLifecycleManager } from "../../platform/knowledge/memory/memory-lifecycle.js";
 import type { KnowledgeManager } from "../../platform/knowledge/knowledge-manager.js";
 import { lintAgentMemory } from "../../platform/knowledge/knowledge-manager-lint.js";
@@ -596,6 +597,11 @@ export class DaemonRunner {
           this.runCommandWithHealth("approval_response", () => this.handleApprovalResponseCommand(goalId, requestId, approved)),
         onRuntimeControl: async (operationId, kind) =>
           this.runCommandWithHealth("runtime_control", () => this.handleRuntimeControlCommand(operationId, kind)),
+        onScheduleRunNow: async (scheduleId, allowEscalation) =>
+          this.runCommandWithHealth(
+            "schedule_run_now",
+            () => this.handleScheduleRunNowCommand(scheduleId, allowEscalation)
+          ),
       });
     }
 
@@ -1219,6 +1225,37 @@ export class DaemonRunner {
     setTimeout(() => {
       this.beginGracefulShutdown();
     }, 25).unref?.();
+  }
+
+  private async handleScheduleRunNowCommand(
+    scheduleId: string,
+    allowEscalation: boolean
+  ): Promise<void> {
+    if (!this.scheduleEngine) {
+      throw new Error("ScheduleEngine is not configured");
+    }
+
+    await this.scheduleEngine.loadEntries();
+    const entry = resolveScheduleEntry(this.scheduleEngine.getEntries(), scheduleId);
+    if (!entry) {
+      throw new Error(`Schedule not found: ${scheduleId}`);
+    }
+
+    const run = await this.scheduleEngine.runEntryNow(entry.id, {
+      allowEscalation,
+      preserveEnabled: true,
+    });
+    if (!run) {
+      throw new Error(`Schedule not found: ${scheduleId}`);
+    }
+
+    this.logger.info("Schedule run-now completed", {
+      schedule_id: entry.id,
+      schedule_name: entry.name,
+      status: run.result.status,
+      reason: run.reason,
+      allow_escalation: allowEscalation,
+    });
   }
 
   private async handleGoalCompletion(goalId: string, result: { status: string; totalIterations: number }): Promise<void> {

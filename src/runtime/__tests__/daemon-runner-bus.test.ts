@@ -264,6 +264,75 @@ describe("DaemonRunner durable runtime wiring", () => {
     );
   });
 
+  it("dispatches schedule_run_now commands through the daemon ScheduleEngine", async () => {
+    const mockEventServer = {
+      setEnvelopeHook: vi.fn(),
+      setCommandEnvelopeHook: vi.fn(),
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      startFileWatcher: vi.fn(),
+      stopFileWatcher: vi.fn(),
+      getPort: vi.fn().mockReturnValue(41700),
+      setActiveWorkersProvider: vi.fn(),
+    };
+
+    let capturedCommandHook:
+      | ((envelope: import("../types/envelope.js").Envelope) => void | Promise<void>)
+      | undefined;
+    mockEventServer.setCommandEnvelopeHook.mockImplementation(
+      (hook: (envelope: import("../types/envelope.js").Envelope) => void | Promise<void>) => {
+        capturedCommandHook = hook;
+      }
+    );
+
+    const entry = {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      name: "Daily digest",
+    };
+    const mockScheduleEngine = {
+      loadEntries: vi.fn().mockResolvedValue([entry]),
+      getEntries: vi.fn().mockReturnValue([entry]),
+      runEntryNow: vi.fn().mockResolvedValue({
+        entry,
+        reason: "manual_run",
+        result: {
+          status: "ok",
+        },
+      }),
+    };
+    const deps = makeDeps(tmpDir, {
+      eventServer: mockEventServer as any,
+      scheduleEngine: mockScheduleEngine as any,
+      config: { check_interval_ms: 50 },
+    });
+
+    const daemon = new DaemonRunner(deps);
+    currentDaemon = daemon;
+    currentStartPromise = daemon.start([]);
+
+    await waitFor(() => capturedCommandHook !== undefined);
+
+    await capturedCommandHook?.(
+      createEnvelope({
+        type: "command",
+        name: "schedule_run_now",
+        source: "http",
+        payload: {
+          scheduleId: "aaaaaaaa",
+          allowEscalation: true,
+        },
+      })
+    );
+
+    await waitFor(() => mockScheduleEngine.runEntryNow.mock.calls.length > 0);
+
+    expect(mockScheduleEngine.loadEntries).toHaveBeenCalled();
+    expect(mockScheduleEngine.runEntryNow).toHaveBeenCalledWith(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      { allowEscalation: true, preserveEnabled: true }
+    );
+  });
+
   it("dispatches durable chat_message commands into DriveSystem events", async () => {
     const mockEventServer = {
       setEnvelopeHook: vi.fn(),
