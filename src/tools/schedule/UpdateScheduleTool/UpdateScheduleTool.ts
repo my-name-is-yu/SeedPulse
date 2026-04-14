@@ -11,6 +11,7 @@ import {
   ScheduleEngine,
   type ScheduleEntryUpdateInput,
 } from "../../../runtime/schedule/engine.js";
+import { resolveScheduleEntry } from "../../../runtime/schedule/entry-resolver.js";
 import {
   CronConfigSchema,
   EscalationConfigSchema,
@@ -58,23 +59,6 @@ export type UpdateScheduleInput = z.infer<typeof UpdateScheduleInputSchema>;
 
 export interface UpdateScheduleOutput {
   entry: ScheduleEntry;
-}
-
-function resolveScheduleEntry(entries: ScheduleEntry[], scheduleId: string): ScheduleEntry | null {
-  const exact = entries.find((entry) => entry.id === scheduleId);
-  if (exact) {
-    return exact;
-  }
-
-  const matches = entries.filter((entry) => entry.id.startsWith(scheduleId));
-  if (matches.length === 1) {
-    return matches[0]!;
-  }
-  if (matches.length > 1) {
-    throw new Error(`Schedule ID prefix is ambiguous: ${scheduleId}`);
-  }
-
-  return null;
 }
 
 export class UpdateScheduleTool implements ITool<UpdateScheduleInput, UpdateScheduleOutput> {

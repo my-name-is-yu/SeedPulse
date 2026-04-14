@@ -9,6 +9,7 @@ import type {
 } from "../../types.js";
 import type { ScheduleEngine } from "../../../runtime/schedule/engine.js";
 import type { ScheduleEntry } from "../../../runtime/types/schedule.js";
+import { resolveScheduleEntry } from "../../../runtime/schedule/entry-resolver.js";
 import { DESCRIPTION } from "./prompt.js";
 import { TAGS, CATEGORY as _CATEGORY, READ_ONLY, PERMISSION_LEVEL } from "./constants.js";
 
@@ -19,23 +20,6 @@ export type ResumeScheduleInput = z.infer<typeof ResumeScheduleInputSchema>;
 
 export interface ResumeScheduleOutput {
   entry: ScheduleEntry;
-}
-
-function resolveScheduleEntry(entries: ScheduleEntry[], scheduleId: string): ScheduleEntry | null {
-  const exact = entries.find((entry) => entry.id === scheduleId);
-  if (exact) {
-    return exact;
-  }
-
-  const matches = entries.filter((entry) => entry.id.startsWith(scheduleId));
-  if (matches.length === 1) {
-    return matches[0]!;
-  }
-  if (matches.length > 1) {
-    throw new Error(`Schedule ID prefix is ambiguous: ${scheduleId}`);
-  }
-
-  return null;
 }
 
 export class ResumeScheduleTool implements ITool<ResumeScheduleInput, ResumeScheduleOutput> {

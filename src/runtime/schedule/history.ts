@@ -12,7 +12,7 @@ import { z } from "zod";
 const HISTORY_FILE = "schedule-history.json";
 const DEFAULT_MAX_RECENT = 500;
 
-export const ScheduleRunReasonSchema = z.enum(["cadence", "retry", "escalation_target"]);
+export const ScheduleRunReasonSchema = z.enum(["cadence", "retry", "escalation_target", "manual_run"]);
 export type ScheduleRunReason = z.infer<typeof ScheduleRunReasonSchema>;
 
 export const ScheduleRunHistoryRecordSchema = ScheduleResultSchema.extend({

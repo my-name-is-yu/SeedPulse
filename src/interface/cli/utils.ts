@@ -49,6 +49,11 @@ Usage:
   pulseed daemon status                Show running daemon status
   pulseed daemon ping                  Check daemon responsiveness
   pulseed cron --goal <id>             Print crontab entry for a goal
+  pulseed schedule list                List schedule entries
+  pulseed schedule edit <id>           Edit a schedule entry
+  pulseed schedule pause <id>          Pause a schedule without deleting it
+  pulseed schedule resume <id>         Resume a paused schedule
+  pulseed schedule run <id>            Run a schedule entry immediately
   pulseed config show                  Show current configuration
   pulseed config set <key> <value>     Set a configuration value
   pulseed config get <key>             Get a configuration value

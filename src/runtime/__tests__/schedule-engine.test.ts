@@ -252,6 +252,34 @@ describe("ScheduleEngine", () => {
     expect(updated!.next_fire_at).not.toBe("2026-04-07T00:00:00.000Z");
   });
 
+  it("runEntryNow executes immediately without resuming a paused entry", async () => {
+    const entry = await engine.addEntry({
+      name: "manual-run-check",
+      layer: "heartbeat",
+      trigger: { type: "interval", seconds: 60, jitter_factor: 0 },
+      enabled: false,
+      heartbeat: {
+        check_type: "custom",
+        check_config: { command: "echo ok" },
+        failure_threshold: 3,
+        timeout_ms: 5000,
+      },
+    });
+
+    const run = await engine.runEntryNow(entry.id);
+
+    expect(run?.result.status).toBe("ok");
+    const updated = engine.getEntries()[0]!;
+    expect(updated.enabled).toBe(false);
+    expect(updated.total_executions).toBe(1);
+    expect(updated.last_fired_at).not.toBeNull();
+
+    const history = await engine.getRecentHistory(10, entry.id);
+    expect(history).toHaveLength(1);
+    expect(history[0]!.reason).toBe("manual_run");
+    expect(history[0]!.status).toBe("ok");
+  });
+
   it("updateEntry rejects layer config updates that do not match the entry layer", async () => {
     const entry = await engine.addEntry({
       name: "layer-mismatch-check",

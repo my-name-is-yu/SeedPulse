@@ -325,7 +325,7 @@ export async function dispatchCommand(
   }
 
   if (subcommand === "schedule") {
-    await cmdSchedule(stateManager, argv.slice(1));
+    await cmdSchedule(stateManager, argv.slice(1), characterConfigManager);
     return 0;
   }
 

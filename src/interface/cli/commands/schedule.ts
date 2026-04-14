@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util";
 import { ScheduleEngine } from "../../../runtime/schedule/engine.js";
 import type { StateManager } from "../../../base/state/state-manager.js";
+import type { CharacterConfigManager } from "../../../platform/traits/character-config.js";
 import {
   buildSchedulePresetEntry,
   listSchedulePresetDefinitions,
@@ -8,10 +9,15 @@ import {
 } from "../../../runtime/schedule/presets.js";
 import { DreamScheduleSuggestionStore } from "../../../platform/dream/dream-schedule-suggestions.js";
 import type { ScheduleTriggerInput } from "../../../runtime/types/schedule.js";
+import { scheduleEdit } from "./schedule/edit.js";
+import { scheduleHistory } from "./schedule/history.js";
+import { scheduleRunNow } from "./schedule/run-now.js";
+import { getScheduleOrPrintError } from "./schedule/shared.js";
 
 export async function cmdSchedule(
   stateManager: StateManager,
   argv: string[],
+  characterConfigManager?: CharacterConfigManager,
 ): Promise<void> {
   const subcommand = argv[0];
   const baseDir = stateManager.getBaseDir();
@@ -21,8 +27,25 @@ export async function cmdSchedule(
   switch (subcommand) {
     case "list":
       return await scheduleList(engine);
+    case "show":
+    case "get":
+      return scheduleShow(engine, argv.slice(1));
     case "add":
       return await scheduleAdd(engine, argv.slice(1));
+    case "edit":
+    case "update":
+      return await scheduleEdit(engine, argv.slice(1));
+    case "pause":
+    case "disable":
+      return await scheduleSetEnabled(engine, argv.slice(1), false);
+    case "resume":
+    case "enable":
+      return await scheduleSetEnabled(engine, argv.slice(1), true);
+    case "run":
+    case "run-now":
+      return await scheduleRunNow(stateManager, characterConfigManager, engine, argv.slice(1));
+    case "history":
+      return await scheduleHistory(engine, argv.slice(1));
     case "remove":
       return await scheduleRemove(engine, argv.slice(1));
     case "presets":
@@ -30,9 +53,15 @@ export async function cmdSchedule(
     case "suggestions":
       return await scheduleSuggestions(baseDir, engine, argv.slice(1));
     default:
-      console.log("Usage: pulseed schedule <list|add|remove|presets|suggestions>");
+      console.log("Usage: pulseed schedule <list|show|add|edit|pause|resume|run|history|remove|presets|suggestions>");
       console.log("  list                              List all schedule entries");
+      console.log("  show <id>                         Show one schedule entry as JSON");
       console.log("  add                               Add a heartbeat entry or preset");
+      console.log("  edit <id>                         Edit name, trigger, enabled state, or layer config");
+      console.log("  pause <id>                        Disable a schedule entry without deleting it");
+      console.log("  resume <id>                       Re-enable a paused schedule entry");
+      console.log("  run <id>                          Run a schedule entry immediately");
+      console.log("  history <id> [--limit <n>]        Show recent execution history");
       console.log("  remove <id>                       Remove a schedule entry");
       console.log("  presets                           List reusable schedule presets");
       console.log("  suggestions <list|apply|reject|dismiss>  Review dream-generated suggestions");
@@ -58,6 +87,23 @@ async function scheduleList(engine: ScheduleEngine): Promise<void> {
       `  ${entry.id.slice(0, 8)}  [${entry.layer}] ${entry.name}  (${schedule})  ${status}  source: ${source}  last: ${lastFired}`
     );
   }
+}
+
+function scheduleShow(engine: ScheduleEngine, argv: string[]): void {
+  const entry = getScheduleOrPrintError(engine, argv[0]);
+  if (!entry) return;
+  console.log(JSON.stringify(entry, null, 2));
+}
+
+async function scheduleSetEnabled(engine: ScheduleEngine, argv: string[], enabled: boolean): Promise<void> {
+  const entry = getScheduleOrPrintError(engine, argv[0]);
+  if (!entry) return;
+  const updated = await engine.updateEntry(entry.id, { enabled });
+  if (!updated) {
+    console.error(`No schedule entry found matching: ${argv[0]}`);
+    return;
+  }
+  console.log(`${enabled ? "Resumed" : "Paused"} schedule entry: ${updated.id} (${updated.name})`);
 }
 
 function resolveOptionalTrigger(values: { cron?: string; interval?: string }): ScheduleTriggerInput | undefined {
@@ -95,6 +141,11 @@ function buildPresetInput(values: Record<string, unknown>): SchedulePresetInput 
           : typeof values["context-source"] === "string"
             ? [values["context-source"] as string]
             : [],
+      };
+    case "soil_publish":
+      return {
+        ...common,
+        preset: "soil_publish",
       };
     case "goal_probe":
       if (typeof values["data-source-id"] !== "string" || values["data-source-id"].length === 0) {
@@ -201,17 +252,8 @@ async function scheduleAdd(engine: ScheduleEngine, argv: string[]): Promise<void
 }
 
 async function scheduleRemove(engine: ScheduleEngine, argv: string[]): Promise<void> {
-  const id = argv[0];
-  if (!id) {
-    console.error("Error: schedule entry ID is required");
-    return;
-  }
-  const entries = engine.getEntries();
-  const match = entries.find((entry) => entry.id === id || entry.id.startsWith(id));
-  if (!match) {
-    console.error(`No schedule entry found matching: ${id}`);
-    return;
-  }
+  const match = getScheduleOrPrintError(engine, argv[0]);
+  if (!match) return;
   await engine.removeEntry(match.id);
   console.log(`Removed schedule entry: ${match.id} (${match.name})`);
 }

@@ -56,6 +56,17 @@ interface DueEntryDescriptor {
   scheduledFor: string | null;
 }
 
+export interface RunScheduleNowOptions {
+  preserveEnabled?: boolean;
+  allowEscalation?: boolean;
+}
+
+export interface RunScheduleNowResult {
+  entry: ScheduleEntry | null;
+  result: ScheduleResult;
+  reason: ScheduleRunReason;
+}
+
 interface ScheduleEngineDeps {
   baseDir: string;
   logger?: {
@@ -316,6 +327,65 @@ export class ScheduleEngine {
     return filtered.slice(-limit);
   }
 
+  async runEntryNow(
+    entryId: string,
+    options: RunScheduleNowOptions = {}
+  ): Promise<RunScheduleNowResult | null> {
+    const entry = this.entries.find((candidate) => candidate.id === entryId);
+    if (!entry) {
+      return null;
+    }
+
+    const scheduledFor = new Date().toISOString();
+    const immediateEntry = {
+      ...entry,
+      enabled: true,
+      next_fire_at: scheduledFor,
+    };
+    const executedResult = await this.executeEntry(immediateEntry);
+    const applied = await this.applyExecutionOutcome(
+      entry.id,
+      executedResult,
+      "manual_run",
+      scheduledFor,
+      { preserveEnabled: options.preserveEnabled ?? true }
+    );
+
+    let finalResult = executedResult;
+    if (options.allowEscalation && applied?.entry) {
+      const escalationResult = await this.checkEscalation(applied.entry, executedResult);
+      if (escalationResult !== null) {
+        finalResult = escalationResult;
+      }
+    }
+
+    if (applied) {
+      await this.saveEntries();
+      await this.recordHistory({
+        entry_id: applied.entry?.id ?? entry.id,
+        entry_name: applied.entry?.name ?? entry.name,
+        layer: entry.layer,
+        result: {
+          ...finalResult,
+          failure_kind: applied.failureKind,
+        },
+        reason: "manual_run",
+        attempt: applied.attempt,
+        scheduled_for: scheduledFor,
+        started_at: applied.startedAt,
+        finished_at: applied.finishedAt,
+        retry_at: applied.retryAt,
+        failure_kind: applied.failureKind,
+      });
+    }
+
+    return {
+      entry: applied?.entry ?? null,
+      result: finalResult,
+      reason: "manual_run",
+    };
+  }
+
   private async getDueEntryDescriptors(): Promise<DueEntryDescriptor[]> {
     const now = Date.now();
     return this.entries.flatMap((entry) => {
@@ -539,7 +609,8 @@ export class ScheduleEngine {
     entryId: string,
     result: ScheduleResult,
     _reason: ScheduleRunReason,
-    scheduledFor: string | null
+    scheduledFor: string | null,
+    options: { preserveEnabled?: boolean } = {}
   ): Promise<{
     entry: ScheduleEntry | null;
     attempt: number;
@@ -583,7 +654,7 @@ export class ScheduleEngine {
 
     this.entries[idx] = {
       ...entry,
-      enabled: true,
+      enabled: options.preserveEnabled ? entry.enabled : true,
       last_fired_at: result.fired_at,
       next_fire_at: this.computeNextFireAt(entry.trigger),
       updated_at: new Date().toISOString(),

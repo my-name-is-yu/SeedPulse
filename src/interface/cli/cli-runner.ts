@@ -14,6 +14,10 @@
 //   pulseed start --goal <id>          Start daemon mode for one or more goals
 //   pulseed stop                       Stop the running daemon
 //   pulseed cron --goal <id>           Print crontab entry for a goal
+//   pulseed schedule list              List schedule entries
+//   pulseed schedule pause <id>        Pause a schedule entry
+//   pulseed schedule resume <id>       Resume a paused schedule entry
+//   pulseed schedule run <id>          Run a schedule entry immediately
 //   pulseed cleanup                    Archive all completed goals and remove stale data
 //   pulseed improve [path]             Analyze, suggest goals, and run improvement loop
 //   pulseed suggest "<context>"        Suggest improvement goals for a project

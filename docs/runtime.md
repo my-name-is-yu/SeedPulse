@@ -40,6 +40,26 @@ It keeps the runtime alive for long-running goal work and recovery.
 The normal user-facing path is to ask PulSeed to keep a goal moving in the background.
 Scriptable daemon and cron subcommands remain lower-level controls.
 
+## Schedule Operations
+
+PulSeed schedules are managed by the ScheduleEngine, which supports heartbeat,
+probe, cron, and goal-trigger entries. The scriptable lifecycle commands are:
+
+```bash
+pulseed schedule list
+pulseed schedule show <id>
+pulseed schedule add --preset daily_brief
+pulseed schedule edit <id> --name "Morning brief" --cron "0 9 * * *" --timezone Asia/Tokyo
+pulseed schedule pause <id>
+pulseed schedule resume <id>
+pulseed schedule run <id>
+pulseed schedule history <id> --limit 10
+pulseed schedule remove <id>
+```
+
+`run` executes an entry immediately and records it as manual history. It does
+not resume a paused schedule unless `resume` is used separately.
+
 ## What runtime does not explain
 
 This page does not restate the loop model, verification model, or completion model in full.

@@ -97,4 +97,100 @@ describe("cmdSchedule", () => {
       cleanupTempDir(tempDir);
     }
   });
+
+  it("pauses, resumes, and edits a schedule entry", async () => {
+    const tempDir = makeTempDir("schedule-command-lifecycle-");
+    try {
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await cmdSchedule(makeStateManager(tempDir), [
+        "add",
+        "--name",
+        "custom-check",
+        "--type",
+        "custom",
+        "--command",
+        "echo ok",
+        "--interval",
+        "60",
+      ]);
+
+      let engine = new ScheduleEngine({ baseDir: tempDir });
+      await engine.loadEntries();
+      const id = engine.getEntries()[0]!.id;
+
+      await cmdSchedule(makeStateManager(tempDir), ["pause", id.slice(0, 8)]);
+      engine = new ScheduleEngine({ baseDir: tempDir });
+      await engine.loadEntries();
+      expect(engine.getEntries()[0]!.enabled).toBe(false);
+
+      await cmdSchedule(makeStateManager(tempDir), ["resume", id.slice(0, 8)]);
+      engine = new ScheduleEngine({ baseDir: tempDir });
+      await engine.loadEntries();
+      expect(engine.getEntries()[0]!.enabled).toBe(true);
+
+      await cmdSchedule(makeStateManager(tempDir), [
+        "edit",
+        id.slice(0, 8),
+        "--name",
+        "renamed-check",
+        "--cron",
+        "0 9 * * *",
+        "--timezone",
+        "Asia/Tokyo",
+        "--disabled",
+      ]);
+
+      engine = new ScheduleEngine({ baseDir: tempDir });
+      await engine.loadEntries();
+      expect(engine.getEntries()[0]).toEqual(expect.objectContaining({
+        name: "renamed-check",
+        enabled: false,
+        trigger: { type: "cron", expression: "0 9 * * *", timezone: "Asia/Tokyo" },
+      }));
+    } finally {
+      cleanupTempDir(tempDir);
+    }
+  });
+
+  it("runs a paused schedule entry immediately without resuming it and exposes history", async () => {
+    const tempDir = makeTempDir("schedule-command-run-now-");
+    try {
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await cmdSchedule(makeStateManager(tempDir), [
+        "add",
+        "--name",
+        "manual-run-check",
+        "--type",
+        "custom",
+        "--command",
+        "echo ok",
+        "--interval",
+        "60",
+      ]);
+
+      let engine = new ScheduleEngine({ baseDir: tempDir });
+      await engine.loadEntries();
+      const id = engine.getEntries()[0]!.id;
+
+      await cmdSchedule(makeStateManager(tempDir), ["pause", id]);
+      await cmdSchedule(makeStateManager(tempDir), ["run", id]);
+
+      engine = new ScheduleEngine({ baseDir: tempDir });
+      await engine.loadEntries();
+      expect(engine.getEntries()[0]!.enabled).toBe(false);
+      expect(engine.getEntries()[0]!.total_executions).toBe(1);
+
+      const history = await engine.getRecentHistory(10, id);
+      expect(history).toHaveLength(1);
+      expect(history[0]!.reason).toBe("manual_run");
+      expect(history[0]!.status).toBe("ok");
+
+      await cmdSchedule(makeStateManager(tempDir), ["history", id, "--limit", "1"]);
+      expect(logSpy.mock.calls.some((call) => String(call[0]).includes("manual_run"))).toBe(true);
+    } finally {
+      cleanupTempDir(tempDir);
+    }
+  });
 });

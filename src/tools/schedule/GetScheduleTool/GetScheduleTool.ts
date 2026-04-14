@@ -7,8 +7,8 @@ import type {
   ToolMetadata,
   ToolResult,
 } from "../../types.js";
-import type { ScheduleEntry } from "../../../runtime/types/schedule.js";
 import type { ScheduleEngine } from "../../../runtime/schedule/engine.js";
+import { resolveScheduleEntry } from "../../../runtime/schedule/entry-resolver.js";
 import { DESCRIPTION } from "./prompt.js";
 import { TAGS, PERMISSION_LEVEL, MAX_OUTPUT_CHARS } from "./constants.js";
 
@@ -16,23 +16,6 @@ export const GetScheduleInputSchema = z.object({
   schedule_id: z.string().min(1),
 });
 export type GetScheduleInput = z.infer<typeof GetScheduleInputSchema>;
-
-function resolveScheduleEntry(entries: ScheduleEntry[], scheduleId: string): ScheduleEntry | null {
-  const exact = entries.find((entry) => entry.id === scheduleId);
-  if (exact) {
-    return exact;
-  }
-
-  const matches = entries.filter((entry) => entry.id.startsWith(scheduleId));
-  if (matches.length === 1) {
-    return matches[0]!;
-  }
-  if (matches.length > 1) {
-    throw new Error(`Schedule ID prefix is ambiguous: ${scheduleId}`);
-  }
-
-  return null;
-}
 
 export class GetScheduleTool implements ITool<GetScheduleInput, unknown> {
   readonly metadata: ToolMetadata = {

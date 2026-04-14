@@ -463,6 +463,7 @@ export async function buildDeps(
     stateManager,
     driveSystem,
     llmClient,
+    dataSourceRegistry: new Map(dataSources.map((adapter) => [adapter.sourceId, adapter])),
     hookManager,
     memoryLifecycleManager,
     knowledgeManager,

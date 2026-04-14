@@ -165,6 +165,13 @@ Common scriptable commands:
 | `pulseed start --goal <id>` | Start the daemon |
 | `pulseed stop` | Stop the daemon |
 | `pulseed cron --goal <id>` | Print a cron entry |
+| `pulseed schedule list` | List schedule entries |
+| `pulseed schedule show <id>` | Inspect one schedule entry |
+| `pulseed schedule edit <id>` | Edit a schedule entry's name, trigger, enabled state, or layer config |
+| `pulseed schedule pause <id>` | Pause a schedule without deleting it |
+| `pulseed schedule resume <id>` | Resume a paused schedule |
+| `pulseed schedule run <id>` | Run a schedule entry immediately for validation |
+| `pulseed schedule history <id>` | Show recent schedule execution history |
 
 ## 10. Practical guidance
 

@@ -738,12 +738,21 @@ Schedule entries are persisted to `~/.pulseed/schedules.json`. This file is mana
 # List all schedule entries
 pulseed schedule list
 
-# Add a new entry (interactive or from JSON)
-pulseed schedule add --name "morning-briefing" --layer cron --cron "0 8 * * *"
+# Show one entry
+pulseed schedule show <id>
 
-# Enable/disable
-pulseed schedule enable <id>
-pulseed schedule disable <id>
+# Add a preset-backed cron entry
+pulseed schedule add --preset daily_brief --name "morning-briefing" --cron "0 8 * * *"
+
+# Edit fields without deleting and recreating
+pulseed schedule edit <id> --name "morning-briefing" --cron "0 9 * * *" --timezone Asia/Tokyo
+
+# Pause/resume
+pulseed schedule pause <id>
+pulseed schedule resume <id>
+
+# Run immediately for validation
+pulseed schedule run <id>
 
 # Remove
 pulseed schedule remove <id>
