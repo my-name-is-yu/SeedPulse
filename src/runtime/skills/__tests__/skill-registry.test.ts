@@ -44,4 +44,31 @@ describe("SkillRegistry", () => {
     expect(installed.id).toBe("imported/analyze");
     expect(fs.existsSync(path.join(homeSkills, "imported", "analyze", "SKILL.md"))).toBe(true);
   });
+
+  it("sanitizes install namespace before writing inside skills root", async () => {
+    const sourceDir = path.join(tmpDir, "source", "audit");
+    fs.mkdirSync(sourceDir, { recursive: true });
+    fs.writeFileSync(path.join(sourceDir, "SKILL.md"), "# Audit\nReview risky changes.\n");
+    const registry = new SkillRegistry({ homeSkillsDir: homeSkills });
+
+    const installed = await registry.install(sourceDir, { namespace: "../../pwn" });
+
+    expect(installed.id).toBe("pwn/audit");
+    expect(fs.existsSync(path.join(homeSkills, "pwn", "audit", "SKILL.md"))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, "pwn", "audit", "SKILL.md"))).toBe(false);
+  });
+
+  it("uses frontmatter description when present", async () => {
+    fs.mkdirSync(path.join(homeSkills, "imported", "frontmatter"), { recursive: true });
+    fs.writeFileSync(
+      path.join(homeSkills, "imported", "frontmatter", "SKILL.md"),
+      "---\nname: Review Skill\ndescription: Finds correctness risks.\n---\n# Review\nBody text.\n"
+    );
+    const registry = new SkillRegistry({ homeSkillsDir: homeSkills });
+
+    const [skill] = await registry.search("correctness");
+
+    expect(skill?.name).toBe("Review");
+    expect(skill?.description).toBe("Finds correctness risks.");
+  });
 });

@@ -72,11 +72,14 @@ export class SkillRegistry {
     }
     const content = await fsp.readFile(skillFile, "utf-8");
     const parsed = parseSkillFile(content, skillFile, "home", path.dirname(skillFile));
-    const namespace = options.namespace?.trim() || "imported";
+    const namespace = toSafeId(options.namespace?.trim() || "imported") || "imported";
     const parsedId = parsed.id === "." ? "" : parsed.id;
     const safeName = toSafeId(parsedId || path.basename(path.dirname(skillFile)) || parsed.name);
     const destDir = path.join(this.homeSkillsDir, namespace, safeName);
     const destFile = path.join(destDir, "SKILL.md");
+    if (!isPathInside(this.homeSkillsDir, destFile)) {
+      throw new Error("skill install destination must stay inside the skills directory");
+    }
     if (fs.existsSync(destFile) && !options.force) {
       throw new Error(`skill "${namespace}/${safeName}" already exists; use --force to overwrite`);
     }
@@ -110,12 +113,13 @@ function parseSkillFile(
   source: SkillRecord["source"],
   root: string
 ): SkillRecord {
-  const firstHeading = content.match(/^#\s+(.+)$/m)?.[1]?.trim();
-  const description = content
+  const parsed = splitFrontmatter(content);
+  const firstHeading = parsed.body.match(/^#\s+(.+)$/m)?.[1]?.trim();
+  const description = parsed.attributes.description ?? parsed.body
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find((line) => line.length > 0 && !line.startsWith("#") && !line.startsWith("---")) ?? "";
-  const name = firstHeading ?? path.basename(path.dirname(filePath));
+  const name = firstHeading ?? parsed.attributes.name ?? path.basename(path.dirname(filePath));
   const relativePath = path.relative(root, filePath);
   return {
     id: toSafeId(path.dirname(relativePath)),
@@ -133,9 +137,47 @@ function toSafeId(value: string): string {
     .split("/")
     .filter(Boolean)
     .map((part) => part.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, ""))
-    .filter(Boolean)
+    .filter((part) => part.length > 0 && part !== "." && part !== "..")
     .join("/");
   return normalized === "." ? "" : normalized;
+}
+
+function splitFrontmatter(content: string): {
+  attributes: { name?: string; description?: string };
+  body: string;
+} {
+  const lines = content.split(/\r?\n/);
+  if (lines[0]?.trim() !== "---") {
+    return { attributes: {}, body: content };
+  }
+
+  const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
+  if (end < 0) {
+    return { attributes: {}, body: content };
+  }
+
+  const attributes: { name?: string; description?: string } = {};
+  for (const line of lines.slice(1, end)) {
+    const match = /^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$/.exec(line);
+    if (!match) continue;
+    const key = match[1]!.toLowerCase();
+    const value = match[2]!.trim().replace(/^['"]|['"]$/g, "");
+    if ((key === "name" || key === "description") && value.length > 0) {
+      attributes[key] = value;
+    }
+  }
+
+  return {
+    attributes,
+    body: lines.slice(end + 1).join("\n"),
+  };
+}
+
+function isPathInside(root: string, candidate: string): boolean {
+  const resolvedRoot = path.resolve(root);
+  const resolvedCandidate = path.resolve(candidate);
+  const relative = path.relative(resolvedRoot, resolvedCandidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 async function walk(root: string, visit: (file: string) => Promise<void>): Promise<void> {

@@ -29,6 +29,13 @@ export interface ResolvedTerminalCommandSpec extends TerminalCommandSpec {
 
 const DEFAULT_CONTAINER_WORKDIR = "/workspace";
 
+const DOCKER_ENV_DENYLIST = new Set([
+  "PWD",
+  "OLDPWD",
+  "SHLVL",
+  "_",
+]);
+
 export function resolveTerminalBackendConfig(
   config: TerminalBackendConfig | undefined
 ): TerminalBackendConfig {
@@ -76,7 +83,8 @@ export function wrapTerminalCommand(
   for (const volume of docker.volumes ?? []) {
     args.push("-v", volume);
   }
-  for (const [key, value] of Object.entries(docker.env ?? {})) {
+  const containerEnv = normalizeContainerEnv(spec.env, docker.env);
+  for (const [key, value] of Object.entries(containerEnv)) {
     args.push("-e", `${key}=${value}`);
   }
 
@@ -89,4 +97,19 @@ export function wrapTerminalCommand(
     stdinData: spec.stdinData,
     backend: "docker",
   };
+}
+
+function normalizeContainerEnv(
+  specEnv: NodeJS.ProcessEnv | undefined,
+  dockerEnv: Record<string, string> | undefined
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(specEnv ?? {})) {
+    if (value === undefined || DOCKER_ENV_DENYLIST.has(key)) continue;
+    result[key] = value;
+  }
+  for (const [key, value] of Object.entries(dockerEnv ?? {})) {
+    result[key] = value;
+  }
+  return result;
 }

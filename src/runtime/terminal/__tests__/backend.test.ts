@@ -42,6 +42,35 @@ describe("terminal backend", () => {
     expect(command.cwd).toBeUndefined();
   });
 
+  it("passes adapter env into the docker container and lets backend env override it", () => {
+    const command = wrapTerminalCommand(
+      {
+        command: "codex",
+        args: ["exec"],
+        cwd: "/tmp/work",
+        env: {
+          OPENAI_API_KEY: "sk-host",
+          NO_COLOR: "1",
+          TERM: "dumb",
+          PWD: "/tmp/work",
+        },
+      },
+      {
+        type: "docker",
+        docker: {
+          image: "node:22",
+          env: { OPENAI_API_KEY: "sk-container" },
+        },
+      }
+    );
+
+    expect(command.args).toContain("-e");
+    expect(command.args).toContain("OPENAI_API_KEY=sk-container");
+    expect(command.args).toContain("NO_COLOR=1");
+    expect(command.args).toContain("TERM=dumb");
+    expect(command.args).not.toContain("PWD=/tmp/work");
+  });
+
   it("requires docker image for docker backend", () => {
     expect(() => resolveTerminalBackendConfig({ type: "docker", docker: { image: "" } }))
       .toThrow("docker.image");
