@@ -18,6 +18,7 @@ web/tsconfig.tsbuildinfo
 docs/archive/
 scripts/*
 !scripts/check-docs.mjs
+!scripts/release.mjs
 
 # Non-public: stale, will revisit later
 web/

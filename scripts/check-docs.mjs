@@ -6,7 +6,19 @@ import { fileURLToPath } from 'node:url';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '..');
-const ignoredDirNames = new Set(['node_modules', '.git', '.next', '.claude']);
+const ignoredDirNames = new Set([
+  'node_modules',
+  '.git',
+  '.next',
+  '.claude',
+  '.claire',
+  '.pulseed',
+  'coverage',
+  'coverage-c8',
+  'dist',
+  'memory',
+  'web',
+]);
 const ignoredRelativeDirs = new Set(['docs/archive']);
 const ignoredFileNames = new Set(['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'npm-shrinkwrap.json']);
 

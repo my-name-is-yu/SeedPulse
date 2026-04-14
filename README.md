@@ -65,6 +65,18 @@ Use the lower-level CLI commands only when you need scriptable or diagnostic con
 - [Configuration](docs/configuration.md)
 - [Architecture Map](docs/architecture-map.md)
 
+## Release
+
+Run releases from a clean, up-to-date `main` branch:
+
+```bash
+npm run release -- 0.4.9
+```
+
+The script updates the package version, runs docs/build/test checks, pushes `main`,
+then pushes the matching `v*` tag. The tag push triggers GitHub Actions to publish
+to npm through Trusted Publishing.
+
 ## License
 
 MIT
