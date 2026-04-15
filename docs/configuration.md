@@ -79,7 +79,11 @@ Optional `terminal_backend` shape for CLI adapters:
 }
 ```
 
-When omitted, PulSeed uses the local process backend. The Docker backend wraps supported CLI adapters in `docker run`, mounts the task cwd at the configured workdir, and defaults network access to `none`.
+When omitted, supported CLI execution adapters use the local process backend.
+The Docker backend wraps those CLI adapters in `docker run`, mounts the task cwd
+at the configured workdir, and defaults network access to `none`. This backend
+applies to CLI adapters such as `openai_codex_cli` and `claude_code_cli`; native
+`agent_loop` isolation is configured separately through `agent_loop.worktree`.
 
 ## 4. Environment variables
 
@@ -135,6 +139,8 @@ Operational meaning:
 
 - when enabled, task execution can run in a separate worktree instead of mutating the primary workspace directly
 - when `keep_for_debug` is true, PulSeed leaves the worktree behind for inspection
+- worktree isolation separates filesystem changes from the primary checkout, but it is not an OS-level sandbox
+- for untrusted goals that need process or network isolation, use a Docker terminal backend for supported CLI adapters or run PulSeed inside a container or VM
 
 ## 7. Local state layout
 

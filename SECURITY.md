@@ -52,7 +52,14 @@ PulSeed is a local-first orchestrator. Its trust boundaries are as follows:
 PulSeed calls external LLM APIs (OpenAI, Anthropic) for goal decomposition, observation, and task generation. API keys are read from environment variables or `~/.pulseed/provider.json`. All LLM responses are treated as untrusted input: they pass through a Zod schema validation and sanitization pipeline before any data is acted upon. Errors in this pipeline are always logged — they are never silently swallowed.
 
 ### Agent Execution
-PulSeed delegates tasks to AI agents (e.g., Claude Code CLI, OpenAI Codex CLI) by spawning subprocesses. These agents can execute shell commands and file operations on the user's machine. PulSeed provides a configurable terminal backend for supported CLI adapters, including a Docker wrapper, but the default backend is still the local process backend. The EthicsGate (L1) provides a software-level safety check — evaluating proposed actions against mechanical rules and, for ambiguous cases, an LLM judgment — but this is not a substitute for using a container, VM, or host-level sandbox for untrusted work.
+PulSeed has two task execution families:
+
+- Native `agent_loop` execution runs PulSeed's bounded tool-using runtime. When `agent_loop.worktree.enabled` is configured, task execution happens in a detached git worktree and can preserve or clean up that worktree according to the configured policy.
+- Supported CLI adapters such as Claude Code CLI and OpenAI Codex CLI spawn subprocesses. They can run through the local process backend or through the configured Docker terminal backend. The Docker backend mounts the task cwd into the container and defaults container networking to `none`.
+
+Git worktrees isolate repository changes from the primary checkout, but they are not an OS privilege boundary. The local process backend runs with the user's OS privileges. Docker provides a stronger process and network boundary for supported CLI adapters, but its protection depends on the Docker image, volume configuration, and host Docker setup.
+
+The EthicsGate (L1) provides a software-level safety check — evaluating proposed actions against mechanical rules and, for ambiguous cases, an LLM judgment — but this is not a substitute for a host-level sandbox when running untrusted work.
 
 Irreversible actions (file deletion, external API mutations, state modifications) always require explicit human approval, regardless of trust score or confidence level. PulSeed never executes these directly; it delegates and verifies.
 
@@ -76,7 +83,11 @@ API keys for LLM providers may be stored in `~/.pulseed/provider.json` or passed
 - Rotate keys regularly
 
 ### Agent Execution Sandbox Limitations
-The EthicsGate performs rule-based and LLM-based checks on proposed agent actions before execution. It operates entirely in software and cannot guarantee prevention against a sufficiently crafted prompt or a compromised LLM response. Users running PulSeed against untrusted goals, in shared environments, or automating high-risk tasks should consider running it inside a container or VM for additional isolation.
+The EthicsGate performs rule-based and LLM-based checks on proposed agent actions before execution. It operates entirely in software and cannot guarantee prevention against a sufficiently crafted prompt or a compromised LLM response.
+
+Worktree isolation helps keep native `agent_loop` file changes out of the primary checkout, but a process running in that worktree still has the privileges granted to the PulSeed process and its tools. Docker terminal backends give supported CLI adapters a configurable process and network boundary, but only for those subprocess-backed adapters.
+
+Users running PulSeed against untrusted goals, in shared environments, or automating high-risk tasks should use Docker-backed CLI adapters, run PulSeed itself inside a container, or use a VM for additional isolation.
 
 ### LLM Prompt Injection
 PulSeed passes user-supplied goal descriptions and observed state into LLM prompts. A maliciously crafted goal string could attempt to manipulate LLM output (prompt injection). All LLM responses are validated through a schema pipeline, which reduces the blast radius, but does not eliminate the risk entirely. Review goals before executing the core loop.

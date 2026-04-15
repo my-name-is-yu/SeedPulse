@@ -6,10 +6,14 @@
 
 Goal-driven orchestration for long-running work.
 
-[![Website](https://img.shields.io/badge/Website-pulseed.dev-blue)](https://pulseed.dev)
-[![CI](https://github.com/my-name-is-yu/PulSeed/actions/workflows/ci.yml/badge.svg)](https://github.com/my-name-is-yu/PulSeed/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/pulseed.svg)](https://www.npmjs.com/package/pulseed)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Website](https://img.shields.io/badge/Website-pulseed.dev-blue?style=flat-square)](https://pulseed.dev)
+[![CI](https://img.shields.io/github/actions/workflow/status/my-name-is-yu/PulSeed/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/my-name-is-yu/PulSeed/actions/workflows/ci.yml)
+[![Publish](https://img.shields.io/github/actions/workflow/status/my-name-is-yu/PulSeed/publish.yml?label=Publish&style=flat-square)](https://github.com/my-name-is-yu/PulSeed/actions/workflows/publish.yml)
+[![npm version](https://img.shields.io/npm/v/pulseed.svg?style=flat-square)](https://www.npmjs.com/package/pulseed)
+[![npm downloads](https://img.shields.io/npm/dm/pulseed.svg?style=flat-square)](https://www.npmjs.com/package/pulseed)
+[![Node.js >=20](https://img.shields.io/badge/node-%3E%3D20-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Security Policy](https://img.shields.io/badge/security-policy-brightgreen.svg?style=flat-square)](SECURITY.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 
 </div>
 
@@ -44,8 +48,10 @@ PulSeed uses two layers:
 State, reports, schedules, and local memory live under `~/.pulseed/`.
 
 Security boundary: PulSeed uses approval gates and verification around delegated work.
-Supported CLI adapters can be wrapped with a configured terminal backend such as Docker,
-but high-risk or untrusted goals should still run inside an environment you control. See [Security](SECURITY.md).
+Native `agent_loop` task execution can use isolated git worktrees, and supported
+CLI adapters can be wrapped with a Docker terminal backend. These reduce blast
+radius, but local backends and plugins still run with the user's privileges. See
+[Security](SECURITY.md).
 
 ## Main Command
 
@@ -73,9 +79,10 @@ Run releases from a clean, up-to-date `main` branch:
 npm run release -- 0.4.9
 ```
 
-The script updates the package version, runs docs/build/test checks, pushes `main`,
-then pushes the matching `v*` tag. The tag push triggers GitHub Actions to publish
-to npm through Trusted Publishing.
+The script updates the package version, runs release verification including
+docs, typecheck, boundary lint, full tests, production audit, and an npm pack
+dry run, pushes `main`, then pushes the matching `v*` tag. The tag push triggers
+GitHub Actions to publish to npm through Trusted Publishing.
 
 ## License
 

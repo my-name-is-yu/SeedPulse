@@ -30,9 +30,12 @@ For broader navigation, see [Architecture Map](architecture-map.md).
 
 ## Safety Boundary
 
-PulSeed has software-level approval and verification gates, but it does not provide
-OS-level sandboxing for delegated agent subprocesses. For high-risk or untrusted
-goals, use an external container or VM boundary. See [Security](../SECURITY.md).
+PulSeed has software-level approval and verification gates. Native `agent_loop`
+task execution can use git worktree isolation, and supported CLI adapters can be
+wrapped with a Docker terminal backend. These boundaries are configurable and do
+not cover every execution path: local backends and plugins still run with the
+user's privileges. For high-risk or untrusted goals, use Docker, a containerized
+PulSeed process, or a VM boundary. See [Security](../SECURITY.md).
 
 ## Source of truth
 

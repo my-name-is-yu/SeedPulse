@@ -38,9 +38,8 @@ if (remoteTagExists(tagName)) {
 
 run('npm', ['version', version, '--no-git-tag-version']);
 run('git', ['add', 'package.json', 'package-lock.json']);
-run('npm', ['run', 'check:docs']);
-run('npm', ['run', 'build']);
-run('npm', ['test']);
+run('npm', ['run', 'verify:release']);
+run('git', ['diff', '--exit-code']);
 run('git', ['add', 'package.json', 'package-lock.json']);
 run('git', ['commit', '-m', `Release ${version}`]);
 run('git', ['push', 'origin', 'main']);

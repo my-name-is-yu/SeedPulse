@@ -24,8 +24,6 @@ jobs:
 
       - run: npm install -g npm@11
       - run: npm ci
-      - run: npm run build
-      - run: npm test
 
       - name: Verify release tag matches package version
         run: |
@@ -36,4 +34,6 @@ jobs:
             exit 1
           fi
 
+      - run: npm run verify:release
+      - run: git diff --exit-code
       - run: npm publish --provenance --access public

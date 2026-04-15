@@ -15,6 +15,7 @@ memory/
 docs/archive/
 scripts/*
 !scripts/check-docs.mjs
+!scripts/clean-dist.mjs
 !scripts/release.mjs
 
 # Non-public: stale, will revisit later

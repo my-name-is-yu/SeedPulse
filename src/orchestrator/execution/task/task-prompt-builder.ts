@@ -256,9 +256,9 @@ Gap Analysis:
 - work_description: issue title (line 1) + issue body
 - Generate specific, actionable issues only\n`;
   } else if (adapterType === "openai_codex_cli" || adapterType === "claude_code_cli") {
-    adapterSection = `\nExecution context: CLI code agent in sandbox.
+    adapterSection = `\nExecution context: CLI code agent.
 You MUST produce implementation tasks that modify or create files.
-The executing agent will run in a code sandbox with full file access.
+The executing agent's filesystem and network boundary depends on the configured terminal backend.
 Tasks should involve writing code, fixing bugs, adding tests, or editing configuration — NOT analysis or planning.
 For operational KPI dimensions such as reliability, recovery, latency, uptime, or daemon stability, do not generate a test-only/regression-only task unless the goal explicitly asks for tests; prefer the smallest runtime/config/code change that directly moves the KPI, with tests only as supporting validation.
 Constraints:

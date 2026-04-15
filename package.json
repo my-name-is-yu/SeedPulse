@@ -45,8 +45,12 @@
     "LICENSE"
   ],
   "scripts": {
+    "clean": "node scripts/clean-dist.mjs",
     "build": "tsc -p tsconfig.build.json",
     "check:docs": "node scripts/check-docs.mjs",
+    "audit:prod": "npm audit --omit=dev --audit-level=high",
+    "prepack": "npm run clean && npm run build",
+    "pack:dry-run": "npm pack --dry-run",
     "release": "node scripts/release.mjs",
     "test": "vitest run --exclude tests/e2e",
     "test:all": "vitest run",
@@ -56,6 +60,7 @@
     "test:changed": "vitest run --changed",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
+    "verify:release": "npm run check:docs && npm run typecheck && npm run lint:boundaries && npm run test:all && npm audit --omit=dev --audit-level=high && npm pack --dry-run",
     "tui": "node dist/interface/tui/entry.js",
     "test:remote": "bash scripts/test-remote.sh",
     "test:remote:coverage": "bash scripts/test-remote.sh --coverage",
