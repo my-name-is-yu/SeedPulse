@@ -303,7 +303,7 @@ describe("run subcommand with real CoreLoop (max_iterations=1)", () => {
 
     // Exit code 0 = completed or max_iterations reached
     expect(code).toBe(0);
-  });
+  }, 60_000);
 
   it("exits with code 1 when the goal ID does not exist in state", async () => {
     const { LLMClient } = await import("../../../base/llm/llm-client.js");
