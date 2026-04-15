@@ -12,6 +12,8 @@ import type { ILLMClient } from "../../../base/llm/llm-client.js";
 import type { ChatAgentLoopRunner } from "../../../orchestrator/execution/agent-loop/chat-agent-loop-runner.js";
 import { RuntimeControlService } from "../../../runtime/control/index.js";
 import { RuntimeOperationStore } from "../../../runtime/store/runtime-operation-store.js";
+import type { Goal } from "../../../base/types/goal.js";
+import type { Task } from "../../../base/types/task.js";
 
 // Mock context-provider so tests don't walk the real filesystem
 vi.mock("../../../platform/observation/context-provider.js", () => ({
@@ -46,6 +48,91 @@ function makeDeps(overrides: Partial<ChatRunnerDeps> = {}): ChatRunnerDeps {
   return {
     stateManager: makeMockStateManager(),
     adapter: makeMockAdapter(),
+    ...overrides,
+  };
+}
+
+function makeGoal(id: string, overrides: Partial<Goal> = {}): Goal {
+  return {
+    id,
+    parent_id: null,
+    node_type: "goal",
+    title: `Goal ${id}`,
+    description: `Description for ${id}`,
+    status: "active",
+    dimensions: [{
+      name: "quality",
+      label: "Quality",
+      current_value: 0.4,
+      threshold: { type: "min", value: 0.9 },
+      confidence: 0.8,
+      observation_method: {
+        type: "manual",
+        source: "test",
+        schedule: null,
+        endpoint: null,
+        confidence_tier: "self_report",
+      },
+      last_updated: null,
+      history: [],
+      weight: 1,
+      uncertainty_weight: null,
+      state_integrity: "ok",
+      dimension_mapping: null,
+    }],
+    gap_aggregation: "max",
+    dimension_mapping: null,
+    constraints: [],
+    children_ids: [],
+    target_date: null,
+    origin: null,
+    pace_snapshot: null,
+    deadline: null,
+    confidence_flag: null,
+    user_override: false,
+    feasibility_note: null,
+    uncertainty_weight: 1,
+    decomposition_depth: 0,
+    specificity_score: null,
+    loop_status: "idle",
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:01.000Z",
+    ...overrides,
+  };
+}
+
+function makeTask(id: string, goalId: string, overrides: Partial<Task> = {}): Task {
+  return {
+    id,
+    goal_id: goalId,
+    strategy_id: null,
+    target_dimensions: ["quality"],
+    primary_dimension: "quality",
+    work_description: `Work for ${id}`,
+    rationale: "Because it advances the goal.",
+    approach: "Do the smallest useful thing.",
+    success_criteria: [{
+      description: "The work is complete",
+      verification_method: "review",
+      is_blocking: true,
+    }],
+    scope_boundary: {
+      in_scope: ["implementation"],
+      out_of_scope: [],
+      blast_radius: "low",
+    },
+    constraints: [],
+    plateau_until: null,
+    estimated_duration: null,
+    consecutive_failure_count: 0,
+    reversibility: "reversible",
+    task_category: "normal",
+    status: "pending",
+    started_at: null,
+    completed_at: null,
+    timeout_at: null,
+    heartbeat_at: null,
+    created_at: "2026-01-01T00:00:02.000Z",
     ...overrides,
   };
 }
@@ -118,6 +205,23 @@ describe("ChatRunner", () => {
       expect(result.output).toContain("/clear");
       expect(result.output).toContain("/exit");
       expect(result.output).toContain("/track");
+      expect(adapter.execute).not.toHaveBeenCalled();
+    });
+
+    it("/help groups commands by intent", async () => {
+      const adapter = makeMockAdapter();
+      const runner = new ChatRunner(makeDeps({ adapter }));
+
+      const result = await runner.execute("/help", "/repo");
+
+      expect(result.success).toBe(true);
+      expect(result.output).toContain("Session");
+      expect(result.output).toContain("Goals and tasks");
+      expect(result.output).toContain("Configuration");
+      expect(result.output).toContain("Deferred");
+      expect(result.output).toContain("/status [goal-id]");
+      expect(result.output).toContain("/compact");
+      expect(result.output).not.toContain("/context");
       expect(adapter.execute).not.toHaveBeenCalled();
     });
 
@@ -363,6 +467,255 @@ describe("ChatRunner", () => {
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
+    });
+
+    it("/status and /goals read goal state without calling adapter", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pulseed-chat-goals-"));
+      try {
+        const stateManager = new StateManager(tmpDir);
+        await stateManager.init();
+        await stateManager.saveGoal(makeGoal("goal-a"));
+        const adapter = makeMockAdapter();
+        const runner = new ChatRunner(makeDeps({ stateManager, adapter }));
+
+        const status = await runner.execute("/status", "/repo");
+        const focused = await runner.execute("/status goal-a", "/repo");
+        const goals = await runner.execute("/goals", "/repo");
+
+        expect(status.success).toBe(true);
+        expect(status.output).toContain("Active goals");
+        expect(status.output).toContain("goal-a");
+        expect(focused.success).toBe(true);
+        expect(focused.output).toContain("Goal status: Goal goal-a");
+        expect(focused.output).toContain("Dimensions:");
+        expect(goals.success).toBe(true);
+        expect(goals.output).toContain("Goals:");
+        expect(adapter.execute).not.toHaveBeenCalled();
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("/tasks and /task read task state without shelling out", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pulseed-chat-tasks-"));
+      try {
+        const stateManager = new StateManager(tmpDir);
+        await stateManager.init();
+        await stateManager.saveGoal(makeGoal("goal-a"));
+        await stateManager.writeRaw("tasks/goal-a/task-1.json", makeTask("task-1", "goal-a"));
+        const adapter = makeMockAdapter();
+        const runner = new ChatRunner(makeDeps({ stateManager, adapter }));
+
+        const tasks = await runner.execute("/tasks", "/repo");
+        const task = await runner.execute("/task task-1", "/repo");
+
+        expect(tasks.success).toBe(true);
+        expect(tasks.output).toContain("Tasks for goal goal-a");
+        expect(tasks.output).toContain("task-1");
+        expect(task.success).toBe(true);
+        expect(task.output).toContain("Task: task-1");
+        expect(task.output).toContain("Success criteria:");
+        expect(adapter.execute).not.toHaveBeenCalled();
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("/tasks asks for a goal when multiple active goals exist", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pulseed-chat-tasks-multiple-"));
+      try {
+        const stateManager = new StateManager(tmpDir);
+        await stateManager.init();
+        await stateManager.saveGoal(makeGoal("goal-a"));
+        await stateManager.saveGoal(makeGoal("goal-b"));
+        const runner = new ChatRunner(makeDeps({ stateManager }));
+
+        const result = await runner.execute("/tasks", "/repo");
+
+        expect(result.success).toBe(false);
+        expect(result.output).toContain("Multiple active goals");
+        expect(result.output).toContain("/tasks <goal-id>");
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("/config, /model, and /plugins are read-only command surfaces", async () => {
+      const adapter = makeMockAdapter();
+      const pluginLoader = {
+        loadAll: vi.fn().mockResolvedValue([{ name: "demo", type: "notifier", enabled: true }]),
+      };
+      const runner = new ChatRunner(makeDeps({ adapter, pluginLoader }));
+
+      const config = await runner.execute("/config", "/repo");
+      const model = await runner.execute("/model", "/repo");
+      const plugins = await runner.execute("/plugins", "/repo");
+
+      expect(config.success).toBe(true);
+      expect(config.output).toContain("Provider configuration");
+      expect(config.output).toContain("has_api_key:");
+      expect(model.success).toBe(true);
+      expect(model.output).toContain("Model:");
+      expect(plugins.success).toBe(true);
+      expect(plugins.output).toContain("demo");
+      expect(pluginLoader.loadAll).toHaveBeenCalledOnce();
+      expect(adapter.execute).not.toHaveBeenCalled();
+    });
+
+    it("/model reports migrated legacy provider config without saving it", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pulseed-chat-legacy-config-"));
+      const oldEnv = {
+        PULSEED_PROVIDER: process.env["PULSEED_PROVIDER"],
+        PULSEED_LLM_PROVIDER: process.env["PULSEED_LLM_PROVIDER"],
+        PULSEED_MODEL: process.env["PULSEED_MODEL"],
+        PULSEED_ADAPTER: process.env["PULSEED_ADAPTER"],
+        PULSEED_DEFAULT_ADAPTER: process.env["PULSEED_DEFAULT_ADAPTER"],
+      };
+      try {
+        delete process.env["PULSEED_PROVIDER"];
+        delete process.env["PULSEED_LLM_PROVIDER"];
+        delete process.env["PULSEED_MODEL"];
+        delete process.env["PULSEED_ADAPTER"];
+        delete process.env["PULSEED_DEFAULT_ADAPTER"];
+        const stateManager = new StateManager(tmpDir);
+        await stateManager.init();
+        await stateManager.writeRaw("provider.json", {
+          llm_provider: "anthropic",
+          default_adapter: "claude_api",
+          anthropic: {
+            api_key: "sk-ant-test",
+            model: "claude-haiku-4-5",
+          },
+        });
+        const adapter = makeMockAdapter();
+        const runner = new ChatRunner(makeDeps({ stateManager, adapter }));
+
+        const result = await runner.execute("/model", "/repo");
+        const raw = await stateManager.readRaw("provider.json");
+
+        expect(result.success).toBe(true);
+        expect(result.output).toContain("Model: claude-haiku-4-5");
+        expect(result.output).toContain("Provider: anthropic");
+        expect(result.output).toContain("Adapter: claude_api");
+        expect(raw).toMatchObject({ llm_provider: "anthropic" });
+        expect(adapter.execute).not.toHaveBeenCalled();
+      } finally {
+        for (const [key, value] of Object.entries(oldEnv)) {
+          if (value === undefined) {
+            delete process.env[key];
+          } else {
+            process.env[key] = value;
+          }
+        }
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("/model keeps explicit provider.json model ahead of PULSEED_MODEL", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pulseed-chat-file-model-"));
+      const oldModel = process.env["PULSEED_MODEL"];
+      try {
+        process.env["PULSEED_MODEL"] = "gpt-4o-mini-tts";
+        const stateManager = new StateManager(tmpDir);
+        await stateManager.init();
+        await stateManager.writeRaw("provider.json", {
+          provider: "openai",
+          model: "gpt-5.4",
+          adapter: "openai_codex_cli",
+        });
+        const adapter = makeMockAdapter();
+        const runner = new ChatRunner(makeDeps({ stateManager, adapter }));
+
+        const result = await runner.execute("/model", "/repo");
+
+        expect(result.success).toBe(true);
+        expect(result.output).toContain("Model: gpt-5.4");
+        expect(result.output).not.toContain("gpt-4o-mini-tts");
+        expect(adapter.execute).not.toHaveBeenCalled();
+      } finally {
+        if (oldModel === undefined) {
+          delete process.env["PULSEED_MODEL"];
+        } else {
+          process.env["PULSEED_MODEL"] = oldModel;
+        }
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("/plugins handles missing pluginLoader gracefully", async () => {
+      const runner = new ChatRunner(makeDeps());
+
+      const result = await runner.execute("/plugins", "/repo");
+
+      expect(result.success).toBe(true);
+      expect(result.output).toContain("Plugin information is not available");
+    });
+
+    it("/compact falls back to deterministic summary and keeps latest turns", async () => {
+      const stateManager = makeMockStateManager();
+      const writes: Array<{ messages: Array<{ role: string; content: string }>; compactionSummary?: string }> = [];
+      (stateManager.writeRaw as ReturnType<typeof vi.fn>).mockImplementation(async (_path, data) => {
+        writes.push(JSON.parse(JSON.stringify(data)));
+      });
+      const runner = new ChatRunner(makeDeps({ stateManager }));
+      runner.startSession("/repo");
+
+      await runner.execute("Turn 1", "/repo");
+      await runner.execute("Turn 2", "/repo");
+      await runner.execute("Turn 3", "/repo");
+
+      const result = await runner.execute("/compact", "/repo");
+
+      expect(result.success).toBe(true);
+      expect(result.output).toContain("deterministic summary");
+      expect(result.output).toContain("latest user/assistant turns were kept");
+      const lastWrite = writes[writes.length - 1]!;
+      expect(lastWrite.messages).toHaveLength(4);
+      expect(lastWrite.messages.map((message) => message.content)).toEqual([
+        "Turn 2",
+        "Task completed successfully.",
+        "Turn 3",
+        "Task completed successfully.",
+      ]);
+      expect(lastWrite.compactionSummary).toContain("Turn 1");
+    });
+
+    it("/compact summary is included in the next adapter prompt", async () => {
+      const stateManager = makeMockStateManager();
+      const adapter = makeMockAdapter();
+      const runner = new ChatRunner(makeDeps({ stateManager, adapter }));
+      runner.startSession("/repo");
+
+      await runner.execute("Turn 1", "/repo");
+      await runner.execute("Turn 2", "/repo");
+      await runner.execute("Turn 3", "/repo");
+      await runner.execute("/compact", "/repo");
+      await runner.execute("Continue", "/repo");
+
+      const finalTask = (adapter.execute as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as { prompt: string };
+      expect(finalTask.prompt).toContain("Compacted previous conversation summary");
+      expect(finalTask.prompt).toContain("Turn 1");
+      expect(finalTask.prompt).toContain("Current message:");
+      expect(finalTask.prompt).toContain("Continue");
+    });
+
+    it("/clear removes any compacted summary from later prompts", async () => {
+      const stateManager = makeMockStateManager();
+      const adapter = makeMockAdapter();
+      const runner = new ChatRunner(makeDeps({ stateManager, adapter }));
+      runner.startSession("/repo");
+
+      await runner.execute("Turn 1", "/repo");
+      await runner.execute("Turn 2", "/repo");
+      await runner.execute("Turn 3", "/repo");
+      await runner.execute("/compact", "/repo");
+      await runner.execute("/clear", "/repo");
+      await runner.execute("Fresh start", "/repo");
+
+      const finalTask = (adapter.execute as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as { prompt: string };
+      expect(finalTask.prompt).not.toContain("Compacted previous conversation summary");
+      expect(finalTask.prompt).not.toContain("Turn 1");
+      expect(finalTask.prompt).toContain("Fresh start");
     });
   });
 
@@ -910,6 +1263,37 @@ describe("ChatRunner", () => {
       expect(result.success).toBe(true);
       expect(result.output).toBe("Agentloop direct answer");
       expect(result.diagnostics).toBeUndefined();
+    });
+
+    it("passes compacted chat summary to native chat agentloop", async () => {
+      const adapter = makeMockAdapter();
+      const chatAgentLoopRunner = {
+        execute: vi.fn().mockResolvedValue({
+          success: true,
+          output: "Agentloop response",
+          error: null,
+          exit_code: null,
+          elapsed_ms: 42,
+          stopped_reason: "completed",
+        }),
+      } as unknown as ChatAgentLoopRunner;
+      const runner = new ChatRunner(makeDeps({ adapter, chatAgentLoopRunner }));
+      runner.startSession("/repo");
+
+      await runner.execute("Turn 1", "/repo");
+      await runner.execute("Turn 2", "/repo");
+      await runner.execute("Turn 3", "/repo");
+      await runner.execute("/compact", "/repo");
+      await runner.execute("Continue", "/repo");
+
+      const finalInput = (chatAgentLoopRunner.execute as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as {
+        message: string;
+        systemPrompt?: string;
+      };
+      expect(finalInput.message).toContain("Continue");
+      expect(finalInput.systemPrompt).toContain("Compacted Chat Summary");
+      expect(finalInput.systemPrompt).toContain("Turn 1");
+      expect(adapter.execute).not.toHaveBeenCalled();
     });
 
     it("keeps diagnostics out of the user-facing output", async () => {

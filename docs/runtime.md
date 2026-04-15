@@ -32,6 +32,18 @@ Lower-level subcommands remain available for scriptable and diagnostic use, but 
 `pulseed` is the interactive natural-language surface on top of the same runtime.
 It follows the AgentLoop boundary described in [Mechanism](mechanism.md) and can expose chat, approvals, progress, reports, and loop control without requiring users to memorize subcommands.
 
+Supported chat slash commands:
+
+- Session: `/help`, `/clear`, `/sessions`, `/history [id|title]`, `/title <title>`, `/resume [id|title]`, `/cleanup [--dry-run]`, `/compact`, `/exit`
+- Goals and tasks: `/status [goal-id]`, `/goals`, `/tasks [goal-id]`, `/task <task-id> [goal-id]`, `/track`, `/tend`
+- Configuration: `/config`, `/model`, `/plugins`
+
+`/compact` summarizes older chat turns into the saved session summary and keeps the latest user and assistant turns available for continuation.
+`/config` and `/model` are read-only and mask secrets.
+
+Deferred commands: `/retry`, `/undo`, and `/usage` are intentionally not supported yet.
+Replay and undo need clearer handling of tool side effects, and usage needs durable accounting before it can be reliable.
+
 ## Daemon operations
 
 Daemon mode is the resident host for continuous operation.
