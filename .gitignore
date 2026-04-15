@@ -4,6 +4,7 @@ Thumbs.db
 
 node_modules/
 dist/
+/.dist-delete-*/
 dist-tui-test/
 coverage/
 coverage-c8/

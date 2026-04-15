@@ -46,10 +46,10 @@
   ],
   "scripts": {
     "clean": "node scripts/clean-dist.mjs",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
     "check:docs": "node scripts/check-docs.mjs",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
-    "prepack": "npm run clean && npm run build",
+    "prepack": "npm run build",
     "pack:dry-run": "npm pack --dry-run",
     "release": "node scripts/release.mjs",
     "test": "vitest run --exclude tests/e2e",
