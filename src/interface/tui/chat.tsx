@@ -13,6 +13,7 @@ import { theme } from "./theme.js";
 import { pickSpinnerVerb } from "./spinner-verbs.js";
 import { ShimmerText } from "./shimmer-text.js";
 import { INPUT_MARKER, positionCursorInFrame, buildCursorEscape } from "./cursor-tracker.js";
+import { HIDE_CURSOR, SHOW_CURSOR } from "./flicker/dec.js";
 import { isBashModeInput } from "./bash-mode.js";
 import { isRenderableFrameChunk } from "./render-output.js";
 import { buildChatViewport } from "./chat/viewport.js";
@@ -246,13 +247,15 @@ export function Chat({
     };
   }, []);
 
-  // Hide cursor during AI processing
+  // Keep the terminal's real cursor hidden in standard mode.
   React.useEffect(() => {
-    if (isProcessing) {
-      const original = process.stdout.write.bind(process.stdout);
-      original("\x1b[?25l");
-    }
-  }, [isProcessing]);
+    if (noFlicker) return;
+    const original = process.stdout.write.bind(process.stdout);
+    original(HIDE_CURSOR);
+    return () => {
+      original(SHOW_CURSOR);
+    };
+  }, [noFlicker]);
 
   const handleSubmit = (value: string) => {
     if (hasMatches) return; // let useInput handle enter when suggestions are shown

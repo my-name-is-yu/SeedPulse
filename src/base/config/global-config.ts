@@ -8,14 +8,14 @@ import { z } from "zod";
 
 const GlobalConfigSchema = z.object({
   daemon_mode: z.boolean().default(false),
-  no_flicker: z.boolean().default(false),
+  no_flicker: z.boolean().default(true),
 });
 
 export type GlobalConfig = z.infer<typeof GlobalConfigSchema>;
 
 const DEFAULT_CONFIG: GlobalConfig = {
   daemon_mode: false,
-  no_flicker: false,
+  no_flicker: true,
 };
 
 function getConfigPath(): string {

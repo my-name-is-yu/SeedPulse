@@ -149,6 +149,6 @@ describe("cursor tracker", () => {
       "└──────────────────┘",
     ].join("\n");
 
-    expect(buildCursorEscape(frame, "abc")).toBe("\u001b[2;8H\u001b[?25h");
+    expect(buildCursorEscape(frame, "abc")).toBe("\u001b[2;8H");
   });
 });

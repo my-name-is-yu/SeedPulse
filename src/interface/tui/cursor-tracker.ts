@@ -72,8 +72,8 @@ export function positionCursorInFrame(
   const row = findCursorRow(frame);
   const x = computeCursorX(frame, inputText);
   if (row === null || x === null) return;
-  // ANSI CSI: move to row;col (1-indexed) and show cursor
-  write(`\x1b[${row + 1};${x + 1}H\x1b[?25h`);
+  // ANSI CSI: move to row;col (1-indexed)
+  write(`\x1b[${row + 1};${x + 1}H`);
 }
 
 /**
@@ -88,5 +88,5 @@ export function buildCursorEscape(
   const row = findCursorRow(frame);
   const x = computeCursorX(frame, inputText);
   if (row === null || x === null) return null;
-  return `[${row + 1};${x + 1}H[?25h`;
+  return `\x1b[${row + 1};${x + 1}H`;
 }
