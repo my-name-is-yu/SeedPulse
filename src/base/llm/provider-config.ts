@@ -302,29 +302,32 @@ function resolveAdapter(
   return fileAdapter ?? "openai_codex_cli";
 }
 
+type ModelSource = "file" | "env" | "default";
+
 function resolveModel(
   fileModel: string | undefined,
   provider: ProviderConfig["provider"]
-): string {
-  const envModel = process.env["PULSEED_MODEL"];
-  if (envModel) return envModel;
+): { model: string; source: ModelSource } {
+  if (fileModel) {
+    return { model: fileModel, source: "file" };
+  }
 
-  // provider.json explicit value takes priority over generic env vars
-  if (fileModel) return fileModel;
+  const envModel = process.env["PULSEED_MODEL"];
+  if (envModel) return { model: envModel, source: "env" };
 
   // Provider-specific env vars apply only as fallback when model is not set in provider.json
   if (provider === "openai") {
     const m = process.env["OPENAI_MODEL"];
-    if (m) return m;
+    if (m) return { model: m, source: "env" };
   } else if (provider === "anthropic") {
     const m = process.env["ANTHROPIC_MODEL"];
-    if (m) return m;
+    if (m) return { model: m, source: "env" };
   } else if (provider === "ollama") {
     const m = process.env["OLLAMA_MODEL"];
-    if (m) return m;
+    if (m) return { model: m, source: "env" };
   }
 
-  return defaultModelForProvider(provider);
+  return { model: defaultModelForProvider(provider), source: "default" };
 }
 
 function resolveApiKey(
@@ -388,7 +391,7 @@ async function readProviderEnvFile(): Promise<Record<string, string>> {
  * Load provider configuration.
  *
  * Priority (highest to lowest):
- *   1. Environment variables (PULSEED_PROVIDER, PULSEED_ADAPTER, PULSEED_MODEL, etc.)
+ *   1. Environment variables for provider/adapter selection
  *   2. ~/.pulseed/provider.json
  *   3. Defaults (openai + gpt-5.4-mini + openai_codex_cli)
  *
@@ -419,17 +422,25 @@ export async function loadProviderConfig(): Promise<ProviderConfig> {
   }
 
   const provider = resolveProvider(fileConfig.provider);
-  let model = resolveModel(fileConfig.model, provider);
+  const resolvedModel = resolveModel(fileConfig.model, provider);
+  let model = resolvedModel.model;
   const adapter = resolveAdapter(fileConfig.adapter);
 
-  // Auto-correct model-adapter incompatibility (e.g. OPENAI_MODEL=gpt-4o-mini with openai_codex_cli)
+  // Only env/default-selected models are auto-corrected. Explicit provider.json
+  // models are preserved and surfaced as warnings instead of being replaced.
   const registryEntry = MODEL_REGISTRY[model];
   if (registryEntry && !registryEntry.adapters.includes(adapter)) {
-    const fallback = defaultModelForProvider(provider);
-    console.warn(
-      `[provider-config] Model "${model}" is not compatible with adapter "${adapter}". Falling back to "${fallback}".`
-    );
-    model = fallback;
+    if (resolvedModel.source === "file") {
+      console.warn(
+        `[provider-config] Model "${model}" is not compatible with adapter "${adapter}". Keeping provider.json model and relying on validation to surface the mismatch.`
+      );
+    } else {
+      const fallback = defaultModelForProvider(provider);
+      console.warn(
+        `[provider-config] Model "${model}" is not compatible with adapter "${adapter}". Falling back to "${fallback}".`
+      );
+      model = fallback;
+    }
   }
 
   let api_key = resolveApiKey(fileConfig.api_key, provider, adapter, envFile);

@@ -3,7 +3,7 @@ import type { MCPServerConfig } from "../../../../../base/types/mcp.js";
 
 export type SetupImportSourceId = "hermes" | "openclaw";
 
-export type SetupImportItemKind = "provider" | "skill" | "mcp" | "plugin" | "telegram";
+export type SetupImportItemKind = "provider" | "user" | "skill" | "mcp" | "plugin" | "telegram";
 
 export type SetupImportDecision = "import" | "copy_disabled" | "skip";
 
@@ -22,6 +22,10 @@ export interface SetupImportTelegramSettings {
   allowedUserIds?: number[];
 }
 
+export interface SetupImportUserSettings {
+  content: string;
+}
+
 export interface SetupImportItem {
   id: string;
   source: SetupImportSourceId;
@@ -32,6 +36,7 @@ export interface SetupImportItem {
   decision: SetupImportDecision;
   reason: string;
   providerSettings?: SetupImportProviderSettings;
+  userSettings?: SetupImportUserSettings;
   telegramSettings?: SetupImportTelegramSettings;
   mcpServer?: MCPServerConfig;
 }
@@ -47,6 +52,7 @@ export interface SetupImportSelection {
   sources: SetupImportSource[];
   items: SetupImportItem[];
   providerSettings?: SetupImportProviderSettings;
+  userSettings?: SetupImportUserSettings;
 }
 
 export interface SetupImportAppliedItem {

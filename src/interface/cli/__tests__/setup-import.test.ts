@@ -62,6 +62,7 @@ describe("setup import discovery", () => {
       capabilities: ["notify"],
       description: "test",
     });
+    await fsp.writeFile(path.join(openclawHome, "USER.md"), "# About You\n\nName: Imported User\n", "utf-8");
 
     const { detectSetupImportSources } = await import("../commands/setup/import/discovery.js");
     const sources = detectSetupImportSources();
@@ -73,6 +74,7 @@ describe("setup import discovery", () => {
       "plugin",
       "provider",
       "skill",
+      "user",
     ]);
     expect(openclaw?.items.find((item) => item.kind === "provider")?.providerSettings).toMatchObject({
       provider: "anthropic",
@@ -95,6 +97,9 @@ describe("setup import discovery", () => {
       ],
     });
     expect(openclaw?.items.find((item) => item.kind === "plugin")?.decision).toBe("copy_disabled");
+    expect(openclaw?.items.find((item) => item.kind === "user")?.userSettings).toEqual({
+      content: "# About You\n\nName: Imported User\n",
+    });
   });
 
   it("detects OpenClaw migration-style YAML, env secrets, workspace skills, and nested MCP servers", async () => {
@@ -232,6 +237,63 @@ describe("setup import discovery", () => {
       apiKey: "sk-workspace-main",
     });
     expect(provider?.providerSettings?.apiKey).not.toBe("sk-workspace-secondary");
+  });
+
+  it("prefers the actual provider object over unrelated sibling model values", async () => {
+    const hermesHome = path.join(tmpDir, "hermes");
+    process.env["PULSEED_IMPORT_HERMES_HOME"] = hermesHome;
+
+    await writeJson(path.join(hermesHome, "settings.json"), {
+      agents: {
+        defaults: {
+          model: "gpt-4o-mini-tts",
+        },
+      },
+      provider: {
+        provider: "openai",
+        model: "gpt-5.4",
+        adapter: "openai_codex_cli",
+        apiKey: "OPENAI_API_KEY",
+      },
+    });
+    await fsp.writeFile(path.join(hermesHome, ".env"), "OPENAI_API_KEY=sk-hermes-openai\n", "utf-8");
+
+    const { detectSetupImportSources } = await import("../commands/setup/import/discovery.js");
+    const sources = detectSetupImportSources();
+    const hermes = sources.find((source) => source.id === "hermes");
+    const provider = hermes?.items.find((item) => item.kind === "provider");
+
+    expect(provider?.providerSettings).toMatchObject({
+      provider: "openai",
+      model: "gpt-5.4",
+      adapter: "openai_codex_cli",
+      apiKey: "sk-hermes-openai",
+    });
+  });
+
+  it("detects USER.md from Hermes for identity import", async () => {
+    const hermesHome = path.join(tmpDir, "hermes");
+    process.env["PULSEED_IMPORT_HERMES_HOME"] = hermesHome;
+
+    await writeJson(path.join(hermesHome, "settings.json"), {
+      provider: "openai",
+      model: "gpt-5.4",
+      adapter: "openai_codex_cli",
+    });
+    await fsp.writeFile(
+      path.join(hermesHome, "USER.md"),
+      "# About You\n\nName: Imported User\nPrefers concise updates.\n",
+      "utf-8"
+    );
+
+    const { detectSetupImportSources } = await import("../commands/setup/import/discovery.js");
+    const sources = detectSetupImportSources();
+    const hermes = sources.find((source) => source.id === "hermes");
+    const user = hermes?.items.find((item) => item.kind === "user");
+
+    expect(user?.userSettings).toEqual({
+      content: "# About You\n\nName: Imported User\nPrefers concise updates.\n",
+    });
   });
 });
 

@@ -184,6 +184,8 @@ export async function applySetupImportSelection(
     try {
       if (item.kind === "provider") {
         applied.push(reportItem(item, "applied", "provider settings seeded into setup answers"));
+      } else if (item.kind === "user") {
+        applied.push(reportItem(item, "applied", "USER.md seeded into setup identity"));
       } else if (item.kind === "telegram") {
         applied.push(reportItem(item, "applied", "telegram settings seeded into plugin config"));
       } else if (item.kind === "skill" || item.kind === "plugin") {

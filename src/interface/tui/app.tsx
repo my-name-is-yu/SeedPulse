@@ -47,6 +47,13 @@ export interface ApprovalRequest {
   resolve: (approved: boolean) => void;
 }
 
+export type DaemonConnectionState = "connected" | "connecting" | "disconnected";
+
+export function formatDaemonConnectionState(state: DaemonConnectionState | undefined): string | undefined {
+  if (!state) return undefined;
+  return `  [daemon ${state}]`;
+}
+
 interface AppProps {
   // Daemon mode (thin client — events via SSE, commands via REST)
   daemonClient?: DaemonClient;
@@ -70,8 +77,8 @@ const StatusBar: React.FC<{
   trustScore: number;
   status: string;
   iteration: number;
-  daemonConnected?: boolean;
-}> = ({ goalCount, trustScore, status, iteration, daemonConnected }) => (
+  daemonConnectionState?: DaemonConnectionState;
+}> = ({ goalCount, trustScore, status, iteration, daemonConnectionState }) => (
   <Box
     borderStyle="single"
     borderColor={theme.border}
@@ -81,7 +88,7 @@ const StatusBar: React.FC<{
     <Text dimColor>
       Active: {goalCount}  Trust: {trustScore >= 0 ? "+" : ""}
       {trustScore}  Status: {statusLabel(status)}  Iter: {iteration}
-      {daemonConnected !== undefined && (daemonConnected ? "  [daemon]" : "  [disconnected]")}
+      {formatDaemonConnectionState(daemonConnectionState)}
     </Text>
     <Text dimColor>d:dashboard  ?:help  Ctrl-C× 2:quit</Text>
   </Box>
@@ -130,7 +137,11 @@ export function App({
     : null;
 
   const [daemonLoopState, setDaemonLoopState] = useState<LoopState>(IDLE_LOOP_STATE);
-  const [daemonConnected, setDaemonConnected] = useState(false);
+  const [daemonConnectionState, setDaemonConnectionState] = useState<DaemonConnectionState | undefined>(
+    isDaemonMode
+      ? (daemonClient?.isConnected() ? "connected" : "connecting")
+      : undefined
+  );
 
   const loopState = isDaemonMode ? daemonLoopState : (standaloneHook?.loopState ?? IDLE_LOOP_STATE);
   const startLoop = isDaemonMode
@@ -148,8 +159,8 @@ export function App({
   useEffect(() => {
     if (!isDaemonMode || !daemonClient) return;
 
-    const onConnected = () => setDaemonConnected(true);
-    const onDisconnected = () => setDaemonConnected(false);
+    const onConnected = () => setDaemonConnectionState("connected");
+    const onDisconnected = () => setDaemonConnectionState("disconnected");
 
     const onLoopUpdate = (data: unknown) => {
       const d = data as Record<string, unknown>;
@@ -499,7 +510,7 @@ export function App({
             <Text dimColor> v{PULSEED_VERSION}</Text>
           </Box>
           <Text dimColor>
-            daemon: {isDaemonMode ? "on" : "off"}{providerName ? ` · ${providerName}` : ""}
+            daemon: {isDaemonMode ? daemonConnectionState ?? "connecting" : "off"}{providerName ? ` · ${providerName}` : ""}
           </Text>
           {cwd && (
             <Text dimColor>{cwd}</Text>
@@ -572,7 +583,7 @@ export function App({
         trustScore={loopState.trustScore}
         status={loopState.status}
         iteration={loopState.iteration}
-        daemonConnected={isDaemonMode ? daemonConnected : undefined}
+        daemonConnectionState={daemonConnectionState}
       />
       {ctrlCPending && (
         <Box paddingX={1}>

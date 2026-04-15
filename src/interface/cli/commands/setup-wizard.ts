@@ -9,6 +9,7 @@ import {
 } from "../../../base/llm/provider-config.js";
 import type { ProviderConfig } from "../../../base/llm/provider-config.js";
 import { clearIdentityCache } from "../../../base/config/identity-loader.js";
+import { updateGlobalConfig } from "../../../base/config/global-config.js";
 import { readCodexOAuthToken } from "../../../base/llm/provider-config.js";
 import { isDaemonRunning } from "../../../runtime/daemon/client.js";
 import { ROOT_PRESETS } from "./presets/root-presets.js";
@@ -28,6 +29,7 @@ type SetupAnswers = {
   userName: string;
   agentName: string;
   rootPreset: keyof typeof ROOT_PRESETS;
+  importedUserContent?: string;
   provider: Provider;
   model: string;
   adapter: string;
@@ -43,6 +45,7 @@ type RuntimeAnswers = Pick<SetupAnswers, "startDaemon" | "daemonPort" | "notific
 type FullSetupSection = "identity" | "execution" | "runtime" | "review";
 type IdentityConfigOptions = {
   skipRootPreset?: boolean;
+  skipUserName?: boolean;
 };
 
 function formatSummary(answers: SetupAnswers): string {
@@ -53,7 +56,7 @@ function formatSummary(answers: SetupAnswers): string {
     : "no";
 
   return [
-    `User:      ${answers.userName}`,
+    `User:      ${answers.importedUserContent ? "imported USER.md" : answers.userName}`,
     `Agent:     ${answers.agentName}`,
     `Style:     ${ROOT_PRESETS[answers.rootPreset].name}`,
     `Provider:  ${answers.provider}`,
@@ -85,6 +88,7 @@ function formatImportSetupSummary(
     return [
       `Source:    ${sourceNames}`,
       "Provider:  not found",
+      `User:      ${selection.userSettings ? "imported USER.md" : "PulSeed will ask"}`,
       "Style:     Default",
       "Next:      PulSeed will ask for provider settings.",
     ].join("\n");
@@ -103,6 +107,7 @@ function formatImportSetupSummary(
     `Model:     ${providerPatch.model ?? "not found"}`,
     `Adapter:   ${providerPatch.adapter ?? "not found"}`,
     `API Key:   ${apiKeyStatus}`,
+    `User:      ${selection.userSettings ? "imported USER.md" : "PulSeed will ask"}`,
     "Style:     Default",
   ].join("\n");
 }
@@ -300,7 +305,9 @@ async function stepIdentityConfig(
   options: IdentityConfigOptions = {}
 ): Promise<IdentityAnswers> {
   return {
-    userName: await stepUserName(current?.userName),
+    userName: options.skipUserName
+      ? (current?.userName ?? "Imported USER.md")
+      : await stepUserName(current?.userName),
     agentName: await stepSeedyName(current?.agentName),
     rootPreset: options.skipRootPreset
       ? current?.rootPreset ?? "default"
@@ -509,9 +516,10 @@ export async function runSetupWizard(): Promise<number> {
   }
 
   let answers: SetupAnswers = {
-    userName: "",
+    userName: importSelection?.userSettings ? "Imported USER.md" : "",
     agentName: "Seedy",
     rootPreset: "default",
+    importedUserContent: importSelection?.userSettings?.content,
     provider: importedProviderPatch?.provider ?? "openai",
     model: importedProviderPatch?.model ?? "",
     adapter: importedProviderPatch?.adapter ?? "",
@@ -531,6 +539,7 @@ export async function runSetupWizard(): Promise<number> {
         answers,
         await stepIdentityConfig(answers.userName ? answers : undefined, {
           skipRootPreset: Boolean(importSelection),
+          skipUserName: Boolean(importSelection?.userSettings),
         })
       );
       const next = await stepSectionNavigation("Identity settings complete.");
@@ -626,7 +635,11 @@ export async function runSetupWizard(): Promise<number> {
   if (saveResult !== undefined) return saveResult;
   writeSeedMd(dir, finalAnswers.agentName);
   writeRootMd(dir, finalAnswers.rootPreset);
-  writeUserMd(dir, finalAnswers.userName);
+  if (finalAnswers.importedUserContent !== undefined) {
+    writeUserMd(dir, finalAnswers.userName, finalAnswers.importedUserContent);
+  } else {
+    writeUserMd(dir, finalAnswers.userName);
+  }
   clearIdentityCache();
 
   if (finalAnswers.startDaemon) {
@@ -671,6 +684,11 @@ export async function runSetupWizard(): Promise<number> {
   if (finalAnswers.startDaemon) {
     try {
       await startDaemonAfterSetup(dir, finalAnswers.daemonPort);
+      try {
+        await updateGlobalConfig({ daemon_mode: true });
+      } catch {
+        p.log.warn("Daemon started, but could not enable daemon mode in config.json");
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       p.log.warn(

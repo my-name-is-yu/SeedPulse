@@ -369,11 +369,25 @@ describe("loadProviderConfig", () => {
     expect(config.provider).toBe("anthropic");
   });
 
-  it("PULSEED_MODEL env var overrides file model", async () => {
+  it("PULSEED_MODEL env var is used when provider.json omits model", async () => {
     process.env["PULSEED_MODEL"] = "my-custom-model";
     process.env["OPENAI_API_KEY"] = "sk-test";
     const config = await loadProviderConfig();
     expect(config.model).toBe("my-custom-model");
+  });
+
+  it("keeps provider.json model authoritative over PULSEED_MODEL", async () => {
+    mockAccess.mockResolvedValue(undefined);
+    mockReadFile.mockResolvedValue(JSON.stringify({
+      provider: "openai",
+      model: "gpt-5.4",
+      adapter: "openai_codex_cli",
+    }));
+    process.env["PULSEED_MODEL"] = "gpt-4o-mini-tts";
+
+    const config = await loadProviderConfig();
+
+    expect(config.model).toBe("gpt-5.4");
   });
 
   it("auto-migrates legacy config format", async () => {
@@ -408,16 +422,20 @@ describe("loadProviderConfig", () => {
     expect(config.api_key).toBe("sk-test");
   });
 
-  it("auto-corrects gpt-4o-mini to gpt-5.4-mini when adapter is openai_codex_cli", async () => {
-    process.env["OPENAI_MODEL"] = "gpt-4o-mini";
-    process.env["OPENAI_API_KEY"] = "sk-test";
+  it("keeps explicit file models even when adapter compatibility is mismatched", async () => {
+    mockAccess.mockResolvedValue(undefined);
+    mockReadFile.mockResolvedValue(JSON.stringify({
+      provider: "openai",
+      model: "gpt-4o-mini",
+      adapter: "openai_codex_cli",
+    }));
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     const config = await loadProviderConfig();
 
-    expect(config.model).toBe("gpt-5.4-mini");
+    expect(config.model).toBe("gpt-4o-mini");
     expect(config.adapter).toBe("openai_codex_cli");
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('not compatible with adapter "openai_codex_cli"'));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Keeping provider.json model"));
     warnSpy.mockRestore();
   });
 

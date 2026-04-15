@@ -111,6 +111,8 @@ function providerSection(
 ): Record<string, unknown> | undefined {
   if (!provider) return undefined;
   for (const record of records) {
+    const generic = nestedRecord(record, "provider");
+    if (generic) return generic;
     const direct = nestedRecord(record, provider);
     if (direct) return direct;
     if (provider === "anthropic") {
@@ -210,15 +212,20 @@ export function extractProviderSettings(
   const records = collectRecords(raw);
   if (records.length === 0) return undefined;
 
+  const root = records[0]!;
   const env = { ...envFromConfig(records), ...(context.env ?? {}) };
-  const initialModel = firstString(records, MODEL_KEYS);
+  const rootModel = firstString([root], MODEL_KEYS);
+  const initialModel = rootModel ?? firstString(records, MODEL_KEYS);
   const provider =
     normalizeProvider(firstString(records, PROVIDER_KEYS)) ??
     providerFromModel(initialModel) ??
     providerFromKnownMap(records);
   const section = providerSection(records, provider);
-  const searchable = section ? [section, ...records] : records;
-  const model = firstString(searchable, MODEL_KEYS) ?? initialModel;
+  const model =
+    (section ? firstString([section], MODEL_KEYS) : undefined) ??
+    rootModel ??
+    initialModel;
+  const searchable = section ? [section, root] : [root];
   const adapter = normalizeAdapter(firstString(searchable, ADAPTER_KEYS), provider, model);
   const apiKey = providerApiKey(provider, searchable, env);
   const baseUrl = firstString(searchable, BASE_URL_KEYS);

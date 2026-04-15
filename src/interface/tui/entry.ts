@@ -9,6 +9,7 @@ import os from "os";
 import path from "path";
 import { execFileSync } from "child_process";
 import { randomUUID } from "node:crypto";
+import * as fs from "node:fs/promises";
 
 import { StateManager } from "../../base/state/state-manager.js";
 import { loadProviderConfig } from "../../base/llm/provider-config.js";
@@ -22,8 +23,14 @@ import type { Task } from "../../base/types/task.js";
 import { isNoFlickerEnabled, createFrameWriter, MouseTracking, type FrameWriter } from "./flicker/index.js";
 import { DEFAULT_CURSOR_STYLE, HIDE_CURSOR, SHOW_CURSOR, STEADY_BAR_CURSOR } from "./flicker/dec.js";
 import { isRenderableFrameChunk } from "./render-output.js";
+import { PIDManager } from "../../runtime/pid-manager.js";
+import { probeDaemonHealth, readDaemonAuthToken } from "../../runtime/daemon/client.js";
+import { DEFAULT_PORT } from "../../runtime/port-utils.js";
 
 // ─── Breadcrumb helpers ───
+
+const EXISTING_DAEMON_HEALTH_TIMEOUT_MS = 10_000;
+const EXISTING_DAEMON_HEALTH_POLL_MS = 250;
 
 function getCwd(): string {
   const raw = process.cwd();
@@ -56,6 +63,47 @@ async function startDaemonDetached(baseDir: string): Promise<void> {
     env: { ...process.env, PULSEED_HOME: baseDir },
   });
   child.unref();
+}
+
+async function readDaemonPort(baseDir: string): Promise<number> {
+  try {
+    const configPath = path.join(baseDir, "daemon.json");
+    const raw = await fs.readFile(configPath, "utf-8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const port = parsed.event_server_port;
+    return typeof port === "number" && Number.isInteger(port) && port > 0 ? port : DEFAULT_PORT;
+  } catch {
+    return DEFAULT_PORT;
+  }
+}
+
+export async function resolveRunningDaemonConnection(
+  baseDir: string
+): Promise<{ port: number; authToken?: string | null } | null> {
+  const pidManager = new PIDManager(baseDir);
+  const status = await pidManager.inspect();
+  if (status.running) {
+    const port = await readDaemonPort(baseDir);
+    const authToken = readDaemonAuthToken(baseDir, port);
+    const deadline = Date.now() + EXISTING_DAEMON_HEALTH_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const probe = await probeDaemonHealth({ host: "127.0.0.1", port });
+      if (probe.ok) {
+        return { port, authToken };
+      }
+      const refreshed = await pidManager.inspect();
+      if (!refreshed.running) break;
+      await new Promise((resolve) => setTimeout(resolve, EXISTING_DAEMON_HEALTH_POLL_MS));
+    }
+  }
+
+  const { isDaemonRunning } = await import("../../runtime/daemon/client.js");
+  const running = await isDaemonRunning(baseDir);
+  if (!running.running) return null;
+  return {
+    port: running.port,
+    authToken: running.authToken ?? readDaemonAuthToken(baseDir, running.port),
+  };
 }
 
 async function waitForDaemon(baseDir: string, timeoutMs: number): Promise<{ port: number; authToken?: string | null }> {
@@ -510,16 +558,16 @@ async function startTUIStandaloneMode(): Promise<void> {
 // ─── Daemon mode ───
 
 async function startTUIDaemonMode(): Promise<void> {
-  const { DaemonClient, isDaemonRunning } = await import("../../runtime/daemon/client.js");
+  const { DaemonClient } = await import("../../runtime/daemon/client.js");
   const baseDir = process.env.PULSEED_HOME ?? getPulseedDirPath();
 
   let daemonClient: InstanceType<typeof DaemonClient>;
 
   try {
-    const { running, port, authToken } = await isDaemonRunning(baseDir);
+    const existingConnection = await resolveRunningDaemonConnection(baseDir);
 
-    if (running) {
-      daemonClient = new DaemonClient({ host: "127.0.0.1", port, authToken, baseDir });
+    if (existingConnection) {
+      daemonClient = new DaemonClient({ host: "127.0.0.1", ...existingConnection, baseDir });
     } else {
       await startDaemonDetached(baseDir);
       const ready = await waitForDaemon(baseDir, 10_000);

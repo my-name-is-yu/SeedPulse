@@ -13,6 +13,10 @@ const logWarnMock = vi.fn();
 const logInfoMock = vi.fn();
 const logErrorMock = vi.fn();
 const logSuccessMock = vi.fn();
+const updateGlobalConfigMock = vi.fn(async () => ({
+  daemon_mode: true,
+  no_flicker: false,
+}));
 
 vi.mock("@clack/prompts", () => ({
   confirm: confirmMock,
@@ -31,6 +35,10 @@ vi.mock("@clack/prompts", () => ({
   isCancel: vi.fn(() => false),
 }));
 
+vi.mock("../../../base/config/global-config.js", () => ({
+  updateGlobalConfig: updateGlobalConfigMock,
+}));
+
 describe("setup notification step", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -45,6 +53,7 @@ describe("setup notification step", () => {
     logInfoMock.mockReset();
     logErrorMock.mockReset();
     logSuccessMock.mockReset();
+    updateGlobalConfigMock.mockReset();
   });
 
   afterEach(() => {
@@ -55,6 +64,7 @@ describe("setup notification step", () => {
     vi.doUnmock("../commands/setup/steps-runtime.js");
     vi.doUnmock("../commands/setup/steps-notification.js");
     vi.doUnmock("../../../base/llm/provider-config.js");
+    vi.doUnmock("../../../base/config/global-config.js");
     vi.doUnmock("../../../base/config/identity-loader.js");
     vi.doUnmock("../../../runtime/daemon/client.js");
     vi.doUnmock("node:child_process");
@@ -493,6 +503,7 @@ describe("setup notification step", () => {
     });
     const spawnMock = vi.fn(() => spawnChild);
     const isDaemonRunningMock = vi.fn(async () => ({ running: true, port: 41701 }));
+    const updateGlobalConfigMock = vi.fn(async () => ({ daemon_mode: true, no_flicker: false }));
 
     vi.doMock("node:child_process", () => ({
       spawn: spawnMock,
@@ -536,6 +547,9 @@ describe("setup notification step", () => {
       saveProviderConfig: vi.fn(async () => {}),
       validateProviderConfig: vi.fn(() => ({ valid: true, errors: [] })),
     }));
+    vi.doMock("../../../base/config/global-config.js", () => ({
+      updateGlobalConfig: updateGlobalConfigMock,
+    }));
     vi.doMock("../../../base/config/identity-loader.js", () => ({
       clearIdentityCache: vi.fn(),
     }));
@@ -563,6 +577,7 @@ describe("setup notification step", () => {
       expect.stringContaining("\"event_server_port\": 41701"),
       "utf-8"
     );
+    expect(updateGlobalConfigMock).toHaveBeenCalledWith({ daemon_mode: true });
     expect(spawnMock).toHaveBeenCalledWith(
       process.execPath,
       [expect.any(String), "daemon", "start", "--detach"],
@@ -576,6 +591,92 @@ describe("setup notification step", () => {
     expect(isDaemonRunningMock).toHaveBeenCalledWith("/tmp/pulseed-test");
     expect(logSuccessMock).toHaveBeenCalledWith(
       "Daemon and gateway started (PID: 12345) on port 41701."
+    );
+  });
+
+  it("does not enable daemon mode when daemon startup fails", async () => {
+    const startupError = new Error("spawn failed");
+    const spawnChild = {
+      pid: 12345,
+      unref: vi.fn(),
+      once: vi.fn(),
+    };
+    spawnChild.once.mockImplementation((event: string, callback: (error?: Error) => void) => {
+      if (event === "error") queueMicrotask(() => callback(startupError));
+      return spawnChild;
+    });
+    const spawnMock = vi.fn(() => spawnChild);
+    const updateGlobalConfigMock = vi.fn(async () => ({ daemon_mode: true, no_flicker: false }));
+
+    vi.doMock("node:child_process", () => ({
+      spawn: spawnMock,
+    }));
+    vi.doMock("../../../runtime/daemon/client.js", () => ({
+      isDaemonRunning: vi.fn(async () => ({ running: false, port: 41701 })),
+    }));
+    vi.doMock("../commands/setup/steps-identity.js", () => ({
+      getBanner: () => "banner",
+      stepExistingConfig: vi.fn(async () => "reset"),
+      stepUserName: vi.fn(async () => "User"),
+      stepSeedyName: vi.fn(async () => "Seedy"),
+    }));
+    vi.doMock("../commands/setup/steps-provider.js", () => ({
+      stepRootPreset: vi.fn(async () => "default"),
+      stepProvider: vi.fn(async () => "openai"),
+      stepModel: vi.fn(async () => "gpt-5.4-mini"),
+      stepApiKey: vi.fn(async () => "sk-test"),
+    }));
+    vi.doMock("../commands/setup/steps-adapter.js", () => ({
+      stepAdapter: vi.fn(async () => "openai_codex_cli"),
+    }));
+    vi.doMock("../commands/setup/steps-runtime.js", () => ({
+      ensurePulseedDir: vi.fn(() => "/tmp/pulseed-test"),
+      stepDaemon: vi.fn(async () => ({ start: true, port: 41701 })),
+      writeSeedMd: vi.fn(),
+      writeRootMd: vi.fn(),
+      writeUserMd: vi.fn(),
+    }));
+    vi.doMock("../commands/setup/steps-notification.js", () => ({
+      stepNotification: vi.fn(async () => null),
+    }));
+    vi.doMock("../../../base/llm/provider-config.js", () => ({
+      MODEL_REGISTRY: {
+        "gpt-5.4-mini": {
+          provider: "openai",
+          adapters: ["openai_codex_cli", "openai_api", "agent_loop"],
+        },
+      },
+      loadProviderConfig: vi.fn(),
+      saveProviderConfig: vi.fn(async () => {}),
+      validateProviderConfig: vi.fn(() => ({ valid: true, errors: [] })),
+    }));
+    vi.doMock("../../../base/config/global-config.js", () => ({
+      updateGlobalConfig: updateGlobalConfigMock,
+    }));
+    vi.doMock("../../../base/config/identity-loader.js", () => ({
+      clearIdentityCache: vi.fn(),
+    }));
+    vi.doMock("node:fs", () => ({
+      mkdirSync: vi.fn(),
+      writeFileSync: vi.fn(),
+      existsSync: vi.fn(() => false),
+      readFileSync: vi.fn(),
+    }));
+
+    confirmMock.mockResolvedValueOnce(true);
+    selectMock
+      .mockResolvedValueOnce("continue")
+      .mockResolvedValueOnce("continue")
+      .mockResolvedValueOnce("continue")
+      .mockResolvedValueOnce("save");
+
+    const { runSetupWizard } = await import("../commands/setup-wizard.js");
+    const code = await runSetupWizard();
+
+    expect(code).toBe(0);
+    expect(updateGlobalConfigMock).not.toHaveBeenCalled();
+    expect(logWarnMock).toHaveBeenCalledWith(
+      expect.stringContaining("Setup saved, but daemon/gateway did not start: spawn failed.")
     );
   });
 
@@ -714,6 +815,136 @@ describe("setup notification step", () => {
       })
     );
     expect((saveProviderConfigMock.mock.calls[0] as unknown[] | undefined)?.[0]).not.toHaveProperty("api_key");
+    expect(applySetupImportSelectionMock).toHaveBeenCalledWith("/tmp/pulseed-test", importSelection);
+  });
+
+  it("uses imported USER.md and only asks for Seedy naming", async () => {
+    const stepUserNameMock = vi.fn(async () => "User");
+    const stepSeedyNameMock = vi.fn(async () => "Imported Seedy");
+    const writeUserMdMock = vi.fn();
+    const applySetupImportSelectionMock = vi.fn(async () => ({
+      created_at: "2026-04-13T00:00:00.000Z",
+      sources: [{ id: "hermes", label: "Hermes Agent", rootDir: "/tmp/hermes" }],
+      items: [],
+    }));
+
+    const importSelection: SetupImportSelection = {
+      sources: [{ id: "hermes", label: "Hermes Agent", rootDir: "/tmp/hermes", items: [] }],
+      items: [
+        {
+          id: "hermes:user:USER.md",
+          source: "hermes",
+          sourceLabel: "Hermes Agent",
+          kind: "user",
+          label: "USER.md",
+          decision: "import",
+          reason: "USER.md found",
+          userSettings: {
+            content: "# About You\n\nName: Imported User\nPrefers concise updates.\n",
+          },
+        },
+        {
+          id: "hermes:provider:settings.json",
+          source: "hermes",
+          sourceLabel: "Hermes Agent",
+          kind: "provider",
+          label: "openai / gpt-5.4 / openai_codex_cli",
+          decision: "import",
+          reason: "provider defaults",
+          providerSettings: {
+            provider: "openai",
+            model: "gpt-5.4",
+            adapter: "openai_codex_cli",
+          },
+        },
+      ],
+      providerSettings: {
+        provider: "openai",
+        model: "gpt-5.4",
+        adapter: "openai_codex_cli",
+      },
+      userSettings: {
+        content: "# About You\n\nName: Imported User\nPrefers concise updates.\n",
+      },
+    };
+
+    vi.doMock("../commands/setup/import/flow.js", () => ({
+      stepSetupImport: vi.fn(async () => importSelection),
+      providerConfigPatchFromImport: vi.fn((settings: NonNullable<SetupImportSelection["providerSettings"]>) => ({
+        provider: settings.provider,
+        model: settings.model,
+        adapter: settings.adapter,
+        api_key: settings.apiKey,
+      })),
+    }));
+    vi.doMock("../commands/setup/import/apply.js", () => ({
+      applySetupImportSelection: applySetupImportSelectionMock,
+    }));
+    vi.doMock("../commands/setup/steps-identity.js", () => ({
+      getBanner: () => "banner",
+      stepExistingConfig: vi.fn(async () => "keep"),
+      stepUserName: stepUserNameMock,
+      stepSeedyName: stepSeedyNameMock,
+    }));
+    vi.doMock("../commands/setup/steps-provider.js", () => ({
+      stepRootPreset: vi.fn(async () => "default"),
+      stepProvider: vi.fn(async () => "openai"),
+      stepModel: vi.fn(async () => "gpt-5.4"),
+      stepApiKey: vi.fn(async () => "sk-imported"),
+      runCodexOAuthLogin: vi.fn(),
+    }));
+    vi.doMock("../commands/setup/steps-adapter.js", () => ({
+      stepAdapter: vi.fn(async () => "openai_codex_cli"),
+    }));
+    vi.doMock("../commands/setup/steps-runtime.js", () => ({
+      ensurePulseedDir: vi.fn(() => "/tmp/pulseed-test"),
+      stepDaemon: vi.fn(async () => ({ start: false, port: 41700 })),
+      writeSeedMd: vi.fn(),
+      writeRootMd: vi.fn(),
+      writeUserMd: writeUserMdMock,
+    }));
+    vi.doMock("../commands/setup/steps-notification.js", () => ({
+      stepNotification: vi.fn(async () => null),
+    }));
+    vi.doMock("../../../base/llm/provider-config.js", () => ({
+      MODEL_REGISTRY: {
+        "gpt-5.4": {
+          provider: "openai",
+          adapters: ["openai_codex_cli", "openai_api", "agent_loop"],
+        },
+      },
+      loadProviderConfig: vi.fn(),
+      readCodexOAuthToken: vi.fn(async () => "oauth-token"),
+      saveProviderConfig: vi.fn(async () => {}),
+      validateProviderConfig: vi.fn(() => ({ valid: true, errors: [] })),
+    }));
+    vi.doMock("../../../base/config/identity-loader.js", () => ({
+      clearIdentityCache: vi.fn(),
+    }));
+    vi.doMock("node:fs", () => ({
+      mkdirSync: vi.fn(),
+      writeFileSync: vi.fn(),
+      existsSync: vi.fn(() => false),
+      readFileSync: vi.fn(),
+    }));
+
+    confirmMock.mockResolvedValueOnce(true);
+    selectMock
+      .mockResolvedValueOnce("continue")
+      .mockResolvedValueOnce("continue")
+      .mockResolvedValueOnce("save");
+
+    const { runSetupWizard } = await import("../commands/setup-wizard.js");
+    const code = await runSetupWizard();
+
+    expect(code).toBe(0);
+    expect(stepUserNameMock).not.toHaveBeenCalled();
+    expect(stepSeedyNameMock).toHaveBeenCalledTimes(1);
+    expect(writeUserMdMock).toHaveBeenCalledWith(
+      "/tmp/pulseed-test",
+      "Imported USER.md",
+      "# About You\n\nName: Imported User\nPrefers concise updates.\n"
+    );
     expect(applySetupImportSelectionMock).toHaveBeenCalledWith("/tmp/pulseed-test", importSelection);
   });
 

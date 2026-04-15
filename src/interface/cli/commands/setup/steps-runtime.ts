@@ -164,7 +164,11 @@ export function writeRootMd(dir: string, presetKey: RootPresetKey): void {
   fs.writeFileSync(path.join(dir, "ROOT.md"), ROOT_PRESETS[presetKey].content, "utf-8");
 }
 
-export function writeUserMd(dir: string, userName: string): void {
+export function writeUserMd(dir: string, userName: string, importedContent?: string): void {
+  if (importedContent !== undefined) {
+    fs.writeFileSync(path.join(dir, "USER.md"), importedContent, "utf-8");
+    return;
+  }
   const content = DEFAULT_USER.replace(/^(#[^\n]*)\n/m, `$1\n\nName: ${userName}\n`);
   fs.writeFileSync(path.join(dir, "USER.md"), content, "utf-8");
 }

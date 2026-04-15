@@ -8,6 +8,7 @@ import type {
   SetupImportProviderSettings,
   SetupImportSelection,
   SetupImportSource,
+  SetupImportUserSettings,
 } from "./types.js";
 
 function sourceSummary(sources: SetupImportSource[]): string {
@@ -40,6 +41,8 @@ function itemPreview(item: SetupImportItem): string {
   const decision = item.decision === "copy_disabled" ? "copy disabled" : item.decision;
   const details = item.kind === "provider"
     ? providerPreview(item.providerSettings)
+    : item.kind === "user"
+      ? "will replace PulSeed USER.md"
     : item.kind === "telegram"
       ? [
           item.telegramSettings?.botToken ? `bot_token=${maskKey(item.telegramSettings.botToken)}` : undefined,
@@ -58,6 +61,10 @@ function preview(sources: SetupImportSource[]): string {
 
 function mergeProviderSettings(items: SetupImportItem[]): SetupImportProviderSettings | undefined {
   return items.find((item) => item.decision !== "skip" && item.providerSettings)?.providerSettings;
+}
+
+function mergeUserSettings(items: SetupImportItem[]): SetupImportUserSettings | undefined {
+  return items.find((item) => item.decision !== "skip" && item.userSettings)?.userSettings;
 }
 
 function defaultProviderConfigFromImport(
@@ -141,11 +148,18 @@ export async function stepSetupImport(): Promise<SetupImportSelection | undefine
   }
 
   const providerSettings = mergeProviderSettings(items);
+  const userSettings = mergeUserSettings(items);
   if (providerSettings) {
-    p.log.info("Imported provider settings will be used as defaults. Seedy naming will still be asked.");
+    p.log.info(
+      userSettings
+        ? "Imported provider settings and USER.md will be used as defaults. Setup will still ask for Seedy naming."
+        : "Imported provider settings will be used as defaults. Seedy naming will still be asked."
+    );
+  } else if (userSettings) {
+    p.log.info("Imported USER.md will be used as defaults. Setup will still ask for Seedy naming.");
   } else {
     p.log.info("Import selected. Seedy naming will still be asked.");
   }
 
-  return { sources, items, providerSettings };
+  return { sources, items, providerSettings, userSettings };
 }

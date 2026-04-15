@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { CONFIG_FILENAMES, MCP_FILENAMES, SOURCE_LABELS } from "./constants.js";
@@ -131,6 +132,40 @@ function providerItems(source: SetupImportSourceId, rootDir: string): SetupImpor
   });
 }
 
+function userItems(source: SetupImportSourceId, rootDir: string): SetupImportItem[] {
+  const candidates = unique([
+    path.join(rootDir, "USER.md"),
+    path.join(rootDir, "user.md"),
+    ...workspaceRoots(rootDir).flatMap((workspaceRoot) => [
+      path.join(workspaceRoot, "USER.md"),
+      path.join(workspaceRoot, "user.md"),
+    ]),
+  ]).filter(pathExists);
+
+  const sourcePath = candidates.find((candidate) => {
+    try {
+      return fs.readFileSync(candidate, "utf-8").trim().length > 0;
+    } catch {
+      return false;
+    }
+  });
+  if (!sourcePath) return [];
+
+  return [{
+    id: `${source}:user:${safeImportName(sourcePath)}`,
+    source,
+    sourceLabel: SOURCE_LABELS[source],
+    kind: "user",
+    label: path.relative(rootDir, sourcePath) || "USER.md",
+    sourcePath,
+    decision: "import",
+    reason: "USER.md found",
+    userSettings: {
+      content: fs.readFileSync(sourcePath, "utf-8"),
+    },
+  }];
+}
+
 function telegramItems(source: SetupImportSourceId, rootDir: string): SetupImportItem[] {
   const env = {
     ...readEnvFile(path.join(rootDir, ".env")),
@@ -196,6 +231,7 @@ function detectSource(source: SetupImportSourceId): SetupImportSource | undefine
     if (!pathExists(rootDir)) continue;
     const items = [
       ...providerItems(source, rootDir),
+      ...userItems(source, rootDir),
       ...telegramItems(source, rootDir),
       ...skillItems(source, rootDir),
       ...mcpItems(source, rootDir),
