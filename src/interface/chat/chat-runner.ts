@@ -4,9 +4,15 @@
 // Bypasses TaskLifecycle — calls adapter.execute() directly.
 
 import { execFile } from "node:child_process";
+import * as fsp from "node:fs/promises";
+import * as path from "node:path";
 import type { StateManager } from "../../base/state/state-manager.js";
 import type { IAdapter, AgentTask } from "../../orchestrator/execution/adapter-layer.js";
 import type { ILLMClient } from "../../base/llm/llm-client.js";
+import { getPulseedDirPath } from "../../base/utils/paths.js";
+import { migrateProviderConfig, type ProviderConfig } from "../../base/llm/provider-config.js";
+import { TaskSchema, type Task } from "../../base/types/task.js";
+import type { Goal } from "../../base/types/goal.js";
 import { ChatHistory, type ChatSession } from "./chat-history.js";
 import {
   ChatSessionCatalog,
@@ -132,6 +138,7 @@ const DIRECT_ANSWER_MAX_TOKENS = 256;
 // ─── Command help text ───
 
 const COMMAND_HELP = `Available commands:
+Session
   /help                 Show this help message
   /clear                Clear conversation history
   /sessions             List prior chat sessions
@@ -139,9 +146,25 @@ const COMMAND_HELP = `Available commands:
   /title <title>        Rename the current session
   /resume [id|title]    Resume native agentloop state for the current or selected session
   /cleanup [--dry-run]  Clean up stale chat sessions
+  /compact              Summarize older chat turns and keep the latest turns
   /exit                 Exit chat mode
+
+Goals and tasks
+  /status [goal-id]     Show active goal status, or one goal when an id is provided
+  /goals                List goals
+  /tasks [goal-id]      List tasks for a goal; uses the only active goal when unambiguous
+  /task <task-id> [goal-id]
+                        Show one task; searches goals when no goal id is provided
   /track                Promote session to Tier 2 goal pursuit (not yet implemented)
-  /tend                 Generate a goal from chat history and start autonomous daemon execution`;
+  /tend                 Generate a goal from chat history and start autonomous daemon execution
+
+Configuration
+  /config               Show provider configuration with secrets masked
+  /model                Show the active provider/model/adapter
+  /plugins              List installed plugins when plugin metadata is available
+
+Deferred
+  /retry, /undo, and /usage are intentionally not supported yet.`;
 
 // ─── Helpers ───
 
@@ -294,6 +317,316 @@ export class ChatRunner {
     return `Session ${session.id}${title} (${session.cwd})\n${lines.join("\n")}`;
   }
 
+  private async loadGoals(): Promise<Goal[]> {
+    const goalIds = await this.deps.stateManager.listGoalIds();
+    const goals = await Promise.all(goalIds.map((id) => this.deps.stateManager.loadGoal(id)));
+    return goals.filter((goal): goal is Goal => goal !== null);
+  }
+
+  private activeGoals(goals: Goal[]): Goal[] {
+    return goals.filter((goal) => goal.status === "active" || goal.status === "waiting" || goal.loop_status === "running");
+  }
+
+  private formatGoalLine(goal: Goal): string {
+    const dimensions = goal.dimensions.length === 0
+      ? "no dimensions"
+      : goal.dimensions
+        .slice(0, 3)
+        .map((dimension) => `${dimension.name}: ${String(dimension.current_value)} target ${JSON.stringify(dimension.threshold)}`)
+        .join("; ");
+    return `${goal.id} - ${goal.title} [${goal.status}, loop ${goal.loop_status}] ${dimensions}`;
+  }
+
+  private async handleStatus(args: string, start: number): Promise<ChatRunResult> {
+    const goals = await this.loadGoals();
+    if (args) {
+      const goal = goals.find((candidate) => candidate.id === args);
+      if (!goal) {
+        return { success: false, output: `Goal not found: ${args}`, elapsed_ms: Date.now() - start };
+      }
+      const lines = [
+        `Goal status: ${goal.title}`,
+        `ID: ${goal.id}`,
+        `Status: ${goal.status}`,
+        `Loop: ${goal.loop_status}`,
+        `Updated: ${goal.updated_at}`,
+        `Children: ${goal.children_ids.length}`,
+        `Dimensions:`,
+        ...goal.dimensions.map((dimension) =>
+          `- ${dimension.name}: current=${String(dimension.current_value)}, threshold=${JSON.stringify(dimension.threshold)}, confidence=${dimension.confidence}`
+        ),
+      ];
+      return { success: true, output: lines.join("\n"), elapsed_ms: Date.now() - start };
+    }
+
+    const active = this.activeGoals(goals);
+    if (active.length === 0) {
+      return { success: true, output: "No active goals found.", elapsed_ms: Date.now() - start };
+    }
+    return {
+      success: true,
+      output: `Active goals:\n${active.map((goal) => this.formatGoalLine(goal)).join("\n")}`,
+      elapsed_ms: Date.now() - start,
+    };
+  }
+
+  private async handleGoals(start: number): Promise<ChatRunResult> {
+    const goals = await this.loadGoals();
+    if (goals.length === 0) {
+      return { success: true, output: "No goals found.", elapsed_ms: Date.now() - start };
+    }
+    return {
+      success: true,
+      output: `Goals:\n${goals.map((goal) => this.formatGoalLine(goal)).join("\n")}`,
+      elapsed_ms: Date.now() - start,
+    };
+  }
+
+  private async readTasksForGoal(goalId: string): Promise<Task[]> {
+    const stateManager = this.deps.stateManager as StateManager & { getBaseDir?: () => string };
+    if (typeof stateManager.getBaseDir !== "function") return [];
+    const tasksDir = path.join(stateManager.getBaseDir(), "tasks", goalId);
+    let entries: string[] = [];
+    try {
+      entries = await fsp.readdir(tasksDir);
+    } catch {
+      return [];
+    }
+
+    const tasks: Task[] = [];
+    for (const entry of entries) {
+      if (!entry.endsWith(".json") || entry === "task-history.json" || entry === "last-failure-context.json") continue;
+      const raw = await this.deps.stateManager.readRaw(`tasks/${goalId}/${entry}`);
+      const parsed = TaskSchema.safeParse(raw);
+      if (parsed.success) tasks.push(parsed.data);
+    }
+    return tasks.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  }
+
+  private async resolveGoalForTasks(selector: string): Promise<{ goalId?: string; error?: string }> {
+    if (selector) return { goalId: selector };
+    const active = this.activeGoals(await this.loadGoals());
+    if (active.length === 1) return { goalId: active[0].id };
+    if (active.length === 0) return { error: "No active goals found. Use /tasks <goal-id>." };
+    return { error: "Multiple active goals found. Use /tasks <goal-id>." };
+  }
+
+  private formatTaskLine(task: Task): string {
+    const verdict = task.verification_verdict ? `, verdict ${task.verification_verdict}` : "";
+    return `${task.id} - ${task.status}${verdict}: ${task.work_description}`;
+  }
+
+  private async handleTasks(args: string, start: number): Promise<ChatRunResult> {
+    const resolved = await this.resolveGoalForTasks(args);
+    if (resolved.error || !resolved.goalId) {
+      return { success: false, output: resolved.error ?? "Usage: /tasks <goal-id>", elapsed_ms: Date.now() - start };
+    }
+    const tasks = await this.readTasksForGoal(resolved.goalId);
+    if (tasks.length === 0) {
+      return { success: true, output: `No tasks found for goal "${resolved.goalId}".`, elapsed_ms: Date.now() - start };
+    }
+    return {
+      success: true,
+      output: `Tasks for goal ${resolved.goalId}:\n${tasks.map((task) => this.formatTaskLine(task)).join("\n")}`,
+      elapsed_ms: Date.now() - start,
+    };
+  }
+
+  private parseTaskArgs(args: string): { taskId?: string; goalId?: string } {
+    const parts = args.split(/\s+/).filter(Boolean);
+    const goalFlagIndex = parts.indexOf("--goal");
+    if (goalFlagIndex >= 0) {
+      const goalId = parts[goalFlagIndex + 1];
+      parts.splice(goalFlagIndex, goalId ? 2 : 1);
+      return { taskId: parts[0], goalId };
+    }
+    return { taskId: parts[0], goalId: parts[1] };
+  }
+
+  private async findTask(taskId: string, goalId?: string): Promise<{ task?: Task; matches: Array<{ goalId: string; task: Task }> }> {
+    const goalIds = goalId ? [goalId] : (await this.deps.stateManager.listGoalIds());
+    const matches: Array<{ goalId: string; task: Task }> = [];
+    for (const candidateGoalId of goalIds) {
+      let raw = await this.deps.stateManager.readRaw(`tasks/${candidateGoalId}/${taskId}.json`);
+      if (!raw) {
+        const tasks = await this.readTasksForGoal(candidateGoalId);
+        const matched = tasks.find((task) => task.id === taskId || task.id.startsWith(taskId));
+        if (matched) matches.push({ goalId: candidateGoalId, task: matched });
+        continue;
+      }
+      const parsed = TaskSchema.safeParse(raw);
+      if (parsed.success) matches.push({ goalId: candidateGoalId, task: parsed.data });
+    }
+    return { task: matches.length === 1 ? matches[0].task : undefined, matches };
+  }
+
+  private formatTask(task: Task): string {
+    const lines = [
+      `Task: ${task.id}`,
+      `Goal: ${task.goal_id}`,
+      `Status: ${task.status}`,
+      `Category: ${task.task_category}`,
+      `Created: ${task.created_at}`,
+      `Work: ${task.work_description}`,
+      `Approach: ${task.approach}`,
+    ];
+    if (task.started_at) lines.push(`Started: ${task.started_at}`);
+    if (task.completed_at) lines.push(`Completed: ${task.completed_at}`);
+    if (task.verification_verdict) lines.push(`Verification: ${task.verification_verdict}`);
+    if (task.verification_evidence?.length) lines.push(`Evidence: ${task.verification_evidence.join("; ")}`);
+    if (task.success_criteria.length > 0) {
+      lines.push("Success criteria:");
+      lines.push(...task.success_criteria.map((criterion) => `- ${criterion.description}`));
+    }
+    return lines.join("\n");
+  }
+
+  private async handleTask(args: string, start: number): Promise<ChatRunResult> {
+    const { taskId, goalId } = this.parseTaskArgs(args);
+    if (!taskId) {
+      return { success: false, output: "Usage: /task <task-id> [goal-id]", elapsed_ms: Date.now() - start };
+    }
+    const found = await this.findTask(taskId, goalId);
+    if (found.matches.length > 1) {
+      return {
+        success: false,
+        output: `Task selector "${taskId}" matched multiple goals. Use /task ${taskId} <goal-id>.\n${found.matches.map((match) => `- ${match.goalId}`).join("\n")}`,
+        elapsed_ms: Date.now() - start,
+      };
+    }
+    if (!found.task) {
+      const suffix = goalId ? ` for goal "${goalId}"` : "";
+      return { success: false, output: `Task not found: ${taskId}${suffix}`, elapsed_ms: Date.now() - start };
+    }
+    return { success: true, output: this.formatTask(found.task), elapsed_ms: Date.now() - start };
+  }
+
+  private async readProviderConfigReadOnly(): Promise<Record<string, unknown>> {
+    const stateManager = this.deps.stateManager as StateManager & { getBaseDir?: () => string };
+    const baseDir = typeof stateManager.getBaseDir === "function" ? stateManager.getBaseDir() : getPulseedDirPath();
+    const configPath = path.join(baseDir, "provider.json");
+    let fileConfig: Partial<ProviderConfig> = {};
+    try {
+      const raw = await fsp.readFile(configPath, "utf-8");
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      fileConfig = ("llm_provider" in parsed || "default_adapter" in parsed)
+        ? migrateProviderConfig(parsed as never)
+        : parsed as Partial<ProviderConfig>;
+    } catch {
+      fileConfig = {};
+    }
+    const envProvider = process.env["PULSEED_PROVIDER"] ?? process.env["PULSEED_LLM_PROVIDER"];
+    const provider = envProvider === "codex"
+      ? "openai"
+      : envProvider ?? fileConfig.provider ?? "openai";
+    const model = process.env["PULSEED_MODEL"]
+      ?? fileConfig.model
+      ?? (provider === "anthropic"
+        ? process.env["ANTHROPIC_MODEL"] ?? "claude-sonnet-4-6"
+        : provider === "ollama"
+          ? process.env["OLLAMA_MODEL"] ?? "qwen3:4b"
+          : process.env["OPENAI_MODEL"] ?? "gpt-5.4-mini");
+    return {
+      provider,
+      model,
+      adapter: process.env["PULSEED_ADAPTER"] ?? process.env["PULSEED_DEFAULT_ADAPTER"] ?? fileConfig.adapter ?? "openai_codex_cli",
+      light_model: process.env["PULSEED_LIGHT_MODEL"] ?? fileConfig.light_model,
+      base_url: process.env["OPENAI_BASE_URL"] ?? process.env["OLLAMA_BASE_URL"] ?? fileConfig.base_url,
+      codex_cli_path: fileConfig.codex_cli_path,
+      has_api_key: Boolean(process.env["OPENAI_API_KEY"] || process.env["ANTHROPIC_API_KEY"] || fileConfig.api_key),
+    };
+  }
+
+  private formatConfig(config: Record<string, unknown>): string {
+    return Object.entries(config)
+      .filter(([, value]) => value !== undefined)
+      .map(([key, value]) => `${key}: ${typeof value === "string" && /key|token|secret/i.test(key) ? "[masked]" : String(value)}`)
+      .join("\n");
+  }
+
+  private async handleConfig(start: number): Promise<ChatRunResult> {
+    const config = await this.readProviderConfigReadOnly();
+    return { success: true, output: `Provider configuration:\n${this.formatConfig(config)}`, elapsed_ms: Date.now() - start };
+  }
+
+  private async handleModel(start: number): Promise<ChatRunResult> {
+    const config = await this.readProviderConfigReadOnly();
+    return {
+      success: true,
+      output: `Model: ${String(config["model"])}\nProvider: ${String(config["provider"])}\nAdapter: ${String(config["adapter"])}`,
+      elapsed_ms: Date.now() - start,
+    };
+  }
+
+  private async handlePlugins(start: number): Promise<ChatRunResult> {
+    if (!this.deps.pluginLoader) {
+      return { success: true, output: "Plugin information is not available in this chat session.", elapsed_ms: Date.now() - start };
+    }
+    try {
+      const plugins = await this.deps.pluginLoader.loadAll();
+      if (plugins.length === 0) {
+        return { success: true, output: "No plugins found.", elapsed_ms: Date.now() - start };
+      }
+      return {
+        success: true,
+        output: `Plugins:\n${plugins.map((plugin) => `${plugin.name} - ${plugin.type ?? "unknown"} - ${plugin.enabled === false ? "disabled" : "enabled"}`).join("\n")}`,
+        elapsed_ms: Date.now() - start,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { success: true, output: `Plugin information is unavailable: ${message}`, elapsed_ms: Date.now() - start };
+    }
+  }
+
+  private deterministicChatSummary(messages: ChatSession["messages"]): string {
+    const lines = messages.map((message) => `${message.role}: ${message.content.replace(/\s+/g, " ").trim()}`);
+    return lines.join("\n").slice(0, 4_000);
+  }
+
+  private async summarizeChatForCompaction(messages: ChatSession["messages"], existingSummary?: string): Promise<{ summary: string; usedLlm: boolean }> {
+    const content = [
+      existingSummary ? `Previous summary:\n${existingSummary}` : "",
+      `Messages to summarize:\n${messages.map((message) => `${message.role}: ${message.content}`).join("\n")}`,
+    ].filter(Boolean).join("\n\n");
+
+    if (this.deps.llmClient) {
+      try {
+        const response = await this.deps.llmClient.sendMessage([
+          { role: "user", content: `Summarize this chat history for later continuation. Preserve decisions, open tasks, constraints, and user preferences. Keep it concise.\n\n${content}` },
+        ], { max_tokens: 700, model_tier: "light" });
+        if (response.content.trim()) return { summary: response.content.trim(), usedLlm: true };
+      } catch {
+        // Fall back to deterministic summary below.
+      }
+    }
+
+    const fallback = [
+      existingSummary ? `Previous summary:\n${existingSummary}` : "",
+      "Extractive summary:",
+      this.deterministicChatSummary(messages),
+    ].filter(Boolean).join("\n\n");
+    return { summary: fallback, usedLlm: false };
+  }
+
+  private async handleCompact(start: number): Promise<ChatRunResult> {
+    if (!this.history) {
+      return { success: false, output: "No active chat session to compact.", elapsed_ms: Date.now() - start };
+    }
+    const session = this.history.getSessionData();
+    if (session.messages.length <= 4) {
+      return { success: true, output: "Chat history is already compact. No messages were removed.", elapsed_ms: Date.now() - start };
+    }
+    const olderMessages = session.messages.slice(0, -4);
+    const { summary, usedLlm } = await this.summarizeChatForCompaction(olderMessages, session.compactionSummary);
+    const { before, after } = await this.history.compact(summary, 4);
+    const method = usedLlm ? "LLM summary" : "deterministic summary";
+    return {
+      success: true,
+      output: `Compacted chat history with ${method}. Persisted ${before} message(s) down to ${after}; the latest user/assistant turns were kept.`,
+      elapsed_ms: Date.now() - start,
+    };
+  }
+
   private async handleCommand(input: string): Promise<ChatRunResult | null> {
     const trimmed = input.trim();
     if (!trimmed.startsWith("/")) return null;
@@ -305,7 +638,7 @@ export class ChatRunner {
       return { success: true, output: COMMAND_HELP, elapsed_ms: Date.now() - start };
     }
     if (cmd === "/clear") {
-      this.history?.clear();
+      await this.history?.clear();
       return { success: true, output: "Conversation history cleared.", elapsed_ms: Date.now() - start };
     }
     if (cmd === "/sessions") {
@@ -353,6 +686,30 @@ export class ChatRunner {
         output: `Chat session cleanup ${verb} ${report.removedSessionIds.length} session(s).`,
         elapsed_ms: Date.now() - start,
       };
+    }
+    if (cmd === "/compact") {
+      return this.handleCompact(start);
+    }
+    if (cmd === "/status") {
+      return this.handleStatus(trimmed.slice("/status".length).trim(), start);
+    }
+    if (cmd === "/goals") {
+      return this.handleGoals(start);
+    }
+    if (cmd === "/tasks") {
+      return this.handleTasks(trimmed.slice("/tasks".length).trim(), start);
+    }
+    if (cmd === "/task") {
+      return this.handleTask(trimmed.slice("/task".length).trim(), start);
+    }
+    if (cmd === "/config") {
+      return this.handleConfig(start);
+    }
+    if (cmd === "/model") {
+      return this.handleModel(start);
+    }
+    if (cmd === "/plugins") {
+      return this.handlePlugins(start);
     }
     if (cmd === "/exit") {
       return { success: true, output: "Exiting chat mode.", elapsed_ms: Date.now() - start };
@@ -660,15 +1017,23 @@ export class ChatRunner {
       }
     }
 
-    // Build conversation history from prior turns (last 10)
+    // Build conversation history from prior turns (last 10), including any manual compaction summary.
     const messages = history.getMessages();
+    const compactionSummary = history.getSessionData().compactionSummary;
     const priorTurns = resumeOnly ? messages.slice(-10) : messages.slice(0, -1).slice(-10);
     let historyBlock = "";
+    const historySections: string[] = [];
+    if (compactionSummary) {
+      historySections.push(`Compacted previous conversation summary:\n${compactionSummary}`);
+    }
     if (priorTurns.length > 0) {
       const lines = priorTurns.map((m: { role: string; content: string }) =>
         `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`
       ).join("\n");
-      historyBlock = `Previous conversation:\n${lines}\n\nCurrent message:\n`;
+      historySections.push(`Previous conversation:\n${lines}`);
+    }
+    if (historySections.length > 0) {
+      historyBlock = `${historySections.join("\n\n")}\n\nCurrent message:\n`;
     }
 
     const directAnswerRoute = !resumeOnly && !this.deps.chatAgentLoopRunner && this.deps.llmClient !== undefined && shouldUseDirectAnswerRoute(input);
@@ -745,6 +1110,13 @@ export class ChatRunner {
       .filter((section) => section && section.trim().length > 0)
       .join("\n\n")
       .trim();
+    const agentLoopSystemPrompt = [
+      systemPrompt,
+      compactionSummary ? `## Compacted Chat Summary\n${compactionSummary}` : "",
+    ]
+      .filter((section) => section && section.trim().length > 0)
+      .join("\n\n")
+      .trim();
 
     const context = resumeOnly ? "" : await buildChatContext(input, gitRoot);
     const basePrompt = resumeOnly ? "" : (context ? `${context}\n\n${input}` : input);
@@ -805,7 +1177,7 @@ export class ChatRunner {
           ...(this.nativeAgentLoopStatePath ? { resumeStatePath: this.nativeAgentLoopStatePath } : {}),
           ...(resumeState ? { resumeState } : {}),
           ...(resumeOnly ? { resumeOnly: true } : {}),
-          ...(systemPrompt ? { systemPrompt } : {}),
+          ...(agentLoopSystemPrompt ? { systemPrompt: agentLoopSystemPrompt } : {}),
         });
         const elapsed_ms = Date.now() - start;
         if (result.output) {

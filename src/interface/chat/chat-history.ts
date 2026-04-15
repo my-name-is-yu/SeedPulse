@@ -97,9 +97,24 @@ export class ChatHistory {
   }
 
   /** Clear all messages and persist the empty state. */
-  clear(): void {
+  async clear(): Promise<void> {
     this.session.messages = [];
-    void this.persist();
+    delete this.session.compactionSummary;
+    await this.persist();
+  }
+
+  /** Persist a compacted summary and keep only the latest turns in message history. */
+  async compact(summary: string, keepMessageCount = 4): Promise<{ before: number; after: number }> {
+    const before = this.session.messages.length;
+    const keepCount = Math.max(0, keepMessageCount);
+    const kept = keepCount === 0 ? [] : this.session.messages.slice(-keepCount);
+    this.session.messages = kept.map((message, index) => ({
+      ...message,
+      turnIndex: index,
+    }));
+    this.session.compactionSummary = summary;
+    await this.persist();
+    return { before, after: this.session.messages.length };
   }
 
   getMessages(): ChatMessage[] {
