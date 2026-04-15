@@ -8,6 +8,7 @@ import { SoilRetriever } from "../retriever.js";
 import { SoilDoctor } from "../doctor.js";
 import { readSoilMarkdownFile } from "../io.js";
 import { SqliteSoilRepository } from "../sqlite-repository.js";
+import { prepareSoilDisplaySnapshot } from "../display/index.js";
 
 function fixedClock(): Date {
   return new Date("2026-04-11T10:00:00.000Z");
@@ -275,6 +276,179 @@ describe("Soil doctor", () => {
 
       const report = await SoilDoctor.create({ rootDir, indexPath }).inspect();
       expect(report.findings.some((finding) => finding.code === "typed-store-projection-gap")).toBe(true);
+    } finally {
+      repo?.close();
+      cleanupTempDir(rootDir);
+    }
+  });
+
+  it("clears the typed-store projection gap after preparing the display snapshot", async () => {
+    const rootDir = makeTempDir("soil-display-gap-");
+    const indexPath = path.join(rootDir, ".index", "custom-soil-store.db");
+    let repo: SqliteSoilRepository | null = null;
+    try {
+      await fsp.mkdir(path.join(rootDir, "schedule"), { recursive: true });
+      await fsp.writeFile(path.join(rootDir, "index.md"), "# Soil\n", "utf-8");
+      await fsp.writeFile(path.join(rootDir, "schedule", "active.md"), "# Active\n", "utf-8");
+
+      repo = await SqliteSoilRepository.create({ rootDir, indexPath });
+      await repo.applyMutation({
+        records: [{
+          record_id: "rec-memory",
+          record_key: "memory.preference",
+          version: 1,
+          record_type: "preference",
+          soil_id: "memory/preferences/rec-memory",
+          title: "Preferred editor",
+          summary: "Use Obsidian as the memory viewer.",
+          canonical_text: "Use Obsidian as the memory viewer.",
+          goal_id: null,
+          task_id: null,
+          status: "active",
+          confidence: 0.9,
+          importance: 0.7,
+          source_reliability: null,
+          valid_from: null,
+          valid_to: null,
+          supersedes_record_id: null,
+          is_active: true,
+          source_type: "knowledge",
+          source_id: "memory-preference",
+          metadata_json: {},
+          created_at: "2026-04-11T09:00:00.000Z",
+          updated_at: "2026-04-11T09:00:00.000Z",
+        }],
+        chunks: [{
+          chunk_id: "chunk-memory",
+          record_id: "rec-memory",
+          soil_id: "memory/preferences/rec-memory",
+          chunk_index: 0,
+          chunk_kind: "paragraph",
+          heading_path_json: [],
+          chunk_text: "Use Obsidian as the memory viewer.",
+          token_count: 7,
+          checksum: "memory",
+          created_at: "2026-04-11T09:00:00.000Z",
+        }],
+      });
+      repo.close();
+      repo = null;
+
+      const before = await SoilDoctor.create({ rootDir, indexPath }).inspect();
+      expect(before.findings.some((finding) => finding.code === "typed-store-projection-gap")).toBe(true);
+
+      await prepareSoilDisplaySnapshot({ rootDir, indexPath });
+
+      const after = await SoilDoctor.create({ rootDir, indexPath }).inspect();
+      expect(after.findings.some((finding) => finding.code === "typed-store-projection-gap")).toBe(false);
+      await expect(fsp.access(path.join(rootDir, "memory", "preferences", "rec-memory.md"))).resolves.toBeUndefined();
+    } finally {
+      repo?.close();
+      cleanupTempDir(rootDir);
+    }
+  });
+
+  it("fallback-projects multiple active records that share one Soil page", async () => {
+    const rootDir = makeTempDir("soil-display-grouped-");
+    const indexPath = path.join(rootDir, ".index", "custom-soil-store.db");
+    let repo: SqliteSoilRepository | null = null;
+    try {
+      repo = await SqliteSoilRepository.create({ rootDir, indexPath });
+      await repo.applyMutation({
+        records: [
+          {
+            record_id: "rec-editor",
+            record_key: "memory.preference.editor",
+            version: 1,
+            record_type: "preference",
+            soil_id: "memory/preferences",
+            title: "Preferred editor",
+            summary: "Use Obsidian as the memory viewer.",
+            canonical_text: "Use Obsidian as the memory viewer.",
+            goal_id: null,
+            task_id: null,
+            status: "active",
+            confidence: 0.9,
+            importance: 0.7,
+            source_reliability: null,
+            valid_from: null,
+            valid_to: null,
+            supersedes_record_id: null,
+            is_active: true,
+            source_type: "knowledge",
+            source_id: "memory-preference-editor",
+            metadata_json: {},
+            created_at: "2026-04-11T09:00:00.000Z",
+            updated_at: "2026-04-11T09:00:00.000Z",
+          },
+          {
+            record_id: "rec-publish",
+            record_key: "memory.preference.publish",
+            version: 1,
+            record_type: "preference",
+            soil_id: "memory/preferences",
+            title: "Publish preference",
+            summary: "Publish memory through Soil display integrations.",
+            canonical_text: "Publish memory through Soil display integrations.",
+            goal_id: null,
+            task_id: null,
+            status: "active",
+            confidence: 0.8,
+            importance: 0.6,
+            source_reliability: null,
+            valid_from: null,
+            valid_to: null,
+            supersedes_record_id: null,
+            is_active: true,
+            source_type: "knowledge",
+            source_id: "memory-preference-publish",
+            metadata_json: {},
+            created_at: "2026-04-11T09:05:00.000Z",
+            updated_at: "2026-04-11T09:05:00.000Z",
+          },
+        ],
+        chunks: [
+          {
+            chunk_id: "chunk-editor",
+            record_id: "rec-editor",
+            soil_id: "memory/preferences",
+            chunk_index: 0,
+            chunk_kind: "paragraph",
+            heading_path_json: [],
+            chunk_text: "Use Obsidian as the memory viewer.",
+            token_count: 7,
+            checksum: "editor",
+            created_at: "2026-04-11T09:00:00.000Z",
+          },
+          {
+            chunk_id: "chunk-publish",
+            record_id: "rec-publish",
+            soil_id: "memory/preferences",
+            chunk_index: 0,
+            chunk_kind: "paragraph",
+            heading_path_json: [],
+            chunk_text: "Publish memory through Soil display integrations.",
+            token_count: 7,
+            checksum: "publish",
+            created_at: "2026-04-11T09:05:00.000Z",
+          },
+        ],
+      });
+      repo.close();
+      repo = null;
+
+      const result = await prepareSoilDisplaySnapshot({ rootDir, indexPath });
+
+      expect(result.fallbackPageCount).toBe(1);
+      expect(result.materializedPages).toEqual([
+        expect.objectContaining({
+          relativePath: "memory/preferences.md",
+          recordIds: ["rec-editor", "rec-publish"],
+        }),
+      ]);
+      const content = await fsp.readFile(path.join(rootDir, "memory", "preferences.md"), "utf-8");
+      expect(content).toContain("Preferred editor");
+      expect(content).toContain("Publish preference");
     } finally {
       repo?.close();
       cleanupTempDir(rootDir);

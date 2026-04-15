@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { ForeignPluginCompatibilityReport } from "../../../runtime/foreign-plugins/types.js";
 import type { SetupImportSelection, SetupImportSource } from "../commands/setup/import/types.js";
 
 let tmpDir: string;
@@ -61,6 +62,12 @@ describe("setup import discovery", () => {
       type: "notifier",
       capabilities: ["notify"],
       description: "test",
+      permissions: {
+        network: false,
+        file_read: false,
+        file_write: false,
+        shell: false,
+      },
     });
     await fsp.writeFile(path.join(openclawHome, "USER.md"), "# About You\n\nName: Imported User\n", "utf-8");
 
@@ -97,6 +104,7 @@ describe("setup import discovery", () => {
       ],
     });
     expect(openclaw?.items.find((item) => item.kind === "plugin")?.decision).toBe("copy_disabled");
+    expect(openclaw?.items.find((item) => item.kind === "plugin")?.pluginCompatibility?.status).toBe("convertible");
     expect(openclaw?.items.find((item) => item.kind === "user")?.userSettings).toEqual({
       content: "# About You\n\nName: Imported User\n",
     });
@@ -295,6 +303,68 @@ describe("setup import discovery", () => {
       content: "# About You\n\nName: Imported User\nPrefers concise updates.\n",
     });
   });
+
+  it("classifies imported plugin manifests by compatibility and permission summary", async () => {
+    const openclawHome = path.join(tmpDir, "openclaw");
+    process.env["PULSEED_IMPORT_OPENCLAW_HOME"] = openclawHome;
+
+    await fsp.mkdir(path.join(openclawHome, "plugins", "convertible"), { recursive: true });
+    await writeJson(path.join(openclawHome, "plugins", "convertible", "plugin.json"), {
+      name: "convertible",
+      version: "1.0.0",
+      type: "notifier",
+      capabilities: ["notify"],
+      description: "convertible plugin",
+      permissions: {
+        network: false,
+        file_read: false,
+        file_write: false,
+        shell: false,
+      },
+    });
+    await fsp.mkdir(path.join(openclawHome, "plugins", "quarantined"), { recursive: true });
+    await writeJson(path.join(openclawHome, "plugins", "quarantined", "plugin.json"), {
+      name: "quarantined",
+      version: "1.0.0",
+      type: "notifier",
+      capabilities: ["notify"],
+      description: "quarantined plugin",
+      permissions: {
+        network: true,
+        file_read: false,
+        file_write: false,
+        shell: false,
+      },
+    });
+    await fsp.mkdir(path.join(openclawHome, "plugins", "incompatible"), { recursive: true });
+    await writeJson(path.join(openclawHome, "plugins", "incompatible", "plugin.json"), {
+      name: "Bad Name",
+      version: "1.0",
+      type: "custom",
+      capabilities: [],
+      description: "",
+    });
+
+    const { detectSetupImportSources } = await import("../commands/setup/import/discovery.js");
+    const sources = detectSetupImportSources();
+    const openclaw = sources.find((source) => source.id === "openclaw");
+    const pluginItems = openclaw?.items.filter((item) => item.kind === "plugin") ?? [];
+
+    expect(pluginItems.map((item) => item.label).sort()).toEqual([
+      "convertible",
+      "incompatible",
+      "quarantined",
+    ]);
+    expect(pluginItems.find((item) => item.label === "convertible")?.pluginCompatibility?.status).toBe("convertible");
+    expect(pluginItems.find((item) => item.label === "quarantined")?.pluginCompatibility?.status).toBe("quarantined");
+    expect(pluginItems.find((item) => item.label === "incompatible")?.pluginCompatibility?.status).toBe("incompatible");
+    expect(pluginItems.find((item) => item.label === "quarantined")?.pluginCompatibility?.permissions).toMatchObject({
+      network: true,
+      file_read: false,
+      file_write: false,
+      shell: false,
+    });
+  });
 });
 
 describe("setup import apply", () => {
@@ -312,6 +382,12 @@ describe("setup import apply", () => {
       type: "notifier",
       capabilities: ["notify"],
       description: "test",
+      permissions: {
+        network: true,
+        file_read: false,
+        file_write: false,
+        shell: false,
+      },
     });
     await writeJson(path.join(baseDir, "mcp-servers.json"), {
       servers: [
@@ -348,6 +424,26 @@ describe("setup import apply", () => {
           sourcePath: pluginDir,
           decision: "copy_disabled",
           reason: "quarantine",
+          pluginCompatibility: {
+            source: "openclaw",
+            status: "quarantined",
+            issues: ["requested permissions: network"],
+            permissions: {
+              network: true,
+              file_read: false,
+              file_write: false,
+              shell: false,
+            },
+            manifestPath: path.join(pluginDir, "plugin.json"),
+            manifest: {
+              name: "notifier",
+              version: "1.0.0",
+              type: "notifier",
+              capabilities: ["notify"],
+              description: "test",
+              entry_point: "dist/index.js",
+            },
+          } satisfies ForeignPluginCompatibilityReport,
         },
         {
           id: "openclaw:mcp:filesystem",
@@ -399,6 +495,7 @@ describe("setup import apply", () => {
       ])
     );
     expect(report.items.filter((item) => item.status === "applied")).toHaveLength(4);
+    expect(report.items.find((item) => item.kind === "plugin")?.pluginCompatibility?.status).toBe("quarantined");
     const telegramConfig = JSON.parse(
       await fsp.readFile(path.join(baseDir, "plugins", "telegram-bot", "config.json"), "utf-8")
     ) as Record<string, unknown>;

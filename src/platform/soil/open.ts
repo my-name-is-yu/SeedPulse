@@ -2,6 +2,7 @@ import * as path from "node:path";
 import { execFileNoThrow, type ExecFileResult } from "../../base/utils/execFileNoThrow.js";
 import { createSoilConfig, type SoilConfigInput } from "./config.js";
 import { resolveSoilPageFilePath } from "./paths.js";
+import { prepareSoilDisplaySnapshot } from "./display/index.js";
 
 export type SoilOpenViewer = "default" | "finder" | "vscode" | "obsidian" | "logseq";
 export type SoilOpenTarget =
@@ -108,6 +109,7 @@ export function buildSoilOpenCommand(input: SoilOpenInput): SoilOpenCommand {
 
 export async function openSoil(input: SoilOpenInput, runner: SoilOpenRunner = execFileNoThrow): Promise<SoilOpenResult> {
   const command = buildSoilOpenCommand(input);
+  await prepareSoilDisplaySnapshot({ rootDir: input.rootDir, indexPath: input.indexPath });
   const result = await runner(command.command, command.args, { timeoutMs: 10_000 });
   return {
     ...command,

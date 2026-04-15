@@ -41,6 +41,37 @@ What belongs in PulSeed's core should be minimal. Use the following criteria:
 
 This principle keeps the PulSeed core small and delegates service-specific logic to plugins.
 
+### Builtin Integrations
+
+PulSeed also has builtin integrations. They are plugin-like capabilities that
+ship with the runtime and are registered from code, not dynamically imported
+from `~/.pulseed/plugins`. They are used for standard bridges that many users
+need and that must share PulSeed's trust boundary.
+
+Current builtin integrations:
+
+| ID | Role |
+|---|---|
+| `soil-display` | Materializes typed Soil records/pages into publishable Markdown for Obsidian, Notion, and other display sinks |
+| `mcp-bridge` | Imports MCP server configuration while keeping imported servers disabled until reviewed |
+| `foreign-plugin-bridge` | Classifies Hermes/OpenClaw plugin manifests before quarantine copy |
+
+Builtin integrations are reported separately from installed plugins. They may
+prepare or bridge data for tools, but they are not user-installed code and are
+not loaded through `PluginLoader`.
+
+### Foreign Plugin Import Boundary
+
+Hermes Agent and OpenClaw plugins can be discovered during setup import, but
+they are not enabled automatically. PulSeed copies them to
+`plugins-imported-disabled/<source>/...`, records a compatibility report, and
+requires review before conversion into a PulSeed-native plugin or bridge.
+
+MCP servers and skills are easier to import because they have narrower
+contracts. MCP servers are merged disabled, and skills are copied as local
+skill documents. Arbitrary foreign plugin code remains quarantined until its
+manifest, permissions, and execution model are compatible with PulSeed.
+
 ---
 
 ## §2 Plugin Types

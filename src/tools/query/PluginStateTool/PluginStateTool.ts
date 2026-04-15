@@ -3,6 +3,7 @@ import type { ITool, ToolResult, ToolCallContext, PermissionCheckResult, ToolMet
 import { DESCRIPTION } from "./prompt.js";
 import { TAGS, PERMISSION_LEVEL, MAX_OUTPUT_CHARS } from "./constants.js";
 import type { PluginLoader } from "../../../runtime/plugin-loader.js";
+import { listBuiltinIntegrations } from "../../../runtime/builtin-integrations.js";
 
 export const PluginStateToolInputSchema = z.object({
   pluginId: z.string().optional(),
@@ -40,9 +41,19 @@ export class PluginStateTool implements ITool<PluginStateToolInput, unknown> {
         enabled: p.status === "loaded",
         status: p.status,
       }));
+      const builtinIntegrations = listBuiltinIntegrations();
 
       if (input.pluginId) {
         const match = plugins.find((p) => p.name === input.pluginId);
+        const builtinMatch = builtinIntegrations.find((integration) => integration.id === input.pluginId);
+        if (builtinMatch) {
+          return {
+            success: true,
+            data: builtinMatch,
+            summary: `Builtin integration ${builtinMatch.id}: kind=${builtinMatch.kind}, status=${builtinMatch.status}`,
+            durationMs: Date.now() - startTime,
+          };
+        }
         if (!match) {
           return {
             success: false,
@@ -62,8 +73,8 @@ export class PluginStateTool implements ITool<PluginStateToolInput, unknown> {
 
       return {
         success: true,
-        data: { plugins },
-        summary: `Found ${plugins.length} plugin(s)`,
+        data: { plugins, builtin_integrations: builtinIntegrations },
+        summary: `Found ${plugins.length} plugin(s) and ${builtinIntegrations.length} builtin integration(s)`,
         durationMs: Date.now() - startTime,
       };
     } catch (err) {

@@ -14,6 +14,7 @@ import { extractMcpServers } from "./mcp.js";
 import { collectRecords, firstString, nestedRecord } from "./parse.js";
 import { buildProviderItem, extractProviderSettings } from "./provider.js";
 import { buildTelegramItem, extractTelegramSettings, telegramCredentialItems } from "./telegram.js";
+import { analyzeForeignPluginDirectory } from "../../../../../runtime/foreign-plugins/compatibility.js";
 import type {
   SetupImportItem,
   SetupImportSource,
@@ -212,7 +213,14 @@ function mcpItems(source: SetupImportSourceId, rootDir: string): SetupImportItem
 
 function pluginItems(source: SetupImportSourceId, rootDir: string): SetupImportItem[] {
   return findPluginDirs(rootDir).map((pluginDir) => {
-    const name = path.basename(pluginDir);
+    const pluginCompatibility = analyzeForeignPluginDirectory(source, pluginDir);
+    const name = pluginCompatibility.manifest?.name ?? path.basename(pluginDir);
+    const reason =
+      pluginCompatibility.status === "convertible"
+        ? "plugin manifest is compatible and will be copied disabled until reviewed"
+        : pluginCompatibility.status === "quarantined"
+          ? `plugin is quarantined: ${pluginCompatibility.issues.join("; ")}`
+          : `plugin is incompatible: ${pluginCompatibility.issues.join("; ")}`;
     return {
       id: `${source}:plugin:${name}`,
       source,
@@ -221,7 +229,8 @@ function pluginItems(source: SetupImportSourceId, rootDir: string): SetupImportI
       label: name,
       sourcePath: pluginDir,
       decision: "copy_disabled",
-      reason: "plugins are quarantined until PulSeed compatibility is reviewed",
+      reason,
+      pluginCompatibility,
     };
   });
 }

@@ -212,19 +212,24 @@ describe("handleSelfKnowledgeToolCall — get_plugins", () => {
     const result = await handleSelfKnowledgeToolCall("get_plugins", {}, deps);
     const parsed = JSON.parse(result) as {
       plugins: Array<{ name: string; type: string; enabled: boolean }>;
+      builtin_integrations: Array<{ id: string; source: string }>;
     };
     expect(parsed.plugins).toHaveLength(2);
     expect(parsed.plugins[0].name).toBe("slack-notifier");
     expect(parsed.plugins[1].name).toBe("github-issues");
+    expect(parsed.builtin_integrations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "soil-display", source: "builtin" }),
+    ]));
   });
 
   it("returns unavailable message when pluginLoader is absent", async () => {
     const deps = makeDeps({ pluginLoader: undefined });
     const result = await handleSelfKnowledgeToolCall("get_plugins", {}, deps);
-    const parsed = JSON.parse(result) as { message: string; plugins: unknown[] };
+    const parsed = JSON.parse(result) as { message: string; plugins: unknown[]; builtin_integrations: unknown[] };
     expect(parsed.message).toBeDefined();
     expect(parsed.message.toLowerCase()).toContain("not available");
     expect(parsed.plugins).toHaveLength(0);
+    expect(parsed.builtin_integrations.length).toBeGreaterThan(0);
   });
 
   it("fills defaults for missing type and enabled fields", async () => {

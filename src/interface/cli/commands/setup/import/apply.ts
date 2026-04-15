@@ -57,6 +57,7 @@ async function applyFileItem(baseDir: string, item: SetupImportItem): Promise<Se
       decision: item.decision,
       status: "skipped",
       reason: "no source path",
+      ...(item.pluginCompatibility ? { pluginCompatibility: item.pluginCompatibility } : {}),
     };
   }
 
@@ -72,6 +73,7 @@ async function applyFileItem(baseDir: string, item: SetupImportItem): Promise<Se
       decision: item.decision,
       status: "applied",
       targetPath,
+      ...(item.pluginCompatibility ? { pluginCompatibility: item.pluginCompatibility } : {}),
     };
   }
 
@@ -87,6 +89,7 @@ async function applyFileItem(baseDir: string, item: SetupImportItem): Promise<Se
       decision: item.decision,
       status: "applied",
       targetPath,
+      ...(item.pluginCompatibility ? { pluginCompatibility: item.pluginCompatibility } : {}),
     };
   }
 
@@ -110,6 +113,7 @@ function reportItem(item: SetupImportItem, status: SetupImportAppliedItem["statu
     decision: item.decision,
     status,
     ...(reason ? { reason } : {}),
+    ...(item.pluginCompatibility ? { pluginCompatibility: item.pluginCompatibility } : {}),
   };
 }
 

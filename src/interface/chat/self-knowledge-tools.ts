@@ -3,6 +3,7 @@ import * as path from "path";
 import type { StateManager } from "../../base/state/state-manager.js";
 import type { ToolDefinition } from "../../base/llm/llm-client.js";
 import { getAgentName } from "../../base/config/identity-loader.js";
+import { listBuiltinIntegrations } from "../../runtime/builtin-integrations.js";
 export type { ToolDefinition };
 
 // ─── Dependencies ───
@@ -10,7 +11,7 @@ export type { ToolDefinition };
 export interface SelfKnowledgeDeps {
   stateManager: StateManager;
   trustManager?: { getBalance(domain: string): Promise<{ balance: number }> };
-  pluginLoader?: { loadAll(): Promise<Array<{ name: string; type?: string; enabled?: boolean }>> };
+  pluginLoader?: { loadAll(): Promise<Array<{ name: string; type?: string; enabled?: boolean; status?: string; manifest?: { type?: string } }>> };
   homeDir: string;
 }
 
@@ -69,7 +70,7 @@ export function getSelfKnowledgeToolDefinitions(): ToolDefinition[] {
       function: {
         name: "get_plugins",
         description:
-          "Returns the list of installed plugins with name, type, and enabled status.",
+          "Returns installed plugins and builtin integrations with name, type, capabilities, and enabled status.",
         parameters: { type: "object", properties: {}, required: [] },
       },
     },
@@ -192,19 +193,28 @@ async function handleGetConfig(deps: SelfKnowledgeDeps): Promise<string> {
 }
 
 async function handleGetPlugins(deps: SelfKnowledgeDeps): Promise<string> {
+  const builtinIntegrations = listBuiltinIntegrations();
   if (!deps.pluginLoader) {
-    return JSON.stringify({ message: "Plugin information is not available.", plugins: [] });
+    return JSON.stringify({
+      message: "Plugin information is not available.",
+      plugins: [],
+      builtin_integrations: builtinIntegrations,
+    });
   }
   try {
     const pluginStates = await deps.pluginLoader.loadAll();
     const plugins = pluginStates.map((p) => ({
       name: p.name,
-      type: p.type ?? "unknown",
-      enabled: p.enabled ?? true,
+      type: p.type ?? p.manifest?.type ?? "unknown",
+      enabled: p.enabled ?? (p.status ? p.status === "loaded" : true),
     }));
-    return JSON.stringify({ plugins });
+    return JSON.stringify({ plugins, builtin_integrations: builtinIntegrations });
   } catch {
-    return JSON.stringify({ message: "Failed to load plugin information.", plugins: [] });
+    return JSON.stringify({
+      message: "Failed to load plugin information.",
+      plugins: [],
+      builtin_integrations: builtinIntegrations,
+    });
   }
 }
 

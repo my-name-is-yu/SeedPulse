@@ -156,6 +156,7 @@ Common directories:
 - `memory/`
 - `chat/`
 - `plugins/`
+- `plugins-imported-disabled/`
 
 Depending on the features in use, you may also see:
 
@@ -163,6 +164,12 @@ Depending on the features in use, you may also see:
 - runtime health snapshots
 - Soil projections and indexes
 - schedule suggestions and approval state
+
+`plugins/` contains installed PulSeed-native plugins. Foreign plugins imported
+from Hermes Agent or OpenClaw are copied to `plugins-imported-disabled/` with a
+compatibility report and are not loaded until reviewed. Builtin integrations
+such as `soil-display`, `mcp-bridge`, and `foreign-plugin-bridge` ship with the
+runtime and are reported separately from installed plugins.
 
 ## 8. Skills
 

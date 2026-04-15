@@ -39,6 +39,17 @@ function providerPreview(settings: SetupImportProviderSettings | undefined): str
 
 function itemPreview(item: SetupImportItem): string {
   const decision = item.decision === "copy_disabled" ? "copy disabled" : item.decision;
+  const pluginCompatibility =
+    item.kind === "plugin" && item.pluginCompatibility
+      ? [
+          `compatibility=${item.pluginCompatibility.status}`,
+          `permissions=${
+            Object.entries(item.pluginCompatibility.permissions)
+              .flatMap(([key, value]) => (value ? [key] : []))
+              .join(", ") || "none"
+          }`,
+        ].join(", ")
+      : undefined;
   const details = item.kind === "provider"
     ? providerPreview(item.providerSettings)
     : item.kind === "user"
@@ -48,6 +59,8 @@ function itemPreview(item: SetupImportItem): string {
           item.telegramSettings?.botToken ? `bot_token=${maskKey(item.telegramSettings.botToken)}` : undefined,
           item.telegramSettings?.allowedUserIds?.length ? `allowed_users=${item.telegramSettings.allowedUserIds.length}` : undefined,
         ].filter(Boolean).join(", ")
+    : item.kind === "plugin"
+      ? pluginCompatibility
     : item.reason;
   return `[${item.sourceLabel}] ${item.kind}: ${item.label}\n  ${decision}${details ? ` - ${details}` : ""}`;
 }

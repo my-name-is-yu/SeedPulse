@@ -9,6 +9,7 @@ import {
 import { publishAppleNotesSnapshot, type AppleNotesRunner } from "./apple-notes.js";
 import { publishNotionSnapshot, type NotionPublishClient } from "./notion.js";
 import { collectSoilSnapshotFiles, filterAppleNotesSnapshotFiles } from "./snapshot.js";
+import { prepareSoilDisplaySnapshot } from "../display/index.js";
 import {
   SoilPublishProviderSchema,
   type SoilPublishProvider,
@@ -38,6 +39,7 @@ export async function publishSoilSnapshots(input: SoilPublishConfigInput & {
   const rootDir = resolveSoilPublishRoot(input);
   const config = await loadSoilPublishConfig({ rootDir });
   const state = await loadSoilPublishState(rootDir);
+  await prepareSoilDisplaySnapshot({ rootDir, indexPath: input.indexPath, clock: input.clock });
   const files = await collectSoilSnapshotFiles(rootDir);
   const providers: SoilPublishProviderResult[] = [];
 

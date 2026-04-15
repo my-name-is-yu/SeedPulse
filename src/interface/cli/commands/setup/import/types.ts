@@ -1,5 +1,6 @@
 import type { ProviderConfig } from "../../../../../base/llm/provider-config.js";
 import type { MCPServerConfig } from "../../../../../base/types/mcp.js";
+import type { ForeignPluginCompatibilityReport } from "../../../../../runtime/foreign-plugins/types.js";
 
 export type SetupImportSourceId = "hermes" | "openclaw";
 
@@ -39,6 +40,7 @@ export interface SetupImportItem {
   userSettings?: SetupImportUserSettings;
   telegramSettings?: SetupImportTelegramSettings;
   mcpServer?: MCPServerConfig;
+  pluginCompatibility?: ForeignPluginCompatibilityReport;
 }
 
 export interface SetupImportSource {
@@ -64,6 +66,7 @@ export interface SetupImportAppliedItem {
   status: "applied" | "skipped" | "failed";
   targetPath?: string;
   reason?: string;
+  pluginCompatibility?: ForeignPluginCompatibilityReport;
 }
 
 export interface SetupImportReport {

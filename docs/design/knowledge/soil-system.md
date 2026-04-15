@@ -33,6 +33,12 @@ Legacy `.index/soil.db` remains the old `file-json-v1` Markdown snapshot and is
 kept as a fallback path. The new SQLite retrieval store uses `.index/soil.sqlite`
 so the two formats do not conflict.
 
+Display integrations use the Markdown projection contract. Obsidian and Notion
+do not read `soil_records` directly; the builtin `soil-display` integration
+first materializes typed `soil_pages` into the Markdown tree and fallback
+projects active typed records that do not yet have a page. Snapshot consumers
+then read the publishable Markdown tree.
+
 ---
 
 ## 2. Record Model
