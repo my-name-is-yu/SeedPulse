@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildChatViewport, getMatchingSuggestions, getScrollRequest, stripMouseEscapeSequences } from "../chat.js";
+import { buildChatViewport, getInputPromptLabel, getMatchingSuggestions, getScrollRequest, stripMouseEscapeSequences } from "../chat.js";
 import { estimateMarkdownHeight, estimateWrappedLineCount, wrapTextToRows } from "../markdown-renderer.js";
 import { extractBashCommand, isBashModeInput, isSafeBashCommand, createShellApprovalTask, formatShellOutput } from "../bash-mode.js";
 import { INPUT_MARKER, buildCursorEscape } from "../cursor-tracker.js";
@@ -145,10 +145,15 @@ describe("cursor tracker", () => {
   it("positions the caret from the marker column inside a bordered input box", () => {
     const frame = [
       "┌──────────────────┐",
-      `│ \u001b[31m${INPUT_MARKER} \u001b[0mhello │`,
+      `│ \u001b[31m${INPUT_MARKER}! \u001b[0mhello │`,
       "└──────────────────┘",
     ].join("\n");
 
     expect(buildCursorEscape(frame, "abc")).toBe("\u001b[2;8H");
+  });
+
+  it("keeps the bash prompt label separate from the internal marker", () => {
+    expect(getInputPromptLabel(true)).toBe("!");
+    expect(getInputPromptLabel(false)).toBe("◉");
   });
 });

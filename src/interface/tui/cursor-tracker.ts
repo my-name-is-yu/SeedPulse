@@ -3,11 +3,11 @@
  * Used for IME candidate window positioning — avoids fragile arithmetic.
  */
 
-// Unique marker: zero-width space + ◉ — won't appear in message history
-export const INPUT_MARKER = "\u200B\u25C9";
+// Unique invisible marker — won't appear in message history or the visible prompt.
+export const INPUT_MARKER = "\u200B\u2060";
 const ZERO_WIDTH_SPACE = "\u200B";
 const ESCAPE_SEQUENCE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
-const PROMPT_WIDTH = 2; // "◉ " prefix
+const PROMPT_WIDTH = 2; // one prompt glyph + trailing space
 
 function displayWidth(text: string): number {
   let width = 0;
@@ -46,7 +46,7 @@ export function findCursorRow(frame: string): number | null {
 
 /**
  * Compute the cursor x-position from the marker column and input text.
- * Prompt "◉ " = 2 columns. CJK chars = 2 columns each.
+ * Prompt "x " = 2 columns. CJK chars = 2 columns each.
  */
 export function computeCursorX(frame: string, input: string): number | null {
   const position = findInputMarkerPosition(frame);

@@ -38,10 +38,16 @@ interface ChatProps {
 }
 
 const SCROLL_LINE_STEP = 3;
+const DEFAULT_PROMPT = "◉";
+const BASH_PROMPT = "!";
 
 export { buildChatViewport } from "./chat/viewport.js";
 export { getScrollRequest, stripMouseEscapeSequences } from "./chat/scroll.js";
 export { getMatchingSuggestions } from "./chat/suggestions.js";
+
+export function getInputPromptLabel(bashMode: boolean): string {
+  return bashMode ? BASH_PROMPT : DEFAULT_PROMPT;
+}
 
 export function Chat({
   messages,
@@ -356,7 +362,8 @@ export function Chat({
             paddingX={1}
           >
             <Text color={bashMode ? theme.command : theme.userPrompt} bold>
-              {`${INPUT_MARKER} `}
+              {INPUT_MARKER}
+              {getInputPromptLabel(bashMode)}{" "}
             </Text>
             <TextInput
               value={input}
