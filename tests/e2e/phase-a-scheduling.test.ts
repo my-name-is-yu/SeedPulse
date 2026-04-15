@@ -534,7 +534,7 @@ describe("Phase A — DaemonRunner adaptive sleep (calculateAdaptiveInterval)", 
 
   // ── Test 12: Adaptive sleep disabled — returns base interval unchanged ──
 
-  it("returns baseInterval unchanged when adaptive_sleep is disabled", () => {
+  it("returns baseInterval unchanged when adaptive_sleep is disabled", async () => {
     // Use a separate tempDir2 to avoid Logger file-handle contention with the outer beforeEach runner
     const tempDir2 = makeTempDir("pulseed-adaptive-disabled-test-");
     let logger2: Logger | undefined;
@@ -551,7 +551,7 @@ describe("Phase A — DaemonRunner adaptive sleep (calculateAdaptiveInterval)", 
       const result = d.calculateAdaptiveInterval(300_000, 0, 0, 0);
       expect(result).toBe(300_000);
     } finally {
-      void logger2?.close();
+      await logger2?.close();
       cleanupTempDir(tempDir2);
     }
   });
