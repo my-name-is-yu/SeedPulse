@@ -6,6 +6,7 @@
 // concrete agent implementations (Claude Code CLI, Claude API, etc.).
 
 import { AdapterError } from "../../base/utils/errors.js";
+import type { VerificationFileDiff } from "../../base/types/task.js";
 
 // ─── Types ───
 
@@ -61,6 +62,10 @@ export interface AgentResult {
    * true = files were changed; false = adapter reported success but no files changed.
    */
   filesChanged?: boolean;
+  /** Relative file paths changed during execution, when available. */
+  filesChangedPaths?: string[];
+  /** Unified diffs captured immediately after execution, when available. */
+  fileDiffs?: VerificationFileDiff[];
   /** Native agentloop execution metadata when the task ran through the in-process loop. */
   agentLoop?: AgentLoopExecutionInfo;
 }

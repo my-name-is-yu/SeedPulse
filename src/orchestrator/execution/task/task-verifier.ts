@@ -18,7 +18,7 @@
 
 import { StateManager } from "../../../base/state/state-manager.js";
 import { VerificationResultSchema } from "../../../base/types/task.js";
-import type { Task, VerificationResult } from "../../../base/types/task.js";
+import type { Task, VerificationResult, VerificationFileDiff } from "../../../base/types/task.js";
 import type { AgentResult } from "../adapter-layer.js";
 import { wrapXmlTag, formatKnowledge } from "../../../prompt/formatters.js";
 import { analyzeImpact } from "../impact-analyzer.js";
@@ -70,6 +70,113 @@ function formatSelfReportEvidence(executorReport: import("./task-verifier-types.
   ].filter((segment) => segment.length > 0);
 
   return segments.join("\n");
+}
+
+function quoteShellArg(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+async function collectVerificationDiffs(
+  deps: VerifierDeps,
+  task: Task,
+  executionResult: AgentResult,
+): Promise<VerificationFileDiff[]> {
+  if (executionResult.fileDiffs && executionResult.fileDiffs.length > 0) {
+    return executionResult.fileDiffs;
+  }
+
+  if (!deps.toolExecutor) return [];
+
+  const cwd =
+    executionResult.agentLoop?.requestedCwd ??
+    executionResult.agentLoop?.executionCwd ??
+    task.constraints.find((constraint) => constraint.startsWith("workspace_path:"))?.slice("workspace_path:".length) ??
+    process.cwd();
+
+  const changedPaths = [
+    ...(executionResult.filesChangedPaths ?? []),
+    ...(executionResult.agentLoop?.filesChangedPaths ?? []),
+  ].filter((path, index, all) => path.length > 0 && all.indexOf(path) === index);
+
+  const toolContext = {
+    cwd,
+    goalId: task.goal_id,
+    trustBalance: 0,
+    preApproved: true,
+    approvalFn: async () => true,
+  };
+
+  const collectForPath = async (path: string): Promise<VerificationFileDiff | null> => {
+    try {
+      const result = await deps.toolExecutor!.execute(
+        "git_diff",
+        { target: "unstaged", path, maxLines: 160 },
+        toolContext
+      );
+      if (result.success && typeof result.data === "string" && result.data.trim()) {
+        return { path, patch: result.data };
+      }
+    } catch {
+      // Fall through to untracked-file fallback.
+    }
+
+    try {
+      const quotedPath = quoteShellArg(path);
+      const fallback = await deps.toolExecutor!.execute(
+        "shell_command",
+        {
+          command: `test -f ${quotedPath} && git diff --no-index -- /dev/null ${quotedPath} || true`,
+          cwd,
+          timeoutMs: 30_000,
+          description: `Render diff for new file ${path}`,
+        },
+        toolContext
+      );
+      const shellOutput =
+        fallback.data &&
+        typeof fallback.data === "object" &&
+        "stdout" in fallback.data &&
+        typeof fallback.data.stdout === "string"
+          ? fallback.data.stdout
+          : "";
+      if (shellOutput.trim()) {
+        return { path, patch: shellOutput };
+      }
+    } catch {
+      return null;
+    }
+
+    return null;
+  };
+
+  if (changedPaths.length > 0) {
+    const diffs = await Promise.all(changedPaths.slice(0, 5).map((path) => collectForPath(path)));
+    return diffs.filter((diff): diff is VerificationFileDiff => diff !== null);
+  }
+
+  try {
+    const result = await deps.toolExecutor.execute(
+      "git_diff",
+      { target: "unstaged", maxLines: 240 },
+      toolContext
+    );
+    if (!result.success || typeof result.data !== "string" || !result.data.trim()) return [];
+
+    return result.data
+      .split(/^diff --git /m)
+      .filter(Boolean)
+      .slice(0, 5)
+      .map((section) => {
+        const patch = `diff --git ${section}`;
+        const match = patch.match(/^diff --git a\/(.+?) b\/(.+)$/m);
+        return {
+          path: match?.[2] ?? match?.[1] ?? "unknown",
+          patch,
+        };
+      });
+  } catch {
+    return [];
+  }
 }
 
 // ─── verifyTask ───
@@ -312,6 +419,7 @@ export async function verifyTask(
     confidence,
     evidence,
     dimension_updates,
+    file_diffs: await collectVerificationDiffs(deps, task, executionResult),
     timestamp: now,
   });
 

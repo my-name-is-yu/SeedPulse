@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ReportTypeEnum, VerbosityLevelEnum } from "../../base/types/core.js";
+import { VerificationFileDiffSchema } from "../../base/types/task.js";
 
 // --- Report ---
 
@@ -23,6 +24,7 @@ export const ReportSchema = z.object({
       elapsed_ms: z.number().optional(),
       task_id: z.string().nullable().optional(),
       task_action: z.string().nullable().optional(),
+      task_verification_diffs: z.array(VerificationFileDiffSchema).optional(),
       loops_run: z.number().optional(),
       stall_count: z.number().optional(),
       pivot_count: z.number().optional(),
@@ -34,4 +36,3 @@ export const ReportSchema = z.object({
     .optional(),
 });
 export type Report = z.infer<typeof ReportSchema>;
-

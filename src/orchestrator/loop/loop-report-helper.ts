@@ -45,6 +45,7 @@ export async function generateLoopReport(
             taskId: iterationResult.taskResult.task.id,
             action: iterationResult.taskResult.action,
             dimension: iterationResult.taskResult.task.primary_dimension,
+            verificationDiffs: iterationResult.taskResult.verificationResult.file_diffs,
           }
         : null;
 

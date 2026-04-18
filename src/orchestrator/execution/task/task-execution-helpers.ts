@@ -6,6 +6,7 @@ import type { ToolExecutor } from "../../../tools/executor.js";
 import { executeTask as executeTaskDirect } from "./task-executor.js";
 import type { StateManager } from "../../../base/state/state-manager.js";
 import type { SessionManager } from "../session-manager.js";
+import { captureExecutionDiffArtifacts } from "./task-diff-capture.js";
 
 interface ExecuteTaskWithGuardsParams {
   task: Task;
@@ -80,7 +81,15 @@ export async function executeTaskWithGuards(
         toolCtx
       );
       if (toolResult.success && toolResult.data != null) {
-        return toolResult.data as AgentResult;
+        const result = toolResult.data as AgentResult;
+        const goal = await stateManager.loadGoal(task.goal_id).catch(() => null);
+        const workspaceCwd = goal?.constraints.find((constraint) => constraint.startsWith("workspace_path:"))
+          ?.slice("workspace_path:".length);
+        const diffArtifacts = captureExecutionDiffArtifacts(execFileSyncFn, workspaceCwd ?? process.cwd());
+        result.filesChangedPaths = diffArtifacts.changedPaths;
+        result.fileDiffs = diffArtifacts.fileDiffs;
+        result.filesChanged = diffArtifacts.changedPaths.length > 0;
+        return result;
       }
       logger?.warn?.(`[TaskLifecycle] run-adapter tool failed, falling back to direct call: ${toolResult.error ?? "unknown"}`);
     } catch (err) {

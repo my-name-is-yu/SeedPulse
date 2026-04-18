@@ -8,6 +8,7 @@ import type { Strategy } from "../../../base/types/strategy.js";
 import { appendTaskOutcomeEvent } from "./task-outcome-ledger.js";
 import { validateProtectedPath } from "../../../tools/fs/FileValidationTool/protected-path-policy.js";
 import { loadProviderConfig } from "../../../base/llm/provider-config.js";
+import { captureExecutionDiffArtifacts } from "./task-diff-capture.js";
 const DEBUG = process.env.PULSEED_DEBUG === "true";
 
 // ─── Deps interface ───
@@ -177,26 +178,10 @@ export async function executeTask(
   if (result.success) {
     try {
       const gitCwd = workspaceCwd ?? process.cwd();
-      const diffOutput = execFileSyncFn("git", ["diff", "--name-only"], {
-        cwd: gitCwd,
-        encoding: "utf-8",
-      }).trim();
-
-      // Also detect new (untracked) files — git diff alone misses them
-      let untrackedOutput = "";
-      try {
-        untrackedOutput = execFileSyncFn("git", ["ls-files", "--others", "--exclude-standard"], {
-          cwd: gitCwd,
-          encoding: "utf-8",
-        }).trim();
-      } catch {
-        // git ls-files failure is non-fatal
-      }
-
-      const changedFiles = [
-        ...(diffOutput ? diffOutput.split("\n") : []),
-        ...(untrackedOutput ? untrackedOutput.split("\n") : []),
-      ];
+      const diffArtifacts = captureExecutionDiffArtifacts(execFileSyncFn, gitCwd);
+      const changedFiles = diffArtifacts.changedPaths;
+      result.filesChangedPaths = changedFiles;
+      result.fileDiffs = diffArtifacts.fileDiffs;
       result.filesChanged = changedFiles.length > 0;
       if (!result.filesChanged) {
         logger?.warn(

@@ -56,6 +56,7 @@ import type { MemoryLifecycleManager } from "../../../platform/knowledge/memory/
 import { buildEnrichedKnowledgeContext } from "./task-context-enricher.js";
 import { persistTaskCycleSideEffects } from "./task-side-effects.js";
 import { finalizeSuccessfulExecution } from "./task-post-execution.js";
+import { captureExecutionDiffArtifacts } from "./task-diff-capture.js";
 import { GuardrailRunner } from "../../../platform/traits/guardrail-runner.js";
 import type { HookManager } from "../../../runtime/hook-manager.js";
 import type { ToolExecutor } from "../../../tools/executor.js";
@@ -407,6 +408,15 @@ export class TaskLifecycle {
         knowledgeContext,
       });
       result = taskAgentLoopResultToAgentResult(agentLoopResult);
+      if (agentLoopResult.workspace?.executionCwd) {
+        const diffArtifacts = captureExecutionDiffArtifacts(
+          this.execFileSyncFn,
+          agentLoopResult.workspace.executionCwd,
+        );
+        result.filesChangedPaths = diffArtifacts.changedPaths;
+        result.fileDiffs = diffArtifacts.fileDiffs;
+        result.filesChanged = diffArtifacts.changedPaths.length > 0;
+      }
     } catch (err) {
       result = {
         success: false,

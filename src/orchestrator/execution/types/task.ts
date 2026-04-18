@@ -25,6 +25,12 @@ export const ScopeBoundarySchema = z.object({
 });
 export type ScopeBoundary = z.infer<typeof ScopeBoundarySchema>;
 
+export const VerificationFileDiffSchema = z.object({
+  path: z.string(),
+  patch: z.string(),
+});
+export type VerificationFileDiff = z.infer<typeof VerificationFileDiffSchema>;
+
 // --- Task ---
 
 export const TaskSchema = z.object({
@@ -96,6 +102,7 @@ export const VerificationResultSchema = z.object({
   confidence: z.number().min(0).max(1),
   evidence: z.array(EvidenceSchema),
   dimension_updates: z.array(DimensionUpdateSchema),
+  file_diffs: z.array(VerificationFileDiffSchema).optional(),
   timestamp: z.string(),
 });
 export type VerificationResult = z.infer<typeof VerificationResultSchema>;

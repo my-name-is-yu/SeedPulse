@@ -1,9 +1,16 @@
+import type { VerificationFileDiff } from "../base/types/task.js";
+
 export type ExecutionSummaryParams = {
   goalId: string;
   loopIndex: number;
   observation: { dimensionName: string; progress: number; confidence: number }[];
   gapAggregate: number;
-  taskResult: { taskId: string; action: string; dimension: string } | null;
+  taskResult: {
+    taskId: string;
+    action: string;
+    dimension: string;
+    verificationDiffs?: VerificationFileDiff[];
+  } | null;
   stallDetected: boolean;
   pivotOccurred: boolean;
   elapsedMs: number;

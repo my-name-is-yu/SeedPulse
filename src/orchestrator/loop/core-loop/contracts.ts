@@ -27,6 +27,7 @@ import type { GoalRefiner } from "../../goal/goal-refiner.js";
 import type { Goal } from "../../../base/types/goal.js";
 import type { GapVector } from "../../../base/types/gap.js";
 import type { DriveContext, DriveScore } from "../../../base/types/drive.js";
+import type { VerificationFileDiff } from "../../../base/types/task.js";
 import type { ToolExecutor } from "../../../tools/executor.js";
 import type { ToolRegistry } from "../../../tools/registry.js";
 import type { CorePhaseRunner } from "../../execution/agent-loop/core-phase-runner.js";
@@ -72,7 +73,12 @@ export interface ExecutionSummaryParams {
   loopIndex: number;
   observation: { dimensionName: string; progress: number; confidence: number }[];
   gapAggregate: number;
-  taskResult: { taskId: string; action: string; dimension: string } | null;
+  taskResult: {
+    taskId: string;
+    action: string;
+    dimension: string;
+    verificationDiffs?: VerificationFileDiff[];
+  } | null;
   stallDetected: boolean;
   pivotOccurred: boolean;
   elapsedMs: number;

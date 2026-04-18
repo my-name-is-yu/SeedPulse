@@ -85,6 +85,33 @@ describe("generateExecutionSummary", () => {
     expect(report.content).toContain("code_quality");
   });
 
+  it("stores verification diffs in structured metadata", () => {
+    const report = engine.generateExecutionSummary(makeBaseParams({
+      taskResult: {
+        taskId: "task-xyz",
+        action: "fix-lint",
+        dimension: "code_quality",
+        verificationDiffs: [{
+          path: "src/example.ts",
+          patch: [
+            "diff --git a/src/example.ts b/src/example.ts",
+            "@@ -1 +1 @@",
+            "-before",
+            "+after",
+          ].join("\n"),
+        }],
+      },
+    }));
+
+    expect(report.metadata?.task_verification_diffs).toEqual([
+      expect.objectContaining({
+        path: "src/example.ts",
+        patch: expect.stringContaining("+after"),
+      }),
+    ]);
+    expect(report.content).not.toContain("```diff");
+  });
+
   it("shows 'No task executed' when taskResult is null", () => {
     const report = engine.generateExecutionSummary(makeBaseParams({ taskResult: null }));
     expect(report.content).toContain("No task executed");

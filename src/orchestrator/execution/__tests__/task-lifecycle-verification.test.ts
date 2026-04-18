@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import { z } from "zod";
 import { StateManager } from "../../../base/state/state-manager.js";
@@ -14,6 +14,7 @@ import type {
   LLMRequestOptions,
   LLMResponse,
 } from "../../../base/llm/llm-client.js";
+import type { ToolExecutor } from "../../../tools/executor.js";
 import { createMockLLMClient } from "../../../../tests/helpers/mock-llm.js";
 import { makeTempDir } from "../../../../tests/helpers/temp-dir.js";
 
@@ -133,6 +134,7 @@ describe("TaskLifecycle", async () => {
       logger?: import("../../../runtime/logger.js").Logger;
       adapterRegistry?: import("../task/task-lifecycle.js").AdapterRegistry;
       execFileSyncFn?: (cmd: string, args: string[], opts: { cwd: string; encoding: "utf-8" }) => string;
+      toolExecutor?: ToolExecutor;
     }
   ): TaskLifecycle {
     strategyManager = new StrategyManager(stateManager, llmClient);
@@ -242,6 +244,90 @@ describe("TaskLifecycle", async () => {
       const verification = await lifecycle.verifyTask(task, result);
       expect(verification.verdict).toBe("pass");
       expect(verification.confidence).toBeGreaterThanOrEqual(0.8);
+    });
+
+    it("uses execution-provided diffs as the source of truth", async () => {
+      const llm = createMockLLMClient([LLM_REVIEW_PASS]);
+      const execute = vi.fn();
+      const lifecycle = createLifecycle(llm, {
+        toolExecutor: { execute } as unknown as ToolExecutor,
+      });
+      const task = makeTask();
+      const result = makeExecutionResult({
+        filesChangedPaths: ["src/example.ts"],
+        fileDiffs: [{
+          path: "src/example.ts",
+          patch: [
+            "diff --git a/src/example.ts b/src/example.ts",
+            "@@ -1 +1 @@",
+            "-before",
+            "+after",
+          ].join("\n"),
+        }],
+      });
+
+      const verification = await lifecycle.verifyTask(task, result);
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(verification.file_diffs).toEqual([
+        expect.objectContaining({
+          path: "src/example.ts",
+          patch: expect.stringContaining("+after"),
+        }),
+      ]);
+    });
+
+    it("falls back to synthetic diff output for newly created files", async () => {
+      const llm = createMockLLMClient([LLM_REVIEW_PASS]);
+      const execute = vi.fn()
+        .mockResolvedValueOnce({
+          success: true,
+          data: "",
+          summary: "No changes found",
+          durationMs: 1,
+        })
+        .mockResolvedValueOnce({
+          success: false,
+          data: {
+            stdout: [
+              "diff --git a/src/new-file.ts b/src/new-file.ts",
+              "new file mode 100644",
+              "--- /dev/null",
+              "+++ b/src/new-file.ts",
+              "@@ -0,0 +1 @@",
+              "+export const created = true;",
+            ].join("\n"),
+            stderr: "",
+            exitCode: 1,
+          },
+          summary: "Command failed (exit 1)",
+          error: "",
+          durationMs: 1,
+        });
+      const lifecycle = createLifecycle(llm, {
+        toolExecutor: { execute } as unknown as ToolExecutor,
+      });
+      const task = makeTask();
+      const result = makeExecutionResult({
+        filesChangedPaths: ["src/new-file.ts"],
+      });
+
+      const verification = await lifecycle.verifyTask(task, result);
+
+      expect(execute).toHaveBeenNthCalledWith(
+        2,
+        "shell_command",
+        expect.objectContaining({
+          command: expect.stringContaining("git diff --no-index -- /dev/null"),
+        }),
+        expect.objectContaining({ goalId: task.goal_id })
+      );
+      expect(verification.file_diffs).toEqual([
+        expect.objectContaining({
+          path: "src/new-file.ts",
+          patch: expect.stringContaining("new file mode 100644"),
+        }),
+      ]);
     });
 
     it("uses the preferred execution adapter for mechanical verification", async () => {
@@ -649,6 +735,36 @@ describe("TaskLifecycle", async () => {
         completion_evidence: ["updated handler", "added regression test"],
         verification_hints: ["run targeted vitest"],
       });
+    });
+
+    it("collects git diff entries into the verification result when toolExecutor is available", async () => {
+      const llm = createMockLLMClient([LLM_REVIEW_PASS]);
+      const toolExecutor = {
+        execute: async (toolName: string, input: unknown) => {
+          if (toolName !== "git_diff") throw new Error("unexpected tool");
+          const path = (input as { path?: string }).path;
+          return {
+            success: true,
+            data: `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-old\n+new`,
+            summary: "diff ok",
+            durationMs: 1,
+          };
+        },
+      } as unknown as ToolExecutor;
+      const lifecycle = createLifecycle(llm, { toolExecutor });
+      const task = makeTask();
+      const result = makeExecutionResult({
+        filesChangedPaths: ["src/example.ts"],
+      });
+
+      const verification = await lifecycle.verifyTask(task, result);
+
+      expect(verification.file_diffs).toEqual([
+        expect.objectContaining({
+          path: "src/example.ts",
+        }),
+      ]);
+      expect(verification.file_diffs[0]?.patch).toContain("+new");
     });
 
     it("truncates very long output in L2 review prompt", async () => {

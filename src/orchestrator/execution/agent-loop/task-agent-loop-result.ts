@@ -40,6 +40,7 @@ export function taskAgentLoopResultToAgentResult(
       result.stopReason === "timeout" ? "timeout" :
       done ? "completed" : "error",
     filesChanged: result.changedFiles.length > 0 || (result.output ? result.output.filesChanged.length > 0 : result.filesChanged),
+    filesChangedPaths: [...new Set([...(result.output?.filesChanged ?? []), ...result.changedFiles])],
     agentLoop: {
       traceId: result.traceId,
       sessionId: result.sessionId,

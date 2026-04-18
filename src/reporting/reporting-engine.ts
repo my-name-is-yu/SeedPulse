@@ -88,6 +88,7 @@ export class ReportingEngine {
         elapsed_ms: elapsedMs,
         task_id: taskResult?.taskId ?? null,
         task_action: taskResult?.action ?? null,
+        task_verification_diffs: taskResult?.verificationDiffs,
       },
     });
 
