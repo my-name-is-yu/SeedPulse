@@ -60,6 +60,10 @@ export class GoalWorker {
         } catch {
           // Bookkeeping callbacks must not turn a successful loop into a worker crash.
         }
+
+        if (!this.extendRequested) {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
       } while (this.extendRequested);
 
       this.status = 'idle';

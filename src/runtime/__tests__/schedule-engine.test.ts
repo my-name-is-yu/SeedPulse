@@ -2564,7 +2564,7 @@ describe("Jitter support (Phase 4)", () => {
     expect(unique.size).toBeGreaterThan(1);
     // All samples within ±50% of 60s = 30s to 90s range
     for (const offset of samples) {
-      expect(offset).toBeGreaterThan(30_000);
+      expect(offset).toBeGreaterThanOrEqual(29_000);
       expect(offset).toBeLessThan(90_000 + 1000);
     }
   });

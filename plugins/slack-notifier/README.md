@@ -4,7 +4,7 @@ A PulSeed notifier plugin that sends events to a Slack channel via Incoming Webh
 
 ## Requirements
 
-- Node.js 20+ (uses built-in `fetch`)
+- Node.js 22 or 24 (uses built-in `fetch`)
 - A Slack Incoming Webhook URL
 
 ## Installation

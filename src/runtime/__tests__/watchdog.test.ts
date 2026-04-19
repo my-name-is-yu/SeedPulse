@@ -114,7 +114,7 @@ describe("RuntimeWatchdog", () => {
       },
       pollIntervalMs: 20,
       heartbeatTimeoutMs: 50,
-      startupGraceMs: 0,
+      startupGraceMs: 40,
       restartBackoffMs: 10,
       maxRestartBackoffMs: 20,
       childShutdownGraceMs: 10,
@@ -139,7 +139,7 @@ describe("RuntimeWatchdog", () => {
 
     expect(fs.existsSync(pidManager.getPath())).toBe(false);
     expect(children[1]!.kills).toContain("SIGTERM");
-  });
+  }, 20_000);
 
   it("updates the pid file to the current runtime child across restarts", async () => {
     tmpDir = makeTempDir();

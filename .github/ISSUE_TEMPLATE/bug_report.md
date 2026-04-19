@@ -17,7 +17,7 @@ What you expected to happen.
 
 ## Environment
 - OS: [e.g., macOS, Ubuntu]
-- Node.js version: [e.g., 20.x]
+- Node.js version: [e.g., 22.x or 24.x]
 - PulSeed version: [e.g., 0.4.0]
 
 ## Additional context

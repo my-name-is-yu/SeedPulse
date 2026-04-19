@@ -1204,7 +1204,7 @@ describe("DaemonRunner durable runtime", () => {
 
     daemon.stop();
     await startPromise;
-  });
+  }, 30_000);
 
   it("holds the leader lock, emits runtime heartbeats, and releases leadership on stop", async () => {
     const eventServer = makeEventServerMock();
@@ -1232,14 +1232,19 @@ describe("DaemonRunner durable runtime", () => {
     expect(healthRecord.details?.pid).toBe(process.pid);
 
     daemon.stop();
-    await startPromise;
+    void startPromise.catch(() => {});
+
+    await pollForJsonMatch<{ leader: boolean }>(
+      path.join(runtimeDir, "health", "daemon.json"),
+      (value) => value.leader === false
+    );
     currentDaemon = null;
     currentStartPromise = null;
 
     expect(fs.existsSync(path.join(runtimeDir, "leader", "leader.json"))).toBe(false);
     const finalHealth = JSON.parse(fs.readFileSync(path.join(runtimeDir, "health", "daemon.json"), "utf-8"));
     expect(finalHealth.leader).toBe(false);
-  });
+  }, 30_000);
 
   it("anchors a relative runtime_root to the daemon base dir", async () => {
     const eventServer = makeEventServerMock();

@@ -21,7 +21,7 @@ See `docs/archive/status.md` for stage-by-stage details.
 
 ## Tech Stack
 
-- Node.js 20+, TypeScript 5.3+
+- Node.js 22/24, TypeScript 5.3+
 - LLM SDK (Anthropic/OpenAI etc.) (for LLM calls)
 - Zod (schema validation)
 - State persistence: file-based JSON (~/.pulseed/)

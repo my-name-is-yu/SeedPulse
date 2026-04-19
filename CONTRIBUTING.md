@@ -26,7 +26,7 @@ Use the following process to prepare a working local environment and verify it b
 
 ### Prerequisites
 
-- Use Node.js 20 or newer. The repository declares `>=20` in `package.json`.
+- Use Node.js 22 or 24. The repository declares `>=22 <23 || >=24 <25` in `package.json`.
 - Use the npm version that ships with your installed Node.js unless you have a project-specific reason not to.
 - Confirm your environment before continuing:
 
