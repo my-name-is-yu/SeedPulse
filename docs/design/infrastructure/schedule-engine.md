@@ -17,14 +17,14 @@ PulSeed already has a CoreLoop that runs continuously when the daemon is active.
 
 The ScheduleEngine fills this gap. It introduces time-based triggers that cause PulSeed to act at specific moments: checking email every 30 minutes, generating a morning summary at 8am, running a weekly code quality review, or pinging a health endpoint every minute.
 
-### PulSeed vs OpenClaw cron / system crontab
+### PulSeed vs static cron / system crontab
 
-In system crontab and OpenClaw's cron, scheduled tasks are "fire and forget" — a command runs at a time, produces output, and the system does not reason about whether to escalate, suppress, or adapt. The schedule is static.
+In system crontab and other static cron systems, scheduled tasks are "fire and forget" — a command runs at a time, produces output, and the system does not reason about whether to escalate, suppress, or adapt. The schedule is static.
 
 PulSeed's ScheduleEngine is different in three ways:
 
 ```
-System crontab / OpenClaw cron:
+System crontab / static cron:
   Schedule -> Execute command -> Output (always)
   No conditional logic. No escalation. No cost awareness.
 

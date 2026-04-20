@@ -36,7 +36,7 @@ describe("foreign plugin compatibility", () => {
       },
     });
 
-    const report = analyzeForeignPluginDirectory("openclaw", pluginDir);
+    const report = analyzeForeignPluginDirectory("hermes", pluginDir);
     expect(report.status).toBe("convertible");
     expect(report.permissions).toEqual({
       network: false,
@@ -74,7 +74,7 @@ describe("foreign plugin compatibility", () => {
   });
 
   it("classifies an invalid manifest as incompatible", () => {
-    const report = analyzeForeignPluginManifest("openclaw", {
+    const report = analyzeForeignPluginManifest("hermes", {
       name: "Bad Name",
       version: "1.0",
       type: "custom",

@@ -773,7 +773,7 @@ describe("setup notification step", () => {
     );
   });
 
-  it("uses imported provider settings without re-asking execution prompts after importing from OpenClaw", async () => {
+  it("uses imported provider settings without re-asking execution prompts after importing from Hermes", async () => {
     const stepExistingConfigMock = vi.fn(async () => "keep");
     const stepSeedyNameMock = vi.fn(async () => "Imported Seedy");
     const stepProviderMock = vi.fn(async (initial?: string) => initial ?? "openai");
@@ -784,17 +784,17 @@ describe("setup notification step", () => {
     const saveProviderConfigMock = vi.fn(async () => {});
     const applySetupImportSelectionMock = vi.fn(async () => ({
       created_at: "2026-04-13T00:00:00.000Z",
-      sources: [{ id: "openclaw", label: "OpenClaw", rootDir: "/tmp/openclaw" }],
+      sources: [{ id: "hermes", label: "Hermes Agent", rootDir: "/tmp/hermes" }],
       items: [],
     }));
 
     const importSelection: SetupImportSelection = {
-      sources: [{ id: "openclaw", label: "OpenClaw", rootDir: "/tmp/openclaw", items: [] }],
+      sources: [{ id: "hermes", label: "Hermes Agent", rootDir: "/tmp/hermes", items: [] }],
       items: [
         {
-          id: "openclaw:provider:config.json",
-          source: "openclaw",
-          sourceLabel: "OpenClaw",
+          id: "hermes:provider:config.json",
+          source: "hermes",
+          sourceLabel: "Hermes Agent",
           kind: "provider",
           label: "anthropic / claude-sonnet-4-6 / agent_loop",
           decision: "import",

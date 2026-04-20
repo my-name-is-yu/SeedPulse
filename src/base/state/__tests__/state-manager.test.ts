@@ -15,6 +15,41 @@ import type { GapHistoryEntry } from "../../types/gap.js";
 import { makeTempDir } from "../../../../tests/helpers/temp-dir.js";
 import { makeGoal, makeDimension } from "../../../../tests/helpers/fixtures.js";
 
+function makeTaskRecord(id: string, goalId: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id,
+    goal_id: goalId,
+    strategy_id: null,
+    target_dimensions: ["coverage"],
+    primary_dimension: "coverage",
+    work_description: `Improve coverage for ${id}`,
+    rationale: "Need better confidence",
+    approach: "Run tests and add missing cases",
+    success_criteria: [],
+    scope_boundary: {
+      in_scope: ["src"],
+      out_of_scope: ["infra"],
+      blast_radius: "low",
+    },
+    constraints: [],
+    plateau_until: null,
+    estimated_duration: null,
+    consecutive_failure_count: 0,
+    reversibility: "reversible",
+    task_category: "verification",
+    status: "completed",
+    started_at: "2026-01-01T00:00:00.000Z",
+    completed_at: "2026-01-01T00:05:00.000Z",
+    timeout_at: null,
+    heartbeat_at: null,
+    created_at: "2026-01-01T00:00:00.000Z",
+    verification_verdict: "pass",
+    verification_evidence: ["tests passed"],
+    execution_output: "done",
+    ...overrides,
+  };
+}
+
 describe("StateManager", async () => {
   let tmpDir: string;
   let manager: StateManager;
@@ -122,6 +157,37 @@ describe("StateManager", async () => {
       const content = fs.readFileSync(filePath, "utf-8");
       const parsed = JSON.parse(content);
       expect(parsed.id).toBe("json-test");
+    });
+  });
+
+  describe("task queries", async () => {
+    it("lists active tasks before falling back to archived tasks", async () => {
+      await manager.writeRaw("tasks/goal-1/task-2.json", makeTaskRecord("task-2", "goal-1", {
+        created_at: "2026-01-02T00:00:00.000Z",
+      }));
+      await manager.writeRaw("tasks/goal-1/task-1.json", makeTaskRecord("task-1", "goal-1"));
+      await manager.writeRaw("archive/goal-1/tasks/task-archived.json", makeTaskRecord("task-archived", "goal-1"));
+
+      const tasks = await manager.listTasks("goal-1");
+
+      expect(tasks.map((task) => task.id)).toEqual(["task-2", "task-1"]);
+    });
+
+    it("falls back to archived tasks when active tasks are absent", async () => {
+      await manager.writeRaw("archive/goal-1/tasks/task-archived.json", makeTaskRecord("task-archived", "goal-1"));
+
+      const tasks = await manager.listTasks("goal-1");
+      const task = await manager.loadTask("goal-1", "task-archived");
+
+      expect(tasks.map((entry) => entry.id)).toEqual(["task-archived"]);
+      expect(task?.id).toBe("task-archived");
+    });
+
+    it("lists recoverable archived goals from archive directories with goal.json", async () => {
+      await manager.writeRaw("archive/recoverable/goal/goal.json", makeGoal({ id: "recoverable", status: "archived" }));
+      await manager.writeRaw("archive/.staging/ignored/goal/goal.json", makeGoal({ id: "ignored", status: "archived" }));
+
+      expect(await manager.listRecoverableArchivedGoalIds()).toEqual(["recoverable"]);
     });
   });
 

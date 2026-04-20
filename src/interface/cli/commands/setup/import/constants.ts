@@ -2,7 +2,6 @@ import type { SetupImportSourceId } from "./types.js";
 
 export const SOURCE_LABELS: Record<SetupImportSourceId, string> = {
   hermes: "Hermes Agent",
-  openclaw: "OpenClaw",
 };
 
 export const CONFIG_FILENAMES = [
@@ -12,8 +11,6 @@ export const CONFIG_FILENAMES = [
   "config.yml",
   "settings.json",
   "agent.json",
-  "openclaw.json",
-  "openclaw.config.json",
   "clawdbot.json",
   "moltbot.json",
   "hermes.config.json",

@@ -1,4 +1,4 @@
-export type ForeignPluginSource = "hermes" | "openclaw";
+export type ForeignPluginSource = "hermes";
 
 export type ForeignPluginCompatibilityStatus = "convertible" | "quarantined" | "incompatible";
 

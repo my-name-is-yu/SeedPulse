@@ -4,14 +4,11 @@
 // Bypasses TaskLifecycle — calls adapter.execute() directly.
 
 import { execFile } from "node:child_process";
-import * as fsp from "node:fs/promises";
-import * as path from "node:path";
 import type { StateManager } from "../../base/state/state-manager.js";
 import type { IAdapter, AgentTask } from "../../orchestrator/execution/adapter-layer.js";
 import type { ILLMClient } from "../../base/llm/llm-client.js";
-import { getPulseedDirPath } from "../../base/utils/paths.js";
 import { loadProviderConfig } from "../../base/llm/provider-config.js";
-import { TaskSchema, type Task } from "../../base/types/task.js";
+import type { Task } from "../../base/types/task.js";
 import type { Goal } from "../../base/types/goal.js";
 import { ChatHistory, type ChatSession } from "./chat-history.js";
 import {
@@ -57,6 +54,7 @@ import {
   withExecutionPolicyOverrides,
   type ExecutionPolicy,
 } from "../../orchestrator/execution/agent-loop/execution-policy.js";
+import { ChatStateService, type ProviderConfigSummary } from "./chat-state-service.js";
 
 // ─── Types ───
 
@@ -133,16 +131,6 @@ interface AssistantBuffer {
 
 interface ResumeCommand {
   selector?: string;
-}
-
-interface ProviderConfigSummary {
-  provider: string;
-  model: string;
-  adapter: string;
-  light_model?: string;
-  base_url?: string;
-  codex_cli_path?: string;
-  has_api_key: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -258,9 +246,11 @@ export class ChatRunner {
   private nativeAgentLoopStatePath: string | null = null;
   private runtimeControlContext: RuntimeControlChatContext | null = null;
   private sessionExecutionPolicy: ExecutionPolicy | null = null;
+  private readonly stateView: ChatStateService;
 
   constructor(deps: ChatRunnerDeps) {
     this.deps = deps;
+    this.stateView = new ChatStateService(deps.stateManager);
   }
 
   /**
@@ -343,52 +333,15 @@ export class ChatRunner {
   }
 
   private async loadGoals(): Promise<Goal[]> {
-    const goalIds = await this.deps.stateManager.listGoalIds();
-    const goals = await Promise.all(goalIds.map((id) => this.deps.stateManager.loadGoal(id)));
-    return goals.filter((goal): goal is Goal => goal !== null);
+    return this.stateView.loadGoals();
   }
 
   private async listAllGoalIds(): Promise<string[]> {
-    const activeIds = await this.deps.stateManager.listGoalIds();
-    const archivedIds = await this.deps.stateManager.listArchivedGoals();
-    const recoverableArchivedIds = await this.listRecoverableArchivedGoalIds();
-    return [...new Set([...activeIds, ...archivedIds, ...recoverableArchivedIds])];
-  }
-
-  private resolveStatePath(baseDir: string, ...segments: string[]): string | null {
-    const base = path.resolve(baseDir);
-    const resolved = path.resolve(base, ...segments);
-    if (!resolved.startsWith(base + path.sep)) return null;
-    return resolved;
-  }
-
-  private async listRecoverableArchivedGoalIds(): Promise<string[]> {
-    const stateManager = this.deps.stateManager as StateManager & { getBaseDir?: () => string };
-    if (typeof stateManager.getBaseDir !== "function") return [];
-    const archiveDir = this.resolveStatePath(stateManager.getBaseDir(), "archive");
-    if (archiveDir === null) return [];
-    let entries: Array<{ name: string; isDirectory(): boolean }> = [];
-    try {
-      entries = await fsp.readdir(archiveDir, { withFileTypes: true });
-    } catch {
-      return [];
-    }
-
-    const goalIds: string[] = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name === ".staging") continue;
-      try {
-        await fsp.access(path.join(archiveDir, entry.name, "goal", "goal.json"));
-        goalIds.push(entry.name);
-      } catch {
-        continue;
-      }
-    }
-    return goalIds;
+    return this.stateView.listAllGoalIds();
   }
 
   private activeGoals(goals: Goal[]): Goal[] {
-    return goals.filter((goal) => goal.status === "active" || goal.status === "waiting" || goal.loop_status === "running");
+    return this.stateView.activeGoals(goals);
   }
 
   private formatGoalLine(goal: Goal): string {
@@ -446,39 +399,8 @@ export class ChatRunner {
     };
   }
 
-  private async readTasksFromDir(tasksDir: string): Promise<Task[]> {
-    let entries: string[] = [];
-    try {
-      entries = await fsp.readdir(tasksDir);
-    } catch {
-      return [];
-    }
-
-    const tasks: Task[] = [];
-    for (const entry of entries) {
-      if (!entry.endsWith(".json") || entry === "task-history.json" || entry === "last-failure-context.json") continue;
-      let raw: unknown;
-      try {
-        raw = JSON.parse(await fsp.readFile(path.join(tasksDir, entry), "utf-8"));
-      } catch {
-        continue;
-      }
-      const parsed = TaskSchema.safeParse(raw);
-      if (parsed.success) tasks.push(parsed.data);
-    }
-    return tasks.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
-  }
-
   private async readTasksForGoal(goalId: string): Promise<Task[]> {
-    const stateManager = this.deps.stateManager as StateManager & { getBaseDir?: () => string };
-    if (typeof stateManager.getBaseDir !== "function") return [];
-    const baseDir = stateManager.getBaseDir();
-    const activeTasksDir = this.resolveStatePath(baseDir, "tasks", goalId);
-    const archiveTasksDir = this.resolveStatePath(baseDir, "archive", goalId, "tasks");
-    if (activeTasksDir === null || archiveTasksDir === null) return [];
-    const activeTasks = await this.readTasksFromDir(activeTasksDir);
-    if (activeTasks.length > 0) return activeTasks;
-    return this.readTasksFromDir(archiveTasksDir);
+    return this.stateView.readTasksForGoal(goalId);
   }
 
   private async resolveGoalForTasks(selector: string): Promise<{ goalId?: string; error?: string }> {
@@ -522,25 +444,7 @@ export class ChatRunner {
   }
 
   private async findTask(taskId: string, goalId?: string): Promise<{ task?: Task; matches: Array<{ goalId: string; task: Task }> }> {
-    const goalIds = goalId ? [goalId] : await this.listAllGoalIds();
-    const matches: Array<{ goalId: string; task: Task }> = [];
-    for (const candidateGoalId of goalIds) {
-      let raw: unknown | null = null;
-      try {
-        raw = await this.deps.stateManager.readRaw(`tasks/${candidateGoalId}/${taskId}.json`);
-      } catch {
-        raw = null;
-      }
-      if (!raw) {
-        const tasks = await this.readTasksForGoal(candidateGoalId);
-        const matched = tasks.find((task) => task.id === taskId || task.id.startsWith(taskId));
-        if (matched) matches.push({ goalId: candidateGoalId, task: matched });
-        continue;
-      }
-      const parsed = TaskSchema.safeParse(raw);
-      if (parsed.success) matches.push({ goalId: candidateGoalId, task: parsed.data });
-    }
-    return { task: matches.length === 1 ? matches[0].task : undefined, matches };
+    return this.stateView.findTask(taskId, goalId);
   }
 
   private formatTask(task: Task): string {
@@ -584,32 +488,12 @@ export class ChatRunner {
     return { success: true, output: this.formatTask(found.task), elapsed_ms: Date.now() - start };
   }
 
-  private providerConfigBaseDir(): string {
-    const stateManager = this.deps.stateManager as StateManager & { getBaseDir?: () => string };
-    return typeof stateManager.getBaseDir === "function" ? stateManager.getBaseDir() : getPulseedDirPath();
-  }
-
   private async readProviderConfigSummary(): Promise<ProviderConfigSummary> {
-    const config = await loadProviderConfig({
-      baseDir: this.providerConfigBaseDir(),
-      saveMigration: false,
-    });
-    return {
-      provider: config.provider,
-      model: config.model,
-      adapter: config.adapter,
-      light_model: config.light_model,
-      base_url: config.base_url,
-      codex_cli_path: config.codex_cli_path,
-      has_api_key: Boolean(config.api_key),
-    };
+    return this.stateView.readProviderConfigSummary();
   }
 
   private formatConfig(config: ProviderConfigSummary): string {
-    return Object.entries(config)
-      .filter(([, value]) => value !== undefined)
-      .map(([key, value]) => `${key}: ${typeof value === "string" && /key|token|secret/i.test(key) ? "[masked]" : String(value)}`)
-      .join("\n");
+    return this.stateView.formatConfig(config);
   }
 
   private async handleConfig(start: number): Promise<ChatRunResult> {

@@ -1,14 +1,11 @@
 import { CronExpressionParser } from "cron-parser";
 import * as path from "node:path";
 import * as net from "node:net";
-import * as fsp from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { exec } from "node:child_process";
-import { writeJsonFileAtomic, readJsonFileOrNull } from "../../base/utils/json-io.js";
 import type { StateManager } from "../../base/state/state-manager.js";
 import {
   ScheduleEntrySchema,
-  ScheduleEntryListSchema,
   ScheduleResultSchema,
   type ScheduleFailureKind,
   type CronConfig,
@@ -45,12 +42,7 @@ import { projectSchedulesToSoil, rebuildSoilIndex } from "../../platform/soil/in
 import { hasConfiguredSoilPublishProvider } from "../../platform/soil/publish/index.js";
 import { buildSchedulePresetEntry } from "./presets.js";
 import { ExternalScheduleEntrySchema, type ExternalScheduleEntry, type IScheduleSource } from "./source.js";
-
-const SCHEDULES_FILE = "schedules.json";
-const SCHEDULE_LOCK_DIR = `${SCHEDULES_FILE}.lock`;
-const SCHEDULE_LOCK_TIMEOUT_MS = 5000;
-const SCHEDULE_LOCK_STALE_MS = 30_000;
-const SCHEDULE_LOCK_RETRY_MS = 25;
+import { ScheduleEntryStore } from "./entry-store.js";
 const DEFAULT_RETRY_POLICY: ScheduleRetryPolicy = {
   enabled: true,
   initial_delay_ms: 30_000,
@@ -122,7 +114,6 @@ export type ScheduleEntryUpdateInput = Partial<{
 export class ScheduleEngine {
   private entries: ScheduleEntry[] = [];
   private baseDir: string;
-  private schedulesPath: string;
   private logger: NonNullable<ScheduleEngineDeps["logger"]>;
   private dataSourceRegistry?: Map<string, IDataSourceAdapter> | DataSourceRegistry;
   private llmClient?: ILLMClient;
@@ -134,13 +125,10 @@ export class ScheduleEngine {
   private memoryLifecycle?: MemoryLifecycleManager;
   private knowledgeManager?: KnowledgeManager;
   private historyStore: ScheduleHistoryStore;
-  private schedulesLockPath: string;
-  private scheduleLockDepth = 0;
+  private readonly entryStore: ScheduleEntryStore;
 
   constructor(deps: ScheduleEngineDeps) {
     this.baseDir = deps.baseDir;
-    this.schedulesPath = path.join(deps.baseDir, SCHEDULES_FILE);
-    this.schedulesLockPath = path.join(deps.baseDir, SCHEDULE_LOCK_DIR);
     this.logger = deps.logger ?? noopLogger;
     this.dataSourceRegistry = deps.dataSourceRegistry;
     this.llmClient = deps.llmClient;
@@ -152,6 +140,10 @@ export class ScheduleEngine {
     this.memoryLifecycle = deps.memoryLifecycle;
     this.knowledgeManager = deps.knowledgeManager;
     this.historyStore = new ScheduleHistoryStore(this.baseDir);
+    this.entryStore = new ScheduleEntryStore(this.baseDir, this.logger, async (entries) => {
+      this.entries = entries;
+      await this.projectCurrentSchedulesToSoil();
+    });
   }
 
   // ─── Persistence ───
@@ -163,23 +155,15 @@ export class ScheduleEngine {
   }
 
   private async readEntriesFromDisk(): Promise<ScheduleEntry[]> {
-    const raw = await readJsonFileOrNull(this.schedulesPath);
-    if (raw === null) {
-      return [];
-    }
-    const result = ScheduleEntryListSchema.safeParse(raw);
-    return result.success ? result.data : [];
+    return this.entryStore.readEntries();
   }
 
   async saveEntries(): Promise<void> {
-    await this.withScheduleFileLock(async () => {
-      await this.writeEntriesAndProject();
-    });
+    await this.entryStore.saveEntries(this.entries);
   }
 
   private async writeEntriesAndProject(): Promise<void> {
-    await writeJsonFileAtomic(this.schedulesPath, this.entries);
-    await this.projectCurrentSchedulesToSoil();
+    await this.entryStore.saveEntries(this.entries);
   }
 
   private async refreshEntriesForMutation(): Promise<void> {
@@ -220,74 +204,7 @@ export class ScheduleEngine {
   }
 
   private async withScheduleFileLock<T>(work: () => Promise<T>): Promise<T> {
-    if (this.scheduleLockDepth > 0) {
-      return work();
-    }
-
-    const release = await this.acquireScheduleFileLock();
-    this.scheduleLockDepth++;
-    try {
-      return await work();
-    } finally {
-      this.scheduleLockDepth--;
-      await release();
-    }
-  }
-
-  private async acquireScheduleFileLock(): Promise<() => Promise<void>> {
-    await fsp.mkdir(this.baseDir, { recursive: true });
-    const startedAt = Date.now();
-
-    while (true) {
-      try {
-        await fsp.mkdir(this.schedulesLockPath);
-        await fsp.writeFile(
-          path.join(this.schedulesLockPath, "owner.json"),
-          JSON.stringify({ pid: process.pid, created_at: new Date().toISOString() }),
-          "utf-8"
-        );
-        return async () => {
-          await fsp.rm(this.schedulesLockPath, { recursive: true, force: true });
-        };
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== "EEXIST") {
-          throw error;
-        }
-
-        await this.removeStaleScheduleLock().catch(() => undefined);
-        if (Date.now() - startedAt >= SCHEDULE_LOCK_TIMEOUT_MS) {
-          throw new Error(`Timed out waiting for schedule file lock at ${this.schedulesLockPath}`);
-        }
-        await new Promise((resolve) => setTimeout(resolve, SCHEDULE_LOCK_RETRY_MS));
-      }
-    }
-  }
-
-  private async removeStaleScheduleLock(): Promise<void> {
-    const stat = await fsp.stat(this.schedulesLockPath);
-    if (Date.now() - stat.mtimeMs <= SCHEDULE_LOCK_STALE_MS) {
-      return;
-    }
-
-    try {
-      const raw = await fsp.readFile(path.join(this.schedulesLockPath, "owner.json"), "utf-8");
-      const owner = JSON.parse(raw) as { pid?: unknown };
-      if (typeof owner.pid === "number") {
-        try {
-          process.kill(owner.pid, 0);
-          return;
-        } catch {
-          // Owner is gone; stale lock can be removed.
-        }
-      }
-    } catch {
-      // Missing or malformed owner data is treated as stale after the age threshold.
-    }
-
-    if (Date.now() - stat.mtimeMs > SCHEDULE_LOCK_STALE_MS) {
-      await fsp.rm(this.schedulesLockPath, { recursive: true, force: true });
-    }
+    return this.entryStore.withLock(work);
   }
 
   async ensureSoilPublishSchedule(): Promise<ScheduleEntry | null> {

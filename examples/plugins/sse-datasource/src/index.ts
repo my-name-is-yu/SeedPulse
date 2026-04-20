@@ -4,7 +4,7 @@
 // SSE event type is used as the dimension_name key for the latest-value cache.
 // Reconnection is handled natively by the EventSource spec / eventsource package.
 
-import EventSource from "eventsource";
+import EventSource, { type MessageEvent as EventSourceMessageEvent } from "eventsource";
 import type {
   DataSourceConfig,
   DataSourceQuery,
@@ -64,7 +64,7 @@ export class SseDataSourceAdapter implements IDataSourceAdapter {
 
       // Listen to all named events by subscribing to the generic "message" event.
       // For named events, callers can override via dimension_mapping in config.
-      es.onmessage = (event: MessageEvent) => {
+      es.onmessage = (event: EventSourceMessageEvent) => {
         this._handleEvent("message", event.data as string);
       };
 
@@ -72,7 +72,7 @@ export class SseDataSourceAdapter implements IDataSourceAdapter {
       // we register known event types from dimension_mapping if provided.
       const mapping = this.config.dimension_mapping ?? {};
       for (const eventType of Object.keys(mapping)) {
-        es.addEventListener(eventType, (event: MessageEvent) => {
+        es.addEventListener(eventType, (event: EventSourceMessageEvent) => {
           this._handleEvent(eventType, event.data as string);
         });
       }

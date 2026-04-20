@@ -10,6 +10,8 @@ import type { Goal, GoalTree } from "../types/goal.js";
 import type { ObservationLog, ObservationLogEntry } from "../types/state.js";
 import type { GapHistoryEntry } from "../types/gap.js";
 import type { PaceSnapshot } from "../types/goal.js";
+import { TaskSchema } from "../types/task.js";
+import type { Task } from "../types/task.js";
 import { LoopCheckpointSchema } from "../types/checkpoint.js";
 import type { CheckpointTrustPort } from "./checkpoint-trust-port.js";
 import { initDirs, atomicWrite, atomicRead } from "./state-persistence.js";
@@ -158,6 +160,51 @@ export class StateManager {
 
   private archiveCompleteMarkerPath(archiveBase: string): string {
     return path.join(archiveBase, ".archive-complete.json");
+  }
+
+  private resolveWithinBase(...segments: string[]): string | null {
+    const base = path.resolve(this.baseDir);
+    const resolved = path.resolve(base, ...segments);
+    if (resolved !== base && !resolved.startsWith(`${base}${path.sep}`)) {
+      return null;
+    }
+    return resolved;
+  }
+
+  private taskStorageDirs(goalId: string): { activeDir: string | null; archiveDir: string | null } {
+    return {
+      activeDir: this.resolveWithinBase("tasks", goalId),
+      archiveDir: this.resolveWithinBase("archive", goalId, "tasks"),
+    };
+  }
+
+  private async readTasksFromDir(tasksDir: string): Promise<Task[]> {
+    let entries: string[];
+    try {
+      entries = await fsp.readdir(tasksDir);
+    } catch (error: unknown) {
+      if (this.isEnoent(error)) return [];
+      throw error;
+    }
+
+    const tasks: Task[] = [];
+    for (const entry of entries) {
+      if (!entry.endsWith(".json") || entry === "task-history.json" || entry === "last-failure-context.json") {
+        continue;
+      }
+      try {
+        const raw = await this.atomicRead<unknown>(path.join(tasksDir, entry));
+        if (raw === null) continue;
+        const parsed = TaskSchema.safeParse(raw);
+        if (parsed.success) {
+          tasks.push(parsed.data);
+        }
+      } catch (error: unknown) {
+        if (!this.isEnoent(error)) throw error;
+      }
+    }
+
+    return tasks.sort((left, right) => right.created_at.localeCompare(left.created_at));
   }
 
   private async cleanupActiveGoalState(goalId: string): Promise<void> {
@@ -508,6 +555,54 @@ export class StateManager {
     }
   }
 
+  async listRecoverableArchivedGoalIds(): Promise<string[]> {
+    const archiveDir = path.join(this.baseDir, "archive");
+    try {
+      const entries = await fsp.readdir(archiveDir, { withFileTypes: true });
+      const recoverable: string[] = [];
+      for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name === ".staging") continue;
+        if (await this.pathExists(path.join(archiveDir, entry.name, "goal", "goal.json"))) {
+          recoverable.push(entry.name);
+        }
+      }
+      return recoverable;
+    } catch (error: unknown) {
+      if (this.isEnoent(error)) return [];
+      throw error;
+    }
+  }
+
+  async listTasks(goalId: string, options: { includeArchive?: boolean } = {}): Promise<Task[]> {
+    const { activeDir, archiveDir } = this.taskStorageDirs(goalId);
+    if (activeDir === null || archiveDir === null) {
+      return [];
+    }
+    const activeTasks = await this.readTasksFromDir(activeDir);
+    if (activeTasks.length > 0 || options.includeArchive === false) {
+      return activeTasks;
+    }
+    return this.readTasksFromDir(archiveDir);
+  }
+
+  async loadTask(goalId: string, taskId: string, options: { includeArchive?: boolean } = {}): Promise<Task | null> {
+    const relativeCandidates = [`tasks/${goalId}/${taskId}.json`];
+    if (options.includeArchive !== false) {
+      relativeCandidates.push(`archive/${goalId}/tasks/${taskId}.json`);
+    }
+
+    for (const relativePath of relativeCandidates) {
+      const raw = await this.readRaw(relativePath);
+      if (raw === null) continue;
+      const parsed = TaskSchema.safeParse(raw);
+      if (parsed.success) {
+        return parsed.data;
+      }
+    }
+
+    return null;
+  }
+
   // ─── Goal Tree ───
 
   async saveGoalTree(tree: GoalTree): Promise<void> {
@@ -804,15 +899,15 @@ export class StateManager {
 
       // Restore trust balance for the adapter domain
       if (typeof cp.trust_snapshot === "number" && trustManager) {
-        try {
-          await trustManager.setOverride(adapterType, cp.trust_snapshot, "checkpoint_restore");
-        } catch (e: unknown) {
-          // Non-fatal — trust restore failure should not abort the run
-        }
+    try {
+      await trustManager.setOverride(adapterType, cp.trust_snapshot, "checkpoint_restore");
+    } catch {
+      // Non-fatal — trust restore failure should not abort the run
+    }
       }
 
       return cp.cycle_number;
-    } catch (e: unknown) {
+    } catch {
       // Checkpoint restore failure is non-fatal — caller starts from beginning
       return 0;
     }

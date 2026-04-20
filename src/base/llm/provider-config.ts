@@ -116,14 +116,6 @@ export interface ProviderConfig {
     }>;
   };
 
-  /** Optional local-only OpenClaw ACP adapter configuration */
-  openclaw?: {
-    cli_path?: string;
-    profile?: string;
-    model?: string;
-    work_dir?: string;
-  };
-
   /** Native agentloop runtime settings */
   agent_loop?: {
     security?: AgentLoopSecurityConfig;
@@ -510,7 +502,6 @@ async function resolveProviderConfig(
   if (fileConfig.terminal_backend !== undefined) config.terminal_backend = fileConfig.terminal_backend;
   if (fileConfig.a2a !== undefined) config.a2a = fileConfig.a2a;
   if (lightModel !== undefined) config.light_model = lightModel;
-  if (fileConfig.openclaw !== undefined) config.openclaw = fileConfig.openclaw;
   if (fileConfig.agent_loop !== undefined) config.agent_loop = fileConfig.agent_loop;
   return config;
 }
@@ -600,7 +591,6 @@ export async function getProviderRuntimeFingerprint(): Promise<string> {
       ? createHash("sha256").update(config.api_key).digest("hex")
       : null,
     a2a: config.a2a ?? null,
-    openclaw: config.openclaw ?? null,
     agent_loop: config.agent_loop ?? null,
   };
 

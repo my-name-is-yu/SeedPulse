@@ -43,8 +43,8 @@ export class TaskGetTool implements ITool<TaskGetInput, unknown> {
   async call(input: TaskGetInput, _context: ToolCallContext): Promise<ToolResult> {
     const startTime = Date.now();
     try {
-      const raw = await this.stateManager.readRaw(`tasks/${input.goalId}/${input.taskId}.json`);
-      if (raw == null) {
+      const task = await this.loadTask(input.goalId, input.taskId);
+      if (task == null) {
         return {
           success: false,
           data: null,
@@ -54,21 +54,10 @@ export class TaskGetTool implements ITool<TaskGetInput, unknown> {
         };
       }
 
-      const parsed = TaskSchema.safeParse(raw);
-      if (!parsed.success) {
-        return {
-          success: false,
-          data: null,
-          summary: `Task parse failed: ${input.taskId}`,
-          error: parsed.error.message,
-          durationMs: Date.now() - startTime,
-        };
-      }
-
       return {
         success: true,
-        data: parsed.data,
-        summary: `Task ${parsed.data.id}: status=${parsed.data.status}, category=${parsed.data.task_category}`,
+        data: task,
+        summary: `Task ${task.id}: status=${task.status}, category=${task.task_category}`,
         durationMs: Date.now() - startTime,
       };
     } catch (err) {
@@ -88,5 +77,31 @@ export class TaskGetTool implements ITool<TaskGetInput, unknown> {
 
   isConcurrencySafe(): boolean {
     return true;
+  }
+
+  private async loadTask(goalId: string, taskId: string) {
+    const manager = this.stateManager as StateManager & {
+      loadTask?: (goalId: string, taskId: string) => Promise<unknown>;
+      readRaw?: (relativePath: string) => Promise<unknown>;
+    };
+
+    if (typeof manager.loadTask === "function") {
+      return manager.loadTask(goalId, taskId);
+    }
+
+    if (typeof manager.readRaw !== "function") {
+      throw new Error("StateManager does not expose loadTask or readRaw");
+    }
+
+    const raw = await manager.readRaw(`tasks/${goalId}/${taskId}.json`);
+    if (raw == null) {
+      return null;
+    }
+
+    const parsed = TaskSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new Error(parsed.error.message);
+    }
+    return parsed.data;
   }
 }

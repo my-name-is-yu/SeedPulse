@@ -68,6 +68,10 @@ const config = [
       ],
       // Entry-point enforcement is off — we only care about layer boundaries
       "boundaries/entry-point": "off",
+      "@typescript-eslint/consistent-type-imports": ["warn", { prefer: "type-imports", fixStyle: "inline-type-imports" }],
+      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+      "prefer-const": "warn",
+      "no-var": "warn",
     },
   },
 ];

@@ -65,11 +65,7 @@ export class PostgresDataSourceAdapter implements IDataSourceAdapter {
 
     assertSelectOnly(sql);
 
-    const bindValues = params.parameters
-      ? Object.values(params.parameters)
-      : [];
-
-    const result = await this.pool.query(sql, bindValues as unknown[]);
+    const result = await this.pool.query(sql);
     const rows = result.rows;
     const raw: unknown = rows;
 

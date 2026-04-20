@@ -188,22 +188,6 @@ function providerApiKey(
   return root ? firstSecretString([root], API_KEY_KEYS, env) : undefined;
 }
 
-function openclawSettings(
-  records: Record<string, unknown>[],
-  model: string | undefined
-): ProviderConfig["openclaw"] | undefined {
-  const cliPath = firstString(records, ["openclaw_cli_path", "openclawCliPath", "cli_path", "cliPath"]);
-  const profile = firstString(records, ["profile", "openclawProfile"]);
-  const workDir = firstString(records, ["work_dir", "workDir", "workspace", "workspacePath"]);
-  if (!cliPath && !profile && !model && !workDir) return undefined;
-  return {
-    ...(cliPath ? { cli_path: cliPath } : {}),
-    ...(profile ? { profile } : {}),
-    ...(model ? { model } : {}),
-    ...(workDir ? { work_dir: workDir } : {}),
-  };
-}
-
 export function extractProviderSettings(
   raw: unknown,
   source: SetupImportSourceId,
@@ -230,7 +214,6 @@ export function extractProviderSettings(
   const apiKey = providerApiKey(provider, searchable, env);
   const baseUrl = firstString(searchable, BASE_URL_KEYS);
   const codexCliPath = firstString(searchable, CLI_PATH_KEYS);
-  const openclaw = source === "openclaw" ? openclawSettings(searchable, model) : undefined;
 
   const settings: SetupImportProviderSettings = {};
   if (provider) settings.provider = provider;
@@ -239,7 +222,6 @@ export function extractProviderSettings(
   if (apiKey) settings.apiKey = apiKey;
   if (baseUrl) settings.baseUrl = baseUrl;
   if (codexCliPath) settings.codexCliPath = codexCliPath;
-  if (openclaw) settings.openclaw = openclaw;
 
   return Object.keys(settings).length > 0 ? settings : undefined;
 }

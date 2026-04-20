@@ -153,7 +153,6 @@ function buildProviderConfig(
 
   if (base?.provider && base.provider !== execution.provider) {
     delete config.base_url;
-    delete config.openclaw;
   }
 
   return config;

@@ -91,7 +91,6 @@ function defaultProviderConfigFromImport(
     ...(settings.apiKey ? { api_key: settings.apiKey } : {}),
     ...(settings.baseUrl ? { base_url: settings.baseUrl } : {}),
     ...(settings.codexCliPath ? { codex_cli_path: settings.codexCliPath } : {}),
-    ...(settings.openclaw ? { openclaw: settings.openclaw } : {}),
   };
 }
 
@@ -105,10 +104,7 @@ export async function stepSetupImport(): Promise<SetupImportSelection | undefine
   const detectedSources = detectSetupImportSources();
   if (detectedSources.length === 0) return undefined;
 
-  const choiceSources = [...detectedSources].sort((a, b) => {
-    const order: Record<SetupImportSource["id"], number> = { openclaw: 0, hermes: 1 };
-    return order[a.id] - order[b.id];
-  });
+  const choiceSources = [...detectedSources];
 
   p.note(sourceSummary(detectedSources), "Existing agent configs found");
   const sourceChoice = guardCancel(
@@ -117,9 +113,7 @@ export async function stepSetupImport(): Promise<SetupImportSelection | undefine
       options: [
         ...choiceSources.map((source) => ({
           value: source.id,
-          label: source.id === "hermes"
-            ? "Migrate Hermes Agent settings"
-            : "Migrate OpenClaw settings",
+          label: "Migrate Hermes Agent settings",
           hint: source.rootDir,
         })),
         {

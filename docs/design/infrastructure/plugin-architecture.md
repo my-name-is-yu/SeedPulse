@@ -12,13 +12,13 @@
 
 ## §1 Overview and PulSeedtion
 
-### PulSeed vs Claude Code / OpenClaw
+### PulSeed vs Claude Code / legacy tool plugins
 
-In Claude Code and OpenClaw, plugins are "tools the user explicitly calls." The user runs a command and the tool responds. The user is the active agent.
+In Claude Code and legacy tool-centric systems, plugins are "tools the user explicitly calls." The user runs a command and the tool responds. The user is the active agent.
 
 PulSeed plugins are different. PulSeed's long-lived control runtime runs autonomously without user instructions. Therefore, plugins must also be things **PulSeed autonomously selects and integrates into CoreLoop, AgentLoop, or runtime services**. Not requiring user instructions like "please call this plugin" is the starting point of PulSeed's plugin design.
 ```
-Claude Code / OpenClaw:
+Claude Code / legacy tool plugins:
   User → "Search Jira" → Jira plugin → returns result to user
 
 PulSeed:
@@ -54,7 +54,7 @@ Current builtin integrations:
 |---|---|
 | `soil-display` | Materializes typed Soil records/pages into publishable Markdown for Obsidian, Notion, and other display sinks |
 | `mcp-bridge` | Imports MCP server configuration while keeping imported servers disabled until reviewed |
-| `foreign-plugin-bridge` | Classifies Hermes/OpenClaw plugin manifests before quarantine copy |
+| `foreign-plugin-bridge` | Classifies imported Hermes plugin manifests before quarantine copy |
 
 Builtin integrations are reported separately from installed plugins. They may
 prepare or bridge data for tools, but they are not user-installed code and are
@@ -62,7 +62,7 @@ not loaded through `PluginLoader`.
 
 ### Foreign Plugin Import Boundary
 
-Hermes Agent and OpenClaw plugins can be discovered during setup import, but
+Hermes Agent plugins can be discovered during setup import, but
 they are not enabled automatically. PulSeed copies them to
 `plugins-imported-disabled/<source>/...`, records a compatibility report, and
 requires review before conversion into a PulSeed-native plugin or bridge.

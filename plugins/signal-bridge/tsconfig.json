@@ -4,6 +4,9 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "baseUrl": ".",
+    "paths": {
+      "pulseed": ["../../dist/index.d.ts"]
+    },
     "outDir": "dist",
     "strict": true,
     "declaration": true,

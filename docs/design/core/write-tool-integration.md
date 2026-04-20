@@ -131,9 +131,9 @@ src/tools/
 
 | Tool | Category | readOnly | Destructive | Source |
 |------|----------|----------|-------------|--------|
-| config-tool | state | true | false | self-knowledge-tools.ts |
-| plugin-state-tool | state | true | false | self-knowledge-tools.ts |
-| architecture-tool | state | true | false | self-knowledge-tools.ts |
+| config-tool | state | true | false | builtin state tools |
+| plugin-state-tool | state | true | false | builtin state tools |
+| architecture-tool | state | true | false | builtin state tools |
 | set-goal-tool | state | false | false | mutation-tool-defs.ts |
 | update-goal-tool | state | false | false | mutation-tool-defs.ts |
 | archive-goal-tool | state | false | false | mutation-tool-defs.ts |
@@ -225,13 +225,13 @@ No new TUI component needed — existing `MessageRow` handles `messageType: "inf
 
 Migrate System B into System A. No new functionality — behavior preserved exactly.
 
-1. Add 3 missing read tools to `src/tools/state/`: `config-tool.ts`, `plugin-state-tool.ts`, `architecture-tool.ts` (from `self-knowledge-tools.ts`)
-2. Add 7 mutation tools to `src/tools/state/`: set-goal-tool, update-goal-tool, archive-goal-tool, delete-goal-tool, toggle-plugin-tool, update-config-tool, reset-trust-tool (from `mutation-tool-defs.ts` + `self-knowledge-mutation-tools.ts`)
+1. Add 3 missing read tools to `src/tools/state/`: `config-tool.ts`, `plugin-state-tool.ts`, `architecture-tool.ts`
+2. Add 7 mutation tools to `src/tools/state/`: set-goal-tool, update-goal-tool, archive-goal-tool, delete-goal-tool, toggle-plugin-tool, update-config-tool, reset-trust-tool
 3. Create `src/tools/tool-definition-adapter.ts` — `toToolDefinition(tool: ITool): ToolDefinition`
 4. Wire `chat-runner.ts` to use `getAllTools().map(toToolDefinition)` instead of raw definitions
-5. Deprecate System B files with re-export shims for backward compatibility
+5. Land the registry migration, then remove temporary compatibility shims once callers move over
 
-Files: ~11 new (state tools + adapter), 2 modified (chat-runner.ts, tools/index.ts), 3 shims (self-knowledge-tools.ts, mutation-tool-defs.ts, self-knowledge-mutation-tools.ts)
+Files: ~11 new (state tools + adapter), 2 modified (chat-runner.ts, tools/index.ts), temporary compatibility shims removed after migration
 
 Tests: verify all existing chat-runner and self-knowledge tool tests pass unchanged after migration.
 
@@ -277,9 +277,9 @@ Files: 2-3 modified | Tests: concurrency, overflow
 | src/tools/state/reset-trust-tool.ts | 0 | Create |
 | src/tools/index.ts | 0 | Modify (export toToolDefinition) |
 | src/interface/chat/chat-runner.ts | 0 | Modify (use registry) |
-| src/interface/chat/self-knowledge-tools.ts | 0 | Shim (re-export) |
+| src/tools/state/ | 0 | State and mutation tool implementations |
 | src/interface/chat/mutation-tool-defs.ts | 0 | Shim (re-export) |
-| src/interface/chat/self-knowledge-mutation-tools.ts | 0 | Shim (re-export) |
+| src/interface/chat/chat-state-service.ts | 0 | Chat-side state access boundary |
 | src/tools/execution/run-adapter.ts | A | Create |
 | src/tools/execution/spawn-session.ts | A | Create |
 | src/tools/knowledge/query-data-source.ts | A | Create |
@@ -294,7 +294,7 @@ Files: 2-3 modified | Tests: concurrency, overflow
 ## 9. Test Strategy
 
 - **Unit**: each new tool tested independently with mock dependencies (same pattern as existing state/ tests)
-- **Migration**: all existing `self-knowledge-tools.test.ts` and `self-knowledge-mutation-tools.test.ts` pass unchanged
+- **Migration**: chat-runner and task/state integration tests preserve the same behavior through the registry-backed tools
 - **Integration (ChatRunner)**: LLM tool calls routed through registry produce same results as before
 - **Integration (CoreLoop)**: CoreLoop with tool layer, full round-trip (Phase B)
 - **Concurrency**: parallel read-only tools execute simultaneously via existing concurrency.ts (Phase C)

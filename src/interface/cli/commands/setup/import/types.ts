@@ -2,7 +2,7 @@ import type { ProviderConfig } from "../../../../../base/llm/provider-config.js"
 import type { MCPServerConfig } from "../../../../../base/types/mcp.js";
 import type { ForeignPluginCompatibilityReport } from "../../../../../runtime/foreign-plugins/types.js";
 
-export type SetupImportSourceId = "hermes" | "openclaw";
+export type SetupImportSourceId = "hermes";
 
 export type SetupImportItemKind = "provider" | "user" | "skill" | "mcp" | "plugin" | "telegram";
 
@@ -15,7 +15,6 @@ export interface SetupImportProviderSettings {
   apiKey?: string;
   baseUrl?: string;
   codexCliPath?: string;
-  openclaw?: ProviderConfig["openclaw"];
 }
 
 export interface SetupImportTelegramSettings {

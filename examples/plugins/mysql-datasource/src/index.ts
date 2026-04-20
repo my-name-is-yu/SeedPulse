@@ -4,14 +4,13 @@
 // Only SELECT statements are permitted; mutating SQL is rejected.
 
 import mysql from "mysql2/promise";
+import type { Pool as MySQLPool } from "mysql2/promise";
 import type {
   DataSourceConfig,
   DataSourceQuery,
   DataSourceResult,
   IDataSourceAdapter,
 } from "pulseed";
-
-type MySQLPool = mysql.Pool;
 
 // ─── Security ───
 
@@ -64,11 +63,7 @@ export class MysqlDataSourceAdapter implements IDataSourceAdapter {
 
     assertSelectOnly(sql);
 
-    const bindValues = params.parameters
-      ? Object.values(params.parameters)
-      : [];
-
-    const [rows] = await this.pool.query(sql, bindValues);
+    const [rows] = await this.pool.query(sql);
     const rowArray = rows as Record<string, unknown>[];
     const raw: unknown = rowArray;
 

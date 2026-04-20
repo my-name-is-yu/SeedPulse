@@ -32,7 +32,7 @@ export const BUILTIN_INTEGRATIONS: BuiltinIntegrationDescriptor[] = [
     id: "foreign-plugin-bridge",
     kind: "bridge",
     title: "Foreign Plugin Bridge",
-    description: "Classifies Hermes and OpenClaw plugins before they are copied into quarantine.",
+    description: "Classifies imported Hermes plugins before they are copied into quarantine.",
     source: "builtin",
     status: "available",
     capabilities: [

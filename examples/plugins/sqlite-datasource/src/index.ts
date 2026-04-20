@@ -61,11 +61,7 @@ export class SqliteDataSourceAdapter implements IDataSourceAdapter {
 
     assertSelectOnly(sql);
 
-    const bindParams = params.parameters
-      ? Object.values(params.parameters)
-      : [];
-
-    const rows = this.db.prepare(sql).all(...bindParams);
+    const rows = this.db.prepare(sql).all();
     const raw: unknown = rows;
 
     // Extract a scalar value: use the first column of the first row when possible

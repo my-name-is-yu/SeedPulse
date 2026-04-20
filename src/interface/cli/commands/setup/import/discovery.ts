@@ -37,7 +37,7 @@ function workspaceRoots(rootDir: string): string[] {
   ]);
 }
 
-function findSkillDirs(source: SetupImportSourceId, rootDir: string): string[] {
+function findSkillDirs(_source: SetupImportSourceId, rootDir: string): string[] {
   const roots = unique([
     path.join(rootDir, "skills"),
     path.join(rootDir, "agent", "skills"),
@@ -71,28 +71,16 @@ function findPluginDirs(rootDir: string): string[] {
   return unique(candidates);
 }
 
-function sourceRoots(source: SetupImportSourceId): string[] {
+function sourceRoots(_source: SetupImportSourceId): string[] {
   const home = os.homedir();
-  if (source === "hermes") {
-    return unique([
-      process.env["PULSEED_IMPORT_HERMES_HOME"] ?? "",
-      process.env["PULSEED_HERMES_HOME"] ?? "",
-      process.env["HERMES_HOME"] ?? "",
-      path.join(home, ".hermes"),
-      path.join(home, ".hermes-agent"),
-      path.join(home, "Library", "Application Support", "Hermes Agent"),
-    ].filter(Boolean));
-  }
-    return unique([
-      process.env["PULSEED_IMPORT_OPENCLAW_HOME"] ?? "",
-      process.env["PULSEED_OPENCLAW_HOME"] ?? "",
-      process.env["OPENCLAW_HOME"] ?? "",
-      path.join(home, ".openclaw"),
-      path.join(home, ".clawdbot"),
-      path.join(home, ".moltbot"),
-      path.join(home, ".config", "openclaw"),
-      path.join(home, "Library", "Application Support", "OpenClaw"),
-    ].filter(Boolean));
+  return unique([
+    process.env["PULSEED_IMPORT_HERMES_HOME"] ?? "",
+    process.env["PULSEED_HERMES_HOME"] ?? "",
+    process.env["HERMES_HOME"] ?? "",
+    path.join(home, ".hermes"),
+    path.join(home, ".hermes-agent"),
+    path.join(home, "Library", "Application Support", "Hermes Agent"),
+  ].filter(Boolean));
 }
 
 function providerItems(source: SetupImportSourceId, rootDir: string): SetupImportItem[] {
@@ -259,7 +247,7 @@ function detectSource(source: SetupImportSourceId): SetupImportSource | undefine
 }
 
 export function detectSetupImportSources(): SetupImportSource[] {
-  return (["hermes", "openclaw"] as const).flatMap((source) => {
+  return (["hermes"] as const).flatMap((source) => {
     const detected = detectSource(source);
     return detected ? [detected] : [];
   });

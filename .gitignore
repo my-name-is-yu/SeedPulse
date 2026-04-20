@@ -18,13 +18,8 @@ memory/
 docs/archive/
 scripts/*
 !scripts/check-docs.mjs
+!scripts/check-subpackages.mjs
 !scripts/clean-dist.mjs
 !scripts/release.mjs
 !scripts/run-tui-test.mjs
 !scripts/test-changed.mjs
-
-# Non-public: stale, will revisit later
-src/adapters/datasources/openclaw-datasource.ts
-src/adapters/agents/openclaw-acp.ts
-src/adapters/__tests__/openclaw-acp.test.ts
-src/adapters/__tests__/openclaw-datasource.test.ts

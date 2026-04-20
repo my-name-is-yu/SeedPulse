@@ -50,6 +50,7 @@
     "build": "npm run clean && tsc -p tsconfig.build.json",
     "build:watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
     "check:docs": "node scripts/check-docs.mjs",
+    "check:subpackages": "node scripts/check-subpackages.mjs --changed",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "prepack": "npm run build",
     "pack:dry-run": "npm pack --dry-run",
@@ -71,7 +72,8 @@
     "tui:test": "node scripts/run-tui-test.mjs",
     "test:remote": "bash scripts/test-remote.sh",
     "test:remote:coverage": "bash scripts/test-remote.sh --coverage",
-    "lint:boundaries": "eslint -c eslint.config.mjs 'src/**/*.ts'"
+    "lint:boundaries": "eslint -c eslint.config.mjs 'src/**/*.ts'",
+    "lint:quality": "eslint -c eslint.config.mjs 'src/**/*.ts' --report-unused-disable-directives"
   },
   "engines": {
     "node": ">=22 <23 || >=24 <25"

@@ -758,13 +758,14 @@ describe("TaskLifecycle", async () => {
       });
 
       const verification = await lifecycle.verifyTask(task, result);
+      const fileDiffs = verification.file_diffs ?? [];
 
-      expect(verification.file_diffs).toEqual([
+      expect(fileDiffs).toEqual([
         expect.objectContaining({
           path: "src/example.ts",
         }),
       ]);
-      expect(verification.file_diffs[0]?.patch).toContain("+new");
+      expect(fileDiffs[0]?.patch).toContain("+new");
     });
 
     it("truncates very long output in L2 review prompt", async () => {

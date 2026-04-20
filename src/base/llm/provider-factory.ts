@@ -10,7 +10,6 @@ import { OpenAILLMClient } from "./openai-client.js";
 import { CodexLLMClient } from "./codex-llm-client.js";
 import { loadProviderConfig } from "./provider-config.js";
 import { AdapterRegistry } from "../../orchestrator/execution/adapter-layer.js";
-import type { IAdapter } from "../../orchestrator/execution/adapter-layer.js";
 import { ClaudeCodeCLIAdapter } from "../../adapters/agents/claude-code-cli.js";
 import { ClaudeAPIAdapter } from "../../adapters/agents/claude-api.js";
 import { OpenAICodexCLIAdapter } from "../../adapters/agents/openai-codex.js";
@@ -19,37 +18,6 @@ import { GitHubIssueAdapter } from "../../adapters/github-issue.js";
 import { A2AAdapter } from "../../adapters/agents/a2a-adapter.js";
 import type { ProviderConfig } from "./provider-config.js";
 import { resolveExecutionPolicy } from "../../orchestrator/execution/agent-loop/execution-policy.js";
-
-type OpenClawACPAdapterCtor = new (config: {
-  cliPath?: string;
-  profile?: string;
-  model?: string;
-  workDir?: string;
-}) => IAdapter;
-
-let openClawAdapterCtorPromise: Promise<OpenClawACPAdapterCtor | undefined> | undefined;
-
-async function loadOpenClawAdapterCtor(): Promise<OpenClawACPAdapterCtor | undefined> {
-  if (!openClawAdapterCtorPromise) {
-    const openclawPath = "../../adapters/agents/openclaw-acp.js";
-    openClawAdapterCtorPromise = import(/* @vite-ignore */ openclawPath)
-      .then((module) => module.OpenClawACPAdapter as OpenClawACPAdapterCtor)
-      .catch((error: unknown) => {
-        const code = typeof error === "object" && error !== null && "code" in error
-          ? (error as { code?: string }).code
-          : undefined;
-
-        // Fresh clones won't have the ignored OpenClaw adapter files.
-        if (code === "ERR_MODULE_NOT_FOUND") {
-          return undefined;
-        }
-
-        throw error;
-      });
-  }
-
-  return openClawAdapterCtorPromise;
-}
 
 /**
  * Build an LLM client based on provider configuration.
@@ -182,26 +150,6 @@ export async function buildAdapterRegistry(
     registry.register(new A2AAdapter({
       baseUrl: envBaseUrl,
       authToken: process.env["PULSEED_A2A_AUTH_TOKEN"],
-    }));
-  }
-
-  const OpenClawACPAdapter = await loadOpenClawAdapterCtor();
-
-  // OpenClaw from provider config
-  if (config.openclaw && OpenClawACPAdapter) {
-    registry.register(new OpenClawACPAdapter({
-      cliPath: config.openclaw.cli_path,
-      profile: config.openclaw.profile,
-      model: config.openclaw.model,
-      workDir: config.openclaw.work_dir,
-    }));
-  }
-
-  // Environment variable shortcut
-  if (process.env["PULSEED_OPENCLAW_CLI_PATH"] && !config.openclaw && OpenClawACPAdapter) {
-    registry.register(new OpenClawACPAdapter({
-      cliPath: process.env["PULSEED_OPENCLAW_CLI_PATH"],
-      profile: process.env["PULSEED_OPENCLAW_PROFILE"],
     }));
   }
 

@@ -167,11 +167,11 @@ The grounding layer ensures PulSeed never says "I don't know what goals I have."
 
 ### 5.1 New Files
 
-- `src/chat/self-knowledge-tools.ts` -- Tool definitions (JSON Schema format) and handler functions
+- Builtin state and chat tools under `src/tools/` and `src/interface/chat/` -- Tool definitions and state access wiring
 
 ### 5.2 Changed Files
 
-- `src/chat/chat-runner.ts` -- Add self-knowledge tools to the `tools` array in LLM calls; handle `tool_call` responses by dispatching to the handler
+- `src/interface/chat/chat-runner.ts` -- Registers builtin tools and dispatches tool calls through the shared executor
 
 ### 5.3 Interface
 
@@ -215,7 +215,7 @@ The tool definitions add a small fixed cost per turn. This is comparable to a si
 
 ### 7.1 Unit Tests
 
-`tests/chat/self-knowledge-tools.test.ts`:
+Chat and tool integration tests:
 - Each of the 6 handlers returns the expected structure
 - `get_goals` correctly serializes goal state from StateManager
 - `get_sessions` respects the `limit` parameter
@@ -286,8 +286,8 @@ The effective level resolves as: `approvalConfig?.[toolName] ?? DEFAULT_APPROVAL
 
 ### Implementation
 
-- **New file**: `src/chat/self-knowledge-mutation-tools.ts` — Tool definitions, handlers, dispatcher
-- **Changed file**: `src/chat/chat-runner.ts` — Imports mutation tools, merges tool arrays, dispatches mutation calls, adds `trustManager`, `pluginLoader`, `approvalFn`, `approvalConfig` to `ChatRunnerDeps`
+- **Implementation**: mutation tools live under `src/tools/state/` and are exposed through the shared tool registry
+- **Changed file**: `src/interface/chat/chat-runner.ts` — consumes the shared registry and injects `trustManager`, `pluginLoader`, `approvalFn`, and `approvalConfig` through its deps
 
 ### MutationToolDeps Interface
 
