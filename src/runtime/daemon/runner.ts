@@ -403,6 +403,11 @@ export class DaemonRunner {
     this.shutdownResolve?.();
     this.sleepAbortController?.abort();
     this.state.status = "stopping";
+    void this.runtimeOwnership.releaseLeadership().catch((err) => {
+      this.logger.error("Failed to release runtime leadership during stop", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
     // Save current active_goals as interrupted_goals for state restoration
     this.state.interrupted_goals = [...this.state.active_goals];
     // Do NOT persist here — cleanup() will save the final state after the loop exits.

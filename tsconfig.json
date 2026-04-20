@@ -14,7 +14,8 @@
     "declarationMap": true,
     "sourceMap": true,
     "resolveJsonModule": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "types": ["node", "react", "better-sqlite3", "js-yaml", "nodemailer"]
   },
   "include": ["src/**/*", "tests/helpers/**/*"],
   "exclude": ["node_modules", "dist"]

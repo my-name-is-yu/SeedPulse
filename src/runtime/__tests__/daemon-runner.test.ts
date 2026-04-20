@@ -1232,7 +1232,12 @@ describe("DaemonRunner durable runtime", () => {
     expect(healthRecord.details?.pid).toBe(process.pid);
 
     daemon.stop();
-    await startPromise;
+    void startPromise.catch(() => {});
+
+    await pollForJsonMatch<{ leader: boolean }>(
+      path.join(runtimeDir, "health", "daemon.json"),
+      (value) => value.leader === false
+    );
     currentDaemon = null;
     currentStartPromise = null;
 

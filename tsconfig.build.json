@@ -1,11 +1,14 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "rootDir": "src"
+    "rootDir": "src",
+    "incremental": true,
+    "tsBuildInfoFile": ".cache/tsbuildinfo/build.tsbuildinfo"
   },
   "exclude": [
     "node_modules",
     "dist",
+    ".cache",
     "tests",
     "src/**/__tests__/**",
     "src/adapters/agents/openclaw-acp.ts",

@@ -11,7 +11,7 @@ Keep a goal moving until it is actually done.
 [![Downloads](https://img.shields.io/npm/dm/pulseed.svg?style=for-the-badge)](https://www.npmjs.com/package/pulseed)
 [![CI](https://img.shields.io/github/actions/workflow/status/my-name-is-yu/PulSeed/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/my-name-is-yu/PulSeed/actions/workflows/ci.yml)
 [![Publish](https://img.shields.io/github/actions/workflow/status/my-name-is-yu/PulSeed/publish.yml?style=for-the-badge&label=Publish)](https://github.com/my-name-is-yu/PulSeed/actions/workflows/publish.yml)
-[![Node.js >=20](https://img.shields.io/badge/node-%3E%3D20-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Node.js 22/24](https://img.shields.io/badge/node-22%20%2F%2024-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
 </div>
@@ -45,7 +45,7 @@ menu of subcommands.
 
 ## Start Here
 
-PulSeed requires Node.js 20 or newer.
+PulSeed requires Node.js 22 or 24.
 
 ```bash
 npm install -g pulseed

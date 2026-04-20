@@ -4,7 +4,7 @@ This is the shortest path from install to a first goal run.
 
 ## 1. Install
 
-PulSeed requires Node.js 20 or newer.
+PulSeed requires Node.js 22 or 24.
 
 ```bash
 npm install -g pulseed
