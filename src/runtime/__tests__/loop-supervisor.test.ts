@@ -679,6 +679,7 @@ describe("LoopSupervisor", () => {
 
     try {
       await supervisorA.start(["g-restart"]);
+      await waitFor(() => coreLoopA.run.mock.calls.length === 1);
       await new Promise((resolve) => setTimeout(resolve, 70));
       expect(journalQueue.sweepExpiredClaims().reclaimed).toBe(1);
 

@@ -64,13 +64,23 @@ git checkout -b feat/your-change
 Use the script that matches the part of the system you are editing:
 
 - `npm run build`
-  Recompiles the TypeScript source into `dist/`. Run this after changing anything in `src/` that affects runtime behavior.
+  Recompiles the TypeScript source into `dist/`. The build now uses incremental TypeScript state under `.cache/tsbuildinfo/`, so repeated local builds are much faster than clean CI builds.
+- `npm run build:watch`
+  Keeps an incremental TypeScript build warm while you edit source files.
 - `npm test`
-  Runs the full Vitest suite once. Use this before opening a pull request.
+  Runs the fast unit lane once. Use this for normal local iteration.
+- `npm run test:smoke`
+  Runs the representative runtime-heavy smoke lane. Use this when you touch daemon, runtime, sqlite, or TUI code.
+- `npm run test:integration`
+  Runs the full integration lane, including runtime-heavy and end-to-end coverage. Use this before opening a pull request for deep runtime changes.
+- `npm run test:changed`
+  Detects the files you changed and runs the narrowest reasonable mix of docs, related tests, and smoke coverage.
 - `npm run test:watch`
-  Starts Vitest in watch mode for fast iteration during implementation.
+  Starts the fast unit lane in watch mode for quick iteration.
+- `npm run test:watch:integration`
+  Starts the integration lane in watch mode when you are working on runtime-heavy behavior.
 - `npm run typecheck`
-  Verifies TypeScript correctness without writing build output.
+  Verifies TypeScript correctness without writing build output, using an incremental cache separate from the production build cache.
 - `npm run tui`
   Launches the terminal UI from `dist/tui/entry.js`. Build first so the output is current.
 
@@ -81,6 +91,14 @@ npm run test:watch
 # edit files in src/ and tests/
 npm run typecheck
 npm run build
+```
+
+Example workflow for runtime, daemon, or sqlite changes:
+
+```bash
+npm run test:changed
+npm run test:smoke
+npm run test:integration
 ```
 
 Example workflow for a TUI change:

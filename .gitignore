@@ -8,6 +8,7 @@ dist/
 dist-tui-test/
 coverage/
 coverage-c8/
+.cache/
 .pulseed/
 .claire/
 .claude/
@@ -20,6 +21,7 @@ scripts/*
 !scripts/clean-dist.mjs
 !scripts/release.mjs
 !scripts/run-tui-test.mjs
+!scripts/test-changed.mjs
 
 # Non-public: stale, will revisit later
 src/adapters/datasources/openclaw-datasource.ts
