@@ -68,6 +68,9 @@ default for most users is `agent_loop` with OpenAI or Anthropic.
   verify, or stop
 - `AgentLoop` handles bounded tool-using work for task execution, chat, and
   selected runtime phases
+- Centralized AgentLoop profiles keep task execution isolated by default,
+  narrow chat permissions, and run `/review` through a dedicated read-only
+  review posture
 - Dream-backed playbooks can feed verified workflow hints into later task
   generation without auto-writing executable skills
 - State, reports, schedules, and local memory live under `~/.pulseed/`
