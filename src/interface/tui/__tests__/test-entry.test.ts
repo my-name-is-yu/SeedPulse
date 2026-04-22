@@ -18,6 +18,7 @@ vi.mock("../flicker/index.js", () => ({
   AlternateScreen: ({ children }: { children?: unknown }) => children,
   MouseTracking: ({ children }: { children?: unknown }) => children,
   isNoFlickerEnabled: vi.fn(async () => true),
+  isMouseTrackingEnabled: vi.fn(() => false),
 }));
 
 vi.mock("../git-branch.js", () => ({

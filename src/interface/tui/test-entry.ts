@@ -8,6 +8,7 @@ import { resetTuiDebugLog, getTuiDebugLogPath, logTuiDebug } from "./debug-log.j
 import {
   AlternateScreen,
   MouseTracking,
+  isMouseTrackingEnabled,
   isNoFlickerEnabled,
 } from "./flicker/index.js";
 import { DEFAULT_CURSOR_STYLE, HIDE_CURSOR, SHOW_CURSOR, STEADY_BAR_CURSOR } from "./flicker/dec.js";
@@ -29,6 +30,7 @@ export async function startTUITest(): Promise<void> {
   logTuiDebug("test-entry", "start", { logPath: getTuiDebugLogPath() });
 
   const noFlicker = await isNoFlickerEnabled();
+  const mouseTrackingEnabled = isMouseTrackingEnabled();
   const outputController = noFlicker ? createNoFlickerOutputController() : null;
   outputController?.install();
   let cleanedUp = false;
@@ -62,7 +64,7 @@ export async function startTUITest(): Promise<void> {
         { enabled: noFlicker, stream: terminalStream },
         React.createElement(
           MouseTracking,
-          { stream: terminalStream },
+          { enabled: mouseTrackingEnabled, stream: terminalStream },
           appElement,
         ),
       ),

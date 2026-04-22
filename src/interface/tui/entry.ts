@@ -19,7 +19,7 @@ import { isSafeBashCommand } from "./bash-mode.js";
 import { getCliLogger } from "../cli/cli-logger.js";
 import { ensureProviderConfig } from "../cli/ensure-api-key.js";
 import type { Task } from "../../base/types/task.js";
-import { isNoFlickerEnabled, AlternateScreen, MouseTracking } from "./flicker/index.js";
+import { isNoFlickerEnabled, isMouseTrackingEnabled, AlternateScreen, MouseTracking } from "./flicker/index.js";
 import { DEFAULT_CURSOR_STYLE, HIDE_CURSOR, SHOW_CURSOR, STEADY_BAR_CURSOR } from "./flicker/dec.js";
 import { setTrustedTuiControlStream } from "./terminal-output.js";
 import { getGitBranch } from "./git-branch.js";
@@ -485,6 +485,7 @@ async function buildDeps() {
 
 async function startTUIStandaloneMode(): Promise<void> {
   const noFlicker = await isNoFlickerEnabled();
+  const mouseTrackingEnabled = isMouseTrackingEnabled();
   const outputController = noFlicker ? createNoFlickerOutputController() : null;
   outputController?.install();
   let cleanedUp = false;
@@ -547,7 +548,7 @@ async function startTUIStandaloneMode(): Promise<void> {
         { enabled: noFlicker, stream: terminalStream },
         React.createElement(
           MouseTracking,
-          { stream: terminalStream },
+          { enabled: mouseTrackingEnabled, stream: terminalStream },
           appElement,
         ),
       ),
@@ -572,6 +573,7 @@ async function startTUIDaemonMode(): Promise<void> {
   const { DaemonClient } = await import("../../runtime/daemon/client.js");
   const baseDir = process.env.PULSEED_HOME ?? getPulseedDirPath();
   const noFlicker = await isNoFlickerEnabled();
+  const mouseTrackingEnabled = isMouseTrackingEnabled();
   const outputController = noFlicker ? createNoFlickerOutputController() : null;
   outputController?.install();
   let cleanedUp = false;
@@ -768,7 +770,7 @@ async function startTUIDaemonMode(): Promise<void> {
         { enabled: noFlicker, stream: terminalStream },
         React.createElement(
           MouseTracking,
-          { stream: terminalStream },
+          { enabled: mouseTrackingEnabled, stream: terminalStream },
           appElement,
         ),
       ),

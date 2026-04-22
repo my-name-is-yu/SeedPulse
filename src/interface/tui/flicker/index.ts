@@ -20,3 +20,13 @@ export async function isNoFlickerEnabled(): Promise<boolean> {
   const config = await loadGlobalConfig();
   return config.no_flicker;
 }
+
+/**
+ * Mouse tracking blocks normal terminal text selection in many terminals.
+ * Keep it opt-in until we have a better mode switch inside the TUI.
+ */
+export function isMouseTrackingEnabled(): boolean {
+  const envVal = process.env.PULSEED_TUI_MOUSE_TRACKING;
+  if (!envVal) return false;
+  return envVal === "1" || envVal.toLowerCase() === "true";
+}
