@@ -127,6 +127,14 @@ describe("buildSystemPrompt (grounding.ts)", () => {
     expect(prompt.length).toBeGreaterThan(0);
   });
 
+  it("biases final answers toward concise structured markdown", async () => {
+    const sm = makeMockStateManager();
+    const prompt = await buildSystemPrompt({ stateManager: sm, homeDir: tmpDir });
+
+    expect(prompt).toContain("concise structured markdown");
+    expect(prompt).toContain("short headings and bullets");
+  });
+
   it("aligns default identity text with direct tool execution", async () => {
     const sm = makeMockStateManager();
     const prompt = await buildSystemPrompt({ stateManager: sm, homeDir: tmpDir });

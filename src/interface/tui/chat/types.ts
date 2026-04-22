@@ -1,3 +1,5 @@
+import type { MarkdownSegment } from "../markdown-renderer.js";
+
 export interface ChatMessage {
   id: string;
   role: "user" | "pulseed";
@@ -10,6 +12,7 @@ export interface ChatDisplayRow {
   key: string;
   kind: "user" | "pulseed" | "spacer";
   text: string;
+  segments?: MarkdownSegment[];
   color?: string;
   backgroundColor?: string;
   bold?: boolean;

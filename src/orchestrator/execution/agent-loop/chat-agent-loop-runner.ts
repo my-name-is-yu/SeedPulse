@@ -18,11 +18,44 @@ import { buildAgentLoopBaseInstructions } from "./agent-loop-prompts.js";
 import type { ApprovalRequest, ToolCallContext } from "../../../tools/types.js";
 import type { ExecutionPolicy, SubagentRole } from "./execution-policy.js";
 
-export const ChatAgentLoopOutputSchema = z.object({
-  status: z.enum(["done", "blocked", "failed"]).default("done"),
-  message: z.string(),
+const ChatAgentLoopFinalAnswerSectionSchema = z.object({
+  title: z.string(),
+  bullets: z.array(z.string()).default([]),
+});
+
+const ChatAgentLoopFinalAnswerSchema = z.object({
+  summary: z.string().default(""),
+  sections: z.array(ChatAgentLoopFinalAnswerSectionSchema).default([]),
   evidence: z.array(z.string()).default([]),
   blockers: z.array(z.string()).default([]),
+  nextActions: z.array(z.string()).default([]),
+  nextAction: z.string().optional(),
+}).passthrough();
+
+const ChatAgentLoopOutputBaseSchema = z.object({
+  status: z.enum(["done", "blocked", "failed"]).default("done"),
+  message: z.string().default(""),
+  evidence: z.array(z.string()).default([]),
+  blockers: z.array(z.string()).default([]),
+  finalAnswer: ChatAgentLoopFinalAnswerSchema.optional(),
+}).passthrough();
+
+export const ChatAgentLoopOutputSchema = ChatAgentLoopOutputBaseSchema.transform((value) => {
+  const finalAnswer = value.finalAnswer ?? {
+    summary: value.message,
+    sections: [],
+    evidence: value.evidence,
+    blockers: value.blockers,
+    nextActions: [],
+  };
+
+  return {
+    ...value,
+    message: value.message.trim() || finalAnswer.summary.trim(),
+    evidence: value.evidence.length > 0 ? value.evidence : finalAnswer.evidence,
+    blockers: value.blockers.length > 0 ? value.blockers : finalAnswer.blockers,
+    finalAnswer,
+  };
 });
 export type ChatAgentLoopOutput = z.infer<typeof ChatAgentLoopOutputSchema>;
 
@@ -151,8 +184,8 @@ export class ChatAgentLoopRunner {
       /approval denied|user denied approval|requires approval/i.test(entry.outputSummary),
     );
     const fallbackOutput = success
-      ? this.buildSuccessfulOutput(result.finalText, result.output?.message)
-      : this.buildFailureOutput(result.stopReason, hadApprovalDeniedError, result.finalText, result.output?.blockers);
+      ? this.buildSuccessfulOutput(result.finalText, result.output)
+      : this.buildFailureOutput(result.stopReason, hadApprovalDeniedError, result.finalText, result.output, result.output?.blockers);
     return {
       success,
       output: fallbackOutput,
@@ -185,10 +218,12 @@ export class ChatAgentLoopRunner {
     };
   }
 
-  private buildSuccessfulOutput(finalText: string, fallbackMessage?: string): string {
+  private buildSuccessfulOutput(finalText: string, output?: ChatAgentLoopOutput | null): string {
+    const formattedOutput = this.formatChatOutput(output);
+    if (formattedOutput) return formattedOutput;
     const formatted = this.formatStructuredFinalText(finalText);
     if (formatted) return formatted;
-    if (fallbackMessage && fallbackMessage.trim().length > 0) return fallbackMessage.trim();
+    if (output?.message && output.message.trim().length > 0) return output.message.trim();
     if (finalText && finalText.trim().length > 0) return finalText.trim();
     return "(no response)";
   }
@@ -197,6 +232,7 @@ export class ChatAgentLoopRunner {
     stopReason: string,
     hadApprovalDeniedError: boolean,
     finalText: string,
+    output?: ChatAgentLoopOutput | null,
     blockers?: string[],
   ): string {
     if (
@@ -218,11 +254,98 @@ export class ChatAgentLoopRunner {
       return "I stopped because the tool loop repeated without making progress.";
     }
 
+    const formattedOutput = this.formatChatOutput(output);
+    if (formattedOutput) return formattedOutput;
     const formatted = this.formatStructuredFinalText(finalText);
     if (formatted) return formatted;
     if (blockers && blockers.length > 0) return blockers.join("; ");
     if (finalText && !/^Calling\s+/i.test(finalText.trim())) return finalText.trim();
     return `Interrupted: ${stopReason}`;
+  }
+
+  private formatChatOutput(output?: ChatAgentLoopOutput | null): string | null {
+    if (!output) return null;
+
+    const finalAnswer = output.finalAnswer;
+    const summary = finalAnswer?.summary.trim() || output.message.trim();
+    const sections: string[] = [];
+    const handledKeys = new Set<string>(["status", "message", "evidence", "blockers", "finalAnswer"]);
+
+    if (summary.length > 0) {
+      sections.push(summary);
+    }
+
+    for (const section of finalAnswer?.sections ?? []) {
+      const bullets = section.bullets.map((item) => item.trim()).filter((item) => item.length > 0);
+      if (bullets.length === 0) continue;
+      sections.push(`### ${section.title.trim()}\n${bullets.map((bullet) => `- ${bullet}`).join("\n")}`);
+    }
+
+    const evidence = [...new Set([
+      ...(finalAnswer?.evidence ?? []),
+      ...output.evidence,
+    ].map((item) => item.trim()).filter((item) => item.length > 0))];
+    if (evidence.length > 0) {
+      sections.push(`### Evidence\n${evidence.map((item) => `- ${item}`).join("\n")}`);
+    }
+
+    const blockers = [...new Set([
+      ...(finalAnswer?.blockers ?? []),
+      ...output.blockers,
+    ].map((item) => item.trim()).filter((item) => item.length > 0))];
+    if (blockers.length > 0) {
+      sections.push(`### Blockers\n${blockers.map((item) => `- ${item}`).join("\n")}`);
+    }
+
+    const nextActions = [
+      ...(finalAnswer?.nextActions ?? []),
+      ...(typeof finalAnswer?.nextAction === "string" ? [finalAnswer.nextAction] : []),
+    ].map((item) => item.trim()).filter((item) => item.length > 0);
+    if (nextActions.length > 0) {
+      sections.push(`### Next steps\n${nextActions.map((item) => `- ${item}`).join("\n")}`);
+    }
+
+    for (const [key, fieldValue] of Object.entries(output)) {
+      if (handledKeys.has(key) || !Array.isArray(fieldValue)) continue;
+      const lines = fieldValue.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+      if (lines.length === 0) continue;
+      sections.push(`### ${this.humanizeFieldLabel(this.normalizeOutputFieldLabel(key))}\n${lines.map((line) => `- ${line}`).join("\n")}`);
+    }
+
+    for (const [key, fieldValue] of Object.entries(output)) {
+      if (handledKeys.has(key) || typeof fieldValue !== "string") continue;
+      const value = fieldValue.trim();
+      if (!value) continue;
+      if (key === "nextAction" || key === "next_action" || key === "nextStep" || key === "next_step") {
+        sections.push(`### Next step\n- ${value}`);
+      }
+    }
+
+    const rendered = sections.join("\n\n").trim();
+    return rendered.length > 0 ? rendered : null;
+  }
+
+  private humanizeFieldLabel(key: string): string {
+    return key
+      .split(/[_\s-]+/g)
+      .filter(Boolean)
+      .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+      .join(" ");
+  }
+
+  private normalizeOutputFieldLabel(key: string): string {
+    switch (key) {
+      case "steps":
+        return "recommended_steps";
+      case "files":
+      case "relevantFiles":
+        return "relevant_files";
+      case "nextActions":
+      case "next_actions":
+        return "next_steps";
+      default:
+        return key;
+    }
   }
 
   private formatStructuredFinalText(finalText: string): string | null {
@@ -239,48 +362,8 @@ export class ChatAgentLoopRunner {
       return null;
     }
 
-    const value = parsed as Record<string, unknown>;
-    const message = typeof value.message === "string" ? value.message.trim() : "";
-    const sections: string[] = [];
-    const handledKeys = new Set<string>(["status", "message", "evidence", "blockers"]);
-
-    const appendStringArray = (title: string, key: string) => {
-      const array = value[key];
-      if (!Array.isArray(array)) return;
-      const lines = array.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
-      if (lines.length === 0) return;
-      handledKeys.add(key);
-      sections.push(`${title}:\n${lines.map((line) => `- ${line}`).join("\n")}`);
-    };
-
-    appendStringArray("Details", "details");
-    appendStringArray("Capabilities", "capabilities");
-    appendStringArray("Evidence", "evidence");
-    appendStringArray("Blockers", "blockers");
-    appendStringArray("Examples", "examples");
-    appendStringArray("Telegram examples", "telegram_examples");
-    appendStringArray("Next actions", "next_actions");
-
-    for (const [key, fieldValue] of Object.entries(value)) {
-      if (handledKeys.has(key) || !Array.isArray(fieldValue)) continue;
-      const lines = fieldValue.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
-      if (lines.length === 0) continue;
-      sections.push(`${this.humanizeFieldLabel(key)}:\n${lines.map((line) => `- ${line}`).join("\n")}`);
-    }
-
-    if (typeof value.next_step === "string" && value.next_step.trim().length > 0) {
-      sections.push(`Next step: ${value.next_step.trim()}`);
-    }
-
-    if (!message && sections.length === 0) return raw;
-    return [message, ...sections].filter((section) => section.length > 0).join("\n\n");
-  }
-
-  private humanizeFieldLabel(key: string): string {
-    return key
-      .split(/[_\s-]+/g)
-      .filter(Boolean)
-      .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-      .join(" ");
+    const parsedOutput = ChatAgentLoopOutputSchema.safeParse(parsed);
+    if (!parsedOutput.success) return null;
+    return this.formatChatOutput(parsedOutput.data);
   }
 }

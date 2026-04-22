@@ -523,22 +523,47 @@ export function Chat({
               );
             }
 
+            if (row.kind === "user") {
+              return (
+                <Box key={row.key} paddingX={row.paddingX ?? 0}>
+                  <Text
+                    color={row.color}
+                    backgroundColor={row.backgroundColor}
+                    bold={row.bold}
+                    dimColor={row.dim}
+                    italic={row.italic}
+                  >
+                    {row.text}
+                  </Text>
+                </Box>
+              );
+            }
+
+            if (row.segments && row.segments.length > 0) {
+              return (
+                <Box key={row.key} marginLeft={row.marginLeft ?? 0}>
+                  {row.segments.map((segment, index) => (
+                    <Text
+                      key={`${row.key}-${index}`}
+                      color={segment.color ?? (segment.code ? theme.codeInline : row.color)}
+                      backgroundColor={row.backgroundColor}
+                      bold={segment.bold ?? row.bold}
+                      dimColor={row.dim}
+                      italic={segment.italic ?? row.italic}
+                    >
+                      {segment.text}
+                    </Text>
+                  ))}
+                </Box>
+              );
+            }
+
             const text = row.text;
             const textProps: Record<string, unknown> = {};
             if (row.color) textProps.color = row.color;
             if (row.bold) textProps.bold = true;
             if (row.dim) textProps.dimColor = true;
             if (row.italic) textProps.italic = true;
-
-            if (row.kind === "user") {
-              return (
-                <Box key={row.key} paddingX={row.paddingX ?? 0}>
-                  <Text {...textProps} backgroundColor={row.backgroundColor}>
-                    {text}
-                  </Text>
-                </Box>
-              );
-            }
 
             return (
               <Box key={row.key} marginLeft={row.marginLeft ?? 0}>

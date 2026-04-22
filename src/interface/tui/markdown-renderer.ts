@@ -8,6 +8,8 @@
 // Instead, we do lightweight manual conversion that produces clean text
 // which Ink can properly measure and render.
 
+import * as os from "node:os";
+import * as path from "node:path";
 import { theme } from "./theme.js";
 
 export interface MarkdownSegment {
@@ -96,15 +98,119 @@ export function estimateWrappedLineCount(text: string, width: number): number {
 
 /**
  * Expand a rendered markdown line into terminal rows at the given width.
- * Line-level style is preserved, but inline segment styling is flattened on wrapped rows.
+ * Inline segment styling is preserved on wrapped rows.
  */
 export function splitMarkdownLineToRows(line: MarkdownLine, width: number): MarkdownLine[] {
-  return wrapTextToRows(line.text, width).map((text) => ({
-    text,
-    bold: line.bold,
-    dim: line.dim,
-    italic: line.italic,
-  }));
+  if (!line.segments || line.segments.length === 0) {
+    return wrapTextToRows(line.text, width).map((text) => ({
+      text,
+      bold: line.bold,
+      dim: line.dim,
+      italic: line.italic,
+    }));
+  }
+
+  const safeWidth = Math.max(1, Math.floor(width));
+  const rows: MarkdownLine[] = [];
+  let currentSegments: MarkdownSegment[] = [];
+  let currentText = "";
+  let currentWidth = 0;
+
+  const pushRow = (): void => {
+    rows.push({
+      text: currentText,
+      bold: line.bold,
+      dim: line.dim,
+      italic: line.italic,
+      segments: currentSegments.length > 0 ? currentSegments : undefined,
+      language: line.language,
+    });
+    currentSegments = [];
+    currentText = "";
+    currentWidth = 0;
+  };
+
+  const appendPiece = (piece: string, segment: MarkdownSegment): void => {
+    if (!piece) return;
+    const last = currentSegments[currentSegments.length - 1];
+    if (
+      last &&
+      last.bold === segment.bold &&
+      last.code === segment.code &&
+      last.italic === segment.italic &&
+      last.color === segment.color
+    ) {
+      last.text += piece;
+      currentText += piece;
+      return;
+    }
+
+    const nextSegment: MarkdownSegment = { ...segment, text: piece };
+    currentSegments.push(nextSegment);
+    currentText += piece;
+  };
+
+  const piecesFor = (text: string): string[] => {
+    if (text === "") {
+      return [""];
+    }
+    return WORD_SEGMENTER
+      ? Array.from(WORD_SEGMENTER.segment(text), (segment) => segment.segment)
+      : text.match(/\S+\s*|\s+/g) ?? [text];
+  };
+
+  for (const segment of line.segments) {
+    const pieces = piecesFor(segment.text);
+    for (const piece of pieces) {
+      if (!piece) continue;
+
+      if (piece.length > safeWidth) {
+        if (currentWidth > 0) {
+          pushRow();
+        }
+        for (let index = 0; index < piece.length; index += safeWidth) {
+          rows.push({
+            text: piece.slice(index, index + safeWidth),
+            bold: line.bold,
+            dim: line.dim,
+            italic: line.italic,
+            segments: [{ ...segment, text: piece.slice(index, index + safeWidth) }],
+            language: line.language,
+          });
+        }
+        continue;
+      }
+
+      if (currentWidth + piece.length > safeWidth && currentWidth > 0) {
+        pushRow();
+      }
+
+      const rowPiece = currentWidth === 0 ? piece : piece.trimStart();
+      if (!rowPiece) {
+        continue;
+      }
+
+      appendPiece(rowPiece, segment);
+      currentWidth += rowPiece.length;
+
+      if (currentWidth >= safeWidth) {
+        pushRow();
+      }
+    }
+  }
+
+  if (currentWidth > 0 || rows.length === 0) {
+    rows.push({
+      text: currentText,
+      bold: line.bold,
+      dim: line.dim,
+      italic: line.italic,
+      segments: currentSegments.length > 0 ? currentSegments : undefined,
+      language: line.language,
+    });
+  }
+
+  return rows;
 }
 
 /**
@@ -236,7 +342,7 @@ function prependText(prefix: string, segs: MarkdownSegment[]): MarkdownSegment[]
 export function parseInlineSegments(text: string): MarkdownSegment[] {
   const segments: MarkdownSegment[] = [];
   // Pattern: bold+italic (***), bold (**/__), italic (*/_), code (`), link ([text](url))
-  const pattern = /(\*{3}.+?\*{3}|\*{2}.+?\*{2}|_{2}.+?_{2}|\*.+?\*|_.+?_|`[^`]+`|\[.+?\]\(.+?\))/g;
+  const pattern = /(\*{3}.+?\*{3}|\*{2}.+?\*{2}|_{2}.+?_{2}|\*.+?\*|_.+?_|`[^`]+`|\[[^\]]+\]\((?:[^()]|\([^)]*\))+(?:\s+"[^"]*")?\))/g;
   let lastIndex = 0;
   let m: RegExpExecArray | null;
 
@@ -259,9 +365,13 @@ export function parseInlineSegments(text: string): MarkdownSegment[] {
                (raw.startsWith('_') && raw.endsWith('_'))) {
       segments.push({ text: raw.slice(1, -1), italic: true });
     } else if (raw.startsWith('[')) {
-      // Link: [text](url) -> just show text
-      const linkMatch = raw.match(/^\[(.+?)\]/);
-      segments.push({ text: linkMatch ? linkMatch[1] : raw });
+      const linkMatch = raw.match(/^\[(.+?)\]\(((?:[^()]|\([^)]*\))+?)(?:\s+"[^"]*")?\)$/);
+      const label = linkMatch?.[1] ?? raw;
+      const destination = linkMatch?.[2] ?? "";
+      segments.push({
+        text: renderMarkdownLinkText(label, destination),
+        color: theme.info,
+      });
     } else {
       segments.push({ text: raw });
     }
@@ -275,6 +385,42 @@ export function parseInlineSegments(text: string): MarkdownSegment[] {
   }
 
   return segments.length > 0 ? segments : [{ text }];
+}
+
+function renderMarkdownLinkText(label: string, destination: string): string {
+  if (!destination || !isLocalPathLikeLink(destination)) {
+    return label;
+  }
+
+  return shortenLocalPath(destination.replace(/^file:\/\//, ""));
+}
+
+function isLocalPathLikeLink(destination: string): boolean {
+  return destination.startsWith("/")
+    || destination.startsWith("./")
+    || destination.startsWith("../")
+    || destination.startsWith("~/")
+    || destination.startsWith("file://");
+}
+
+function shortenLocalPath(destination: string): string {
+  if (destination.startsWith("~/")) {
+    return destination;
+  }
+
+  const homeDir = os.homedir();
+  if (destination.startsWith(homeDir)) {
+    return `~/${destination.slice(homeDir.length + 1)}`;
+  }
+
+  if (path.isAbsolute(destination)) {
+    const relative = path.relative(process.cwd(), destination);
+    if (relative && !relative.startsWith("..")) {
+      return relative;
+    }
+  }
+
+  return destination;
 }
 
 // ─── Code Syntax Highlighting ───

@@ -83,6 +83,7 @@ function buildExecutionBiasSection(): string {
     "- Prefer direct local tool use for routine reads, edits, diffs, and verification.",
     "- Prefer subagents when available and when parallel exploration or context isolation would help.",
     "- Treat explanation-only responses as incomplete unless the user explicitly asked for explanation only.",
+    "- For final user-facing answers, prefer concise structured markdown with short headings and bullets instead of long prose.",
   ].join("\n");
 }
 
@@ -104,6 +105,8 @@ function buildCommunicationPolicySection(): string {
     "- Do not give long preambles before routine tool calls.",
     "- Prefer action first, then concise reporting.",
     "- Progress updates should be brief and relevant.",
+    "- Prefer concise structured markdown with short headings and bullets instead of one long block of prose.",
+    "- Keep diagnostics and raw internal metadata out of normal user-facing answers unless the user asks for them.",
     "- Do not narrate internal process details at length unless they matter to the user's decision.",
   ].join("\n");
 }

@@ -45,6 +45,7 @@ function buildMessageRows(msg: ChatMessage, width: number): ChatDisplayRow[] {
         key: `${msg.id}:pulseed:${lineIndex}:${rowIndex}`,
         kind: "pulseed",
         text: wrappedLine.text,
+        segments: wrappedLine.segments,
         color: typeColor,
         bold: wrappedLine.bold,
         dim: wrappedLine.dim,

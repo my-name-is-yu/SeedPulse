@@ -521,7 +521,7 @@ describe("agentloop phase 7 ChatAgentLoopRunner and CoreLoopControlTools", () =>
 
     expect(result.success).toBe(true);
     expect(result.output).toContain("Goal is running");
-    expect(result.output).toContain("Evidence:");
+    expect(result.output).toContain("### Evidence");
     expect(modelClient.calls[1].messages.some((m) => m.role === "tool" && m.toolName === "core_goal_status")).toBe(true);
   });
 
@@ -569,7 +569,7 @@ describe("agentloop phase 7 ChatAgentLoopRunner and CoreLoopControlTools", () =>
 
     expect(result.success).toBe(true);
     expect(result.output).toContain("approved path");
-    expect(result.output).toContain("Evidence:");
+    expect(result.output).toContain("### Evidence");
     expect(events.some((event) => event.type === "approval_request" && event.toolName === "approval_tool")).toBe(true);
     expect(modelClient.calls[1].messages.some((m) => m.role === "tool" && m.toolName === "approval_tool")).toBe(true);
   });
@@ -693,10 +693,52 @@ describe("agentloop phase 7 ChatAgentLoopRunner and CoreLoopControlTools", () =>
     const result = await chat.execute({ message: "何ができるの？" });
 
     expect(result.success).toBe(true);
-    expect(result.output).toContain("この環境でできること");
-    expect(result.output).toContain("Capabilities:");
+    expect(result.output.startsWith("この環境でできること")).toBe(true);
+    expect(result.output).toContain("### Capabilities");
     expect(result.output).toContain("- コードを読む");
-    expect(result.output).toContain("Next step:");
+    expect(result.output).toContain("### Next step");
+    expect(result.output).toContain("- 必要なら実装方針を作成する");
+  });
+
+  it("renders nested finalAnswer summaries and recommended steps in a compact order", async () => {
+    const modelInfo = makeModelInfo();
+    const modelClient = new ScriptedModelClient(modelInfo, [
+      {
+        content: JSON.stringify({
+          status: "done",
+          finalAnswer: {
+            summary: "Telegram 連携は既存機能を有効化すれば使えます。",
+            sections: [
+              {
+                title: "Recommended steps",
+                bullets: ["BotFather で bot を作成する", "通知先チャットで /sethome を送る"],
+              },
+            ],
+            evidence: ["telegram-bot plugin が存在する", "config は ~/.pulseed 配下に保存される"],
+            nextAction: "必要ならセットアップ手順を実行します。",
+          },
+        }),
+        toolCalls: [],
+        stopReason: "end_turn",
+      },
+    ]);
+    const registry = new ToolRegistry();
+    const { router, runtime } = makeRuntime(registry);
+    const registryModel = new StaticAgentLoopModelRegistry([modelInfo]);
+    const chat = new ChatAgentLoopRunner({
+      boundedRunner: new BoundedAgentLoopRunner({ modelClient, toolRouter: router, toolRuntime: runtime }),
+      modelClient,
+      modelRegistry: registryModel,
+      defaultModel: modelInfo.ref,
+    });
+
+    const result = await chat.execute({ message: "telegramから操作できるようにしたい" });
+
+    expect(result.success).toBe(true);
+    expect(result.output.startsWith("Telegram 連携は既存機能を有効化すれば使えます。")).toBe(true);
+    expect(result.output).toContain("### Recommended steps");
+    expect(result.output).toContain("### Evidence");
+    expect(result.output).toContain("### Next steps");
   });
 
   it("returns a clear approval-policy message instead of leaking raw tool commentary", async () => {

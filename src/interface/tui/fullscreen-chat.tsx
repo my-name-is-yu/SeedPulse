@@ -52,6 +52,7 @@ type RenderSegment = {
   backgroundColor?: string;
   bold?: boolean;
   dim?: boolean;
+  italic?: boolean;
 };
 
 type RenderLine = {
@@ -66,6 +67,7 @@ type RenderLine = {
   backgroundColor?: string;
   bold?: boolean;
   dim?: boolean;
+  italic?: boolean;
   protected?: boolean;
 };
 
@@ -575,6 +577,29 @@ function buildComposerLines(args: {
 function renderMessageRow(row: ChatDisplayRow, cols: number): RenderLine {
   if (row.kind === "spacer") {
     return { key: row.key, text: " ".repeat(cols) };
+  }
+
+  if (row.segments && row.segments.length > 0) {
+    const segments: RenderSegment[] = [];
+    for (const segment of row.segments) {
+      segments.push({
+        text: segment.text,
+        color: segment.color ?? (segment.code ? theme.codeInline : row.color),
+        backgroundColor: row.backgroundColor,
+        bold: segment.bold ?? row.bold,
+        dim: row.dim,
+        italic: segment.italic ?? row.italic,
+      });
+    }
+
+    return {
+      key: row.key,
+      segments,
+      color: row.color,
+      backgroundColor: row.backgroundColor,
+      bold: row.bold,
+      dim: row.dim,
+    };
   }
 
   return {
@@ -1161,6 +1186,7 @@ export function FullscreenChat({
                 backgroundColor={segment.backgroundColor ?? line.backgroundColor}
                 bold={segment.bold ?? line.bold}
                 dimColor={segment.dim ?? line.dim}
+                italic={segment.italic ?? line.italic}
               >
                 {index === 0 && line.protected
                   ? `${PROTECTED_ROW_MARKER}${segment.text}`

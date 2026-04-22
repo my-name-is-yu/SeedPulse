@@ -12,7 +12,13 @@ import {
   stripMouseEscapeSequences,
 } from "../chat.js";
 import { renderProcessingRow } from "../fullscreen-chat.js";
-import { estimateMarkdownHeight, estimateWrappedLineCount, wrapTextToRows } from "../markdown-renderer.js";
+import {
+  estimateMarkdownHeight,
+  estimateWrappedLineCount,
+  renderMarkdownLines,
+  splitMarkdownLineToRows,
+  wrapTextToRows,
+} from "../markdown-renderer.js";
 import { extractBashCommand, isBashModeInput, isSafeBashCommand, createShellApprovalTask, formatShellOutput } from "../bash-mode.js";
 import {
   CARET_MARKER,
@@ -108,6 +114,21 @@ describe("markdown sizing helpers", () => {
 });
 
 describe("chat viewport", () => {
+  it("preserves inline markdown segments through viewport rows", () => {
+    const rows = buildChatViewport([
+      {
+        id: "m1",
+        role: "pulseed" as const,
+        text: "Hello **world**",
+        timestamp: new Date(),
+      },
+    ], 80, 8, 0).rows;
+
+    const messageRow = rows.find((row) => row.kind === "pulseed");
+    expect(messageRow?.segments).toBeDefined();
+    expect(messageRow?.segments?.some((segment) => segment.bold === true)).toBe(true);
+  });
+
   it("keeps earlier rows available when scrolling back", () => {
     const messages = [
       {
@@ -137,6 +158,32 @@ describe("chat viewport", () => {
     const scrolled = buildChatViewport(messages, 40, 8, 3);
     expect(scrolled.hiddenAboveRows).toBe(0);
     expect(scrolled.rows.some((row) => row.text.trim() === "line 1")).toBe(true);
+  });
+});
+
+describe("markdown row wrapping", () => {
+  it("keeps inline segments attached when a styled line wraps", () => {
+    const rows = splitMarkdownLineToRows({
+      text: "hello **world**",
+      segments: [
+        { text: "hello " },
+        { text: "world", bold: true },
+      ],
+    }, 6);
+
+    expect(rows.some((row) => row.segments?.some((segment) => segment.bold === true))).toBe(true);
+  });
+
+  it("renders local markdown links as repo-relative paths", () => {
+    const [line] = renderMarkdownLines("[runner](/Users/yuyoshimuta/Documents/dev/SeedPulse-output-opt/src/interface/chat/chat-runner.ts:12)");
+
+    expect(line?.text).toContain("src/interface/chat/chat-runner.ts:12");
+  });
+
+  it("renders local markdown links with parentheses and titles as paths", () => {
+    const [line] = renderMarkdownLines("[spec](/Users/yuyoshimuta/Documents/dev/SeedPulse-output-opt/docs/Design (draft).md:8 \"draft\")");
+
+    expect(line?.text).toContain("docs/Design (draft).md:8");
   });
 });
 
