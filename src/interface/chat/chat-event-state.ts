@@ -6,6 +6,7 @@ export interface StreamChatMessage {
   text: string;
   timestamp: Date;
   messageType?: "info" | "error" | "warning" | "success";
+  transient?: boolean;
 }
 
 function upsertMessage(
@@ -20,6 +21,14 @@ function upsertMessage(
     return next;
   }
   return [...next, nextMessage].slice(-maxMessages);
+}
+
+function removeTransientActivityForTurn(
+  messages: StreamChatMessage[],
+  turnId: string
+): StreamChatMessage[] {
+  const transientActivityId = `activity:${turnId}`;
+  return messages.filter((message) => !(message.id === transientActivityId && message.transient));
 }
 
 export function applyChatEventToMessages(
@@ -40,7 +49,8 @@ export function applyChatEventToMessages(
   }
 
   if (event.type === "assistant_final") {
-    return upsertMessage(messages, {
+    const next = removeTransientActivityForTurn(messages, event.turnId);
+    return upsertMessage(next, {
       id: event.turnId,
       role: "pulseed",
       text: event.text,
@@ -56,21 +66,27 @@ export function applyChatEventToMessages(
       text: event.message,
       timestamp,
       messageType: "info",
+      transient: event.transient === true,
     }, maxMessages);
   }
 
   if (event.type === "lifecycle_error") {
+    const next = removeTransientActivityForTurn(messages, event.turnId);
     const messageId = event.partialText ? event.turnId : `error:${event.runId}`;
     const text = event.partialText
       ? `${event.partialText}\n\n[interrupted: ${event.error}]`
       : `Error: ${event.error}`;
-    return upsertMessage(messages, {
+    return upsertMessage(next, {
       id: messageId,
       role: "pulseed",
       text,
       timestamp,
       messageType: "error",
     }, maxMessages);
+  }
+
+  if (event.type === "lifecycle_end") {
+    return removeTransientActivityForTurn(messages, event.turnId);
   }
 
   if (event.type === "tool_start") {

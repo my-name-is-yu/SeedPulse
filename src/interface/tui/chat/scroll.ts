@@ -3,6 +3,8 @@ import type { ScrollRequest } from "./types.js";
 const SGR_MOUSE_SEQUENCE = /(?:\u001b)?\[<(\d+);(\d+);(\d+)([mM])/;
 const SGR_MOUSE_SEQUENCE_GLOBAL = /(?:\u001b)?\[<(\d+);(\d+);(\d+)([mM])/g;
 const SHIFT_ENTER_SEQUENCE_GLOBAL = /(?:\u001b)?\[27;2;13~/g;
+const BRACKETED_PASTE_START_SEQUENCE_GLOBAL = /(?:\u001b)?\[200~/g;
+const BRACKETED_PASTE_END_SEQUENCE_GLOBAL = /(?:\u001b)?\[201~/g;
 
 type ScrollKey = {
   upArrow?: boolean;
@@ -118,9 +120,9 @@ export function getScrollRequest(
 }
 
 export function stripMouseEscapeSequences(input: string): string {
-  return input.replace(SGR_MOUSE_SEQUENCE_GLOBAL, "");
-}
-
-export function normalizeComposerInput(input: string): string {
-  return stripMouseEscapeSequences(input).replace(SHIFT_ENTER_SEQUENCE_GLOBAL, "\n");
+  return input
+    .replace(SGR_MOUSE_SEQUENCE_GLOBAL, "")
+    .replace(BRACKETED_PASTE_START_SEQUENCE_GLOBAL, "")
+    .replace(BRACKETED_PASTE_END_SEQUENCE_GLOBAL, "")
+    .replace(SHIFT_ENTER_SEQUENCE_GLOBAL, "\n");
 }
