@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.20] - 2026-04-22
+
+### Added
+- Added cross-platform one-command installer scripts for macOS/Linux (`scripts/install.sh`) and Windows PowerShell (`scripts/install.ps1`), including Node bootstrap support, npm permission fallback, PATH persistence, and post-install verification (`pulseed --version` and best-effort `pulseed doctor`) (#716)
+
+### Changed
+- Simplified README install guidance to keep quick-install commands front-and-center while moving detailed installer options and fallback procedures to Getting Started (#716)
+- Bumped the package version to `0.4.20`
+
+### Fixed
+- Fixed no-flicker/fullscreen TUI regressions around spinner animation/styling parity, Shift+Enter multiline input escape handling, `/permissions` routing behavior, and cursor/frame-writer artifacts (#716)
+
 ## [0.4.19] - 2026-04-22
 
 ### Added
