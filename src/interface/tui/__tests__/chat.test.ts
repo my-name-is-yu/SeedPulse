@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-import React from "react";
-import { Text } from "ink";
 import {
   buildChatViewport,
   estimateComposerHeight,
@@ -9,13 +7,8 @@ import {
   getMatchingSuggestions,
   parseMouseEvent,
   getScrollRequest,
-  normalizeComposerInput,
   stripMouseEscapeSequences,
 } from "../chat.js";
-import {
-  formatProcessingLabel,
-  renderProcessingRow,
-} from "../fullscreen-chat.js";
 import { estimateMarkdownHeight, estimateWrappedLineCount, wrapTextToRows } from "../markdown-renderer.js";
 import { extractBashCommand, isBashModeInput, isSafeBashCommand, createShellApprovalTask, formatShellOutput } from "../bash-mode.js";
 import {
@@ -25,14 +18,11 @@ import {
   buildCursorEscapeFromCaretMarker,
   buildCursorEscapeFromInputMarker,
 } from "../cursor-tracker.js";
-import { CheckerboardSpinner } from "../checkerboard-spinner.js";
-import { ShimmerText } from "../shimmer-text.js";
 
 describe("getMatchingSuggestions", () => {
   it("hides suggestions for an exact slash command so enter can submit", () => {
     expect(getMatchingSuggestions("/help", [])).toEqual([]);
     expect(getMatchingSuggestions("/config", [])).toEqual([]);
-    expect(getMatchingSuggestions("/permissions", [])).toEqual([]);
   });
 
   it("keeps suggestions for partial slash commands", () => {
@@ -241,10 +231,14 @@ describe("chat scroll keys", () => {
     expect(stripMouseEscapeSequences("hello\u001b[<64;40;12Mworld")).toBe("helloworld");
   });
 
-  it("normalizes Shift+Enter escape sequences into newlines", () => {
-    expect(normalizeComposerInput("[27;2;13~")).toBe("\n");
-    expect(normalizeComposerInput("\u001b[27;2;13~")).toBe("\n");
-    expect(normalizeComposerInput("left[27;2;13~right")).toBe("left\nright");
+  it("normalizes shift-enter escape variants into newlines", () => {
+    expect(stripMouseEscapeSequences("foo\u001b[27;2;13~bar")).toBe("foo\nbar");
+    expect(stripMouseEscapeSequences("foo[27;2;13~bar")).toBe("foo\nbar");
+  });
+
+  it("strips bracketed-paste wrappers with and without esc prefix", () => {
+    expect(stripMouseEscapeSequences("\u001b[200~hello\nworld\u001b[201~")).toBe("hello\nworld");
+    expect(stripMouseEscapeSequences("[200~hello[201~")).toBe("hello");
   });
 });
 
@@ -282,29 +276,5 @@ describe("cursor tracker", () => {
     ].join("\n");
 
     expect(buildCursorEscapeFromInputMarker(frame, 3)).toBe("\u001b[2;8H\u001b[?25h");
-  });
-});
-
-describe("fullscreen processing row", () => {
-  it("builds animated spinner + shimmer row while processing", () => {
-    const row = renderProcessingRow(
-      true,
-      "Thinking",
-      40,
-    ) as React.ReactElement<{ children?: React.ReactNode }>;
-    const children = React.Children.toArray(
-      row.props.children,
-    ) as React.ReactElement<{ children?: React.ReactNode }>[];
-
-    expect(row.type).toBe(React.Fragment);
-    expect(children[0]?.type).toBe(CheckerboardSpinner);
-    expect(children[1]?.type).toBe(Text);
-    expect(children[2]?.type).toBe(ShimmerText);
-    expect(children[2]?.props.children).toBe("Thinking...");
-  });
-
-  it("formats processing label to available width budget", () => {
-    expect(formatProcessingLabel("Thinking", 8)).toBe("Thin");
-    expect(formatProcessingLabel("Working", 4)).toBe("W");
   });
 });

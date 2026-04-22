@@ -3,8 +3,6 @@ import { Box, Text, useInput } from "ink";
 import { getClipboardContent } from "./clipboard.js";
 import { logTuiDebug } from "./debug-log.js";
 import { theme } from "./theme.js";
-import { CheckerboardSpinner } from "./checkerboard-spinner.js";
-import { ShimmerText } from "./shimmer-text.js";
 import { pickSpinnerVerb } from "./spinner-verbs.js";
 import {
   buildHiddenCursorEscapeFromPosition,
@@ -17,8 +15,8 @@ import { isBashModeInput } from "./bash-mode.js";
 import { buildChatViewport } from "./chat/viewport.js";
 import {
   getScrollRequest,
-  normalizeComposerInput,
   parseMouseEvent,
+  stripMouseEscapeSequences,
 } from "./chat/scroll.js";
 import { getMatchingSuggestions, type Suggestion } from "./chat/suggestions.js";
 import type { ChatMessage, ChatDisplayRow } from "./chat/types.js";
@@ -44,6 +42,8 @@ const INPUT_MARGIN = 4;
 const SELECTION_BACKGROUND = theme.text;
 const SELECTION_FOREGROUND = "#1F2329";
 const FAKE_CURSOR_GLYPH = "▌";
+const PROCESSING_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
+const PROCESSING_SPINNER_INTERVAL_MS = 80;
 
 type RenderSegment = {
   text: string;
@@ -57,7 +57,6 @@ type RenderLine = {
   key: string;
   text?: string;
   segments?: RenderSegment[];
-  processing?: boolean;
   color?: string;
   backgroundColor?: string;
   bold?: boolean;
@@ -128,28 +127,6 @@ function padToWidth(text: string, width: number): string {
   const trimmed = trimToWidth(text, width);
   const padding = Math.max(0, width - stringWidth(trimmed));
   return trimmed + " ".repeat(padding);
-}
-
-export function formatProcessingLabel(spinnerVerb: string, availableCols: number): string {
-  return trimToWidth(`${spinnerVerb}...`, Math.max(1, availableCols - 4));
-}
-
-export function renderProcessingRow(
-  isProcessing: boolean,
-  spinnerVerb: string,
-  availableCols: number,
-): React.ReactNode {
-  if (!isProcessing) {
-    return <Text>{padToWidth("", availableCols)}</Text>;
-  }
-
-  return (
-    <>
-      <CheckerboardSpinner />
-      <Text> </Text>
-      <ShimmerText>{formatProcessingLabel(spinnerVerb, availableCols)}</ShimmerText>
-    </>
-  );
 }
 
 function getPreviousOffset(text: string, offset: number): number {
@@ -666,6 +643,7 @@ export function FullscreenChat({
   const [scrollOffset, setScrollOffset] = React.useState(0);
   const [targetScrollOffset, setTargetScrollOffset] = React.useState(0);
   const [spinnerVerb, setSpinnerVerb] = React.useState(() => pickSpinnerVerb());
+  const [spinnerFrameIndex, setSpinnerFrameIndex] = React.useState(0);
 
   React.useEffect(() => {
     let lastClipboard = "";
@@ -698,6 +676,18 @@ export function FullscreenChat({
     const interval = setInterval(() => {
       setSpinnerVerb(pickSpinnerVerb());
     }, 5000);
+    return () => clearInterval(interval);
+  }, [isProcessing]);
+
+  React.useEffect(() => {
+    if (!isProcessing) {
+      setSpinnerFrameIndex(0);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setSpinnerFrameIndex((prev) => (prev + 1) % PROCESSING_SPINNER_FRAMES.length);
+    }, PROCESSING_SPINNER_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [isProcessing]);
 
@@ -964,7 +954,7 @@ export function FullscreenChat({
         clearSelection();
         return;
       }
-      setCursorOffset((prev) => Math.max(0, prev - 1));
+      setCursorOffset((prev) => getPreviousOffset(input, prev));
       return;
     }
     if (key.rightArrow) {
@@ -973,7 +963,7 @@ export function FullscreenChat({
         clearSelection();
         return;
       }
-      setCursorOffset((prev) => Math.min(input.length, prev + 1));
+      setCursorOffset((prev) => getNextOffset(input, prev));
       return;
     }
     if ((key.ctrl && inputChar === "a") || key.home) {
@@ -1072,7 +1062,7 @@ export function FullscreenChat({
     }
 
     if (inputChar && !key.ctrl && !key.meta) {
-      const clean = normalizeComposerInput(inputChar);
+      const clean = stripMouseEscapeSequences(inputChar);
       if (clean.length === 0) return;
       insertText(clean);
     }
@@ -1105,9 +1095,12 @@ export function FullscreenChat({
   }
   lines.push(...renderedRows);
 
+  const spinnerGlyph = PROCESSING_SPINNER_FRAMES[spinnerFrameIndex] ?? PROCESSING_SPINNER_FRAMES[0];
   lines.push({
     key: "processing",
-    processing: true,
+    text: padToWidth(isProcessing ? `${spinnerGlyph} ${spinnerVerb}...` : "", availableCols),
+    color: isProcessing ? theme.command : undefined,
+    dim: !isProcessing,
   });
   lines.push({
     key: "indicator-bottom",
@@ -1132,9 +1125,7 @@ export function FullscreenChat({
     <Box flexDirection="column" flexGrow={1} overflow="hidden">
       {visibleLines.map((line) => (
         <Box key={line.key} height={1} overflow="hidden">
-          {line.processing ? (
-            renderProcessingRow(isProcessing, spinnerVerb, availableCols)
-          ) : line.segments ? (
+          {line.segments ? (
             line.segments.map((segment, index) => (
               <Text
                 key={`${line.key}-${index}`}
