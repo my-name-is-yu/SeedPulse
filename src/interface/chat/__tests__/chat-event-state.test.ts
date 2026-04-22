@@ -34,8 +34,8 @@ describe("applyChatEventToMessages", () => {
     });
   });
 
-  it("keeps tool progress visible as one updatable row per tool call", () => {
-    const started = applyChatEventToMessages([], {
+  it("does not add separate chat rows for raw tool events", () => {
+    const messages = applyChatEventToMessages([], {
       type: "tool_start",
       runId: "run-1",
       turnId: "turn-1",
@@ -45,44 +45,7 @@ describe("applyChatEventToMessages", () => {
       args: { pattern: "ChatEvent" },
     }, 20);
 
-    const running = applyChatEventToMessages(started, {
-      type: "tool_update",
-      runId: "run-1",
-      turnId: "turn-1",
-      createdAt: "2026-04-08T00:00:01.000Z",
-      toolCallId: "tool-1",
-      toolName: "grep",
-      status: "running",
-      message: "started",
-    }, 20);
-
-    expect(running).toHaveLength(1);
-    expect(running[0]!).toMatchObject({
-      id: "tool:turn-1:tool-1",
-      role: "pulseed",
-      text: "Running tool: grep",
-      messageType: "info",
-      transient: true,
-    });
-
-    const finished = applyChatEventToMessages(running, {
-      type: "tool_end",
-      runId: "run-1",
-      turnId: "turn-1",
-      createdAt: "2026-04-08T00:00:02.000Z",
-      toolCallId: "tool-1",
-      toolName: "grep",
-      success: true,
-      summary: "2 matches",
-      durationMs: 50,
-    }, 20);
-
-    expect(finished).toHaveLength(1);
-    expect(finished[0]!).toMatchObject({
-      id: "tool:turn-1:tool-1",
-      text: "Finished tool: grep - 2 matches",
-      messageType: "success",
-    });
+    expect(messages).toEqual([]);
   });
 
   it("removes transient activity when assistant final arrives", () => {
@@ -158,71 +121,6 @@ describe("applyChatEventToMessages", () => {
     }, 20);
 
     expect(afterEnd).toEqual([]);
-  });
-
-  it("removes transient tool progress on lifecycle end", () => {
-    const withToolProgress = applyChatEventToMessages([], {
-      type: "tool_update",
-      runId: "run-1",
-      turnId: "turn-1",
-      createdAt: "2026-04-08T00:00:00.000Z",
-      toolCallId: "tool-1",
-      toolName: "grep",
-      status: "running",
-      message: "Reading files",
-    }, 20);
-
-    const afterEnd = applyChatEventToMessages(withToolProgress, {
-      type: "lifecycle_end",
-      runId: "run-1",
-      turnId: "turn-1",
-      createdAt: "2026-04-08T00:00:01.000Z",
-      status: "completed",
-      elapsedMs: 1000,
-      persisted: true,
-    }, 20);
-
-    expect(afterEnd).toEqual([]);
-  });
-
-  it("keeps other in-flight tool rows when one tool finishes", () => {
-    const withFirstTool = applyChatEventToMessages([], {
-      type: "tool_update",
-      runId: "run-1",
-      turnId: "turn-1",
-      createdAt: "2026-04-08T00:00:00.000Z",
-      toolCallId: "tool-1",
-      toolName: "grep",
-      status: "running",
-      message: "Reading files",
-    }, 20);
-
-    const withSecondTool = applyChatEventToMessages(withFirstTool, {
-      type: "tool_update",
-      runId: "run-1",
-      turnId: "turn-1",
-      createdAt: "2026-04-08T00:00:01.000Z",
-      toolCallId: "tool-2",
-      toolName: "glob",
-      status: "running",
-      message: "Finding files",
-    }, 20);
-
-    const afterFirstEnd = applyChatEventToMessages(withSecondTool, {
-      type: "tool_end",
-      runId: "run-1",
-      turnId: "turn-1",
-      createdAt: "2026-04-08T00:00:02.000Z",
-      toolCallId: "tool-1",
-      toolName: "grep",
-      success: true,
-      summary: "2 matches",
-      durationMs: 50,
-    }, 20);
-
-    expect(afterFirstEnd).toHaveLength(2);
-    expect(afterFirstEnd.some((message) => message.id === "tool:turn-1:tool-1" && message.text.includes("Finished tool: grep"))).toBe(true);
-    expect(afterFirstEnd.some((message) => message.id === "tool:turn-1:tool-2" && message.text.includes("glob: Finding files"))).toBe(true);
   });
 
   it("keeps non-transient activity rows after turn-ending events", () => {

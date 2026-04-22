@@ -26,3 +26,5 @@ scripts/*
 !scripts/run-tui-test.mjs
 !scripts/test-changed.mjs
 !scripts/verify-packaged-artifacts.mjs
+
+tmp/

@@ -14,12 +14,16 @@ import { LLMError } from "../utils/errors.js";
 
 // ─── Constants ───
 
-const DEFAULT_TIMEOUT_MS = 300_000; // 5 minutes per call
-const DEFAULT_IDLE_TIMEOUT_MS = 0;
-const DEFAULT_RETRY_ATTEMPTS = 2;
+const DEFAULT_TIMEOUT_MS = 120_000; // 2 minutes per call
+const DEFAULT_RETRY_ATTEMPTS = 3;
 const MAX_RETRY_ATTEMPTS = 5;
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000];
 const SIGKILL_DELAY_MS = 5000;
+
+function isNonRetryableCodexError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return err.message.includes("request timed out") || err.message.includes("idle timed out");
+}
 
 /**
  * Build a single prompt string from messages and system prompt.
@@ -56,11 +60,11 @@ export interface CodexLLMClientConfig {
   lightModel?: string;
   /** Repository path passed to Codex for workspace-aware execution. Default: "." */
   repoPath?: string;
-  /** Total request timeout per call in milliseconds. Default: 300000 (5 minutes) */
+  /** Total request timeout per call in milliseconds. Default: 120000 (2 minutes) */
   timeoutMs?: number;
-  /** Idle timeout after Codex emits output and then goes quiet. Disabled by default. */
+  /** Idle timeout after Codex emits output and then goes quiet. Defaults to timeoutMs. */
   idleTimeoutMs?: number;
-  /** Total retry attempts including the initial call. Default: 2, capped at 5. */
+  /** Total retry attempts including the initial call. Default: 3, capped at 5. */
   retryAttempts?: number;
   /** Sandbox passed to codex exec. Default: workspace-write. */
   sandboxPolicy?: string;
@@ -98,7 +102,7 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
     this.totalTimeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.idleTimeoutMs = typeof config.idleTimeoutMs === "number" && Number.isFinite(config.idleTimeoutMs)
       ? Math.max(0, Math.trunc(config.idleTimeoutMs))
-      : DEFAULT_IDLE_TIMEOUT_MS;
+      : this.totalTimeoutMs;
     const requestedRetryAttempts = typeof config.retryAttempts === "number" && Number.isFinite(config.retryAttempts)
       ? Math.trunc(config.retryAttempts)
       : DEFAULT_RETRY_ATTEMPTS;
@@ -135,7 +139,7 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
         };
       } catch (err) {
         lastError = err;
-        if (!isRetryableCodexError(err)) {
+        if (isNonRetryableCodexError(err)) {
           break;
         }
         if (attempt < this.retryAttempts - 1) {
@@ -291,11 +295,6 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
       });
     });
   }
-}
-
-function isRetryableCodexError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return message.includes("CodexLLMClient: spawn error");
 }
 
 // ─── Helpers ───

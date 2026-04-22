@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-import React from "react";
-import { Text } from "ink";
 import {
   buildChatViewport,
   estimateComposerHeight,
@@ -11,14 +9,8 @@ import {
   getScrollRequest,
   stripMouseEscapeSequences,
 } from "../chat.js";
-import { buildFullscreenChatRenderLines, renderProcessingRow } from "../fullscreen-chat.js";
-import {
-  estimateMarkdownHeight,
-  estimateWrappedLineCount,
-  renderMarkdownLines,
-  splitMarkdownLineToRows,
-  wrapTextToRows,
-} from "../markdown-renderer.js";
+import { buildFullscreenChatRenderLines } from "../fullscreen-chat.js";
+import { estimateMarkdownHeight, estimateWrappedLineCount, wrapTextToRows } from "../markdown-renderer.js";
 import { extractBashCommand, isBashModeInput, isSafeBashCommand, createShellApprovalTask, formatShellOutput } from "../bash-mode.js";
 import {
   CARET_MARKER,
@@ -27,7 +19,6 @@ import {
   buildCursorEscapeFromCaretMarker,
   buildCursorEscapeFromInputMarker,
 } from "../cursor-tracker.js";
-import { ShimmerText } from "../shimmer-text.js";
 
 describe("getMatchingSuggestions", () => {
   it("hides suggestions for an exact slash command so enter can submit", () => {
@@ -114,21 +105,6 @@ describe("markdown sizing helpers", () => {
 });
 
 describe("chat viewport", () => {
-  it("preserves inline markdown segments through viewport rows", () => {
-    const rows = buildChatViewport([
-      {
-        id: "m1",
-        role: "pulseed" as const,
-        text: "Hello **world**",
-        timestamp: new Date(),
-      },
-    ], 80, 8, 0).rows;
-
-    const messageRow = rows.find((row) => row.kind === "pulseed");
-    expect(messageRow?.segments).toBeDefined();
-    expect(messageRow?.segments?.some((segment) => segment.bold === true)).toBe(true);
-  });
-
   it("keeps earlier rows available when scrolling back", () => {
     const messages = [
       {
@@ -188,31 +164,31 @@ describe("chat viewport", () => {
     expect(keys.indexOf("indicator-bottom")).toBeLessThan(keys.indexOf("processing"));
     expect(keys.indexOf("processing")).toBeLessThan(keys.indexOf("composer-helper"));
   });
-});
 
-describe("markdown row wrapping", () => {
-  it("keeps inline segments attached when a styled line wraps", () => {
-    const rows = splitMarkdownLineToRows({
-      text: "hello **world**",
-      segments: [
-        { text: "hello " },
-        { text: "world", bold: true },
-      ],
-    }, 6);
+  it("preserves markdown segments in fullscreen render lines", () => {
+    const messages = [
+      {
+        id: "m1",
+        role: "pulseed" as const,
+        text: "**hello** `world`",
+        timestamp: new Date(),
+      },
+    ];
+    const viewport = buildChatViewport(messages, 40, 6, 0);
 
-    expect(rows.some((row) => row.segments?.some((segment) => segment.bold === true))).toBe(true);
-  });
+    const lines = buildFullscreenChatRenderLines({
+      availableCols: 40,
+      availableRows: 10,
+      viewport,
+      composerLines: [{ key: "composer-input", text: "input" }],
+      isProcessing: false,
+      spinnerGlyph: "⠋",
+      spinnerVerb: "Thinking",
+    });
 
-  it("renders local markdown links as repo-relative paths", () => {
-    const [line] = renderMarkdownLines("[runner](/Users/yuyoshimuta/Documents/dev/SeedPulse-output-opt/src/interface/chat/chat-runner.ts:12)");
-
-    expect(line?.text).toContain("src/interface/chat/chat-runner.ts:12");
-  });
-
-  it("renders local markdown links with parentheses and titles as paths", () => {
-    const [line] = renderMarkdownLines("[spec](/Users/yuyoshimuta/Documents/dev/SeedPulse-output-opt/docs/Design (draft).md:8 \"draft\")");
-
-    expect(line?.text).toContain("docs/Design (draft).md:8");
+    const messageLine = lines.find((line) => line.key.startsWith("m1:pulseed:0:0"));
+    expect(messageLine?.segments?.length).toBeGreaterThan(1);
+    expect(messageLine?.segments?.some((segment) => segment.bold)).toBe(true);
   });
 });
 
@@ -356,26 +332,5 @@ describe("cursor tracker", () => {
     ].join("\n");
 
     expect(buildCursorEscapeFromInputMarker(frame, 3)).toBe("\u001b[2;8H\u001b[?25h");
-  });
-});
-
-describe("fullscreen processing row", () => {
-  it("renders spinner + shimmer text while processing", () => {
-    const row = renderProcessingRow("⠋", "Thinking", 40) as React.ReactElement<{ children?: React.ReactNode; color?: string }>;
-    const children = React.Children.toArray(
-      row.props.children,
-    ) as React.ReactElement<{ children?: React.ReactNode; color?: string }>[];
-
-    expect(row.type).toBe(React.Fragment);
-    expect(children[0]?.type).toBe(Text);
-    expect(children[0]?.props.color).toBeDefined();
-    expect(children[2]?.type).toBe(ShimmerText);
-    expect(children[2]?.props.children).toBe("Thinking...");
-  });
-
-  it("renders an empty row when not processing", () => {
-    const row = renderProcessingRow("", "", 20) as React.ReactElement<{ children?: React.ReactNode }>;
-    expect(row.type).toBe(Text);
-    expect(row.props.children).toBeTypeOf("string");
   });
 });

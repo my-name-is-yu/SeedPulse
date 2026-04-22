@@ -1,9 +1,4 @@
-import type {
-  ChatEvent,
-  ToolEndEvent,
-  ToolStartEvent,
-  ToolUpdateEvent,
-} from "./chat-events.js";
+import type { ChatEvent } from "./chat-events.js";
 
 export interface StreamChatMessage {
   id: string;
@@ -33,56 +28,7 @@ function removeTransientActivityForTurn(
   turnId: string
 ): StreamChatMessage[] {
   const transientActivityId = `activity:${turnId}`;
-  const transientToolPrefix = `tool:${turnId}:`;
-  return messages.filter((message) => {
-    if (!message.transient) {
-      return true;
-    }
-    return !(
-      message.id === transientActivityId ||
-      message.id.startsWith(transientToolPrefix)
-    );
-  });
-}
-
-function buildToolMessage(
-  event: ToolStartEvent | ToolUpdateEvent | ToolEndEvent,
-): StreamChatMessage {
-  const id = `tool:${event.turnId}:${event.toolCallId}`;
-  if (event.type === "tool_start") {
-    return {
-      id,
-      role: "pulseed",
-      text: `Running tool: ${event.toolName}`,
-      timestamp: new Date(event.createdAt),
-      messageType: "info",
-      transient: true,
-    };
-  }
-
-  if (event.type === "tool_update") {
-    const transient = event.status !== "result";
-    const messageType = event.status === "awaiting_approval" ? "warning" : "info";
-    const text = event.status === "running" && event.message === "started"
-      ? `Running tool: ${event.toolName}`
-      : `${event.toolName}: ${event.message}`;
-    return {
-      id,
-      role: "pulseed",
-      text,
-      timestamp: new Date(event.createdAt),
-      messageType,
-      transient,
-    };
-  }
-
-  return {
-    id,
-    role: "pulseed",
-    text: `${event.success ? "Finished" : "Failed"} tool: ${event.toolName}${event.summary ? ` - ${event.summary}` : ""}`,
-    timestamp: new Date(event.createdAt),
-    messageType: event.success ? "success" : "error",
-  };
+  return messages.filter((message) => !(message.id === transientActivityId && message.transient));
 }
 
 export function applyChatEventToMessages(
@@ -124,10 +70,6 @@ export function applyChatEventToMessages(
     }, maxMessages);
   }
 
-  if (event.type === "tool_start" || event.type === "tool_update" || event.type === "tool_end") {
-    return upsertMessage(messages, buildToolMessage(event), maxMessages);
-  }
-
   if (event.type === "lifecycle_error") {
     const next = removeTransientActivityForTurn(messages, event.turnId);
     const messageId = event.partialText ? event.turnId : `error:${event.runId}`;
@@ -145,6 +87,18 @@ export function applyChatEventToMessages(
 
   if (event.type === "lifecycle_end") {
     return removeTransientActivityForTurn(messages, event.turnId);
+  }
+
+  if (event.type === "tool_start") {
+    return messages;
+  }
+
+  if (event.type === "tool_update") {
+    return messages;
+  }
+
+  if (event.type === "tool_end") {
+    return messages;
   }
 
   return messages;

@@ -3,7 +3,6 @@ import { Box, Text, useInput } from "ink";
 import { getClipboardContent } from "./clipboard.js";
 import { logTuiDebug } from "./debug-log.js";
 import { theme } from "./theme.js";
-import { ShimmerText } from "./shimmer-text.js";
 import { pickSpinnerVerb } from "./spinner-verbs.js";
 import {
   buildHiddenCursorEscapeFromPosition,
@@ -53,21 +52,17 @@ type RenderSegment = {
   bold?: boolean;
   dim?: boolean;
   italic?: boolean;
+  code?: boolean;
 };
 
 type RenderLine = {
   key: string;
   text?: string;
   segments?: RenderSegment[];
-  processing?: {
-    glyph: string;
-    verb: string;
-  };
   color?: string;
   backgroundColor?: string;
   bold?: boolean;
   dim?: boolean;
-  italic?: boolean;
   protected?: boolean;
 };
 
@@ -144,27 +139,6 @@ function padToWidth(text: string, width: number): string {
   const trimmed = trimToWidth(text, width);
   const padding = Math.max(0, width - stringWidth(trimmed));
   return trimmed + " ".repeat(padding);
-}
-
-export function renderProcessingRow(glyph: string, verb: string, cols: number): React.ReactNode {
-  if (!verb) {
-    return <Text>{padToWidth("", cols)}</Text>;
-  }
-
-  const spinner = trimToWidth(glyph, Math.max(1, cols));
-  const remaining = Math.max(0, cols - stringWidth(spinner) - 1);
-  const label = trimToWidth(`${verb}...`, remaining);
-  const consumedWidth = stringWidth(spinner) + (remaining > 0 ? 1 + stringWidth(label) : 0);
-  const tailPadding = " ".repeat(Math.max(0, cols - consumedWidth));
-
-  return (
-    <>
-      <Text color={theme.command}>{spinner}</Text>
-      {remaining > 0 ? <Text> </Text> : null}
-      {remaining > 0 ? <ShimmerText>{label}</ShimmerText> : null}
-      {tailPadding.length > 0 ? <Text>{tailPadding}</Text> : null}
-    </>
-  );
 }
 
 function getPreviousOffset(text: string, offset: number): number {
@@ -590,18 +564,23 @@ function renderMessageRow(row: ChatDisplayRow, cols: number): RenderLine {
   }
 
   if (row.segments && row.segments.length > 0) {
-    const segments: RenderSegment[] = [];
-    for (const segment of row.segments) {
+    const segments = row.segments.map((segment) => ({
+      text: segment.text,
+      color: segment.color,
+      bold: segment.bold,
+      italic: segment.italic,
+      code: segment.code,
+    }));
+    const remainingWidth = cols - stringWidth(row.text);
+    if (remainingWidth > 0) {
       segments.push({
-        text: segment.text,
-        color: segment.color ?? (segment.code ? theme.codeInline : row.color),
-        backgroundColor: row.backgroundColor,
-        bold: segment.bold ?? row.bold,
-        dim: row.dim,
-        italic: segment.italic ?? row.italic,
+        text: " ".repeat(remainingWidth),
+        color: row.color,
+        bold: undefined,
+        italic: undefined,
+        code: undefined,
       });
     }
-
     return {
       key: row.key,
       segments,
@@ -657,9 +636,9 @@ export function buildFullscreenChatRenderLines({
   });
   lines.push({
     key: "processing",
-    ...(isProcessing
-      ? { processing: { glyph: spinnerGlyph, verb: spinnerVerb } }
-      : { text: padToWidth("", availableCols), dim: true }),
+    text: padToWidth(isProcessing ? `${spinnerGlyph} ${spinnerVerb}...` : "", availableCols),
+    color: isProcessing ? theme.command : undefined,
+    dim: !isProcessing,
   });
   lines.push(...composerLines);
 
@@ -1205,17 +1184,15 @@ export function FullscreenChat({
     <Box flexDirection="column" flexGrow={1} overflow="hidden">
       {visibleLines.map((line) => (
         <Box key={line.key} height={1} overflow="hidden">
-          {line.processing ? (
-            renderProcessingRow(line.processing.glyph, line.processing.verb, availableCols)
-          ) : line.segments ? (
+          {line.segments ? (
             line.segments.map((segment, index) => (
               <Text
                 key={`${line.key}-${index}`}
-                color={segment.color ?? line.color}
+                color={segment.color ?? (segment.code ? theme.codeInline : line.color)}
                 backgroundColor={segment.backgroundColor ?? line.backgroundColor}
                 bold={segment.bold ?? line.bold}
                 dimColor={segment.dim ?? line.dim}
-                italic={segment.italic ?? line.italic}
+                italic={segment.italic}
               >
                 {index === 0 && line.protected
                   ? `${PROTECTED_ROW_MARKER}${segment.text}`
