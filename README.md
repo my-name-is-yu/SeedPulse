@@ -10,7 +10,6 @@ Keep a goal moving until it is actually done.
 [![npm](https://img.shields.io/npm/v/pulseed.svg?style=for-the-badge)](https://www.npmjs.com/package/pulseed)
 [![Downloads](https://img.shields.io/npm/dm/pulseed.svg?style=for-the-badge)](https://www.npmjs.com/package/pulseed)
 [![CI](https://img.shields.io/github/actions/workflow/status/my-name-is-yu/PulSeed/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/my-name-is-yu/PulSeed/actions/workflows/ci.yml)
-[![Publish](https://img.shields.io/github/actions/workflow/status/my-name-is-yu/PulSeed/publish.yml?style=for-the-badge&label=Publish)](https://github.com/my-name-is-yu/PulSeed/actions/workflows/publish.yml)
 [![Node.js 22/24](https://img.shields.io/badge/node-22%20%2F%2024-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
@@ -23,28 +22,7 @@ looping until the goal is reached or the plan needs to change.
 The primary entry point is `pulseed`. The normal flow is natural language, not a
 menu of subcommands.
 
-## Quick Links
-
-- [Get Started](docs/getting-started.md)
-- [Docs Index](docs/index.md)
-- [Use Cases](docs/usecase.md)
-- [Runtime](docs/runtime.md)
-- [Configuration](docs/configuration.md)
-- [Status](docs/status.md)
-- [Contributing](CONTRIBUTING.md)
-- [Security](SECURITY.md)
-
-## Why PulSeed
-
-- Goal-first orchestration for long-running work
-- Honest goal negotiation when a target is not realistic as stated
-- Bounded agent execution with verification around delegated work
-- Verified playbook memory that turns successful runs into reusable planning hints
-- Local persistent state under `~/.pulseed/`
-- Multiple runtime surfaces: CLI, chat, TUI, daemon, and cron
-- Support for OpenAI, Anthropic, Ollama, and adapter-based execution paths
-
-## Start Here
+## Get Started
 
 PulSeed supports Node.js 22 or 24.
 
@@ -74,8 +52,28 @@ Then describe the goal in natural language:
 - `Show me the current progress.`
 - `Keep this goal moving in the background.`
 
-PulSeed will guide provider and adapter setup when needed. The recommended
-default for most users is `agent_loop` with OpenAI or Anthropic.
+PulSeed will guide provider and adapter setup when needed.
+
+## Links
+
+- [Get Started](docs/getting-started.md)
+- [Docs Index](docs/index.md)
+- [Use Cases](docs/usecase.md)
+- [Runtime](docs/runtime.md)
+- [Configuration](docs/configuration.md)
+- [Status](docs/status.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
+
+## Why PulSeed?
+
+- Goal-first orchestration for long-running work
+- Honest goal negotiation when a target is not realistic as stated
+- Bounded agent execution with verification around delegated work
+- Verified playbook memory that turns successful runs into reusable planning hints
+- Local persistent state under `~/.pulseed/`
+- Multiple runtime surfaces: CLI, chat, TUI, daemon, and cron
+- Support for OpenAI, Anthropic, Ollama, and adapter-based execution paths
 
 ## What It Does
 
