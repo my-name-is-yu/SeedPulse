@@ -27,6 +27,7 @@ export interface AgentLoopSessionState {
   finalText: string;
   status: "running" | "completed" | "failed";
   stopReason?: AgentLoopStopReason;
+  stopDetail?: string;
   updatedAt: string;
 }
 
@@ -113,6 +114,7 @@ export function normalizeAgentLoopSessionState(value: unknown): AgentLoopSession
     finalText: typeof value["finalText"] === "string" ? value["finalText"] : "",
     status: statusField(value, "status"),
     ...(typeof value["stopReason"] === "string" ? { stopReason: value["stopReason"] as AgentLoopStopReason } : {}),
+    ...(typeof value["stopDetail"] === "string" ? { stopDetail: value["stopDetail"] } : {}),
     updatedAt: typeof value["updatedAt"] === "string" ? value["updatedAt"] : new Date(0).toISOString(),
   };
 }

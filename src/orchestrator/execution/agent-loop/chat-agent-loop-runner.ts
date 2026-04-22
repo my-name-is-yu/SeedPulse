@@ -116,106 +116,137 @@ export class ChatAgentLoopRunner {
       ...(input.eventSink ? { eventSink: input.eventSink } : {}),
       ...(input.resumeState ? { sessionId: input.resumeState.sessionId, traceId: input.resumeState.traceId } : {}),
     });
-    const result = await this.deps.boundedRunner.run({
-      session,
-      turnId,
-      goalId: input.goalId ?? "chat",
-      cwd,
-      model,
-      modelInfo,
-      ...(this.deps.defaultProfileName ? { profileName: this.deps.defaultProfileName } : {}),
-      ...(this.deps.defaultReasoningEffort ? { reasoningEffort: this.deps.defaultReasoningEffort } : {}),
-      loadPersistedState: input.resumeOnly || input.resumeState !== undefined,
-      messages: input.resumeOnly
-        ? []
-        : [
-            {
-              role: "system",
-              content: [
-                buildAgentLoopBaseInstructions({
-                  mode: "chat",
-                  extraRules: [
-                    "Use tools to answer the user and operate CoreLoop only through tools.",
-                    "Do not call CoreLoop internals directly.",
-                  ],
-                  role: input.role,
-                }),
-                input.systemPrompt?.trim() ? input.systemPrompt.trim() : "",
-              ].join("\n"),
-            },
-            ...(input.history ?? []).map((m) => ({ role: m.role, content: m.content })),
-            { role: "user" as const, content: input.message },
-          ],
-      outputSchema: ChatAgentLoopOutputSchema,
-      budget: withDefaultBudget({ ...this.deps.defaultBudget, ...input.budget }),
-      toolPolicy: { ...this.deps.defaultToolPolicy, ...input.toolPolicy },
-      ...(input.resumeState ? { resumeState: input.resumeState } : {}),
-      ...(this.deps.defaultExecutionPolicy ? { executionPolicy: this.deps.defaultExecutionPolicy } : {}),
-      toolCallContext: {
-        cwd,
+    try {
+      const result = await this.deps.boundedRunner.run({
+        session,
+        turnId,
         goalId: input.goalId ?? "chat",
-        trustBalance: 0,
-        preApproved: true,
-        approvalFn: input.approvalFn ?? (async () => false),
-        onApprovalRequested: async (request) => {
-          await input.eventSink?.emit({
-            type: "approval_request",
-            eventId: randomUUID(),
-            sessionId: session.sessionId,
-            traceId: session.traceId,
-            turnId,
-            goalId: input.goalId ?? "chat",
-            createdAt: new Date().toISOString(),
-            callId: request.callId ?? `approval:${turnId}`,
-            toolName: request.toolName,
-            reason: request.reason,
-            permissionLevel: request.permissionLevel,
-            isDestructive: request.isDestructive,
-          });
+        cwd,
+        model,
+        modelInfo,
+        ...(this.deps.defaultProfileName ? { profileName: this.deps.defaultProfileName } : {}),
+        ...(this.deps.defaultReasoningEffort ? { reasoningEffort: this.deps.defaultReasoningEffort } : {}),
+        loadPersistedState: input.resumeOnly || input.resumeState !== undefined,
+        messages: input.resumeOnly
+          ? []
+          : [
+              {
+                role: "system",
+                content: [
+                  buildAgentLoopBaseInstructions({
+                    mode: "chat",
+                    extraRules: [
+                      "Use tools to answer the user and operate CoreLoop only through tools.",
+                      "Do not call CoreLoop internals directly.",
+                    ],
+                    role: input.role,
+                  }),
+                  input.systemPrompt?.trim() ? input.systemPrompt.trim() : "",
+                ].join("\n"),
+              },
+              ...(input.history ?? []).map((m) => ({ role: m.role, content: m.content })),
+              { role: "user" as const, content: input.message },
+            ],
+        outputSchema: ChatAgentLoopOutputSchema,
+        budget: withDefaultBudget({ ...this.deps.defaultBudget, ...input.budget }),
+        toolPolicy: { ...this.deps.defaultToolPolicy, ...input.toolPolicy },
+        ...(input.resumeState ? { resumeState: input.resumeState } : {}),
+        ...(this.deps.defaultExecutionPolicy ? { executionPolicy: this.deps.defaultExecutionPolicy } : {}),
+        toolCallContext: {
+          cwd,
+          goalId: input.goalId ?? "chat",
+          trustBalance: 0,
+          preApproved: true,
+          approvalFn: input.approvalFn ?? (async () => false),
+          onApprovalRequested: async (request) => {
+            await input.eventSink?.emit({
+              type: "approval_request",
+              eventId: randomUUID(),
+              sessionId: session.sessionId,
+              traceId: session.traceId,
+              turnId,
+              goalId: input.goalId ?? "chat",
+              createdAt: new Date().toISOString(),
+              callId: request.callId ?? `approval:${turnId}`,
+              toolName: request.toolName,
+              reason: request.reason,
+              permissionLevel: request.permissionLevel,
+              isDestructive: request.isDestructive,
+            });
+          },
+          ...this.deps.defaultToolCallContext,
+          ...input.toolCallContext,
+          agentRole: input.role,
         },
-        ...this.deps.defaultToolCallContext,
-        ...input.toolCallContext,
-        agentRole: input.role,
-      },
-    });
+      });
 
-    const success = result.success && result.output?.status === "done";
-    const hadApprovalDeniedError = result.commandResults.some((entry) =>
-      /approval denied|user denied approval|requires approval/i.test(entry.outputSummary),
-    );
-    const fallbackOutput = success
-      ? this.buildSuccessfulOutput(result.finalText, result.output)
-      : this.buildFailureOutput(result.stopReason, hadApprovalDeniedError, result.finalText, result.output, result.output?.blockers);
-    return {
-      success,
-      output: fallbackOutput,
-      error: success ? null : result.output?.blockers.join("; ") || result.stopReason,
-      exit_code: null,
-      elapsed_ms: Date.now() - started,
-      stopped_reason: success ? "completed" : result.stopReason === "timeout" ? "timeout" : "error",
-      agentLoop: {
-        traceId: result.traceId,
-        sessionId: result.sessionId,
-        turnId: result.turnId,
-        stopReason: result.stopReason,
-        modelTurns: result.modelTurns,
-        toolCalls: result.toolCalls,
-        usage: result.usage,
-        compactions: result.compactions,
-        ...(result.profileName ? { profileName: result.profileName } : {}),
-        ...(result.reasoningEffort ? { reasoningEffort: result.reasoningEffort } : {}),
-        completionEvidence: result.output?.evidence ?? [],
-        verificationHints: result.output?.blockers ?? [],
-        filesChangedPaths: result.changedFiles,
-        ...(result.executionPolicy
-          ? {
-              sandboxMode: result.executionPolicy.sandboxMode,
-              approvalPolicy: result.executionPolicy.approvalPolicy,
-              networkAccess: result.executionPolicy.networkAccess,
-            }
-          : {}),
-      },
-    };
+      const success = result.success && result.output?.status === "done";
+      const hadApprovalDeniedError = result.commandResults.some((entry) =>
+        /approval denied|user denied approval|requires approval/i.test(entry.outputSummary),
+      );
+      const fallbackOutput = success
+        ? this.buildSuccessfulOutput(result.finalText, result.output)
+        : this.buildFailureOutput(result.stopReason, hadApprovalDeniedError, result.finalText, result.output, result.output?.blockers);
+      return {
+        success,
+        output: fallbackOutput,
+        error: success ? null : result.output?.blockers.join("; ") || result.stopReason,
+        exit_code: null,
+        elapsed_ms: Date.now() - started,
+        stopped_reason: success ? "completed" : result.stopReason === "timeout" ? "timeout" : "error",
+        agentLoop: {
+          traceId: result.traceId,
+          sessionId: result.sessionId,
+          turnId: result.turnId,
+          stopReason: result.stopReason,
+          modelTurns: result.modelTurns,
+          toolCalls: result.toolCalls,
+          usage: result.usage,
+          compactions: result.compactions,
+          ...(result.profileName ? { profileName: result.profileName } : {}),
+          ...(result.reasoningEffort ? { reasoningEffort: result.reasoningEffort } : {}),
+          completionEvidence: result.output?.evidence ?? [],
+          verificationHints: result.output?.blockers ?? [],
+          filesChangedPaths: result.changedFiles,
+          ...(result.executionPolicy
+            ? {
+                sandboxMode: result.executionPolicy.sandboxMode,
+                approvalPolicy: result.executionPolicy.approvalPolicy,
+                networkAccess: result.executionPolicy.networkAccess,
+              }
+            : {}),
+        },
+      };
+    } catch (err) {
+      const detail = err instanceof Error
+        ? [err.name !== "Error" ? err.name : null, err.message].filter((part): part is string => typeof part === "string" && part.length > 0).join(": ")
+        : String(err);
+      const lowered = detail.toLowerCase();
+      const isTimeout = lowered.includes("timeout") || lowered.includes("timed out") || lowered.includes("aborterror") || lowered.includes("aborted");
+      const output = isTimeout
+        ? "Agent loop stopped: model request timed out. Narrow broad repo-wide searches or increase `codex_timeout_ms` if this workload is expected."
+        : `Agent loop stopped: model request failed. ${detail ? `Detail: ${detail}. ` : ""}Retry the turn or inspect the provider connection.`;
+      return {
+        success: false,
+        output,
+        error: detail || output,
+        exit_code: null,
+        elapsed_ms: Date.now() - started,
+        stopped_reason: isTimeout ? "timeout" : "error",
+        agentLoop: {
+          traceId: session.traceId,
+          sessionId: session.sessionId,
+          turnId,
+          stopReason: isTimeout ? "timeout" : "fatal_error",
+          modelTurns: 0,
+          toolCalls: 0,
+          compactions: 0,
+          completionEvidence: [],
+          verificationHints: [],
+          filesChangedPaths: [],
+        },
+      };
+    }
   }
 
   private buildSuccessfulOutput(finalText: string, output?: ChatAgentLoopOutput | null): string {

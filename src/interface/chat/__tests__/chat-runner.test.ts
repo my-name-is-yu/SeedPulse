@@ -1505,6 +1505,29 @@ describe("ChatRunner", () => {
       expect(result.diagnostics).toBeUndefined();
     });
 
+    it("surfaces native agentloop failures through the chat path", async () => {
+      const adapter = makeMockAdapter();
+      const chatAgentLoopRunner = {
+        execute: vi.fn().mockResolvedValue({
+          success: false,
+          output: "Agent loop stopped: model request timed out. Narrow broad repo-wide searches or increase `codex_timeout_ms` if this workload is expected.",
+          error: "LLM timeout while waiting for the provider response",
+          exit_code: null,
+          elapsed_ms: 42,
+          stopped_reason: "timeout",
+        }),
+      } as unknown as ChatAgentLoopRunner;
+
+      const runner = new ChatRunner(makeDeps({ adapter, chatAgentLoopRunner }));
+      const result = await runner.execute("Please inspect the repo and report the issue.", "/repo");
+
+      expect(result.success).toBe(false);
+      expect(result.output).toContain("timed out");
+      expect(result.output).toContain("codex_timeout_ms");
+      expect(result.output).not.toContain("[interrupted:");
+      expect(adapter.execute).not.toHaveBeenCalled();
+    });
+
     it("passes compacted chat summary to native chat agentloop", async () => {
       const adapter = makeMockAdapter();
       const chatAgentLoopRunner = {
