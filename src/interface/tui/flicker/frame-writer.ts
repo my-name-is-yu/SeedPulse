@@ -54,8 +54,7 @@ export function createFrameWriter(stream: NodeJS.WriteStream): FrameWriter {
     const prefix = syncSupported ? BSU : "";
     const suffix = syncSupported ? ESU : "";
     const erase = needsErase ? ERASE_SCREEN : "";
-    const trailingCursor = syncSupported ? finalCursor : "";
-    return prefix + erase + CURSOR_HOME + joinFrame(lines) + finalCursor + suffix + trailingCursor;
+    return prefix + erase + CURSOR_HOME + joinFrame(lines) + finalCursor + suffix;
   }
 
   function splitFrame(frame: string): ParsedLine[] {
@@ -70,7 +69,6 @@ export function createFrameWriter(stream: NodeJS.WriteStream): FrameWriter {
   function buildDiffFrame(nextLines: ParsedLine[], finalCursor: string): string {
     const prefix = syncSupported ? BSU : "";
     const suffix = syncSupported ? ESU : "";
-    const trailingCursor = syncSupported ? finalCursor : "";
     const previousLines = lastLines ?? [];
     const maxLines = Math.max(previousLines.length, nextLines.length);
     let output = "";
@@ -91,6 +89,9 @@ export function createFrameWriter(stream: NodeJS.WriteStream): FrameWriter {
         if (nextText.length > 0) {
           output += nextText;
         }
+        if (previousText.length > nextText.length) {
+          output += " ".repeat(previousText.length - nextText.length);
+        }
         continue;
       }
 
@@ -104,7 +105,7 @@ export function createFrameWriter(stream: NodeJS.WriteStream): FrameWriter {
       return "";
     }
 
-    return prefix + output + finalCursor + suffix + trailingCursor;
+    return prefix + output + finalCursor + suffix;
   }
 
   return {

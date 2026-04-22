@@ -56,6 +56,12 @@ const COMMANDS: Suggestion[] = [
     description: "View and toggle config",
     type: "command",
   },
+  {
+    name: "/permissions",
+    aliases: [],
+    description: "Show or update execution policy",
+    type: "command",
+  },
 ];
 
 const GOAL_ARG_COMMANDS = ["/run ", "/start "];

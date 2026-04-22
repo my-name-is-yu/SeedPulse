@@ -77,6 +77,10 @@ export function HelpOverlay({ onDismiss }: HelpOverlayProps) {
             <Text>View and toggle config</Text>
           </Box>
           <Box>
+            <Box width={20}><Text color={theme.command} bold>/permissions</Text></Box>
+            <Text>Show or update execution policy</Text>
+          </Box>
+          <Box>
             <Box width={20}><Text dimColor>{"<anything else>"}</Text></Box>
             <Text>Chat with PulSeed</Text>
           </Box>

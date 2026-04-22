@@ -340,6 +340,8 @@ export function App({
       try {
         // Local-only commands — no LLM round-trip needed
         const trimmedInput = input.trim().toLowerCase();
+        const isPermissionsCommand =
+          trimmedInput === "/permissions" || trimmedInput.startsWith("/permissions ");
         const bashCommand = extractBashCommand(input);
         if (bashCommand !== null) {
           if (!bashCommand) {
@@ -379,6 +381,11 @@ export function App({
             timestamp: new Date(),
             messageType: result.success ? ("info" as const) : ("error" as const),
           }].slice(-MAX_MESSAGES));
+          return;
+        }
+
+        if (isPermissionsCommand && !isDaemonMode && chatRunner) {
+          await chatRunner.execute(input, process.cwd());
           return;
         }
 
@@ -434,6 +441,11 @@ export function App({
           const trimmed = input.trim().toLowerCase();
           if (trimmed === "/help" || trimmed === "/?") {
             setShowHelp(true);
+          } else if (
+            (trimmed === "/permissions" || trimmed.startsWith("/permissions ")) &&
+            chatRunner
+          ) {
+            await chatRunner.execute(input, process.cwd());
           } else if (trimmed === "/settings" || trimmed === "/config") {
             setShowSettings(true);
           } else if (trimmed === "/dashboard" || trimmed === "/d") {

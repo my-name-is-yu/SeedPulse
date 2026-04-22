@@ -18,7 +18,10 @@ import { isBashModeInput } from "./bash-mode.js";
 import { isRenderableFrameChunk } from "./render-output.js";
 import { estimateWrappedLineCount } from "./markdown-renderer.js";
 import { buildChatViewport } from "./chat/viewport.js";
-import { getScrollRequest, stripMouseEscapeSequences } from "./chat/scroll.js";
+import {
+  getScrollRequest,
+  normalizeComposerInput,
+} from "./chat/scroll.js";
 import { getMatchingSuggestions, type Suggestion } from "./chat/suggestions.js";
 import type { ChatMessage } from "./chat/types.js";
 import { getTrustedTuiControlStream } from "./terminal-output.js";
@@ -51,7 +54,12 @@ const SCROLL_INDICATOR_ROWS = 2;
 const INPUT_BOX_HORIZONTAL_CHROME = 4;
 const SUGGESTION_HINT = " arrows to navigate, tab/enter to select, esc to dismiss";
 export { buildChatViewport } from "./chat/viewport.js";
-export { getScrollRequest, parseMouseEvent, stripMouseEscapeSequences } from "./chat/scroll.js";
+export {
+  getScrollRequest,
+  normalizeComposerInput,
+  parseMouseEvent,
+  stripMouseEscapeSequences,
+} from "./chat/scroll.js";
 export { getMatchingSuggestions } from "./chat/suggestions.js";
 
 export function getInputPromptLabel(bashMode: boolean): string {
@@ -589,7 +597,7 @@ export function Chat({
               value={input}
               onChange={(val) => {
                 justSelected.current = false;
-                setInput(stripMouseEscapeSequences(val));
+                setInput(normalizeComposerInput(val));
               }}
               onSubmit={handleSubmit}
               placeholder={getInputPlaceholder(bashMode)}

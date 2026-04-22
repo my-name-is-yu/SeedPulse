@@ -20,6 +20,8 @@ scripts/*
 !scripts/check-docs.mjs
 !scripts/check-subpackages.mjs
 !scripts/clean-dist.mjs
+!scripts/install.sh
+!scripts/install.ps1
 !scripts/release.mjs
 !scripts/run-tui-test.mjs
 !scripts/test-changed.mjs

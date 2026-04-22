@@ -3,6 +3,8 @@ import { Box, Text, useInput } from "ink";
 import { getClipboardContent } from "./clipboard.js";
 import { logTuiDebug } from "./debug-log.js";
 import { theme } from "./theme.js";
+import { CheckerboardSpinner } from "./checkerboard-spinner.js";
+import { ShimmerText } from "./shimmer-text.js";
 import { pickSpinnerVerb } from "./spinner-verbs.js";
 import {
   buildHiddenCursorEscapeFromPosition,
@@ -15,8 +17,8 @@ import { isBashModeInput } from "./bash-mode.js";
 import { buildChatViewport } from "./chat/viewport.js";
 import {
   getScrollRequest,
+  normalizeComposerInput,
   parseMouseEvent,
-  stripMouseEscapeSequences,
 } from "./chat/scroll.js";
 import { getMatchingSuggestions, type Suggestion } from "./chat/suggestions.js";
 import type { ChatMessage, ChatDisplayRow } from "./chat/types.js";
@@ -55,6 +57,7 @@ type RenderLine = {
   key: string;
   text?: string;
   segments?: RenderSegment[];
+  processing?: boolean;
   color?: string;
   backgroundColor?: string;
   bold?: boolean;
@@ -125,6 +128,28 @@ function padToWidth(text: string, width: number): string {
   const trimmed = trimToWidth(text, width);
   const padding = Math.max(0, width - stringWidth(trimmed));
   return trimmed + " ".repeat(padding);
+}
+
+export function formatProcessingLabel(spinnerVerb: string, availableCols: number): string {
+  return trimToWidth(`${spinnerVerb}...`, Math.max(1, availableCols - 4));
+}
+
+export function renderProcessingRow(
+  isProcessing: boolean,
+  spinnerVerb: string,
+  availableCols: number,
+): React.ReactNode {
+  if (!isProcessing) {
+    return <Text>{padToWidth("", availableCols)}</Text>;
+  }
+
+  return (
+    <>
+      <CheckerboardSpinner />
+      <Text> </Text>
+      <ShimmerText>{formatProcessingLabel(spinnerVerb, availableCols)}</ShimmerText>
+    </>
+  );
 }
 
 function getPreviousOffset(text: string, offset: number): number {
@@ -1047,7 +1072,7 @@ export function FullscreenChat({
     }
 
     if (inputChar && !key.ctrl && !key.meta) {
-      const clean = stripMouseEscapeSequences(inputChar);
+      const clean = normalizeComposerInput(inputChar);
       if (clean.length === 0) return;
       insertText(clean);
     }
@@ -1082,8 +1107,7 @@ export function FullscreenChat({
 
   lines.push({
     key: "processing",
-    text: padToWidth(isProcessing ? `⠋ ${spinnerVerb}...` : "", availableCols),
-    dim: !isProcessing,
+    processing: true,
   });
   lines.push({
     key: "indicator-bottom",
@@ -1108,7 +1132,9 @@ export function FullscreenChat({
     <Box flexDirection="column" flexGrow={1} overflow="hidden">
       {visibleLines.map((line) => (
         <Box key={line.key} height={1} overflow="hidden">
-          {line.segments ? (
+          {line.processing ? (
+            renderProcessingRow(isProcessing, spinnerVerb, availableCols)
+          ) : line.segments ? (
             line.segments.map((segment, index) => (
               <Text
                 key={`${line.key}-${index}`}

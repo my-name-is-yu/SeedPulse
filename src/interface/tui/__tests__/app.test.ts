@@ -98,6 +98,54 @@ describe("formatDaemonConnectionState", () => {
   });
 });
 
+describe("standalone slash command routing", () => {
+  beforeEach(() => {
+    testState.lastChatProps = null;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("routes /permissions to ChatRunner instead of standalone intent handlers", async () => {
+    const stateManager = createStateManagerMock();
+    const chatRunner = createChatRunnerMock();
+    const intentRecognizer = {
+      recognize: vi.fn(async () => ({ intent: "unknown", raw: "/permissions" })),
+    };
+    const actionHandler = {
+      handle: vi.fn(async () => ({ messages: ["unexpected"] })),
+    };
+
+    const screen = render(React.createElement(App, {
+      stateManager: stateManager as unknown as StateManager,
+      chatRunner: chatRunner as unknown as ChatRunner,
+      intentRecognizer: intentRecognizer as any,
+      actionHandler: actionHandler as any,
+      noFlicker: false,
+      controlStream: process.stdout,
+      cwd: "~/workspace",
+      gitBranch: "main",
+      providerName: "claude",
+    }), {
+      patchConsole: false,
+      stdout: process.stdout,
+      stderr: process.stderr,
+    });
+
+    await flush();
+    expect(testState.lastChatProps).not.toBeNull();
+
+    await testState.lastChatProps!.onSubmit("/permissions workspace-write");
+
+    expect(chatRunner.execute).toHaveBeenCalledWith("/permissions workspace-write", process.cwd());
+    expect(intentRecognizer.recognize).not.toHaveBeenCalled();
+    expect(actionHandler.handle).not.toHaveBeenCalled();
+
+    screen.unmount();
+  });
+});
+
 describe("daemon-mode chat routing", () => {
   beforeEach(() => {
     testState.lastChatProps = null;
@@ -177,6 +225,37 @@ describe("daemon-mode chat routing", () => {
 
     expect(daemonClient.chat).toHaveBeenCalledWith("goal-123", "question for the active goal");
     expect(chatRunner.execute).not.toHaveBeenCalled();
+
+    screen.unmount();
+  });
+
+  it("routes /permissions to ChatRunner in daemon mode", async () => {
+    const daemonClient = createDaemonClientMock();
+    const stateManager = createStateManagerMock();
+    const chatRunner = createChatRunnerMock();
+
+    const screen = render(React.createElement(App, {
+      daemonClient: daemonClient as unknown as DaemonClient,
+      stateManager: stateManager as unknown as StateManager,
+      chatRunner: chatRunner as unknown as ChatRunner,
+      noFlicker: false,
+      controlStream: process.stdout,
+      cwd: "~/workspace",
+      gitBranch: "main",
+      providerName: "claude",
+    }), {
+      patchConsole: false,
+      stdout: process.stdout,
+      stderr: process.stderr,
+    });
+
+    await flush();
+    expect(testState.lastChatProps).not.toBeNull();
+
+    await testState.lastChatProps!.onSubmit("/permissions read-only");
+
+    expect(chatRunner.execute).toHaveBeenCalledWith("/permissions read-only", process.cwd());
+    expect(daemonClient.chat).not.toHaveBeenCalled();
 
     screen.unmount();
   });

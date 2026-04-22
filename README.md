@@ -46,18 +46,27 @@ menu of subcommands.
 
 ## Start Here
 
-PulSeed supports Node.js 22 and 24. The default install path below uses Node.js 24 via nvm.
+PulSeed supports Node.js 22 or 24.
+
+Quick install (macOS / Linux):
 
 ```bash
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-nvm install 24
-nvm use 24
-nvm alias default 24
-npm install -g pulseed
+curl -fsSL https://raw.githubusercontent.com/my-name-is-yu/PulSeed/main/scripts/install.sh | bash
+```
+
+Quick install (Windows / PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/my-name-is-yu/PulSeed/main/scripts/install.ps1 | iex
+```
+
+Then start PulSeed:
+
+```bash
 pulseed
 ```
+
+For pinned-tag installs, fallback npm installs, and installer flags, see [Getting Started](docs/getting-started.md).
 
 Then describe the goal in natural language:
 
