@@ -17,6 +17,7 @@ import type { Task } from "../../../../base/types/task.js";
 import { makeTempDir } from "../../../../../tests/helpers/temp-dir.js";
 import {
   BoundedAgentLoopRunner,
+  buildAgentLoopBaseInstructions,
   ILLMClientAgentLoopModelClient,
   InMemoryAgentLoopTraceStore,
   StaticAgentLoopModelRegistry,
@@ -271,6 +272,12 @@ describe("agentloop phase 0", () => {
     expect(modelClient).toBeInstanceOf(ILLMClientAgentLoopModelClient);
   });
 
+  it("adds a targeted-inspection guardrail to the chat base instructions", () => {
+    const prompt = buildAgentLoopBaseInstructions({ mode: "chat" });
+    expect(prompt).toContain("Start with targeted inspection first");
+    expect(prompt).toContain("avoid repo-wide glob or grep sweeps");
+  });
+
   it("parses explicit prompted tool-call JSON and preserves unknown tools for runtime feedback", () => {
     let id = 0;
     const calls = extractPromptedToolCalls({
@@ -493,6 +500,7 @@ describe("agentloop phase 1", () => {
     expect(llmCalls[0]?.options?.tools).toBeUndefined();
     expect(llmCalls[0]?.options?.system).toContain("You do not have native function/tool calling");
     expect(llmCalls[0]?.options?.system).toContain("Available tools:");
+    expect(llmCalls[0]?.options?.system).toContain("avoid repo-wide glob or grep sweeps");
     expect(llmCalls[1]?.messages.some((message) => message.role === "user" && message.content.startsWith("Tool result"))).toBe(true);
   });
 
@@ -571,6 +579,53 @@ describe("agentloop phase 1", () => {
 
     expect(result.success).toBe(false);
     expect(result.stopReason).toBe("stalled_tool_loop");
+  });
+
+  it("records a stopped trace with timeout details when the model call throws", async () => {
+    const modelInfo = makeModelInfo();
+    const modelClient: AgentLoopModelClient = {
+      async getModelInfo(): Promise<AgentLoopModelInfo> {
+        return modelInfo;
+      },
+      async createTurn(): Promise<AgentLoopModelResponse> {
+        throw new Error("LLM timeout while waiting for the provider response");
+      },
+    };
+    const { router, runtime } = makeToolRuntime();
+    const runner = new BoundedAgentLoopRunner({ modelClient, toolRouter: router, toolRuntime: runtime });
+    const session = createAgentLoopSession();
+
+    const result = await runner.run({
+      session,
+      turnId: "turn-timeout",
+      goalId: "goal-1",
+      cwd: process.cwd(),
+      model: modelInfo.ref,
+      modelInfo,
+      messages: [{ role: "user", content: "do it" }],
+      outputSchema: z.object({ status: z.literal("done"), finalAnswer: z.string() }),
+      budget: withDefaultBudget({ maxModelTurns: 4 }),
+      toolPolicy: {},
+      toolCallContext: {
+        cwd: process.cwd(),
+        goalId: "goal-1",
+        trustBalance: 0,
+        preApproved: true,
+        approvalFn: async () => false,
+      },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.stopReason).toBe("timeout");
+    expect(result.finalText).toContain("timed out");
+    const events = await session.traceStore.list(session.traceId);
+    const stopped = events.at(-1);
+    expect(stopped).toMatchObject({
+      type: "stopped",
+      reason: "timeout",
+    });
+    expect(stopped).toHaveProperty("reasonDetail");
+    expect((stopped as { reasonDetail?: string }).reasonDetail).toContain("LLM timeout while waiting");
   });
 });
 

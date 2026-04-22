@@ -293,11 +293,11 @@ describe("CodexLLMClient", () => {
   // ─── Error handling ───
 
   describe("sendMessage: spawn error", () => {
-    it("throws when spawn emits error event (single attempt, no retry delay)", async () => {
+    it("retries retryable spawn errors up to the configured attempt limit", async () => {
       // Use fake timers to skip retry delays
       vi.useFakeTimers();
 
-      const client = new CodexLLMClient({ cliPath: "codex" });
+      const client = new CodexLLMClient({ cliPath: "codex", retryAttempts: 3 });
 
       // Queue children for all 3 retry attempts
       const children: FakeChildProcess[] = [];
@@ -313,8 +313,10 @@ describe("CodexLLMClient", () => {
       children[0]!.emit("error", new Error("spawn ENOENT"));
       // Advance timers to trigger retry delays, emit error on subsequent children
       await vi.advanceTimersByTimeAsync(1001);
+      await vi.advanceTimersByTimeAsync(0);
       children[1]!.emit("error", new Error("spawn ENOENT"));
       await vi.advanceTimersByTimeAsync(2001);
+      await vi.advanceTimersByTimeAsync(0);
       children[2]!.emit("error", new Error("spawn ENOENT"));
       await vi.runAllTimersAsync();
 
@@ -325,25 +327,72 @@ describe("CodexLLMClient", () => {
       expect((err as Error).message).toContain("spawn ENOENT");
     });
 
-    it("throws when process exits with non-zero code (after retries)", async () => {
+    it("respects retryAttempts when configured lower than the default", async () => {
       vi.useFakeTimers();
 
-      const client = new CodexLLMClient();
+      const client = new CodexLLMClient({ retryAttempts: 1 });
+      const child = makeFakeChild();
+
+      const promise = client.sendMessage([{ role: "user", content: "hi" }]).catch((e) => e);
+      await vi.advanceTimersByTimeAsync(0);
+      child.emit("error", new Error("spawn ENOENT"));
+      await vi.runAllTimersAsync();
+
+      vi.useRealTimers();
+
+      const err = await promise;
+      expect(mockSpawn).toHaveBeenCalledTimes(1);
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toContain("spawn ENOENT");
+    });
+
+    it("caps retryAttempts at five total attempts", async () => {
+      vi.useFakeTimers();
+
+      const client = new CodexLLMClient({ retryAttempts: 99 });
 
       const children: FakeChildProcess[] = [];
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 5; i++) {
         children.push(makeFakeChild());
       }
 
       const promise = client.sendMessage([{ role: "user", content: "hi" }]).catch((e) => e);
 
+      await vi.advanceTimersByTimeAsync(0);
+      children[0]!.emit("error", new Error("spawn ENOENT"));
+      await vi.advanceTimersByTimeAsync(1001);
+      await vi.advanceTimersByTimeAsync(0);
+      children[1]!.emit("error", new Error("spawn ENOENT"));
+      await vi.advanceTimersByTimeAsync(2001);
+      await vi.advanceTimersByTimeAsync(0);
+      children[2]!.emit("error", new Error("spawn ENOENT"));
+      await vi.advanceTimersByTimeAsync(4001);
+      await vi.advanceTimersByTimeAsync(0);
+      children[3]!.emit("error", new Error("spawn ENOENT"));
+      await vi.advanceTimersByTimeAsync(8001);
+      await vi.advanceTimersByTimeAsync(0);
+      children[4]!.emit("error", new Error("spawn ENOENT"));
+      await vi.runAllTimersAsync();
+
+      vi.useRealTimers();
+
+      const err = await promise;
+      expect(mockSpawn).toHaveBeenCalledTimes(5);
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toContain("spawn ENOENT");
+    });
+
+    it("does not retry non-timeout process exits", async () => {
+      vi.useFakeTimers();
+
+      const client = new CodexLLMClient({ retryAttempts: 3 });
+      const child = makeFakeChild();
+
+      const promise = client.sendMessage([{ role: "user", content: "hi" }]).catch((e) => e);
+
       // Flush microtasks so mkdtemp resolves and spawn is called before emitting close
       await vi.advanceTimersByTimeAsync(0);
-      children[0]!.emit("close", 1);
-      await vi.advanceTimersByTimeAsync(1001);
-      children[1]!.emit("close", 1);
-      await vi.advanceTimersByTimeAsync(2001);
-      children[2]!.emit("close", 1);
+      child.emit("close", 1);
       await vi.runAllTimersAsync();
 
       vi.useRealTimers();
@@ -351,30 +400,62 @@ describe("CodexLLMClient", () => {
       const err = await promise;
       expect(err).toBeInstanceOf(Error);
       expect((err as Error).message).toContain("exited with code 1");
+      expect(mockSpawn).toHaveBeenCalledTimes(1);
     });
   });
 
   // ─── Timeout ───
 
   describe("sendMessage: timeout", () => {
-    it("rejects with timeout error when timeoutMs elapses", async () => {
-      const client = new CodexLLMClient({ timeoutMs: 50 });
+    it("rejects with total timeout error when timeoutMs elapses", async () => {
+      vi.useFakeTimers();
 
-      // Set up 3 fake children that emit "close" only AFTER timeout fires
-      for (let i = 0; i < 3; i++) {
-        const child = new FakeChildProcess();
-        mockSpawn.mockReturnValueOnce(child);
-        // When kill is called (by timeout), emit close
-        child.kill.mockImplementation(() => {
-          setTimeout(() => child.emit("close", null), 5);
-          return true;
-        });
-      }
+      const client = new CodexLLMClient({ timeoutMs: 50, idleTimeoutMs: 1000, retryAttempts: 3 });
 
-      const err = await client.sendMessage([{ role: "user", content: "hi" }]).catch((e) => e);
+      const child = new FakeChildProcess();
+      mockSpawn.mockReturnValueOnce(child);
+      child.kill.mockImplementation(() => {
+        setTimeout(() => child.emit("close", null), 5);
+        return true;
+      });
+
+      const promise = client.sendMessage([{ role: "user", content: "hi" }]).catch((e) => e);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(55);
+      const err = await promise;
+
+      vi.useRealTimers();
 
       expect(err).toBeInstanceOf(Error);
-      expect((err as Error).message).toContain("timed out");
+      expect((err as Error).message).toContain("request timed out");
+      expect(mockSpawn).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects with idle timeout error when no output is produced", async () => {
+      vi.useFakeTimers();
+
+      const client = new CodexLLMClient({ timeoutMs: 1000, idleTimeoutMs: 50 });
+      const child = new FakeChildProcess();
+      mockSpawn.mockReturnValueOnce(child);
+      child.kill.mockImplementation(() => {
+        setTimeout(() => child.emit("close", null), 5);
+        return true;
+      });
+
+      const promise = client.sendMessage([{ role: "user", content: "hi" }]).catch((e) => e);
+      await vi.advanceTimersByTimeAsync(0);
+      child.stderr.emit("data", Buffer.from("working\n"));
+      await vi.advanceTimersByTimeAsync(49);
+      expect(child.kill).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(2);
+      await vi.advanceTimersByTimeAsync(5);
+      const err = await promise;
+
+      vi.useRealTimers();
+
+      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toContain("idle timed out");
     });
   });
 

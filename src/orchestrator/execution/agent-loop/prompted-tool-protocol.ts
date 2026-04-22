@@ -26,6 +26,7 @@ export function buildPromptedToolProtocolSystemPrompt(input: {
     "If you need to call tools, return exactly one JSON object and nothing else.",
     'For one tool, use { "tool": "<name>", "input": { ... } } or { "tool_call": { "name": "<name>", "input": { ... } } }.',
     'For multiple tools, use { "tool_calls": [{ "name": "<name>", "input": { ... } }] }.',
+    "When you need repository context, inspect the narrowest likely files first; avoid repo-wide glob or grep sweeps unless they are truly necessary.",
     "Only use tool names listed below.",
     "Available tools:",
     toolDefinitions,

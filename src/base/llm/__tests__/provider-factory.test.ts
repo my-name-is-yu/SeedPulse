@@ -49,6 +49,7 @@ vi.mock("../provider-config.js", () => ({
 import { buildLLMClient } from "../provider-factory.js";
 import { LLMClient } from "../llm-client.js";
 import { OpenAILLMClient } from "../openai-client.js";
+import { CodexLLMClient } from "../codex-llm-client.js";
 
 // ─── Tests ───
 
@@ -171,6 +172,32 @@ describe("buildLLMClient — early API key validation", () => {
       });
 
       await expect(buildLLMClient()).resolves.not.toThrow();
+    });
+
+    it("passes Codex timeout and retry config through to CodexLLMClient", async () => {
+      const MockedCodexLLMClient = vi.mocked(CodexLLMClient);
+      MockedCodexLLMClient.mockClear();
+
+      mockLoadProviderConfig.mockResolvedValue({
+        provider: "openai",
+        model: "gpt-5.4-mini",
+        adapter: "openai_codex_cli",
+        codex_cli_path: "/usr/local/bin/codex",
+        codex_timeout_ms: 180000,
+        codex_idle_timeout_ms: 30000,
+        codex_retry_attempts: 4,
+      });
+
+      await buildLLMClient();
+
+      expect(MockedCodexLLMClient).toHaveBeenCalledOnce();
+      expect(MockedCodexLLMClient).toHaveBeenCalledWith(expect.objectContaining({
+        cliPath: "/usr/local/bin/codex",
+        model: "gpt-5.4-mini",
+        timeoutMs: 180000,
+        idleTimeoutMs: 30000,
+        retryAttempts: 4,
+      }));
     });
 
     it("succeeds when api_key is present", async () => {

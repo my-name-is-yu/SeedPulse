@@ -49,6 +49,9 @@ export async function buildLLMClient(): Promise<ILLMClient> {
           cliPath: config.codex_cli_path,
           model: config.model,
           lightModel: config.light_model,
+          timeoutMs: config.codex_timeout_ms,
+          idleTimeoutMs: config.codex_idle_timeout_ms,
+          retryAttempts: config.codex_retry_attempts,
           sandboxPolicy: executionPolicy.sandboxMode === "danger_full_access" ? "danger-full-access" : executionPolicy.sandboxMode.replace("_", "-"),
         });
       }

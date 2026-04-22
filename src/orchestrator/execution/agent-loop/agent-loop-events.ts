@@ -115,6 +115,7 @@ export interface AgentLoopFinalEvent extends AgentLoopBaseEvent {
 export interface AgentLoopStoppedEvent extends AgentLoopBaseEvent {
   type: "stopped";
   reason: string;
+  reasonDetail?: string;
 }
 
 export interface AgentLoopEventSink {

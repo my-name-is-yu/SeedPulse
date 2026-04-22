@@ -63,27 +63,29 @@ export class BoundedAgentLoopRunner {
     }
 
     let messages: AgentLoopMessage[] = resumed?.messages ? [...resumed.messages] : [...turn.messages];
-    const preTurnCompaction = await this.compactIfNeeded(turn, messages, "pre_turn", "context_limit", undefined, compactions);
-    if (preTurnCompaction.error) {
-      return this.stop(turn, "fatal_error", startedAt, modelTurns, toolCalls, usage, finalText, null, false, compactions, [], commandResults, messages, calledTools, lastToolLoopSignature, repeatedToolLoopCount);
-    }
-    messages = preTurnCompaction.messages;
-    compactions += preTurnCompaction.compacted ? 1 : 0;
-    await this.saveState(turn, messages, modelTurns, toolCalls, usage, compactions, completionValidationAttempts, calledTools, lastToolLoopSignature, repeatedToolLoopCount, finalText, "running");
 
-    while (true) {
-      if (Date.now() - startedAt > turn.budget.maxWallClockMs) {
-        return this.stop(turn, "timeout", startedAt, modelTurns, toolCalls, usage, finalText, null, false, compactions, await this.collectChangedFiles(turn.cwd, initialWorkspaceSnapshot), commandResults, messages, calledTools, lastToolLoopSignature, repeatedToolLoopCount);
+    try {
+      const preTurnCompaction = await this.compactIfNeeded(turn, messages, "pre_turn", "context_limit", undefined, compactions);
+      if (preTurnCompaction.error) {
+        return this.stop(turn, "fatal_error", startedAt, modelTurns, toolCalls, usage, finalText, null, false, compactions, [], commandResults, messages, calledTools, lastToolLoopSignature, repeatedToolLoopCount);
       }
-      if (modelTurns >= turn.budget.maxModelTurns) {
-        return this.stop(turn, "max_model_turns", startedAt, modelTurns, toolCalls, usage, finalText, null, false, compactions, await this.collectChangedFiles(turn.cwd, initialWorkspaceSnapshot), commandResults, messages, calledTools, lastToolLoopSignature, repeatedToolLoopCount);
-      }
-      if (toolCalls >= turn.budget.maxToolCalls) {
-        return this.stop(turn, "max_tool_calls", startedAt, modelTurns, toolCalls, usage, finalText, null, false, compactions, await this.collectChangedFiles(turn.cwd, initialWorkspaceSnapshot), commandResults, messages, calledTools, lastToolLoopSignature, repeatedToolLoopCount);
-      }
-      if (turn.abortSignal?.aborted) {
-        return this.stop(turn, "cancelled", startedAt, modelTurns, toolCalls, usage, finalText, null, false, compactions, await this.collectChangedFiles(turn.cwd, initialWorkspaceSnapshot), commandResults, messages, calledTools, lastToolLoopSignature, repeatedToolLoopCount);
-      }
+      messages = preTurnCompaction.messages;
+      compactions += preTurnCompaction.compacted ? 1 : 0;
+      await this.saveState(turn, messages, modelTurns, toolCalls, usage, compactions, completionValidationAttempts, calledTools, lastToolLoopSignature, repeatedToolLoopCount, finalText, "running");
+
+      while (true) {
+        if (Date.now() - startedAt > turn.budget.maxWallClockMs) {
+          return this.stop(turn, "timeout", startedAt, modelTurns, toolCalls, usage, finalText, null, false, compactions, await this.collectChangedFiles(turn.cwd, initialWorkspaceSnapshot), commandResults, messages, calledTools, lastToolLoopSignature, repeatedToolLoopCount);
+        }
+        if (modelTurns >= turn.budget.maxModelTurns) {
+          return this.stop(turn, "max_model_turns", startedAt, modelTurns, toolCalls, usage, finalText, null, false, compactions, await this.collectChangedFiles(turn.cwd, initialWorkspaceSnapshot), commandResults, messages, calledTools, lastToolLoopSignature, repeatedToolLoopCount);
+        }
+        if (toolCalls >= turn.budget.maxToolCalls) {
+          return this.stop(turn, "max_tool_calls", startedAt, modelTurns, toolCalls, usage, finalText, null, false, compactions, await this.collectChangedFiles(turn.cwd, initialWorkspaceSnapshot), commandResults, messages, calledTools, lastToolLoopSignature, repeatedToolLoopCount);
+        }
+        if (turn.abortSignal?.aborted) {
+          return this.stop(turn, "cancelled", startedAt, modelTurns, toolCalls, usage, finalText, null, false, compactions, await this.collectChangedFiles(turn.cwd, initialWorkspaceSnapshot), commandResults, messages, calledTools, lastToolLoopSignature, repeatedToolLoopCount);
+        }
 
       const tools = this.deps.toolRouter.modelVisibleTools(turn as AgentLoopTurnContext<unknown>);
       if (modelTurns === 0) {
@@ -314,7 +316,31 @@ export class BoundedAgentLoopRunner {
       }
       messages = compacted.messages;
       compactions += compacted.compacted ? 1 : 0;
-      await this.saveState(turn, messages, modelTurns, toolCalls, usage, compactions, completionValidationAttempts, calledTools, lastToolLoopSignature, repeatedToolLoopCount, finalText, "running");
+        await this.saveState(turn, messages, modelTurns, toolCalls, usage, compactions, completionValidationAttempts, calledTools, lastToolLoopSignature, repeatedToolLoopCount, finalText, "running");
+      }
+    } catch (err) {
+      const failure = this.classifyRunFailure(err);
+      const changedFiles = await this.collectChangedFiles(turn.cwd, initialWorkspaceSnapshot);
+      return this.stop(
+        turn,
+        failure.reason,
+        startedAt,
+        modelTurns,
+        toolCalls,
+        usage,
+        failure.message,
+        null,
+        false,
+        compactions,
+        changedFiles,
+        commandResults,
+        messages,
+        calledTools,
+        lastToolLoopSignature,
+        repeatedToolLoopCount,
+        completionValidationAttempts,
+        failure.detail,
+      );
     }
   }
 
@@ -353,6 +379,7 @@ export class BoundedAgentLoopRunner {
     lastToolLoopSignature?: string | null,
     repeatedToolLoopCount?: number,
     completionValidationAttempts?: number,
+    reasonDetail?: string,
   ): Promise<AgentLoopResult<TOutput>> {
     await this.saveState(
       turn,
@@ -368,12 +395,14 @@ export class BoundedAgentLoopRunner {
       finalText,
       success ? "completed" : "failed",
       reason,
+      reasonDetail,
     );
 
     await this.record(turn, {
       type: "stopped",
       ...this.baseEvent(turn),
       reason,
+      ...(reasonDetail ? { reasonDetail } : {}),
     });
 
     return {
@@ -423,6 +452,28 @@ export class BoundedAgentLoopRunner {
   private async record<TOutput>(turn: AgentLoopTurnContext<TOutput>, event: Parameters<typeof turn.session.traceStore.append>[0]): Promise<void> {
     await turn.session.traceStore.append(event);
     await turn.session.eventSink.emit(event);
+  }
+
+  private classifyRunFailure(error: unknown): { reason: AgentLoopStopReason; detail: string; message: string } {
+    const detail = error instanceof Error
+      ? [error.name !== "Error" ? error.name : null, error.message]
+        .filter((part): part is string => typeof part === "string" && part.length > 0)
+        .join(": ")
+      : String(error);
+    const lowered = detail.toLowerCase();
+    const isTimeout = lowered.includes("timeout") || lowered.includes("timed out") || lowered.includes("aborterror") || lowered.includes("aborted");
+    if (isTimeout) {
+      return {
+        reason: "timeout",
+        detail,
+        message: "Agent loop stopped: model request timed out. Narrow broad repo-wide searches or increase `codex_timeout_ms` if this workload is expected.",
+      };
+    }
+    return {
+      reason: "fatal_error",
+      detail,
+      message: `Agent loop stopped: model request failed. ${detail ? `Detail: ${detail}. ` : ""}Retry the turn or inspect the provider connection.`,
+    };
   }
 
   private preview(value: string): string {
@@ -572,6 +623,7 @@ export class BoundedAgentLoopRunner {
     finalText: string,
     status: AgentLoopSessionState["status"],
     stopReason?: AgentLoopStopReason,
+    stopDetail?: string,
   ): Promise<void> {
     const state: AgentLoopSessionState = {
       sessionId: turn.session.sessionId,
@@ -593,6 +645,7 @@ export class BoundedAgentLoopRunner {
       finalText,
       status,
       ...(stopReason ? { stopReason } : {}),
+      ...(stopDetail ? { stopDetail } : {}),
       updatedAt: new Date().toISOString(),
     };
     await turn.session.stateStore.save(state);

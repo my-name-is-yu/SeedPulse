@@ -92,6 +92,15 @@ export interface ProviderConfig {
   /** CLI path for openai_codex_cli adapter */
   codex_cli_path?: string;
 
+  /** Total Codex request timeout in milliseconds. */
+  codex_timeout_ms?: number;
+
+  /** Codex idle timeout in milliseconds. Disabled when omitted. */
+  codex_idle_timeout_ms?: number;
+
+  /** Maximum Codex retry attempts. */
+  codex_retry_attempts?: number;
+
   /** Optional terminal backend for CLI execution adapters. */
   terminal_backend?: {
     type: "local" | "docker";
@@ -507,6 +516,9 @@ async function resolveProviderConfig(
   if (apiKey !== undefined) config.api_key = apiKey;
   if (baseUrl !== undefined) config.base_url = baseUrl;
   if (fileConfig.codex_cli_path !== undefined) config.codex_cli_path = fileConfig.codex_cli_path;
+  if (fileConfig.codex_timeout_ms !== undefined) config.codex_timeout_ms = fileConfig.codex_timeout_ms;
+  if (fileConfig.codex_idle_timeout_ms !== undefined) config.codex_idle_timeout_ms = fileConfig.codex_idle_timeout_ms;
+  if (fileConfig.codex_retry_attempts !== undefined) config.codex_retry_attempts = fileConfig.codex_retry_attempts;
   if (fileConfig.terminal_backend !== undefined) config.terminal_backend = fileConfig.terminal_backend;
   if (fileConfig.a2a !== undefined) config.a2a = fileConfig.a2a;
   if (lightModel !== undefined) config.light_model = lightModel;
@@ -533,6 +545,9 @@ function providerFileOnlyConfig(fileConfig: Partial<ProviderConfig>): ProviderCo
   if (fileConfig.api_key !== undefined) fileOnly.api_key = fileConfig.api_key;
   if (fileConfig.base_url !== undefined) fileOnly.base_url = fileConfig.base_url;
   if (fileConfig.codex_cli_path !== undefined) fileOnly.codex_cli_path = fileConfig.codex_cli_path;
+  if (fileConfig.codex_timeout_ms !== undefined) fileOnly.codex_timeout_ms = fileConfig.codex_timeout_ms;
+  if (fileConfig.codex_idle_timeout_ms !== undefined) fileOnly.codex_idle_timeout_ms = fileConfig.codex_idle_timeout_ms;
+  if (fileConfig.codex_retry_attempts !== undefined) fileOnly.codex_retry_attempts = fileConfig.codex_retry_attempts;
   if (fileConfig.terminal_backend !== undefined) fileOnly.terminal_backend = fileConfig.terminal_backend;
   if (fileConfig.a2a !== undefined) fileOnly.a2a = fileConfig.a2a;
   if (fileConfig.agent_loop !== undefined) fileOnly.agent_loop = fileConfig.agent_loop;
@@ -595,6 +610,9 @@ export async function getProviderRuntimeFingerprint(): Promise<string> {
     light_model: config.light_model ?? null,
     base_url: config.base_url ?? null,
     codex_cli_path: config.codex_cli_path ?? null,
+    codex_timeout_ms: config.codex_timeout_ms ?? null,
+    codex_idle_timeout_ms: config.codex_idle_timeout_ms ?? null,
+    codex_retry_attempts: config.codex_retry_attempts ?? null,
     terminal_backend: config.terminal_backend ?? null,
     api_key_hash: config.api_key
       ? createHash("sha256").update(config.api_key).digest("hex")

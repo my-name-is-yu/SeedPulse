@@ -2,7 +2,7 @@ import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
-import { BaseLLMClient, MAX_RETRY_ATTEMPTS, RETRY_DELAYS_MS } from "./base-llm-client.js";
+import { BaseLLMClient } from "./base-llm-client.js";
 import {
   type ILLMClient,
   type LLMMessage,
@@ -14,7 +14,12 @@ import { LLMError } from "../utils/errors.js";
 
 // ─── Constants ───
 
-const DEFAULT_TIMEOUT_MS = 120_000; // 2 minutes per call
+const DEFAULT_TIMEOUT_MS = 300_000; // 5 minutes per call
+const DEFAULT_IDLE_TIMEOUT_MS = 0;
+const DEFAULT_RETRY_ATTEMPTS = 2;
+const MAX_RETRY_ATTEMPTS = 5;
+const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000];
+const SIGKILL_DELAY_MS = 5000;
 
 /**
  * Build a single prompt string from messages and system prompt.
@@ -51,8 +56,12 @@ export interface CodexLLMClientConfig {
   lightModel?: string;
   /** Repository path passed to Codex for workspace-aware execution. Default: "." */
   repoPath?: string;
-  /** Timeout per call in milliseconds. Default: 120000 (2 minutes) */
+  /** Total request timeout per call in milliseconds. Default: 300000 (5 minutes) */
   timeoutMs?: number;
+  /** Idle timeout after Codex emits output and then goes quiet. Disabled by default. */
+  idleTimeoutMs?: number;
+  /** Total retry attempts including the initial call. Default: 2, capped at 5. */
+  retryAttempts?: number;
   /** Sandbox passed to codex exec. Default: workspace-write. */
   sandboxPolicy?: string;
   /** Pass --skip-git-repo-check. Default: true. */
@@ -74,7 +83,9 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
   private readonly cliPath: string;
   private readonly model: string | undefined;
   private readonly repoPath: string;
-  private readonly timeoutMs: number;
+  private readonly totalTimeoutMs: number;
+  private readonly idleTimeoutMs: number;
+  private readonly retryAttempts: number;
   private readonly sandboxPolicy: string;
   private readonly skipGitRepoCheck: boolean;
 
@@ -84,7 +95,14 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
     this.model = config.model;
     this.lightModel = config.lightModel;
     this.repoPath = config.repoPath?.trim() || ".";
-    this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.totalTimeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.idleTimeoutMs = typeof config.idleTimeoutMs === "number" && Number.isFinite(config.idleTimeoutMs)
+      ? Math.max(0, Math.trunc(config.idleTimeoutMs))
+      : DEFAULT_IDLE_TIMEOUT_MS;
+    const requestedRetryAttempts = typeof config.retryAttempts === "number" && Number.isFinite(config.retryAttempts)
+      ? Math.trunc(config.retryAttempts)
+      : DEFAULT_RETRY_ATTEMPTS;
+    this.retryAttempts = Math.max(1, Math.min(requestedRetryAttempts, MAX_RETRY_ATTEMPTS));
     this.sandboxPolicy = config.sandboxPolicy ?? "workspace-write";
     this.skipGitRepoCheck = config.skipGitRepoCheck ?? true;
   }
@@ -104,7 +122,7 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
 
     let lastError: unknown;
 
-    for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt++) {
+    for (let attempt = 0; attempt < this.retryAttempts; attempt++) {
       try {
         const content = await this._spawnCodex(prompt, model);
         return {
@@ -117,8 +135,11 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
         };
       } catch (err) {
         lastError = err;
-        if (attempt < MAX_RETRY_ATTEMPTS - 1) {
-          await sleep(RETRY_DELAYS_MS[attempt] ?? 1000);
+        if (!isRetryableCodexError(err)) {
+          break;
+        }
+        if (attempt < this.retryAttempts - 1) {
+          await sleep(RETRY_DELAYS_MS[attempt] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1]!);
         }
       }
     }
@@ -168,21 +189,51 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
       });
 
       let timedOut = false;
+      let timeoutReason: "total" | "idle" | undefined;
+      let totalTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      let idleTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      let sigkillHandle: ReturnType<typeof setTimeout> | undefined;
       let stderrData = "";
-      child.stderr.on("data", (chunk: Buffer) => { stderrData += chunk.toString(); });
-
-      // Timeout: send SIGTERM, then SIGKILL after 5s
-      const timeoutHandle = setTimeout(() => {
+      const clearTimers = (): void => {
+        if (totalTimeoutHandle) clearTimeout(totalTimeoutHandle);
+        if (idleTimeoutHandle) clearTimeout(idleTimeoutHandle);
+        if (sigkillHandle) clearTimeout(sigkillHandle);
+      };
+      const cleanupTmp = (): void => {
+        clearTimers();
+        void _cleanupTmp(tmpDir, tmpFile).catch((cleanupErr) => {
+          console.debug("CodexLLMClient: _cleanupTmp failed (non-critical)", String(cleanupErr));
+        });
+      };
+      const triggerTimeout = (reason: "total" | "idle"): void => {
+        if (timedOut) return;
         timedOut = true;
+        timeoutReason = reason;
         child.kill("SIGTERM");
-        setTimeout(() => {
+        sigkillHandle = setTimeout(() => {
           try {
             child.kill("SIGKILL");
           } catch {
             // process already exited
           }
-        }, 5000);
-      }, this.timeoutMs);
+        }, SIGKILL_DELAY_MS);
+      };
+      const armIdleTimeout = (): void => {
+        if (this.idleTimeoutMs <= 0) return;
+        if (idleTimeoutHandle) clearTimeout(idleTimeoutHandle);
+        idleTimeoutHandle = setTimeout(() => triggerTimeout("idle"), this.idleTimeoutMs);
+      };
+      const markActivity = (): void => {
+        armIdleTimeout();
+      };
+
+      totalTimeoutHandle = setTimeout(() => triggerTimeout("total"), this.totalTimeoutMs);
+
+      child.stdout?.on("data", markActivity);
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderrData += chunk.toString();
+        markActivity();
+      });
 
       // Suppress EPIPE errors on stdin
       child.stdin.on("error", (err: NodeJS.ErrnoException) => {
@@ -194,32 +245,26 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
       child.stdin.end();
 
       child.on("error", (err: Error) => {
-        clearTimeout(timeoutHandle);
-        _cleanupTmp(tmpDir, tmpFile).catch((cleanupErr) => {
-          console.debug("CodexLLMClient: _cleanupTmp failed (non-critical)", String(cleanupErr));
-        });
+        cleanupTmp();
         reject(new LLMError(`CodexLLMClient: spawn error — ${err.message}`));
       });
 
       child.on("close", (code: number | null) => {
-        clearTimeout(timeoutHandle);
+        clearTimers();
 
         if (timedOut) {
-          _cleanupTmp(tmpDir, tmpFile).catch((cleanupErr) => {
-            console.debug("CodexLLMClient: _cleanupTmp failed (non-critical)", String(cleanupErr));
-          });
+          cleanupTmp();
+          const timeoutLabel = timeoutReason === "idle" ? "idle timed out" : "request timed out";
           reject(
             new LLMError(
-              `CodexLLMClient: timed out after ${this.timeoutMs}ms`
+              `CodexLLMClient: ${timeoutLabel} after ${timeoutReason === "idle" ? this.idleTimeoutMs : this.totalTimeoutMs}ms`
             )
           );
           return;
         }
 
         if (code !== 0) {
-          _cleanupTmp(tmpDir, tmpFile).catch((cleanupErr) => {
-            console.debug("CodexLLMClient: _cleanupTmp failed (non-critical)", String(cleanupErr));
-          });
+          cleanupTmp();
           const detail = stderrData.trim() ? ` — ${stderrData.trim().slice(0, 500)}` : "";
           reject(
             new LLMError(
@@ -232,15 +277,11 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
         // Read response from temp file
         fsp.readFile(tmpFile, "utf-8")
           .then((raw) => {
-            _cleanupTmp(tmpDir, tmpFile).catch((cleanupErr) => {
-              console.debug("CodexLLMClient: _cleanupTmp failed (non-critical)", String(cleanupErr));
-            });
+            cleanupTmp();
             resolve(raw.trim());
           })
           .catch((readErr) => {
-            _cleanupTmp(tmpDir, tmpFile).catch((cleanupErr) => {
-              console.debug("CodexLLMClient: _cleanupTmp failed (non-critical)", String(cleanupErr));
-            });
+            cleanupTmp();
             reject(
               new LLMError(
                 `CodexLLMClient: failed to read output file — ${String(readErr)}`
@@ -250,6 +291,11 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
       });
     });
   }
+}
+
+function isRetryableCodexError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes("CodexLLMClient: spawn error");
 }
 
 // ─── Helpers ───

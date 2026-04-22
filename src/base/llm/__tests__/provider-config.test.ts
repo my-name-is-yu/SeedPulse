@@ -424,6 +424,24 @@ describe("loadProviderConfig", () => {
     expect(config.api_key).toBe("sk-test");
   });
 
+  it("loads Codex timeout and retry settings from flat config", async () => {
+    mockAccess.mockResolvedValue(undefined);
+    mockReadFile.mockResolvedValue(JSON.stringify({
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      adapter: "openai_codex_cli",
+      codex_timeout_ms: 180000,
+      codex_idle_timeout_ms: 30000,
+      codex_retry_attempts: 4,
+    }));
+
+    const config = await loadProviderConfig();
+
+    expect(config.codex_timeout_ms).toBe(180000);
+    expect(config.codex_idle_timeout_ms).toBe(30000);
+    expect(config.codex_retry_attempts).toBe(4);
+  });
+
   it("keeps explicit file models even when adapter compatibility is mismatched", async () => {
     mockAccess.mockResolvedValue(undefined);
     mockReadFile.mockResolvedValue(JSON.stringify({
@@ -511,11 +529,19 @@ describe("loadProviderConfig", () => {
       model: "gpt-5.4-mini",
       adapter: "openai_codex_cli",
       api_key: "sk-provider-file",
+      codex_timeout_ms: 180000,
+      codex_idle_timeout_ms: 30000,
+      codex_retry_attempts: 4,
     });
 
     expect(writeJsonFileAtomic).toHaveBeenCalledWith(
       expect.stringContaining("provider.json"),
-      expect.objectContaining({ api_key: "sk-provider-file" }),
+      expect.objectContaining({
+        api_key: "sk-provider-file",
+        codex_timeout_ms: 180000,
+        codex_idle_timeout_ms: 30000,
+        codex_retry_attempts: 4,
+      }),
       { mode: 0o600, directoryMode: 0o700 }
     );
   });
