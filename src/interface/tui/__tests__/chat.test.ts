@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import React from "react";
+import { Text } from "ink";
 import {
   buildChatViewport,
   estimateComposerHeight,
@@ -9,6 +11,7 @@ import {
   getScrollRequest,
   stripMouseEscapeSequences,
 } from "../chat.js";
+import { renderProcessingRow } from "../fullscreen-chat.js";
 import { estimateMarkdownHeight, estimateWrappedLineCount, wrapTextToRows } from "../markdown-renderer.js";
 import { extractBashCommand, isBashModeInput, isSafeBashCommand, createShellApprovalTask, formatShellOutput } from "../bash-mode.js";
 import {
@@ -18,6 +21,7 @@ import {
   buildCursorEscapeFromCaretMarker,
   buildCursorEscapeFromInputMarker,
 } from "../cursor-tracker.js";
+import { ShimmerText } from "../shimmer-text.js";
 
 describe("getMatchingSuggestions", () => {
   it("hides suggestions for an exact slash command so enter can submit", () => {
@@ -276,5 +280,26 @@ describe("cursor tracker", () => {
     ].join("\n");
 
     expect(buildCursorEscapeFromInputMarker(frame, 3)).toBe("\u001b[2;8H\u001b[?25h");
+  });
+});
+
+describe("fullscreen processing row", () => {
+  it("renders spinner + shimmer text while processing", () => {
+    const row = renderProcessingRow("⠋", "Thinking", 40) as React.ReactElement<{ children?: React.ReactNode; color?: string }>;
+    const children = React.Children.toArray(
+      row.props.children,
+    ) as React.ReactElement<{ children?: React.ReactNode; color?: string }>[];
+
+    expect(row.type).toBe(React.Fragment);
+    expect(children[0]?.type).toBe(Text);
+    expect(children[0]?.props.color).toBeDefined();
+    expect(children[2]?.type).toBe(ShimmerText);
+    expect(children[2]?.props.children).toBe("Thinking...");
+  });
+
+  it("renders an empty row when not processing", () => {
+    const row = renderProcessingRow("", "", 20) as React.ReactElement<{ children?: React.ReactNode }>;
+    expect(row.type).toBe(Text);
+    expect(row.props.children).toBeTypeOf("string");
   });
 });

@@ -3,6 +3,7 @@ import { Box, Text, useInput } from "ink";
 import { getClipboardContent } from "./clipboard.js";
 import { logTuiDebug } from "./debug-log.js";
 import { theme } from "./theme.js";
+import { ShimmerText } from "./shimmer-text.js";
 import { pickSpinnerVerb } from "./spinner-verbs.js";
 import {
   buildHiddenCursorEscapeFromPosition,
@@ -57,6 +58,10 @@ type RenderLine = {
   key: string;
   text?: string;
   segments?: RenderSegment[];
+  processing?: {
+    glyph: string;
+    verb: string;
+  };
   color?: string;
   backgroundColor?: string;
   bold?: boolean;
@@ -127,6 +132,27 @@ function padToWidth(text: string, width: number): string {
   const trimmed = trimToWidth(text, width);
   const padding = Math.max(0, width - stringWidth(trimmed));
   return trimmed + " ".repeat(padding);
+}
+
+export function renderProcessingRow(glyph: string, verb: string, cols: number): React.ReactNode {
+  if (!verb) {
+    return <Text>{padToWidth("", cols)}</Text>;
+  }
+
+  const spinner = trimToWidth(glyph, Math.max(1, cols));
+  const remaining = Math.max(0, cols - stringWidth(spinner) - 1);
+  const label = trimToWidth(`${verb}...`, remaining);
+  const consumedWidth = stringWidth(spinner) + (remaining > 0 ? 1 + stringWidth(label) : 0);
+  const tailPadding = " ".repeat(Math.max(0, cols - consumedWidth));
+
+  return (
+    <>
+      <Text color={theme.command}>{spinner}</Text>
+      {remaining > 0 ? <Text> </Text> : null}
+      {remaining > 0 ? <ShimmerText>{label}</ShimmerText> : null}
+      {tailPadding.length > 0 ? <Text>{tailPadding}</Text> : null}
+    </>
+  );
 }
 
 function getPreviousOffset(text: string, offset: number): number {
@@ -1098,9 +1124,9 @@ export function FullscreenChat({
   const spinnerGlyph = PROCESSING_SPINNER_FRAMES[spinnerFrameIndex] ?? PROCESSING_SPINNER_FRAMES[0];
   lines.push({
     key: "processing",
-    text: padToWidth(isProcessing ? `${spinnerGlyph} ${spinnerVerb}...` : "", availableCols),
-    color: isProcessing ? theme.command : undefined,
-    dim: !isProcessing,
+    ...(isProcessing
+      ? { processing: { glyph: spinnerGlyph, verb: spinnerVerb } }
+      : { text: padToWidth("", availableCols), dim: true }),
   });
   lines.push({
     key: "indicator-bottom",
@@ -1125,7 +1151,9 @@ export function FullscreenChat({
     <Box flexDirection="column" flexGrow={1} overflow="hidden">
       {visibleLines.map((line) => (
         <Box key={line.key} height={1} overflow="hidden">
-          {line.segments ? (
+          {line.processing ? (
+            renderProcessingRow(line.processing.glyph, line.processing.verb, availableCols)
+          ) : line.segments ? (
             line.segments.map((segment, index) => (
               <Text
                 key={`${line.key}-${index}`}

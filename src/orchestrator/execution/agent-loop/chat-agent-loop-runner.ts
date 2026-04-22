@@ -147,10 +147,12 @@ export class ChatAgentLoopRunner {
     });
 
     const success = result.success && result.output?.status === "done";
-    const fallbackOutput = result.output?.message
-      ?? result.finalText
-      ?? result.output?.blockers.join("; ")
-      ?? result.stopReason;
+    const hadApprovalDeniedError = result.commandResults.some((entry) =>
+      /approval denied|user denied approval|requires approval/i.test(entry.outputSummary),
+    );
+    const fallbackOutput = success
+      ? this.buildSuccessfulOutput(result.finalText, result.output?.message)
+      : this.buildFailureOutput(result.stopReason, hadApprovalDeniedError, result.finalText, result.output?.blockers);
     return {
       success,
       output: fallbackOutput,
@@ -181,5 +183,104 @@ export class ChatAgentLoopRunner {
           : {}),
       },
     };
+  }
+
+  private buildSuccessfulOutput(finalText: string, fallbackMessage?: string): string {
+    const formatted = this.formatStructuredFinalText(finalText);
+    if (formatted) return formatted;
+    if (fallbackMessage && fallbackMessage.trim().length > 0) return fallbackMessage.trim();
+    if (finalText && finalText.trim().length > 0) return finalText.trim();
+    return "(no response)";
+  }
+
+  private buildFailureOutput(
+    stopReason: string,
+    hadApprovalDeniedError: boolean,
+    finalText: string,
+    blockers?: string[],
+  ): string {
+    if (
+      stopReason === "consecutive_tool_errors"
+      && (hadApprovalDeniedError || /^Calling\s+/i.test(finalText.trim()))
+    ) {
+      return [
+        "I could not continue because repeated tool actions were denied or failed.",
+        "Approve the request or update session policy with `/permissions ...`, then retry.",
+      ].join("\n");
+    }
+    if (stopReason === "max_tool_calls") {
+      return "I reached the tool-call limit before completing this request. Please narrow the scope or continue in another turn.";
+    }
+    if (stopReason === "max_model_turns") {
+      return "I reached the model-turn limit before completing this request. Please continue in another turn.";
+    }
+    if (stopReason === "stalled_tool_loop") {
+      return "I stopped because the tool loop repeated without making progress.";
+    }
+
+    const formatted = this.formatStructuredFinalText(finalText);
+    if (formatted) return formatted;
+    if (blockers && blockers.length > 0) return blockers.join("; ");
+    if (finalText && !/^Calling\s+/i.test(finalText.trim())) return finalText.trim();
+    return `Interrupted: ${stopReason}`;
+  }
+
+  private formatStructuredFinalText(finalText: string): string | null {
+    const raw = finalText?.trim();
+    if (!raw) return null;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+
+    const value = parsed as Record<string, unknown>;
+    const message = typeof value.message === "string" ? value.message.trim() : "";
+    const sections: string[] = [];
+    const handledKeys = new Set<string>(["status", "message", "evidence", "blockers"]);
+
+    const appendStringArray = (title: string, key: string) => {
+      const array = value[key];
+      if (!Array.isArray(array)) return;
+      const lines = array.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+      if (lines.length === 0) return;
+      handledKeys.add(key);
+      sections.push(`${title}:\n${lines.map((line) => `- ${line}`).join("\n")}`);
+    };
+
+    appendStringArray("Details", "details");
+    appendStringArray("Capabilities", "capabilities");
+    appendStringArray("Evidence", "evidence");
+    appendStringArray("Blockers", "blockers");
+    appendStringArray("Examples", "examples");
+    appendStringArray("Telegram examples", "telegram_examples");
+    appendStringArray("Next actions", "next_actions");
+
+    for (const [key, fieldValue] of Object.entries(value)) {
+      if (handledKeys.has(key) || !Array.isArray(fieldValue)) continue;
+      const lines = fieldValue.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+      if (lines.length === 0) continue;
+      sections.push(`${this.humanizeFieldLabel(key)}:\n${lines.map((line) => `- ${line}`).join("\n")}`);
+    }
+
+    if (typeof value.next_step === "string" && value.next_step.trim().length > 0) {
+      sections.push(`Next step: ${value.next_step.trim()}`);
+    }
+
+    if (!message && sections.length === 0) return raw;
+    return [message, ...sections].filter((section) => section.length > 0).join("\n\n");
+  }
+
+  private humanizeFieldLabel(key: string): string {
+    return key
+      .split(/[_\s-]+/g)
+      .filter(Boolean)
+      .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+      .join(" ");
   }
 }

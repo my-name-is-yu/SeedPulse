@@ -520,7 +520,8 @@ describe("agentloop phase 7 ChatAgentLoopRunner and CoreLoopControlTools", () =>
     const result = await chat.execute({ message: "status?", goalId: "goal-1" });
 
     expect(result.success).toBe(true);
-    expect(result.output).toBe("Goal is running");
+    expect(result.output).toContain("Goal is running");
+    expect(result.output).toContain("Evidence:");
     expect(modelClient.calls[1].messages.some((m) => m.role === "tool" && m.toolName === "core_goal_status")).toBe(true);
   });
 
@@ -567,7 +568,8 @@ describe("agentloop phase 7 ChatAgentLoopRunner and CoreLoopControlTools", () =>
     });
 
     expect(result.success).toBe(true);
-    expect(result.output).toBe("approved path");
+    expect(result.output).toContain("approved path");
+    expect(result.output).toContain("Evidence:");
     expect(events.some((event) => event.type === "approval_request" && event.toolName === "approval_tool")).toBe(true);
     expect(modelClient.calls[1].messages.some((m) => m.role === "tool" && m.toolName === "approval_tool")).toBe(true);
   });
@@ -662,6 +664,81 @@ describe("agentloop phase 7 ChatAgentLoopRunner and CoreLoopControlTools", () =>
     } finally {
       fs.rmSync(stateDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
+  });
+
+  it("keeps structured details from final JSON instead of collapsing to a single message line", async () => {
+    const modelInfo = makeModelInfo();
+    const modelClient = new ScriptedModelClient(modelInfo, [
+      {
+        content: JSON.stringify({
+          status: "done",
+          message: "この環境でできること",
+          capabilities: ["コードを読む", "コードを修正する"],
+          next_step: "必要なら実装方針を作成する",
+        }),
+        toolCalls: [],
+        stopReason: "end_turn",
+      },
+    ]);
+    const registry = new ToolRegistry();
+    const { router, runtime } = makeRuntime(registry);
+    const registryModel = new StaticAgentLoopModelRegistry([modelInfo]);
+    const chat = new ChatAgentLoopRunner({
+      boundedRunner: new BoundedAgentLoopRunner({ modelClient, toolRouter: router, toolRuntime: runtime }),
+      modelClient,
+      modelRegistry: registryModel,
+      defaultModel: modelInfo.ref,
+    });
+
+    const result = await chat.execute({ message: "何ができるの？" });
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain("この環境でできること");
+    expect(result.output).toContain("Capabilities:");
+    expect(result.output).toContain("- コードを読む");
+    expect(result.output).toContain("Next step:");
+  });
+
+  it("returns a clear approval-policy message instead of leaking raw tool commentary", async () => {
+    const modelInfo = makeModelInfo();
+    const modelClient = new ScriptedModelClient(modelInfo, [
+      {
+        content: "",
+        toolCalls: [{ id: "call-1", name: "approval_tool", input: { value: "a" } }],
+        stopReason: "tool_use",
+      },
+      {
+        content: "",
+        toolCalls: [{ id: "call-2", name: "approval_tool", input: { value: "b" } }],
+        stopReason: "tool_use",
+      },
+      {
+        content: "",
+        toolCalls: [{ id: "call-3", name: "approval_tool", input: { value: "c" } }],
+        stopReason: "tool_use",
+      },
+    ]);
+    const registry = new ToolRegistry();
+    registry.register(new ApprovalTool());
+    const { router, runtime } = makeRuntime(registry);
+    const registryModel = new StaticAgentLoopModelRegistry([modelInfo]);
+    const chat = new ChatAgentLoopRunner({
+      boundedRunner: new BoundedAgentLoopRunner({ modelClient, toolRouter: router, toolRuntime: runtime }),
+      modelClient,
+      modelRegistry: registryModel,
+      defaultModel: modelInfo.ref,
+      defaultToolPolicy: { allowedTools: ["approval_tool"] },
+    });
+
+    const result = await chat.execute({
+      message: "do work",
+      goalId: "goal-1",
+      approvalFn: async () => false,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.output).toContain("denied or failed");
+    expect(result.output).not.toContain("Calling approval_tool");
   });
 });
 
