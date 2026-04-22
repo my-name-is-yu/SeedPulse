@@ -30,7 +30,8 @@ export class BoundedAgentLoopRunner {
 
   async run<TOutput>(turn: AgentLoopTurnContext<TOutput>): Promise<AgentLoopResult<TOutput>> {
     const startedAt = Date.now();
-    const resumed = turn.resumeState ?? await turn.session.stateStore.load();
+    const resumed = turn.resumeState
+      ?? (turn.loadPersistedState === false ? null : await turn.session.stateStore.load());
     let modelTurns = resumed?.modelTurns ?? 0;
     let toolCalls = resumed?.toolCalls ?? 0;
     const usage: AgentLoopTokenUsage = resumed?.usage

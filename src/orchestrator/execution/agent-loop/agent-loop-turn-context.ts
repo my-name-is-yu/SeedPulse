@@ -45,6 +45,8 @@ export interface AgentLoopTurnContext<TOutput> {
     toolCalls: number;
   }) => AgentLoopCompletionValidationResult;
   resumeState?: AgentLoopSessionState;
+  /** When false, skip loading persisted state from session.stateStore for this run. */
+  loadPersistedState?: boolean;
   abortSignal?: AbortSignal;
 }
 

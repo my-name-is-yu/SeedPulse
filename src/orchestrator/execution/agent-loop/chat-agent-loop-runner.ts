@@ -92,6 +92,7 @@ export class ChatAgentLoopRunner {
       modelInfo,
       ...(this.deps.defaultProfileName ? { profileName: this.deps.defaultProfileName } : {}),
       ...(this.deps.defaultReasoningEffort ? { reasoningEffort: this.deps.defaultReasoningEffort } : {}),
+      loadPersistedState: input.resumeOnly || input.resumeState !== undefined,
       messages: input.resumeOnly
         ? []
         : [

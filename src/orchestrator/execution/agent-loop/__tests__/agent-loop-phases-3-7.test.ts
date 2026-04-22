@@ -571,6 +571,98 @@ describe("agentloop phase 7 ChatAgentLoopRunner and CoreLoopControlTools", () =>
     expect(events.some((event) => event.type === "approval_request" && event.toolName === "approval_tool")).toBe(true);
     expect(modelClient.calls[1].messages.some((m) => m.role === "tool" && m.toolName === "approval_tool")).toBe(true);
   });
+
+  it("uses the latest chat input even when a state file path is reused", async () => {
+    const stateDir = makeTempDir();
+    const statePath = path.join(stateDir, "chat.state.json");
+    try {
+      const modelInfo = makeModelInfo();
+      const modelClient = new ScriptedModelClient(modelInfo, [
+        {
+          content: JSON.stringify({ status: "done", message: "first", evidence: [], blockers: [] }),
+          toolCalls: [],
+          stopReason: "end_turn",
+        },
+        {
+          content: JSON.stringify({ status: "done", message: "second", evidence: [], blockers: [] }),
+          toolCalls: [],
+          stopReason: "end_turn",
+        },
+      ]);
+      const registry = new ToolRegistry();
+      const { router, runtime } = makeRuntime(registry);
+      const registryModel = new StaticAgentLoopModelRegistry([modelInfo]);
+      const chat = new ChatAgentLoopRunner({
+        boundedRunner: new BoundedAgentLoopRunner({ modelClient, toolRouter: router, toolRuntime: runtime }),
+        modelClient,
+        modelRegistry: registryModel,
+        defaultModel: modelInfo.ref,
+        createSession: () =>
+          createAgentLoopSession({
+            sessionId: "chat-session",
+            traceId: "chat-trace",
+            stateStore: new JsonAgentLoopSessionStateStore(statePath),
+          }),
+      });
+
+      await chat.execute({ message: "first input" });
+      await chat.execute({ message: "second input" });
+
+      const firstLastUser = [...modelClient.calls[0].messages].reverse().find((message) => message.role === "user")?.content ?? "";
+      const secondLastUser = [...modelClient.calls[1].messages].reverse().find((message) => message.role === "user")?.content ?? "";
+      expect(firstLastUser).toContain("first input");
+      expect(secondLastUser).toContain("second input");
+      expect(secondLastUser).not.toContain("first input");
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  });
+
+  it("loads persisted state for explicit resumeOnly chat turns", async () => {
+    const stateDir = makeTempDir();
+    const statePath = path.join(stateDir, "chat-resume.state.json");
+    try {
+      const modelInfo = makeModelInfo();
+      const modelClient = new ScriptedModelClient(modelInfo, [
+        {
+          content: JSON.stringify({ status: "done", message: "initial", evidence: [], blockers: [] }),
+          toolCalls: [],
+          stopReason: "end_turn",
+        },
+        {
+          content: JSON.stringify({ status: "done", message: "resumed", evidence: [], blockers: [] }),
+          toolCalls: [],
+          stopReason: "end_turn",
+        },
+      ]);
+      const registry = new ToolRegistry();
+      const { router, runtime } = makeRuntime(registry);
+      const registryModel = new StaticAgentLoopModelRegistry([modelInfo]);
+      const chat = new ChatAgentLoopRunner({
+        boundedRunner: new BoundedAgentLoopRunner({ modelClient, toolRouter: router, toolRuntime: runtime }),
+        modelClient,
+        modelRegistry: registryModel,
+        defaultModel: modelInfo.ref,
+        createSession: () =>
+          createAgentLoopSession({
+            sessionId: "resume-session",
+            traceId: "resume-trace",
+            stateStore: new JsonAgentLoopSessionStateStore(statePath),
+          }),
+      });
+
+      await chat.execute({ message: "persist this input" });
+      await chat.execute({ message: "fresh input should be ignored on resume", resumeOnly: true });
+
+      const secondUserMessages = modelClient.calls[1].messages
+        .filter((message) => message.role === "user")
+        .map((message) => message.content);
+      expect(secondUserMessages.some((content) => content.includes("persist this input"))).toBe(true);
+      expect(secondUserMessages.some((content) => content.includes("fresh input should be ignored on resume"))).toBe(false);
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  });
 });
 
 function run(command: string, args: string[], cwd: string): Promise<void> {
