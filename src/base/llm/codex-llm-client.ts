@@ -134,6 +134,9 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
         };
       } catch (err) {
         lastError = err;
+        if (!isRetryableCodexError(err)) {
+          break;
+        }
         if (attempt < this.retryAttempts - 1) {
           await sleep(RETRY_DELAYS_MS[attempt] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1]!);
         }
@@ -287,6 +290,11 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
       });
     });
   }
+}
+
+function isRetryableCodexError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes("CodexLLMClient: spawn error");
 }
 
 // ─── Helpers ───

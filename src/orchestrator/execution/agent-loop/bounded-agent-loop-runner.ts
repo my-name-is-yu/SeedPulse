@@ -99,7 +99,31 @@ export class BoundedAgentLoopRunner {
         toolCount: tools.length,
       });
 
-      const protocol = await this.createTurnProtocol(turn, messages, tools);
+      let protocol: AgentLoopModelTurnProtocol;
+      try {
+        protocol = await this.createTurnProtocol(turn, messages, tools);
+      } catch (err) {
+        const failure = this.classifyRunFailure(err);
+        return this.stop(
+          turn,
+          failure.reason,
+          startedAt,
+          modelTurns,
+          toolCalls,
+          failure.message,
+          null,
+          false,
+          compactions,
+          await this.collectChangedFiles(turn.cwd, initialWorkspaceSnapshot),
+          commandResults,
+          messages,
+          calledTools,
+          lastToolLoopSignature,
+          repeatedToolLoopCount,
+          completionValidationAttempts,
+          failure.detail,
+        );
+      }
       if (!protocol.responseCompleted) {
         return this.stop(turn, "protocol_incomplete", startedAt, modelTurns, toolCalls, finalText, null, false, compactions, await this.collectChangedFiles(turn.cwd, initialWorkspaceSnapshot), commandResults, messages, calledTools, lastToolLoopSignature, repeatedToolLoopCount);
       }
@@ -344,6 +368,7 @@ export class BoundedAgentLoopRunner {
     lastToolLoopSignature?: string | null,
     repeatedToolLoopCount?: number,
     completionValidationAttempts?: number,
+    reasonDetail?: string,
   ): Promise<AgentLoopResult<TOutput>> {
     await this.saveState(
       turn,
@@ -358,12 +383,14 @@ export class BoundedAgentLoopRunner {
       finalText,
       success ? "completed" : "failed",
       reason,
+      reasonDetail,
     );
 
     await this.record(turn, {
       type: "stopped",
       ...this.baseEvent(turn),
       reason,
+      ...(reasonDetail ? { reasonDetail } : {}),
     });
 
     return {
@@ -423,6 +450,33 @@ export class BoundedAgentLoopRunner {
     } catch {
       return String(value);
     }
+  }
+
+  private classifyRunFailure(error: unknown): { reason: AgentLoopStopReason; detail: string; message: string } {
+    const detail = error instanceof Error
+      ? [error.name !== "Error" ? error.name : null, error.message]
+        .filter((part): part is string => typeof part === "string" && part.length > 0)
+        .join(": ")
+      : String(error);
+    const lowered = detail.toLowerCase();
+    if (
+      lowered.includes("timeout")
+      || lowered.includes("timed out")
+      || lowered.includes("aborterror")
+      || lowered.includes("aborted")
+    ) {
+      return {
+        reason: "timeout",
+        detail,
+        message: "Agent loop stopped: model request timed out. Narrow broad repo-wide searches or increase `codex_timeout_ms` if this workload is expected.",
+      };
+    }
+
+    return {
+      reason: "fatal_error",
+      detail,
+      message: `Agent loop stopped: model request failed. ${detail ? `Detail: ${detail}. ` : ""}Retry the turn or inspect the provider connection.`,
+    };
   }
 
   private async compactIfNeeded<TOutput>(
@@ -543,6 +597,7 @@ export class BoundedAgentLoopRunner {
     finalText: string,
     status: AgentLoopSessionState["status"],
     stopReason?: AgentLoopStopReason,
+    stopDetail?: string,
   ): Promise<void> {
     const state: AgentLoopSessionState = {
       sessionId: turn.session.sessionId,
@@ -563,6 +618,7 @@ export class BoundedAgentLoopRunner {
       finalText,
       status,
       ...(stopReason ? { stopReason } : {}),
+      ...(stopDetail ? { stopDetail } : {}),
       updatedAt: new Date().toISOString(),
     };
     await turn.session.stateStore.save(state);

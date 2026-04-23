@@ -520,7 +520,8 @@ describe("agentloop phase 7 ChatAgentLoopRunner and CoreLoopControlTools", () =>
     const result = await chat.execute({ message: "status?", goalId: "goal-1" });
 
     expect(result.success).toBe(true);
-    expect(result.output).toBe("Goal is running");
+    expect(result.output.startsWith("Goal is running")).toBe(true);
+    expect(result.output).toContain("### Evidence");
     expect(modelClient.calls[1].messages.some((m) => m.role === "tool" && m.toolName === "core_goal_status")).toBe(true);
   });
 
@@ -567,7 +568,8 @@ describe("agentloop phase 7 ChatAgentLoopRunner and CoreLoopControlTools", () =>
     });
 
     expect(result.success).toBe(true);
-    expect(result.output).toBe("approved path");
+    expect(result.output.startsWith("approved path")).toBe(true);
+    expect(result.output).toContain("### Evidence");
     expect(events.some((event) => event.type === "approval_request" && event.toolName === "approval_tool")).toBe(true);
     expect(modelClient.calls[1].messages.some((m) => m.role === "tool" && m.toolName === "approval_tool")).toBe(true);
   });
