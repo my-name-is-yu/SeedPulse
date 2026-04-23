@@ -300,13 +300,27 @@ export class ChatRunner {
     ingress: ChatIngressMessage,
     cwd: string,
     timeoutMs = DEFAULT_TIMEOUT_MS,
-    selectedRoute?: SelectedChatRoute
+    selectedRoute: SelectedChatRoute
   ): Promise<ChatRunResult> {
+    if (!selectedRoute) {
+      throw new Error(
+        "executeIngressMessage requires selectedRoute; use CrossPlatformChatSessionManager for ingress route selection."
+      );
+    }
+
     const runtimeControlContext = this.buildRuntimeControlContextFromIngress(ingress);
-    return this.execute(ingress.text, cwd, timeoutMs, {
-      selectedRoute: selectedRoute ?? standaloneIngressRouter.selectRoute(ingress, this.getRouteCapabilities()),
-      runtimeControlContext,
-    });
+    return this.execute(ingress.text, cwd, timeoutMs, { selectedRoute, runtimeControlContext });
+  }
+
+  private resolveRouteFromIngress(ingress: ChatIngressMessage): SelectedChatRoute {
+    return standaloneIngressRouter.selectRoute(ingress, this.getRouteCapabilities());
+  }
+
+  private resolveRouteFromInput(
+    input: string,
+    runtimeControlContext: RuntimeControlChatContext | null
+  ): SelectedChatRoute {
+    return this.resolveRouteFromIngress(this.buildStandaloneIngressMessage(input, runtimeControlContext));
   }
 
   private getRouteCapabilities(): {
@@ -1518,10 +1532,7 @@ export class ChatRunner {
 
     const selectedRoute = resumeOnly
       ? null
-      : (options.selectedRoute ?? standaloneIngressRouter.selectRoute(
-        this.buildStandaloneIngressMessage(input, runtimeControlContext),
-        this.getRouteCapabilities()
-      ));
+      : (options.selectedRoute ?? this.resolveRouteFromInput(input, runtimeControlContext));
     const directPrompt = historyBlock ? `${historyBlock}${input}` : input;
 
     const start = Date.now();

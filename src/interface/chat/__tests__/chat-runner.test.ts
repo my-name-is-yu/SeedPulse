@@ -15,7 +15,7 @@ import { RuntimeOperationStore } from "../../../runtime/store/runtime-operation-
 import type { Goal } from "../../../base/types/goal.js";
 import type { Task } from "../../../base/types/task.js";
 import type { ChatEvent } from "../chat-events.js";
-
+import { selectLegacyChatRoute } from "../ingress-router.js";
 // Mock context-provider so tests don't walk the real filesystem
 vi.mock("../../../platform/observation/context-provider.js", () => ({
   resolveGitRoot: (cwd: string) => cwd,
@@ -1742,12 +1742,89 @@ describe("ChatRunner", () => {
           approvalMode: "interactive",
         },
         metadata: {},
-      }, "/repo");
+      }, "/repo", 120_000, selectLegacyChatRoute("What is this lane?", {
+        hasLightweightLlm: true,
+        hasAgentLoop: false,
+        hasToolLoop: false,
+        hasRuntimeControlService: false,
+      }));
 
       expect(result.success).toBe(true);
       expect(result.output).toBe("TUI answer");
       expect(result.diagnostics?.reason).toBe("simple_question");
       expect(adapter.execute).not.toHaveBeenCalled();
+    });
+
+    it("requires selectedRoute when executeIngressMessage is called directly", async () => {
+      const runner = new ChatRunner(makeDeps({}));
+
+      await expect(
+        (runner.executeIngressMessage as any)({
+          text: "PulSeed を再起動して",
+          channel: "tui",
+          platform: "local_tui",
+          actor: {
+            surface: "tui",
+            platform: "local_tui",
+          },
+          replyTarget: {
+            surface: "tui",
+            platform: "local_tui",
+            metadata: {},
+          },
+          runtimeControl: {
+            allowed: false,
+            approvalMode: "disallowed",
+          },
+          metadata: {},
+        }, "/repo")
+      ).rejects.toThrow("executeIngressMessage requires selectedRoute");
+    });
+
+    it("supports routed ingress execution with explicit route", async () => {
+      const chatAgentLoopRunner = {
+        execute: vi.fn().mockResolvedValue({
+          success: true,
+          output: "Agentloop from explicit route",
+          error: null,
+          exit_code: null,
+          elapsed_ms: 42,
+          stopped_reason: "completed",
+        }),
+      } as unknown as ChatAgentLoopRunner;
+      const runner = new ChatRunner(makeDeps({ chatAgentLoopRunner }));
+
+      const result = await runner.executeIngressMessage({
+        text: "PulSeed を再起動して",
+        channel: "tui",
+        platform: "local_tui",
+        actor: {
+          surface: "tui",
+          platform: "local_tui",
+        },
+        replyTarget: {
+          surface: "tui",
+          platform: "local_tui",
+          metadata: {},
+        },
+        runtimeControl: {
+          allowed: false,
+          approvalMode: "disallowed",
+        },
+        metadata: {},
+      }, "/repo", 120_000, {
+        lane: "fast",
+        kind: "agent_loop",
+        reason: "agent_loop_available",
+        replyTargetPolicy: "turn_reply_target",
+        eventProjectionPolicy: "turn_only",
+        concurrencyPolicy: "session_serial",
+        daemonChatPolicy: "compatibility_only",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.output).toBe("Agentloop from explicit route");
+      expect(chatAgentLoopRunner.execute).toHaveBeenCalledOnce();
     });
 
     it("does not route repository confirmation questions through the direct path", async () => {

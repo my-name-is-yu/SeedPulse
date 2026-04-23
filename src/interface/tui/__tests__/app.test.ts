@@ -3,7 +3,7 @@ import { render } from "ink";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DaemonClient } from "../../../runtime/daemon/client.js";
 import type { StateManager } from "../../../base/state/state-manager.js";
-import type { ChatRunner } from "../../chat/chat-runner.js";
+import type { TuiChatSurface } from "../chat-surface.js";
 import { App, formatDaemonConnectionState } from "../app.js";
 
 const testState = vi.hoisted(() => ({
@@ -120,7 +120,7 @@ describe("standalone slash command routing", () => {
 
     const screen = render(React.createElement(App, {
       stateManager: stateManager as unknown as StateManager,
-      chatRunner: chatRunner as unknown as ChatRunner,
+      chatRunner: chatRunner as unknown as TuiChatSurface,
       intentRecognizer: intentRecognizer as any,
       actionHandler: actionHandler as any,
       noFlicker: false,
@@ -164,7 +164,7 @@ describe("daemon-mode chat routing", () => {
     const screen = render(React.createElement(App, {
       daemonClient: daemonClient as unknown as DaemonClient,
       stateManager: stateManager as unknown as StateManager,
-      chatRunner: chatRunner as unknown as ChatRunner,
+      chatRunner: chatRunner as unknown as TuiChatSurface,
       noFlicker: false,
       controlStream: process.stdout,
       cwd: "~/workspace",
@@ -183,14 +183,8 @@ describe("daemon-mode chat routing", () => {
 
     await testState.lastChatProps!.onSubmit("free form question");
 
-    expect(chatRunner.executeIngressMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: "free form question",
-        channel: "tui",
-        platform: "local_tui",
-      }),
-      process.cwd()
-    );
+    expect(chatRunner.execute).toHaveBeenCalledWith("free form question", process.cwd());
+    expect(chatRunner.executeIngressMessage).not.toHaveBeenCalled();
     expect(daemonClient.chat).not.toHaveBeenCalled();
 
     screen.unmount();
@@ -204,7 +198,7 @@ describe("daemon-mode chat routing", () => {
     const screen = render(React.createElement(App, {
       daemonClient: daemonClient as unknown as DaemonClient,
       stateManager: stateManager as unknown as StateManager,
-      chatRunner: chatRunner as unknown as ChatRunner,
+      chatRunner: chatRunner as unknown as TuiChatSurface,
       noFlicker: false,
       controlStream: process.stdout,
       cwd: "~/workspace",
@@ -245,7 +239,7 @@ describe("daemon-mode chat routing", () => {
     const screen = render(React.createElement(App, {
       daemonClient: daemonClient as unknown as DaemonClient,
       stateManager: stateManager as unknown as StateManager,
-      chatRunner: chatRunner as unknown as ChatRunner,
+      chatRunner: chatRunner as unknown as TuiChatSurface,
       noFlicker: false,
       controlStream: process.stdout,
       cwd: "~/workspace",

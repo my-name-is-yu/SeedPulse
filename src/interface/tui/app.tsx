@@ -494,27 +494,7 @@ export function App({
               }].slice(-MAX_MESSAGES));
             }
           } else if (freeformRoute === "chat_runner" && chatRunner) {
-            await chatRunner.executeIngressMessage({
-              text: input,
-              channel: "tui",
-              platform: "local_tui",
-              actor: {
-                surface: "tui",
-                platform: "local_tui",
-              },
-              replyTarget: {
-                surface: "tui",
-                platform: "local_tui",
-                metadata: {},
-              },
-              runtimeControl: {
-                allowed: true,
-                approvalMode: "interactive",
-              },
-              metadata: {},
-              ingress_id: randomUUID(),
-              received_at: new Date().toISOString(),
-            }, process.cwd());
+            await chatRunner.execute(input, process.cwd());
           } else {
             setMessages((prev) => [...prev, {
               id: randomUUID(), role: "pulseed" as const,

@@ -19,6 +19,16 @@ const mockGetGlobalCrossPlatformChatSessionManager = vi.hoisted(() => vi.fn().mo
 const mockShouldUseNativeTaskAgentLoop = vi.hoisted(() => vi.fn().mockReturnValue(false));
 const mockCreateNativeChatAgentLoopRunner = vi.hoisted(() => vi.fn());
 const mockResolveChannelRoute = vi.hoisted(() => vi.fn().mockReturnValue({ metadata: {} }));
+const mockSelectRoute = vi.hoisted(() => vi.fn().mockReturnValue({
+  lane: "fast",
+  kind: "tool_loop",
+  reason: "tool_loop_available",
+  replyTargetPolicy: "turn_reply_target",
+  eventProjectionPolicy: "turn_only",
+  concurrencyPolicy: "session_serial",
+  daemonChatPolicy: "compatibility_only",
+}));
+const mockCreateIngressRouter = vi.hoisted(() => vi.fn().mockReturnValue({ selectRoute: mockSelectRoute }));
 
 vi.mock("pulseed", () => {
   class FakeStateManager {
@@ -96,6 +106,7 @@ vi.mock("pulseed", () => {
     shouldUseNativeTaskAgentLoop: mockShouldUseNativeTaskAgentLoop,
     createNativeChatAgentLoopRunner: mockCreateNativeChatAgentLoopRunner,
     resolveChannelRoute: mockResolveChannelRoute,
+    createIngressRouter: mockCreateIngressRouter,
   };
 });
 
@@ -117,6 +128,17 @@ describe("TelegramChatRunnerProcessor", () => {
     mockCreateNativeChatAgentLoopRunner.mockReset();
     mockResolveChannelRoute.mockReset();
     mockResolveChannelRoute.mockReturnValue({ metadata: {} });
+    mockSelectRoute.mockClear();
+    mockSelectRoute.mockReturnValue({
+      lane: "fast",
+      kind: "tool_loop",
+      reason: "tool_loop_available",
+      replyTargetPolicy: "turn_reply_target",
+      eventProjectionPolicy: "turn_only",
+      concurrencyPolicy: "session_serial",
+      daemonChatPolicy: "compatibility_only",
+    });
+    mockCreateIngressRouter.mockClear();
   });
 
   it("reuses one ChatRunner per chatId", async () => {
@@ -148,9 +170,76 @@ describe("TelegramChatRunnerProcessor", () => {
         platform: "telegram",
         conversation_id: "101",
       }),
-      "/workspace"
+      "/workspace",
+      expect.any(Number),
+      expect.objectContaining({
+        kind: "tool_loop",
+        reason: "tool_loop_available",
+      })
+    );
+    expect(mockSelectRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "first",
+        channel: "plugin_gateway",
+        platform: "telegram",
+      }),
+      expect.objectContaining({
+        hasLightweightLlm: true,
+        hasAgentLoop: false,
+        hasToolLoop: true,
+      })
     );
     cwdSpy.mockRestore();
+  });
+
+  it("preserves fallback route selection for direct-answer and runtime-control lanes", async () => {
+    const directRoute = {
+      lane: "fast",
+      kind: "direct_answer",
+      reason: "simple_question",
+      modelTier: "light",
+      maxTokens: 256,
+      replyTargetPolicy: "turn_reply_target",
+      eventProjectionPolicy: "turn_only",
+      concurrencyPolicy: "session_serial",
+      daemonChatPolicy: "compatibility_only",
+    };
+    const runtimeRoute = {
+      lane: "durable",
+      kind: "runtime_control",
+      reason: "runtime_control_intent",
+      intent: { kind: "restart_daemon", reason: "PulSeed を再起動して" },
+      replyTargetPolicy: "turn_reply_target",
+      eventProjectionPolicy: "latest_active_reply_target",
+      concurrencyPolicy: "session_serial",
+      daemonChatPolicy: "compatibility_only",
+    };
+    mockSelectRoute
+      .mockReturnValueOnce(directRoute)
+      .mockReturnValueOnce(runtimeRoute);
+    const processor = new TelegramChatRunnerProcessor("/tmp/plugins/telegram-bot", "/workspace", undefined, [777]);
+
+    await expect(processor.processMessage("What is PulSeed?", 101, vi.fn())).resolves.toBe("runner-output");
+    await expect(processor.processMessage("PulSeed を再起動して", 101, vi.fn(), 777)).resolves.toBe("runner-output");
+
+    expect(mockCreatedRunners[0]!.executeIngressMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "What is PulSeed?" }),
+      "/workspace",
+      expect.any(Number),
+      directRoute
+    );
+    expect(mockCreatedRunners[0]!.executeIngressMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "PulSeed を再起動して",
+        runtimeControl: expect.objectContaining({
+          allowed: true,
+          approvalMode: "interactive",
+        }),
+      }),
+      "/workspace",
+      expect.any(Number),
+      runtimeRoute
+    );
   });
 
   it("returns a plain error string when bootstrap fails", async () => {

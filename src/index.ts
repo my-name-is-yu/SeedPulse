@@ -99,6 +99,21 @@ export type {
   CrossPlatformChatSessionInfo,
   CrossPlatformIncomingChatMessage,
 } from "./interface/chat/cross-platform-session.js";
+export {
+  buildStandaloneIngressMessage,
+  createIngressRouter,
+  describeSelectedRoute,
+  normalizeLegacyIngressInput,
+  selectLegacyChatRoute,
+} from "./interface/chat/ingress-router.js";
+export type {
+  ChatIngressChannel,
+  ChatIngressReplyTarget,
+  ChatSelectedRoute,
+  IngressMessage,
+  IngressRuntimeControl,
+  SelectedChatRoute,
+} from "./interface/chat/ingress-router.js";
 export type {
   ChatEvent,
   ChatEventHandler,

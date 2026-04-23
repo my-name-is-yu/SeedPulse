@@ -22,6 +22,7 @@ export {
   PluginLoader,
   NotifierRegistry,
   resolveChannelRoute,
+  createIngressRouter,
 } from "../../../src/index.js";
 
 export type {
