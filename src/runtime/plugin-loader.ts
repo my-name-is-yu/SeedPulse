@@ -5,7 +5,7 @@ import { getPluginsDir } from "../base/utils/paths.js";
 import { getPulseedVersion as getPackageVersion } from "../base/utils/pulseed-meta.js";
 import { writeJsonFileAtomic } from "../base/utils/json-io.js";
 import { ValidationError } from "../base/utils/errors.js";
-import { getGlobalCrossPlatformChatSessionManager } from "../interface/chat/cross-platform-session.js";
+import { exposeRegisteredCrossPlatformChatSessionManager } from "../interface/chat/cross-platform-session-global.js";
 import type { Logger } from "./logger.js";
 import {
   PluginManifestSchema,
@@ -102,7 +102,7 @@ export class PluginLoader {
     }
 
     // 2. Dynamically import the entry point
-    exposeCrossPlatformChatSessionManager();
+    exposeRegisteredCrossPlatformChatSessionManager();
     const entryPath = path.resolve(pluginDir, manifest.entry_point);
     if (!entryPath.startsWith(pluginDir + path.sep) && entryPath !== pluginDir) {
       throw new ValidationError(`Plugin entry point escapes plugin directory: ${manifest.entry_point}`);
@@ -400,15 +400,6 @@ export class PluginLoader {
 }
 
 // ─── Module-level helpers ───
-
-interface PulseedRuntimeGlobal {
-  __pulseedGetGlobalCrossPlatformChatSessionManager?: typeof getGlobalCrossPlatformChatSessionManager;
-}
-
-function exposeCrossPlatformChatSessionManager(): void {
-  (globalThis as typeof globalThis & PulseedRuntimeGlobal)
-    .__pulseedGetGlobalCrossPlatformChatSessionManager = getGlobalCrossPlatformChatSessionManager;
-}
 
 // ─── PulSeed version (read once from package.json) ───
 

@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as path from "node:path";
 import { PluginLoader, parseSemver, compareSemver, satisfiesRange } from "../plugin-loader.js";
 import { NotifierRegistry } from "../notifier-registry.js";
+import {
+  clearRegisteredCrossPlatformChatSessionManager,
+  registerGlobalCrossPlatformChatSessionManager,
+} from "../../interface/chat/cross-platform-session-global.js";
 import { PluginManifestSchema, PluginStateSchema } from "../../base/types/plugin.js";
 import type { INotifier, NotificationEvent, NotificationEventType, PluginManifest } from "../../base/types/plugin.js";
 import type { AdapterRegistry, IAdapter, AgentTask, AgentResult } from "../../orchestrator/execution/adapter-layer.js";
@@ -25,6 +29,10 @@ function makeDataSourceRegistry(): DataSourceRegistry {
     list: vi.fn().mockReturnValue([]),
   } as unknown as DataSourceRegistry;
 }
+
+afterEach(() => {
+  clearRegisteredCrossPlatformChatSessionManager();
+});
 
 function makeNotifierRegistry(): NotifierRegistry {
   return new NotifierRegistry();
@@ -574,5 +582,51 @@ describe("PluginLoader.getPluginState and updatePluginState", () => {
   it("updatePluginState does nothing for unknown plugin", async () => {
     // Should not throw
     await expect(loader.updatePluginState("ghost-plugin", { trust_score: 10 })).resolves.toBeUndefined();
+  });
+});
+
+describe("PluginLoader cross-platform session exposure", () => {
+  let tmpDir: string;
+  let loader: PluginLoader;
+
+  beforeEach(() => {
+    tmpDir = fsSync.mkdtempSync(path.join(os.tmpdir(), "pulseed-plugin-global-test-"));
+    loader = new PluginLoader(
+      makeAdapterRegistry(),
+      makeDataSourceRegistry(),
+      makeNotifierRegistry(),
+      tmpDir
+    );
+  });
+
+  afterEach(() => {
+    fsSync.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  });
+
+  it("exposes the registered cross-platform session getter before plugin import", async () => {
+    const pluginDir = path.join(tmpDir, "global-aware-plugin");
+    fsSync.mkdirSync(path.join(pluginDir, "dist"), { recursive: true });
+    fsSync.writeFileSync(path.join(pluginDir, "plugin.json"), JSON.stringify(makeValidManifest({
+      name: "global-aware-plugin",
+      entry_point: "dist/index.js",
+    })));
+    fsSync.writeFileSync(
+      path.join(pluginDir, "dist", "index.js"),
+      [
+        "export default {",
+        "  name: 'global-aware-plugin',",
+        "  notify: async () => {},",
+        "  supports: () => true,",
+        "};",
+      ].join("\n"),
+    );
+
+    const getter = vi.fn().mockResolvedValue({ manager: true });
+    registerGlobalCrossPlatformChatSessionManager(getter);
+
+    await expect(loader.loadOne(pluginDir)).resolves.toMatchObject({ status: "loaded" });
+    expect((globalThis as typeof globalThis & {
+      __pulseedGetGlobalCrossPlatformChatSessionManager?: typeof getter;
+    }).__pulseedGetGlobalCrossPlatformChatSessionManager).toBe(getter);
   });
 });

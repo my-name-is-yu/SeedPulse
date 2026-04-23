@@ -32,6 +32,7 @@ import {
   RuntimeControlService,
   createDaemonRuntimeControlExecutor,
 } from "../../runtime/control/index.js";
+import { registerGlobalCrossPlatformChatSessionManager } from "./cross-platform-session-global.js";
 
 export interface CrossPlatformChatSessionOptions {
   /**
@@ -416,3 +417,5 @@ async function createGlobalCrossPlatformChatSessionManager(): Promise<CrossPlatf
     }),
   });
 }
+
+registerGlobalCrossPlatformChatSessionManager(getGlobalCrossPlatformChatSessionManager);
