@@ -2,9 +2,11 @@ import type { ScrollRequest } from "./types.js";
 
 const SGR_MOUSE_SEQUENCE = /(?:\u001b)?\[<(\d+);(\d+);(\d+)([mM])/;
 const SGR_MOUSE_SEQUENCE_GLOBAL = /(?:\u001b)?\[<(\d+);(\d+);(\d+)([mM])/g;
-const SHIFT_ENTER_SEQUENCE_GLOBAL = /(?:\u001b)?\[27;2;13~/g;
-const BRACKETED_PASTE_START_SEQUENCE_GLOBAL = /(?:\u001b)?\[200~/g;
-const BRACKETED_PASTE_END_SEQUENCE_GLOBAL = /(?:\u001b)?\[201~/g;
+const ESC_SHIFT_ENTER_SEQUENCE_GLOBAL = /\u001b\[27;2;13~/g;
+const ESC_BRACKETED_PASTE_OPEN_GLOBAL = /\u001b\[200~/g;
+const ESC_BRACKETED_PASTE_CLOSE_GLOBAL = /\u001b\[201~/g;
+const RAW_SHIFT_ENTER_SEQUENCE = "[27;2;13~";
+const RAW_BRACKETED_PASTE_WRAPPER = /^\[200~([\s\S]*)\[201~$/;
 
 type ScrollKey = {
   upArrow?: boolean;
@@ -121,8 +123,21 @@ export function getScrollRequest(
 
 export function stripMouseEscapeSequences(input: string): string {
   return input
-    .replace(SGR_MOUSE_SEQUENCE_GLOBAL, "")
-    .replace(BRACKETED_PASTE_START_SEQUENCE_GLOBAL, "")
-    .replace(BRACKETED_PASTE_END_SEQUENCE_GLOBAL, "")
-    .replace(SHIFT_ENTER_SEQUENCE_GLOBAL, "\n");
+    .replace(ESC_SHIFT_ENTER_SEQUENCE_GLOBAL, "\n")
+    .replace(ESC_BRACKETED_PASTE_OPEN_GLOBAL, "")
+    .replace(ESC_BRACKETED_PASTE_CLOSE_GLOBAL, "")
+    .replace(SGR_MOUSE_SEQUENCE_GLOBAL, "");
+}
+
+export function normalizeTerminalInputChunk(input: string): string {
+  if (input === RAW_SHIFT_ENTER_SEQUENCE) {
+    return "\n";
+  }
+
+  const bracketedPasteMatch = RAW_BRACKETED_PASTE_WRAPPER.exec(input);
+  if (bracketedPasteMatch) {
+    return bracketedPasteMatch[1] ?? "";
+  }
+
+  return stripMouseEscapeSequences(input);
 }

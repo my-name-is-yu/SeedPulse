@@ -124,7 +124,37 @@ export class TelegramChatRunnerProcessor {
     try {
       const runner = await this.getRunner(chatId);
       runner.onEvent = emit;
-      const result = await runner.execute(text, this.workspaceRoot);
+      const result = await runner.executeIngressMessage({
+        text,
+        channel: "plugin_gateway",
+        platform: "telegram",
+        conversation_id: String(chatId),
+        user_id: String(fromUserId ?? chatId),
+        actor: {
+          surface: "gateway",
+          platform: "telegram",
+          conversation_id: String(chatId),
+          user_id: String(fromUserId ?? chatId),
+        },
+        replyTarget: {
+          surface: "gateway",
+          platform: "telegram",
+          conversation_id: String(chatId),
+          user_id: String(fromUserId ?? chatId),
+          metadata: {
+            chat_id: chatId,
+          },
+        },
+        runtimeControl: {
+          allowed: fromUserId !== undefined ? this.runtimeControlAllowedUserIds.has(fromUserId) : false,
+          approvalMode: fromUserId !== undefined && this.runtimeControlAllowedUserIds.has(fromUserId)
+            ? "interactive"
+            : "disallowed",
+        },
+        metadata: {
+          chat_id: chatId,
+        },
+      }, this.workspaceRoot);
       return result.output;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

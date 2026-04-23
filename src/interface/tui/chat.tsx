@@ -51,7 +51,12 @@ const SCROLL_INDICATOR_ROWS = 2;
 const INPUT_BOX_HORIZONTAL_CHROME = 4;
 const SUGGESTION_HINT = " arrows to navigate, tab/enter to select, esc to dismiss";
 export { buildChatViewport } from "./chat/viewport.js";
-export { getScrollRequest, parseMouseEvent, stripMouseEscapeSequences } from "./chat/scroll.js";
+export {
+  getScrollRequest,
+  normalizeTerminalInputChunk,
+  parseMouseEvent,
+  stripMouseEscapeSequences,
+} from "./chat/scroll.js";
 export { getMatchingSuggestions } from "./chat/suggestions.js";
 
 export function getInputPromptLabel(bashMode: boolean): string {

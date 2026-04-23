@@ -5,6 +5,7 @@ import {
   formatSuggestionLabel,
   getInputPromptLabel,
   getMatchingSuggestions,
+  normalizeTerminalInputChunk,
   parseMouseEvent,
   getScrollRequest,
   stripMouseEscapeSequences,
@@ -261,14 +262,21 @@ describe("chat scroll keys", () => {
     expect(stripMouseEscapeSequences("hello\u001b[<64;40;12Mworld")).toBe("helloworld");
   });
 
-  it("normalizes shift-enter escape variants into newlines", () => {
+  it("normalizes escape-prefixed shift-enter variants into newlines", () => {
     expect(stripMouseEscapeSequences("foo\u001b[27;2;13~bar")).toBe("foo\nbar");
-    expect(stripMouseEscapeSequences("foo[27;2;13~bar")).toBe("foo\nbar");
+    expect(stripMouseEscapeSequences("foo[27;2;13~bar")).toBe("foo[27;2;13~bar");
   });
 
-  it("strips bracketed-paste wrappers with and without esc prefix", () => {
+  it("strips escape-prefixed bracketed-paste wrappers", () => {
     expect(stripMouseEscapeSequences("\u001b[200~hello\nworld\u001b[201~")).toBe("hello\nworld");
-    expect(stripMouseEscapeSequences("[200~hello[201~")).toBe("hello");
+    expect(stripMouseEscapeSequences("[200~hello[201~")).toBe("[200~hello[201~");
+  });
+
+  it("normalizes raw terminal chunks without corrupting ordinary text", () => {
+    expect(normalizeTerminalInputChunk("[27;2;13~")).toBe("\n");
+    expect(normalizeTerminalInputChunk("[200~hello[201~")).toBe("hello");
+    expect(normalizeTerminalInputChunk("foo[27;2;13~bar")).toBe("foo[27;2;13~bar");
+    expect(normalizeTerminalInputChunk("notes [200~ literal")).toBe("notes [200~ literal");
   });
 });
 

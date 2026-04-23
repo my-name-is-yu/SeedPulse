@@ -104,26 +104,4 @@ describe("GroundingGateway", () => {
     expect(bundle.dynamicSections.some((section) => section.key === "knowledge_query")).toBe(false);
     expect(knowledgeQuery).not.toHaveBeenCalled();
   });
-
-  it("caps chat/general_turn grounding to the profile token budget", async () => {
-    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pulseed-grounding-budget-"));
-    const repoDir = path.join(tmpRoot, "repo");
-    fs.mkdirSync(path.join(repoDir, ".git"), { recursive: true });
-    const largeInstructions = "A".repeat(15_000);
-    fs.writeFileSync(path.join(repoDir, "AGENTS.md"), largeInstructions);
-
-    const gateway = createGroundingGateway({ stateManager: makeStateManager() });
-    const bundle = await gateway.build({
-      surface: "chat",
-      purpose: "general_turn",
-      workspaceRoot: repoDir,
-      userMessage: "Summarize the current task",
-      query: "Summarize the current task",
-    });
-
-    const repoInstructions = bundle.dynamicSections.find((section) => section.key === "repo_instructions");
-    expect(bundle.metrics.totalEstimatedTokens).toBeLessThanOrEqual(2200);
-    expect(repoInstructions?.content.length).toBeLessThan(largeInstructions.length);
-    expect(bundle.warnings.some((warning) => warning.includes("Truncated repo_instructions"))).toBe(true);
-  });
 });

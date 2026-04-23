@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { readDaemonAuthToken } from "../../runtime/daemon/client.js";
+import type { ChatEvent } from "./chat-events.js";
 
 export interface TendNotification {
   type: "progress" | "stall" | "complete" | "error" | "approval";
@@ -31,11 +32,32 @@ interface RawNotificationReport {
   goal_id?: string | null;
 }
 
+interface RawChatResponseEvent {
+  goalId?: string;
+  goal_id?: string;
+  message?: string;
+  status?: string;
+}
+
+interface RawLoopErrorEvent {
+  goalId?: string;
+  goal_id?: string;
+  error?: string;
+  message?: string;
+  status?: string;
+  crashCount?: number;
+  crash_count?: number;
+  maxRetries?: number;
+  max_retries?: number;
+}
+
 export class EventSubscriber extends EventEmitter {
   private abortController: AbortController | null = null;
   private previousGap: number | undefined = undefined;
   private lastOutboxSeq = 0;
   private snapshotBootstrapped = false;
+  private streamLoopPromise: Promise<void> | null = null;
+  private localProjectionSeq = 0;
 
   constructor(
     private baseUrl: string,
@@ -53,7 +75,18 @@ export class EventSubscriber extends EventEmitter {
     await this.connect(false);
   }
 
-  private async connect(isRetry: boolean): Promise<void> {
+  /**
+   * Bootstrap snapshot state, open the SSE stream, then continue consuming it
+   * in the background. This is used when callers need the subscription to be
+   * live before triggering daemon work.
+   */
+  async subscribeReady(): Promise<void> {
+    this.abortController?.abort();
+    this.abortController = new AbortController();
+    await this.connect(false, true);
+  }
+
+  private async connect(isRetry: boolean, background = false): Promise<void> {
     if (this.abortController?.signal.aborted) return;
 
     try {
@@ -74,25 +107,13 @@ export class EventSubscriber extends EventEmitter {
         throw new Error(`SSE connect failed: HTTP ${res.status}`);
       }
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() ?? "";
-        for (const part of parts) {
-          this.parseSSEMessage(part);
-        }
+      const loopPromise = this.consumeStream(res.body.getReader(), isRetry);
+      this.streamLoopPromise = loopPromise;
+      if (background) {
+        void loopPromise.catch(() => undefined);
+        return;
       }
-
-      // Stream ended — attempt reconnect once if not aborted
-      if (!this.abortController?.signal.aborted && !isRetry) {
-        await this.connect(true);
-      }
+      await loopPromise;
     } catch (err) {
       if ((err as { name?: string }).name === "AbortError") return;
       const notification: TendNotification = {
@@ -100,12 +121,13 @@ export class EventSubscriber extends EventEmitter {
         goalId: this.goalId,
         message: `⚠️ [tend] ${this.goalId}: Connection error — ${String(err)}`,
       };
-      this.emit("notification", notification);
+      this.emitProjectedEvent("connection_error", null, notification);
       // Retry once on error
       if (!isRetry && !this.abortController?.signal.aborted) {
         await new Promise((r) => setTimeout(r, 2000));
-        await this.connect(true);
+        return this.connect(true, background);
       }
+      throw err;
     }
   }
 
@@ -113,6 +135,29 @@ export class EventSubscriber extends EventEmitter {
   unsubscribe(): void {
     this.abortController?.abort();
     this.abortController = null;
+  }
+
+  private async consumeStream(
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    isRetry: boolean
+  ): Promise<void> {
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() ?? "";
+      for (const part of parts) {
+        this.parseSSEMessage(part);
+      }
+    }
+
+    if (!this.abortController?.signal.aborted && !isRetry) {
+      await this.connect(true, true);
+    }
   }
 
   private parseSSEMessage(raw: string): void {
@@ -147,10 +192,7 @@ export class EventSubscriber extends EventEmitter {
       return;
     }
 
-    const notification = this.formatNotification(eventType, parsed);
-    if (notification) {
-      this.emit("notification", notification);
-    }
+    this.emitProjectedEvent(eventType, parsed);
   }
 
   /** Format a raw SSE event into a TendNotification (returns null if verbosity filters it out) */
@@ -267,7 +309,61 @@ export class EventSubscriber extends EventEmitter {
       return { type: "complete", goalId: this.goalId, message: msg, gap };
     }
 
+    if (eventType === "loop_error") {
+      const ev = data as RawLoopErrorEvent;
+      const message = ev.error ?? ev.message ?? "Unknown daemon loop error";
+      const crashCount = typeof ev.crashCount === "number"
+        ? ev.crashCount
+        : typeof ev.crash_count === "number"
+          ? ev.crash_count
+          : undefined;
+      const maxRetries = typeof ev.maxRetries === "number"
+        ? ev.maxRetries
+        : typeof ev.max_retries === "number"
+          ? ev.max_retries
+          : undefined;
+      const retryNote = crashCount !== undefined && maxRetries !== undefined
+        ? ` (${crashCount}/${maxRetries})`
+        : "";
+      return {
+        type: "error",
+        goalId: this.goalId,
+        message: `⚠️ [tend] ${shortId}: Loop error${retryNote} — ${message}`,
+      };
+    }
+
     return null;
+  }
+
+  private formatChatEvent(
+    eventType: string,
+    data: unknown,
+    notification: TendNotification | null
+  ): ChatEvent | null {
+    if (eventType === "chat_response") {
+      const response = data as RawChatResponseEvent;
+      const text = typeof response.message === "string" ? response.message.trim() : "";
+      if (!text) return null;
+      return {
+        type: "assistant_final",
+        text,
+        persisted: false,
+        ...this.createChatEventBase(eventType, data),
+      };
+    }
+
+    if (!notification) {
+      return null;
+    }
+
+    return {
+      type: "activity",
+      kind: "commentary",
+      message: notification.message,
+      sourceId: this.createChatSourceId(eventType, data, notification),
+      transient: false,
+      ...this.createChatEventBase(eventType, data),
+    };
   }
 
   private matchesGoal(data: unknown): boolean {
@@ -293,14 +389,82 @@ export class EventSubscriber extends EventEmitter {
       this.lastOutboxSeq = Math.max(this.lastOutboxSeq, snapshot.last_outbox_seq ?? 0);
       for (const approval of snapshot.approvals ?? []) {
         if (!this.matchesGoal(approval)) continue;
-        const notification = this.formatNotification("approval_required", approval);
-        if (notification) {
-          this.emit("notification", notification);
-        }
+        this.emitProjectedEvent("approval_required", approval);
       }
     } catch {
       // Snapshot bootstrap is best-effort.
     }
+  }
+
+  private emitProjectedEvent(
+    eventType: string,
+    data: unknown,
+    notificationOverride: TendNotification | null = null
+  ): void {
+    const notification = notificationOverride ?? this.formatNotification(eventType, data);
+    if (notification) {
+      this.emit("notification", notification);
+    }
+
+    const chatEvent = this.formatChatEvent(eventType, data, notification);
+    if (chatEvent) {
+      this.emit("chat_event", chatEvent);
+    }
+  }
+
+  private createChatEventBase(eventType: string, data: unknown): {
+    runId: string;
+    turnId: string;
+    createdAt: string;
+  } {
+    const projectionId = this.createProjectionId(eventType, data);
+    return {
+      runId: `daemon:${this.goalId}`,
+      turnId: `daemon:${this.goalId}:${projectionId}`,
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  private createProjectionId(eventType: string, data: unknown): string {
+    const record = typeof data === "object" && data !== null
+      ? data as Record<string, unknown>
+      : null;
+    const requestId = record?.["requestId"];
+    if (typeof requestId === "string" && requestId) {
+      return `${eventType}:${requestId}`;
+    }
+
+    if (this.lastOutboxSeq > 0) {
+      return `${eventType}:${this.lastOutboxSeq}`;
+    }
+
+    this.localProjectionSeq += 1;
+    return `${eventType}:local:${this.localProjectionSeq}`;
+  }
+
+  private createChatSourceId(
+    eventType: string,
+    data: unknown,
+    notification: TendNotification
+  ): string {
+    const requestId = notification.requestId;
+    if (requestId) {
+      return `daemon:${this.goalId}:${eventType}:${requestId}`;
+    }
+
+    if (notification.reportType) {
+      return `daemon:${this.goalId}:${eventType}:${notification.reportType}`;
+    }
+
+    const record = typeof data === "object" && data !== null
+      ? data as Record<string, unknown>
+      : null;
+    const status = record?.["status"];
+    if (typeof status === "string" && status) {
+      return `daemon:${this.goalId}:${eventType}:${status}`;
+    }
+
+    return `daemon:${this.goalId}:${eventType}`;
   }
 
   private authHeaders(): Record<string, string> {

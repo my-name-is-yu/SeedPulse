@@ -14,6 +14,7 @@ import { RuntimeControlService } from "../../../runtime/control/index.js";
 import { RuntimeOperationStore } from "../../../runtime/store/runtime-operation-store.js";
 import type { Goal } from "../../../base/types/goal.js";
 import type { Task } from "../../../base/types/task.js";
+import type { ChatEvent } from "../chat-events.js";
 
 // Mock context-provider so tests don't walk the real filesystem
 vi.mock("../../../platform/observation/context-provider.js", () => ({
@@ -379,6 +380,102 @@ describe("ChatRunner", () => {
       expect(result.output).toContain("My tracked goal");
       expect(result.output).toContain("pulseed run --goal");
       expect(adapter.execute).toHaveBeenCalledOnce(); // only the non-command turn
+    });
+
+    it("/tend confirmation forwards daemon transcript events without breaking notifications", async () => {
+      const notifications: string[] = [];
+      const events: ChatEvent[] = [];
+      const daemonClient = {
+        startGoal: vi.fn().mockResolvedValue(undefined),
+      };
+      const stream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode(
+            "id: 6\n"
+            + "event: notification_report\n"
+            + "data: {\"goalId\":\"goal-xyz\",\"report_type\":\"daily_summary\",\"title\":\"Morning Planning\"}\n\n"
+          ));
+          controller.close();
+        },
+      });
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ approvals: [], last_outbox_seq: 5 }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          body: stream,
+        });
+      vi.stubGlobal("fetch", mockFetch);
+
+      try {
+        const runner = new ChatRunner(makeDeps({
+          daemonClient: daemonClient as never,
+          daemonBaseUrl: "http://localhost:9000",
+          onNotification: (message) => { notifications.push(message); },
+          onEvent: (event) => { events.push(event); },
+        }));
+        (runner as any).pendingTend = { goalId: "goal-xyz" };
+
+        const result = await runner.execute("y", "/repo");
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(result.success).toBe(true);
+        expect(daemonClient.startGoal).toHaveBeenCalledWith("goal-xyz");
+        expect((mockFetch as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(2);
+        expect((mockFetch as ReturnType<typeof vi.fn>).mock.invocationCallOrder[1]).toBeLessThan(
+          (daemonClient.startGoal as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
+        );
+        expect(notifications.some((message) => message.includes("Morning Planning"))).toBe(true);
+        expect(events.some((event) => (
+          event.type === "activity"
+          && event.message.includes("Morning Planning")
+          && event.transient === false
+        ))).toBe(true);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("/tend confirmation fails when durable subscription cannot be armed", async () => {
+      const daemonClient = {
+        startGoal: vi.fn().mockResolvedValue(undefined),
+      };
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ approvals: [], last_outbox_seq: 0 }),
+        })
+        .mockRejectedValueOnce(new Error("stream unavailable"))
+        .mockRejectedValueOnce(new Error("stream unavailable"));
+      vi.stubGlobal("fetch", mockFetch);
+      vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: (...args: any[]) => void) => {
+        fn();
+        return 0 as any;
+      }) as typeof setTimeout);
+
+      try {
+        const runner = new ChatRunner(makeDeps({
+          daemonClient: daemonClient as never,
+          daemonBaseUrl: "http://localhost:9000",
+        }));
+        (runner as any).pendingTend = { goalId: "goal-xyz" };
+
+        const result = await runner.execute("y", "/repo");
+
+        expect(result.success).toBe(false);
+        expect(result.output).toContain("Daemon event stream unavailable");
+        expect(result.output).toContain("Goal was not started");
+        expect(daemonClient.startGoal).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+      }
     });
 
     it("/exit returns exit message without calling adapter", async () => {
@@ -1581,6 +1678,44 @@ describe("ChatRunner", () => {
         modelTier: "light",
         maxTokens: 256,
       });
+    });
+
+    it("supports routed ingress execution for TUI callers", async () => {
+      const adapter = makeMockAdapter();
+      const llmClient = {
+        sendMessage: vi.fn().mockResolvedValue({
+          content: "TUI answer",
+          usage: { input_tokens: 2, output_tokens: 3 },
+          stop_reason: "end_turn",
+        }),
+        parseJSON: vi.fn(),
+      };
+
+      const runner = new ChatRunner(makeDeps({ adapter, llmClient: llmClient as never }));
+      const result = await runner.executeIngressMessage({
+        text: "What is this lane?",
+        channel: "tui",
+        platform: "local_tui",
+        actor: {
+          surface: "tui",
+          platform: "local_tui",
+        },
+        replyTarget: {
+          surface: "tui",
+          platform: "local_tui",
+          metadata: {},
+        },
+        runtimeControl: {
+          allowed: true,
+          approvalMode: "interactive",
+        },
+        metadata: {},
+      }, "/repo");
+
+      expect(result.success).toBe(true);
+      expect(result.output).toBe("TUI answer");
+      expect(result.diagnostics?.reason).toBe("simple_question");
+      expect(adapter.execute).not.toHaveBeenCalled();
     });
 
     it("does not route repository confirmation questions through the direct path", async () => {

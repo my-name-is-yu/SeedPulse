@@ -14,7 +14,7 @@ import { StateManager } from "../../base/state/state-manager.js";
 import { loadProviderConfig } from "../../base/llm/provider-config.js";
 import { getPulseedDirPath } from "../../base/utils/paths.js";
 import { App, type ApprovalRequest } from "./app.js";
-import type { ChatRunner } from "../../interface/chat/chat-runner.js";
+import type { TuiChatSurface } from "./chat-surface.js";
 import { isSafeBashCommand } from "./bash-mode.js";
 import { getCliLogger } from "../cli/cli-logger.js";
 import { ensureProviderConfig } from "../cli/ensure-api-key.js";
@@ -137,7 +137,7 @@ async function buildDeps() {
   const { MemoryLifecycleManager, DriveScoreAdapter } = await import("../../platform/knowledge/memory/memory-lifecycle.js");
   const { KnowledgeManager } = await import("../../platform/knowledge/knowledge-manager.js");
   const { CharacterConfigManager } = await import("../../platform/traits/character-config.js");
-  const { ChatRunner } = await import("../../interface/chat/chat-runner.js");
+  const { SharedManagerTuiChatSurface } = await import("./chat-surface.js");
   const { ToolRegistry, ToolExecutor, ToolPermissionManager, ConcurrencyController, createBuiltinTools } = await import("../../tools/index.js");
   const { buildCliDataSourceRegistry } = await import("../cli/data-source-bootstrap.js");
   const {
@@ -433,7 +433,7 @@ async function buildDeps() {
     }
   };
 
-  let chatRunner: InstanceType<typeof ChatRunner> | undefined;
+  let chatRunner: TuiChatSurface | undefined;
   try {
     const adapterType = providerConfig.adapter ?? "claude_code_cli";
     const adapter = adapterRegistry.getAdapter(adapterType);
@@ -457,7 +457,7 @@ async function buildDeps() {
           traceBaseDir: stateManager.getBaseDir(),
         })
       : undefined;
-    chatRunner = new ChatRunner({
+    chatRunner = new SharedManagerTuiChatSurface({
       stateManager,
       adapter,
       llmClient,
@@ -612,7 +612,7 @@ async function startTUIDaemonMode(): Promise<void> {
 
     const stateManager = new StateManager(baseDir);
     await stateManager.init();
-    let chatRunner: ChatRunner | undefined;
+    let chatRunner: TuiChatSurface | undefined;
     const { TrustManager } = await import("../../platform/traits/trust-manager.js");
     const { ScheduleEngine } = await import("../../runtime/schedule/engine.js");
     const { buildCliDataSourceRegistry } = await import("../cli/data-source-bootstrap.js");
@@ -700,7 +700,7 @@ async function startTUIDaemonMode(): Promise<void> {
     const providerName = providerConfig.provider;
 
     try {
-      const { ChatRunner } = await import("../../interface/chat/chat-runner.js");
+      const { SharedManagerTuiChatSurface } = await import("./chat-surface.js");
       const { buildLLMClient, buildAdapterRegistry } = await import("../../base/llm/provider-factory.js");
       const {
         createNativeChatAgentLoopRunner,
@@ -731,7 +731,7 @@ async function startTUIDaemonMode(): Promise<void> {
             traceBaseDir: stateManager.getBaseDir(),
           })
         : undefined;
-      chatRunner = new ChatRunner({
+      chatRunner = new SharedManagerTuiChatSurface({
         stateManager,
         adapter,
         llmClient,

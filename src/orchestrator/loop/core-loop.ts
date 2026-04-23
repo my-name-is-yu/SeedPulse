@@ -109,7 +109,21 @@ export class CoreLoop {
    * Run the full loop until completion or stop condition.
    * @param options.maxIterations - Override config.maxIterations for this run only (e.g. per-cycle budget from DaemonRunner).
    */
-  async run(goalId: string, options?: { maxIterations?: number }): Promise<LoopResult> {
+  async run(
+    goalId: string,
+    options?: { maxIterations?: number; onProgress?: CoreLoopDeps["onProgress"] }
+  ): Promise<LoopResult> {
+    const depsWithMutableProgress = this.deps as CoreLoopDeps;
+    const previousOnProgress = depsWithMutableProgress.onProgress;
+    const previousMaxIterations = this.config.maxIterations;
+    if (options?.onProgress) {
+      depsWithMutableProgress.onProgress = options.onProgress;
+    }
+    if (options?.maxIterations !== undefined) {
+      this.config.maxIterations = options.maxIterations;
+    }
+
+    try {
     const startedAt = new Date().toISOString();
     const dreamCollector = this.deps.hookManager?.getDreamCollector();
     const sessionId = dreamCollector?.buildSessionId(goalId, startedAt) ?? `${goalId}:${startedAt}`;
@@ -345,6 +359,10 @@ export class CoreLoop {
       completedAt,
       tokensUsed: totalTokens,
     };
+    } finally {
+      depsWithMutableProgress.onProgress = previousOnProgress;
+      this.config.maxIterations = previousMaxIterations;
+    }
   }
 
   /**

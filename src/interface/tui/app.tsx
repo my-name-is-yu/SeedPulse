@@ -31,7 +31,7 @@ import type { CoreLoop } from "../../orchestrator/loop/core-loop.js";
 import type { StateManager } from "../../base/state/state-manager.js";
 import type { TrustManager } from "../../platform/traits/trust-manager.js";
 import type { Task } from "../../base/types/task.js";
-import type { ChatRunner } from "../../interface/chat/chat-runner.js";
+import type { TuiChatSurface } from "./chat-surface.js";
 import type { DaemonClient } from "../../runtime/daemon/client.js";
 import { ShellTool } from "../../tools/system/ShellTool/ShellTool.js";
 import { getPulseedVersion } from "../../base/utils/pulseed-meta.js";
@@ -83,7 +83,7 @@ interface AppProps {
   trustManager?: TrustManager;
   actionHandler?: ActionHandler;
   intentRecognizer?: IntentRecognizer;
-  chatRunner?: ChatRunner;
+  chatRunner?: TuiChatSurface;
   onApprovalReady?: (requestFn: (req: ApprovalRequest) => void) => void;
   // Shared
   stateManager: StateManager;
@@ -494,7 +494,27 @@ export function App({
               }].slice(-MAX_MESSAGES));
             }
           } else if (freeformRoute === "chat_runner" && chatRunner) {
-            await chatRunner.execute(input, process.cwd());
+            await chatRunner.executeIngressMessage({
+              text: input,
+              channel: "tui",
+              platform: "local_tui",
+              actor: {
+                surface: "tui",
+                platform: "local_tui",
+              },
+              replyTarget: {
+                surface: "tui",
+                platform: "local_tui",
+                metadata: {},
+              },
+              runtimeControl: {
+                allowed: true,
+                approvalMode: "interactive",
+              },
+              metadata: {},
+              ingress_id: randomUUID(),
+              received_at: new Date().toISOString(),
+            }, process.cwd());
           } else {
             setMessages((prev) => [...prev, {
               id: randomUUID(), role: "pulseed" as const,

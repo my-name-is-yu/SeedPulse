@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockCreatedRunners = vi.hoisted(() => [] as Array<{
   startSession: ReturnType<typeof vi.fn>;
   execute: ReturnType<typeof vi.fn>;
+  executeIngressMessage: ReturnType<typeof vi.fn>;
   onEvent: unknown;
 }>);
 
@@ -29,6 +30,11 @@ vi.mock("pulseed", () => {
     onEvent: unknown;
     startSession = vi.fn();
     execute = vi.fn().mockResolvedValue({
+      success: true,
+      output: "runner-output",
+      elapsed_ms: 1,
+    });
+    executeIngressMessage = vi.fn().mockResolvedValue({
       success: true,
       output: "runner-output",
       elapsed_ms: 1,
@@ -124,8 +130,8 @@ describe("TelegramChatRunnerProcessor", () => {
     expect(mockCreatedRunners).toHaveLength(2);
     expect(mockCreatedRunners[0]!.startSession).toHaveBeenCalledTimes(1);
     expect(mockCreatedRunners[1]!.startSession).toHaveBeenCalledTimes(1);
-    expect(mockCreatedRunners[0]!.execute).toHaveBeenCalledTimes(2);
-    expect(mockCreatedRunners[1]!.execute).toHaveBeenCalledTimes(1);
+    expect(mockCreatedRunners[0]!.executeIngressMessage).toHaveBeenCalledTimes(2);
+    expect(mockCreatedRunners[1]!.executeIngressMessage).toHaveBeenCalledTimes(1);
   });
 
   it("defaults the runner workspace to process.cwd()", async () => {
@@ -135,7 +141,15 @@ describe("TelegramChatRunnerProcessor", () => {
     await expect(processor.processMessage("first", 101, vi.fn())).resolves.toBe("runner-output");
 
     expect(mockCreatedRunners[0]!.startSession).toHaveBeenCalledWith("/workspace");
-    expect(mockCreatedRunners[0]!.execute).toHaveBeenCalledWith("first", "/workspace");
+    expect(mockCreatedRunners[0]!.executeIngressMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "first",
+        channel: "plugin_gateway",
+        platform: "telegram",
+        conversation_id: "101",
+      }),
+      "/workspace"
+    );
     cwdSpy.mockRestore();
   });
 

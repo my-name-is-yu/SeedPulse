@@ -87,8 +87,16 @@ describe("CrossPlatformChatSessionManager", () => {
     expect(info?.conversation_id).toBe("conv-1");
     expect(info?.cwd).toBe("/repo");
     expect(info?.metadata).toMatchObject({
+      channel: "plugin_gateway",
       platform: "discord",
       conversation_id: "thread-9",
+      user_id: "user-a",
+    });
+    expect(info?.active_reply_target).toMatchObject({
+      surface: "gateway",
+      platform: "discord",
+      conversation_id: "thread-9",
+      identity_key: "user-123",
       user_id: "user-a",
     });
 
@@ -189,5 +197,55 @@ describe("CrossPlatformChatSessionManager", () => {
         }),
       })
     );
+
+    const info = manager.getSessionInfo({ identity_key: "owner" });
+    expect(info?.active_reply_target).toMatchObject({
+      surface: "gateway",
+      platform: "telegram",
+      conversation_id: "telegram-chat-1",
+      identity_key: "owner",
+      user_id: "user-1",
+    });
+  });
+
+  it("serializes concurrent turns for the same shared session across channels", async () => {
+    let activeCalls = 0;
+    let maxConcurrentCalls = 0;
+    const adapter = {
+      adapterType: "mock",
+      execute: vi.fn().mockImplementation(async () => {
+        activeCalls += 1;
+        maxConcurrentCalls = Math.max(maxConcurrentCalls, activeCalls);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        activeCalls -= 1;
+        return CANNED_RESULT;
+      }),
+    } as unknown as IAdapter;
+    const manager = new CrossPlatformChatSessionManager(makeDeps({
+      stateManager: makeMockStateManager(),
+      adapter,
+    }));
+
+    await Promise.all([
+      manager.processIncomingMessage({
+        text: "turn one",
+        identity_key: "shared-user",
+        platform: "discord",
+        conversation_id: "discord-1",
+        sender_id: "u-1",
+        cwd: "/repo",
+      }),
+      manager.processIncomingMessage({
+        text: "turn two",
+        identity_key: "shared-user",
+        platform: "telegram",
+        conversation_id: "telegram-2",
+        sender_id: "u-1",
+        cwd: "/repo",
+      }),
+    ]);
+
+    expect(adapter.execute).toHaveBeenCalledTimes(2);
+    expect(maxConcurrentCalls).toBe(1);
   });
 });

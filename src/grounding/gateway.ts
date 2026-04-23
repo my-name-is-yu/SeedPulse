@@ -49,51 +49,6 @@ function cloneSections(sections: GroundingSection[]): GroundingSection[] {
   return sections.map((section) => ({ ...section, sources: section.sources.map((source) => ({ ...source })) }));
 }
 
-function truncateSectionContent(content: string, maxTokens: number): string {
-  if (maxTokens <= 0) {
-    return "";
-  }
-  const maxChars = Math.max(1, maxTokens * 4 - 3);
-  if (content.length <= maxChars) {
-    return content;
-  }
-  return `${content.slice(0, maxChars)}...`;
-}
-
-function enforceTokenBudget(
-  sections: GroundingSection[],
-  maxTokens: number,
-  warnings: string[],
-): GroundingSection[] {
-  let remaining = maxTokens;
-  const bounded: GroundingSection[] = [];
-
-  for (const section of sections) {
-    if (remaining <= 0) {
-      warnings.push(`Dropped ${section.key} because the grounding profile budget of ${maxTokens} tokens was exhausted.`);
-      continue;
-    }
-
-    if (section.estimatedTokens <= remaining) {
-      bounded.push(section);
-      remaining -= section.estimatedTokens;
-      continue;
-    }
-
-    const content = truncateSectionContent(section.content, remaining);
-    const estimatedTokens = Math.max(1, Math.ceil(content.length / 4));
-    bounded.push({
-      ...section,
-      content,
-      estimatedTokens,
-    });
-    warnings.push(`Truncated ${section.key} to fit the grounding profile budget of ${maxTokens} tokens.`);
-    remaining -= estimatedTokens;
-  }
-
-  return bounded;
-}
-
 export class DefaultGroundingGateway implements GroundingGateway {
   private readonly staticCache = new Map<string, GroundingSection[]>();
 
@@ -142,11 +97,7 @@ export class DefaultGroundingGateway implements GroundingGateway {
 
     const orderedStatic = sortSections(staticSections);
     const orderedDynamic = sortSections(dynamicSections);
-    const boundedSections = enforceTokenBudget([...orderedStatic, ...orderedDynamic], profile.budgets.maxTokens, warnings);
-    const dynamicKeys = new Set(orderedDynamic.map((section) => section.key));
-    const boundedStatic = boundedSections.filter((section) => !dynamicKeys.has(section.key));
-    const boundedDynamic = boundedSections.filter((section) => dynamicKeys.has(section.key));
-    const allSections = boundedSections;
+    const allSections = [...orderedStatic, ...orderedDynamic];
     const totalEstimatedTokens = allSections.reduce((sum, section) => sum + section.estimatedTokens, 0);
     const retrievalIds = allSections.flatMap((section) =>
       section.sources
@@ -156,8 +107,8 @@ export class DefaultGroundingGateway implements GroundingGateway {
 
     const bundle: GroundingBundle = {
       profile: profile.id,
-      staticSections: boundedStatic,
-      dynamicSections: boundedDynamic,
+      staticSections: orderedStatic,
+      dynamicSections: orderedDynamic,
       warnings,
       metrics: {
         totalEstimatedTokens,

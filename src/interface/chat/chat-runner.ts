@@ -47,7 +47,6 @@ import {
   buildPromptedToolProtocolSystemPrompt,
   extractPromptedToolCalls,
 } from "../../orchestrator/execution/agent-loop/prompted-tool-protocol.js";
-import { recognizeRuntimeControlIntent } from "../../runtime/control/index.js";
 import type { RuntimeControlService } from "../../runtime/control/index.js";
 import type {
   RuntimeControlActor,
@@ -59,6 +58,12 @@ import {
   withExecutionPolicyOverrides,
   type ExecutionPolicy,
 } from "../../orchestrator/execution/agent-loop/execution-policy.js";
+import {
+  buildStandaloneIngressMessage,
+  createIngressRouter,
+  type ChatIngressMessage,
+  type SelectedChatRoute,
+} from "./ingress-router.js";
 
 // ─── Types ───
 
@@ -131,6 +136,11 @@ export interface RuntimeControlChatContext {
   approvalFn?: (description: string) => Promise<boolean>;
 }
 
+export interface ChatRunnerExecutionOptions {
+  selectedRoute?: SelectedChatRoute;
+  runtimeControlContext?: RuntimeControlChatContext | null;
+}
+
 interface AssistantBuffer {
   text: string;
 }
@@ -153,7 +163,7 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_VERIFY_RETRIES = 2;
 const MAX_TOOL_LOOPS = 5;
 const ACTIVITY_PREVIEW_CHARS = 40;
-const DIRECT_ANSWER_MAX_TOKENS = 256;
+const standaloneIngressRouter = createIngressRouter();
 
 // ─── Command help text ───
 
@@ -211,31 +221,6 @@ function previewActivityText(value: string, maxChars = ACTIVITY_PREVIEW_CHARS): 
 function formatToolActivity(action: "Running" | "Finished" | "Failed", toolName: string, detail?: string): string {
   const preview = detail ? previewActivityText(detail) : "";
   return preview ? `${action} tool: ${toolName} - ${preview}` : `${action} tool: ${toolName}`;
-}
-
-function shouldUseDirectAnswerRoute(input: string): boolean {
-  const normalized = input.trim();
-  if (!normalized) return false;
-
-  const lowered = normalized.toLowerCase();
-  const questionSignals = [
-    /[?？]/,
-    /\b(what|why|how|when|where|who|which|is|are|can|could|would|should|tell me|explain|describe|help me understand)\b/,
-    /(教えて|説明して|教えてください|説明してください|どう思う|なんで|なぜ|どうして|いつ|どこ|だれ|誰|何|どれ|どっち)/,
-  ];
-  if (!questionSignals.some((pattern) => pattern.test(lowered))) {
-    return false;
-  }
-
-  const workSignals = [
-    /\b(fix|implement|change|changed|add|remove|delete|update|refactor|patch|debug|diagnose|investigate|review|write|create|build|run|execute|test|verify|confirm|check|inspect|search|open|read|edit|modify|commit|push|merge|release|deploy|start|stop|restart|resume|compare|convert|migrate|optimize|improve|configure|setup|set up)\b/,
-    /(修正|実装|変更|追加|削除|更新|リファクタ|デバッグ|調査|確認|レビュー|書いて|作って|作成|実行|走らせ|テスト|検証|調べて|開いて|読んで|編集|コミット|プッシュ|マージ|デプロイ|再起動|再開|設定)/,
-    /\b(git|repo|repository|branch|commit|diff|pull request|pr|issue|ticket|adapter|agentloop|tool|tools|code)\b|コード|src\//,
-    /\b(latest|most recent|current|today|now|recent|news|web|internet|api|docs|github|release|version)\b|最新|最新版|今日|現在|最近|今|外部|ネット/,
-    /\bwhat\s+(files?\s+)?changed\b|\bwhich\s+files?\s+(changed|were\s+(modified|edited))\b/,
-    /(\.(ts|tsx|js|jsx|json|md|yml|yaml|toml|py|go|rs|sh|sql)\b|\/[^/\s]+\.[A-Za-z0-9]+$)/,
-  ];
-  return !workSignals.some((pattern) => pattern.test(lowered));
 }
 
 // ─── ChatRunner ───
@@ -309,6 +294,80 @@ export class ChatRunner {
 
   setRuntimeControlContext(context: RuntimeControlChatContext | null): void {
     this.runtimeControlContext = context;
+  }
+
+  async executeIngressMessage(
+    ingress: ChatIngressMessage,
+    cwd: string,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    selectedRoute?: SelectedChatRoute
+  ): Promise<ChatRunResult> {
+    const runtimeControlContext = this.buildRuntimeControlContextFromIngress(ingress);
+    return this.execute(ingress.text, cwd, timeoutMs, {
+      selectedRoute: selectedRoute ?? standaloneIngressRouter.selectRoute(ingress, this.getRouteCapabilities()),
+      runtimeControlContext,
+    });
+  }
+
+  private getRouteCapabilities(): {
+    hasLightweightLlm: boolean;
+    hasAgentLoop: boolean;
+    hasToolLoop: boolean;
+    hasRuntimeControlService: boolean;
+  } {
+    return {
+      hasLightweightLlm: this.deps.llmClient !== undefined,
+      hasAgentLoop: this.deps.chatAgentLoopRunner !== undefined,
+      hasToolLoop: this.deps.llmClient !== undefined,
+      hasRuntimeControlService: this.deps.runtimeControlService !== undefined,
+    };
+  }
+
+  private buildStandaloneIngressMessage(
+    input: string,
+    runtimeControlContext: RuntimeControlChatContext | null
+  ): ChatIngressMessage {
+    const channel = runtimeControlContext?.replyTarget?.surface === "tui"
+      ? "tui"
+      : runtimeControlContext?.replyTarget?.surface === "cli"
+        ? "cli"
+        : runtimeControlContext?.replyTarget?.surface === "gateway"
+          ? "plugin_gateway"
+          : "cli";
+    const runtimeApprovalFn = runtimeControlContext?.approvalFn
+      ?? this.deps.runtimeControlApprovalFn
+      ?? this.deps.approvalFn;
+    return buildStandaloneIngressMessage({
+      text: input,
+      channel,
+      platform: runtimeControlContext?.replyTarget?.platform ?? this.deps.runtimeReplyTarget?.platform,
+      identity_key: runtimeControlContext?.replyTarget?.identity_key ?? this.deps.runtimeReplyTarget?.identity_key,
+      conversation_id: runtimeControlContext?.replyTarget?.conversation_id ?? this.deps.runtimeReplyTarget?.conversation_id,
+      user_id: runtimeControlContext?.replyTarget?.user_id ?? this.deps.runtimeReplyTarget?.user_id,
+      actor: runtimeControlContext?.actor ?? this.deps.runtimeControlActor,
+      replyTarget: runtimeControlContext?.replyTarget ?? this.deps.runtimeReplyTarget,
+      runtimeControl: {
+        allowed: true,
+        approvalMode: "interactive",
+      },
+    });
+  }
+
+  private buildRuntimeControlContextFromIngress(ingress: ChatIngressMessage): RuntimeControlChatContext | null {
+    if (!ingress.actor && !ingress.replyTarget) return null;
+    const interactiveApproval =
+      this.runtimeControlContext?.approvalFn
+      ?? this.deps.runtimeControlApprovalFn
+      ?? this.deps.approvalFn;
+    return {
+      actor: ingress.actor,
+      replyTarget: ingress.replyTarget,
+      approvalFn: ingress.runtimeControl.approvalMode === "preapproved"
+        ? async () => true
+        : ingress.runtimeControl.approvalMode === "interactive"
+          ? interactiveApproval
+          : undefined,
+    };
   }
 
   private loadedSessionToChatSession(session: LoadedChatSession): ChatSession {
@@ -1262,34 +1321,49 @@ export class ChatRunner {
       };
     }
 
+    const { goalId, maxIterations } = pending;
+    let subscriber: EventSubscriber | null = null;
+    if (this.deps.daemonBaseUrl && !this.activeSubscribers.has(goalId)) {
+      subscriber = new EventSubscriber(this.deps.daemonBaseUrl, goalId, "normal");
+      this.activeSubscribers.set(goalId, subscriber);
+
+      subscriber.on("notification", (notification: unknown) => {
+        const n = notification as { message: string };
+        this.deps.onNotification?.(n.message);
+        this.onNotification?.(n.message);
+      });
+
+      subscriber.on("chat_event", (event: ChatEvent) => {
+        this.emitEvent(event);
+      });
+
+      try {
+        await subscriber.subscribeReady();
+      } catch (err) {
+        subscriber.unsubscribe();
+        this.activeSubscribers.delete(goalId);
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          success: false,
+          output: `Daemon event stream unavailable: ${msg}. Goal was not started.`,
+          elapsed_ms: Date.now() - start,
+        };
+      }
+    }
+
     try {
-      await this.deps.daemonClient.startGoal(pending.goalId);
+      await this.deps.daemonClient.startGoal(goalId);
     } catch (err) {
+      if (subscriber) {
+        subscriber.unsubscribe();
+        this.activeSubscribers.delete(goalId);
+      }
       const msg = err instanceof Error ? err.message : String(err);
       return {
         success: false,
         output: `Daemon unavailable: ${msg}. Start the daemon with 'pulseed daemon start' first.`,
         elapsed_ms: Date.now() - start,
       };
-    }
-
-    // Subscribe to EventServer progress notifications (non-blocking)
-    const { goalId, maxIterations } = pending;
-    if (this.deps.daemonBaseUrl && !this.activeSubscribers.has(goalId)) {
-      const subscriber = new EventSubscriber(this.deps.daemonBaseUrl, goalId, "normal");
-      this.activeSubscribers.set(goalId, subscriber);
-
-      subscriber.on("notification", (notification: unknown) => {
-        const n = notification as { message: string };
-        // Invoke both the deps callback (wired at construction) and the public
-        // onNotification property (wired post-construction, e.g. from React useEffect)
-        this.deps.onNotification?.(n.message);
-        this.onNotification?.(n.message);
-      });
-
-      subscriber.subscribe().catch(() => {
-        // Connection failures are handled inside EventSubscriber
-      });
     }
 
     const iterNote = maxIterations !== undefined ? ` (max ${maxIterations} iterations)` : "";
@@ -1313,10 +1387,16 @@ export class ChatRunner {
    *  6. Verify changes (git diff + tests); retry up to MAX_VERIFY_RETRIES if tests fail
    *  7. Persist assistant response only after the final assistant text is complete
    */
-  async execute(input: string, cwd: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<ChatRunResult> {
+  async execute(
+    input: string,
+    cwd: string,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    options: ChatRunnerExecutionOptions = {}
+  ): Promise<ChatRunResult> {
     const eventContext = this.createEventContext();
     const resumeCommand = this.parseResumeCommand(input);
     const resumeOnly = resumeCommand !== null;
+    const runtimeControlContext = options.runtimeControlContext ?? this.runtimeControlContext;
 
     // Intercept commands before any adapter call
     const commandResult = resumeOnly ? null : await this.handleCommand(input);
@@ -1351,27 +1431,6 @@ export class ChatRunner {
         false
       );
       return confirmationResult;
-    }
-
-    const runtimeControlResult = resumeOnly
-      ? null
-      : await this.handleRuntimeControlIntent(input, cwd, Date.now());
-    if (runtimeControlResult !== null) {
-      if (runtimeControlResult.output) {
-        this.emitEvent({
-          type: "assistant_final",
-          text: runtimeControlResult.output,
-          persisted: false,
-          ...this.eventBase(eventContext),
-        });
-      }
-      this.emitLifecycleEndEvent(
-        runtimeControlResult.success ? "completed" : "error",
-        runtimeControlResult.elapsed_ms,
-        eventContext,
-        false
-      );
-      return runtimeControlResult;
     }
 
     if (resumeOnly && resumeCommand.selector) {
@@ -1457,14 +1516,43 @@ export class ChatRunner {
       historyBlock = `${historySections.join("\n\n")}\n\nCurrent message:\n`;
     }
 
-    const directAnswerRoute = !resumeOnly && !this.deps.chatAgentLoopRunner && this.deps.llmClient !== undefined && shouldUseDirectAnswerRoute(input);
+    const selectedRoute = resumeOnly
+      ? null
+      : (options.selectedRoute ?? standaloneIngressRouter.selectRoute(
+        this.buildStandaloneIngressMessage(input, runtimeControlContext),
+        this.getRouteCapabilities()
+      ));
     const directPrompt = historyBlock ? `${historyBlock}${input}` : input;
 
     const start = Date.now();
     const assistantBuffer: AssistantBuffer = { text: "" };
     const turnUsage = this.zeroUsageCounter();
 
-    if (directAnswerRoute) {
+    if (selectedRoute?.kind === "runtime_control") {
+      const runtimeControlResult = await this.executeRuntimeControlRoute(
+        selectedRoute,
+        runtimeControlContext,
+        cwd,
+        start
+      );
+      if (runtimeControlResult.success) {
+        await history.appendAssistantMessage(runtimeControlResult.output);
+        this.emitActivity("lifecycle", "Finalizing response...", eventContext, "lifecycle:finalizing");
+        this.emitEvent({
+          type: "assistant_final",
+          text: runtimeControlResult.output,
+          persisted: true,
+          ...this.eventBase(eventContext),
+        });
+        this.emitLifecycleEndEvent("completed", runtimeControlResult.elapsed_ms, eventContext, true);
+      } else {
+        this.emitLifecycleErrorEvent(runtimeControlResult.output, assistantBuffer.text, eventContext);
+        this.emitLifecycleEndEvent("error", runtimeControlResult.elapsed_ms, eventContext, false);
+      }
+      return runtimeControlResult;
+    }
+
+    if (selectedRoute?.kind === "direct_answer") {
       try {
         this.emitActivity("lifecycle", "Calling model...", eventContext, "lifecycle:model");
         const directResponse = await this.sendLLMMessage(
@@ -1472,8 +1560,8 @@ export class ChatRunner {
           [{ role: "user", content: directPrompt }],
           {
             ...(this.cachedStaticSystemPrompt ? { system: this.cachedStaticSystemPrompt } : {}),
-            model_tier: "light",
-            max_tokens: DIRECT_ANSWER_MAX_TOKENS,
+            model_tier: selectedRoute.modelTier,
+            max_tokens: selectedRoute.maxTokens,
           },
           assistantBuffer,
           eventContext
@@ -1499,9 +1587,9 @@ export class ChatRunner {
           elapsed_ms,
           diagnostics: {
             route: "direct",
-            reason: "simple_question",
-            modelTier: "light",
-            maxTokens: DIRECT_ANSWER_MAX_TOKENS,
+            reason: selectedRoute.reason,
+            modelTier: selectedRoute.modelTier,
+            maxTokens: selectedRoute.maxTokens,
           },
         };
       } catch (err) {
@@ -1516,29 +1604,31 @@ export class ChatRunner {
           elapsed_ms: Date.now() - start,
           diagnostics: {
             route: "direct",
-            reason: "simple_question",
-            modelTier: "light",
-            maxTokens: DIRECT_ANSWER_MAX_TOKENS,
+            reason: selectedRoute.reason,
+            modelTier: selectedRoute.modelTier,
+            maxTokens: selectedRoute.maxTokens,
           },
         };
       }
     }
 
     let systemPrompt = this.cachedStaticSystemPrompt ?? "";
-    try {
-      this.emitActivity("lifecycle", "Preparing context...", eventContext, "lifecycle:context");
-      const groundingBundle = await this.groundingGateway.build({
-        surface: "chat",
-        purpose: "general_turn",
-        workspaceRoot: cwd,
-        goalId: this.deps.goalId,
-        userMessage: input,
-        query: input,
-        trustProjectInstructions: this.sessionExecutionPolicy?.trustProjectInstructions ?? true,
-      });
-      systemPrompt = String(groundingBundle.render("prompt"));
-    } catch {
-      systemPrompt = this.cachedStaticSystemPrompt ?? "";
+    if (!resumeOnly) {
+      try {
+        this.emitActivity("lifecycle", "Preparing context...", eventContext, "lifecycle:context");
+        const groundingBundle = await this.groundingGateway.build({
+          surface: "chat",
+          purpose: "general_turn",
+          workspaceRoot: cwd,
+          goalId: this.deps.goalId,
+          userMessage: input,
+          query: input,
+          trustProjectInstructions: this.sessionExecutionPolicy?.trustProjectInstructions ?? true,
+        });
+        systemPrompt = String(groundingBundle.render("prompt"));
+      } catch {
+        systemPrompt = this.cachedStaticSystemPrompt ?? "";
+      }
     }
     const agentLoopSystemPrompt = [
       systemPrompt,
@@ -1569,7 +1659,8 @@ export class ChatRunner {
       };
     }
 
-    if (this.deps.chatAgentLoopRunner) {
+    const chatAgentLoopRunner = this.deps.chatAgentLoopRunner;
+    if (resumeOnly || selectedRoute?.kind === "agent_loop") {
       try {
         const resumeState = resumeOnly ? await this.loadResumableAgentLoopState() : null;
         if (resumeOnly && !resumeState) {
@@ -1589,7 +1680,7 @@ export class ChatRunner {
           };
         }
         this.emitActivity("lifecycle", "Calling model...", eventContext, "lifecycle:model");
-        const result = await this.deps.chatAgentLoopRunner.execute({
+        const result = await chatAgentLoopRunner!.execute({
           message: basePrompt,
           cwd,
           goalId: this.deps.goalId,
@@ -1656,7 +1747,7 @@ export class ChatRunner {
     }
 
     // Prefer the local LLM/tool loop over the external adapter fallback whenever a client is available.
-    if (this.deps.llmClient) {
+    if (selectedRoute?.kind === "tool_loop") {
       try {
         const toolResult = await this.executeWithTools(prompt, eventContext, assistantBuffer, systemPrompt || undefined);
         const elapsed_ms = Date.now() - start;
@@ -1685,6 +1776,18 @@ export class ChatRunner {
           elapsed_ms: Date.now() - start,
         };
       }
+    }
+
+    if (!resumeOnly && selectedRoute && selectedRoute.kind !== "adapter") {
+      const elapsed_ms = Date.now() - start;
+      const output = `Unsupported chat route: ${selectedRoute.kind}`;
+      this.emitLifecycleErrorEvent(output, assistantBuffer.text, eventContext);
+      this.emitLifecycleEndEvent("error", elapsed_ms, eventContext, false);
+      return {
+        success: false,
+        output,
+        elapsed_ms,
+      };
     }
 
     const task: AgentTask = {
@@ -1769,14 +1872,12 @@ export class ChatRunner {
     };
   }
 
-  private async handleRuntimeControlIntent(
-    input: string,
+  private async executeRuntimeControlRoute(
+    route: Extract<SelectedChatRoute, { kind: "runtime_control" }>,
+    runtimeControlContext: RuntimeControlChatContext | null,
     cwd: string,
     start: number
-  ): Promise<ChatRunResult | null> {
-    const intent = recognizeRuntimeControlIntent(input);
-    if (intent === null) return null;
-
+  ): Promise<ChatRunResult> {
     if (!this.deps.runtimeControlService) {
       return {
         success: false,
@@ -1785,10 +1886,10 @@ export class ChatRunner {
       };
     }
 
-    const replyTarget = this.runtimeControlContext?.replyTarget ?? this.deps.runtimeReplyTarget;
-    const actor = this.runtimeControlContext?.actor ?? this.deps.runtimeControlActor;
+    const replyTarget = runtimeControlContext?.replyTarget ?? this.deps.runtimeReplyTarget;
+    const actor = runtimeControlContext?.actor ?? this.deps.runtimeControlActor;
     const result = await this.deps.runtimeControlService.request({
-      intent,
+      intent: route.intent,
       cwd,
       requestedBy: actor ?? {
         surface: replyTarget?.surface ?? "chat",
@@ -1798,7 +1899,7 @@ export class ChatRunner {
         user_id: replyTarget?.user_id,
       },
       replyTarget: replyTarget ?? { surface: "chat" },
-      approvalFn: this.runtimeControlContext?.approvalFn
+      approvalFn: runtimeControlContext?.approvalFn
         ?? this.deps.runtimeControlApprovalFn
         ?? this.deps.approvalFn,
     });

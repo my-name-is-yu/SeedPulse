@@ -1,9 +1,33 @@
 import type { LoopResult } from "../../orchestrator/loop/core-loop.js";
+import type { ProgressEvent } from "../../orchestrator/loop/core-loop.js";
 import type { GoalCycleScheduleSnapshotEntry } from "./maintenance.js";
+import { errorMessage } from "./runner-errors.js";
 
 const MAX_IDLE_SLEEP_MS = 5_000;
 
 export type GoalCycleRunnerContext = any;
+
+function buildLoopCompletePayload(goalId: string, result: LoopResult): Record<string, unknown> {
+  const lastIteration = result.iterations.at(-1);
+  return {
+    goalId,
+    iterations: result.totalIterations,
+    gap: lastIteration?.gapAggregate,
+    status: result.finalStatus,
+  };
+}
+
+function buildLoopErrorPayload(goalId: string, error: unknown, context: GoalCycleRunnerContext): Record<string, unknown> {
+  const message = errorMessage(error);
+  return {
+    goalId,
+    error: message,
+    message,
+    status: "error",
+    crashCount: context.state?.crash_count,
+    maxRetries: context.config?.crash_recovery?.max_retries,
+  };
+}
 
 export async function runDaemonGoalCycleLoop(context: GoalCycleRunnerContext): Promise<void> {
   while (context.running && !context.shuttingDown) {
@@ -25,7 +49,16 @@ export async function runDaemonGoalCycleLoop(context: GoalCycleRunnerContext): P
 
         try {
           const iterationsPerCycle = context.config.iterations_per_cycle ?? 1;
-          const result: LoopResult = await context.coreLoop.run(goalId, { maxIterations: iterationsPerCycle });
+          const result: LoopResult = await context.coreLoop.run(goalId, {
+            maxIterations: iterationsPerCycle,
+            onProgress: (event: ProgressEvent) => {
+              if (!context.eventServer) return;
+              void context.eventServer.broadcast?.("progress", {
+                goalId,
+                ...event,
+              });
+            },
+          });
           context.state.loop_count++;
           context.currentLoopIndex = context.state.loop_count;
           context.state.last_loop_at = new Date().toISOString();
@@ -40,9 +73,13 @@ export async function runDaemonGoalCycleLoop(context: GoalCycleRunnerContext): P
               loopCount: context.state.loop_count,
               status: goal?.status ?? "unknown",
             });
+            void context.eventServer.broadcast?.("loop_complete", buildLoopCompletePayload(goalId, result));
           }
           await context.broadcastGoalUpdated(goalId, result.finalStatus);
         } catch (err) {
+          if (context.eventServer) {
+            void context.eventServer.broadcast?.("loop_error", buildLoopErrorPayload(goalId, err, context));
+          }
           context.handleLoopError(goalId, err);
         }
 

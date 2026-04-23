@@ -199,6 +199,46 @@ describe("CoreLoop", () => {
     expect(mocks.stateManager.saveGoal).toHaveBeenCalledWith(expect.objectContaining({ status: "completed" }));
   });
 
+  it("applies maxIterations overrides to in-run progress metadata and restores config afterwards", async () => {
+    const { CoreLoop } = await import("../core-loop.js");
+    const onProgress = vi.fn();
+
+    const loop = new CoreLoop({
+      stateManager: mocks.stateManager as any,
+      observationEngine: {} as any,
+      gapCalculator: {} as any,
+      driveScorer: {} as any,
+      taskLifecycle: {} as any,
+      satisficingJudge: {} as any,
+      stallDetector: mocks.stallDetector as any,
+      strategyManager: mocks.strategyManager as any,
+      reportingEngine: mocks.reportingEngine as any,
+      driveSystem: {} as any,
+      adapterRegistry: { listAdapters: () => ["mock"] } as any,
+      learningPipeline: {} as any,
+      onProgress,
+      logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() } as any,
+    }, { maxIterations: 5 });
+
+    vi.spyOn(loop, "runOneIteration").mockImplementationOnce(async () => {
+      onProgress({
+        iteration: 1,
+        maxIterations: (loop as any).config.maxIterations,
+        phase: "Observing...",
+      });
+      return mocks.completedIteration as any;
+    });
+
+    await loop.run("goal-1", { maxIterations: 1 });
+
+    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({
+      iteration: 1,
+      maxIterations: 1,
+      phase: "Observing...",
+    }));
+    expect((loop as any).config.maxIterations).toBe(5);
+  });
+
   it("returns early from runOneIteration when the goal is already satisfied (gap=0 + SatisficingJudge)", async () => {
     const { CoreLoop } = await import("../core-loop.js");
     const calculateGapOrComplete = (await import("../core-loop/preparation.js")).calculateGapOrComplete as unknown as ReturnType<typeof vi.fn>;

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventSubscriber } from "../event-subscriber.js";
 import type { TendNotification, NotificationVerbosity } from "../event-subscriber.js";
+import type { ChatEvent } from "../chat-events.js";
 
 // ─── Helpers ───
 
@@ -191,7 +192,12 @@ describe("EventSubscriber", () => {
 
   describe("subscribe / unsubscribe", () => {
     it("bootstraps snapshot then connects to /stream with after cursor", async () => {
-      const stream = new ReadableStream({
+      const firstStream = new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
+      });
+      const retryStream = new ReadableStream({
         start(controller) {
           controller.close();
         },
@@ -206,7 +212,12 @@ describe("EventSubscriber", () => {
         .mockResolvedValueOnce({
           ok: true,
           status: 200,
-          body: stream,
+          body: firstStream,
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          body: retryStream,
         });
 
       vi.stubGlobal("fetch", mockFetch);
@@ -242,6 +253,66 @@ describe("EventSubscriber", () => {
 
       expect(abortMock).toHaveBeenCalledOnce();
       expect((sub as any).abortController).toBeNull();
+    });
+
+    it("subscribeReady resolves after a retry without waiting for the full stream lifecycle", async () => {
+      const stream = new ReadableStream({
+        start() {
+          // Keep the stream open; subscribeReady should still resolve once connected.
+        },
+      });
+
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ approvals: [], last_outbox_seq: 0 }),
+        })
+        .mockRejectedValueOnce(new Error("temporary failure"))
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          body: stream,
+        });
+
+      vi.stubGlobal("fetch", mockFetch);
+      vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: (...args: any[]) => void) => {
+        fn();
+        return 0 as any;
+      }) as typeof setTimeout);
+
+      try {
+        const sub = new EventSubscriber("http://localhost:9000", "goal-xyz", "quiet");
+        await expect(sub.subscribeReady()).resolves.toBeUndefined();
+      } finally {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+      }
+    });
+
+    it("subscribeReady rejects when both initial connect attempts fail", async () => {
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ approvals: [], last_outbox_seq: 0 }),
+        })
+        .mockRejectedValueOnce(new Error("temporary failure"))
+        .mockRejectedValueOnce(new Error("still failing"));
+
+      vi.stubGlobal("fetch", mockFetch);
+      vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: (...args: any[]) => void) => {
+        fn();
+        return 0 as any;
+      }) as typeof setTimeout);
+
+      try {
+        const sub = new EventSubscriber("http://localhost:9000", "goal-xyz", "quiet");
+        await expect(sub.subscribeReady()).rejects.toThrow("still failing");
+      } finally {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+      }
     });
   });
 
@@ -307,6 +378,33 @@ describe("EventSubscriber", () => {
       expect(received[0].message).toContain("Approve daily brief dispatch");
     });
 
+    it("projects loop_error events into notifications and chat events", () => {
+      const sub = makeSubscriber("goal-abc", "normal");
+      const notifications: TendNotification[] = [];
+      const chatEvents: ChatEvent[] = [];
+      sub.on("notification", (n: TendNotification) => notifications.push(n));
+      sub.on("chat_event", (event: ChatEvent) => chatEvents.push(event));
+
+      const raw = `id: 11\nevent: loop_error\ndata: {"goalId":"goal-abc","message":"boom","status":"error"}`;
+      (sub as any).parseSSEMessage(raw);
+
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0]).toMatchObject({
+        type: "error",
+        goalId: "goal-abc",
+      });
+      expect(notifications[0].message).toContain("boom");
+      expect(chatEvents).toHaveLength(1);
+      expect(chatEvents[0]).toMatchObject({
+        type: "activity",
+        kind: "commentary",
+      });
+      if (chatEvents[0].type === "activity") {
+        expect(chatEvents[0].message).toContain("boom");
+        expect(chatEvents[0].sourceId).toBe("daemon:goal-abc:loop_error:error");
+      }
+    });
+
     it("ignores events for other goals when goalId is present", () => {
       const sub = makeSubscriber("goal-abc", "normal");
       const received: TendNotification[] = [];
@@ -317,6 +415,96 @@ describe("EventSubscriber", () => {
 
       expect(received).toHaveLength(0);
       expect((sub as any).lastOutboxSeq).toBe(7);
+    });
+
+    it("emits transcript-compatible chat events for durable progress", () => {
+      const sub = makeSubscriber("goal-abc", "normal");
+      const received: ChatEvent[] = [];
+      sub.on("chat_event", (event: ChatEvent) => received.push(event));
+
+      const raw = `id: 9\nevent: progress\ndata: {"phase":"Observing...","gap":0.5,"iteration":1,"maxIterations":5}`;
+      (sub as any).parseSSEMessage(raw);
+
+      expect(received).toHaveLength(1);
+      expect(received[0]).toMatchObject({
+        type: "activity",
+        kind: "commentary",
+      });
+      if (received[0].type === "activity") {
+        expect(received[0].message).toContain("[1/5]");
+        expect(received[0].message).toContain("gap: 0.50");
+        expect(received[0].message).not.toContain("0.50→0.50");
+        expect(received[0].sourceId).toBe("daemon:goal-abc:progress");
+      }
+    });
+
+    it("emits assistant_final chat events for chat_response", () => {
+      const sub = makeSubscriber("goal-abc", "normal");
+      const received: ChatEvent[] = [];
+      sub.on("chat_event", (event: ChatEvent) => received.push(event));
+
+      const raw = `id: 10\nevent: chat_response\ndata: {"goalId":"goal-abc","message":"queued","status":"queued"}`;
+      (sub as any).parseSSEMessage(raw);
+
+      expect(received).toHaveLength(1);
+      expect(received[0]).toMatchObject({
+        type: "assistant_final",
+        text: "queued",
+        persisted: false,
+      });
+    });
+
+    it("projects snapshot approvals into chat events during bootstrap", async () => {
+      const firstStream = new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
+      });
+      const retryStream = new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
+      });
+
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            approvals: [{
+              goalId: "goal-xyz",
+              requestId: "approval-123",
+              task: { description: "Approve daily brief dispatch" },
+            }],
+            last_outbox_seq: 5,
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          body: firstStream,
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          body: retryStream,
+        });
+
+      vi.stubGlobal("fetch", mockFetch);
+
+      const sub = new EventSubscriber("http://localhost:9000", "goal-xyz", "normal");
+      const received: ChatEvent[] = [];
+      sub.on("chat_event", (event: ChatEvent) => received.push(event));
+
+      await sub.subscribe();
+
+      expect(received.some((event) => (
+        event.type === "activity"
+        && event.message.includes("Approve daily brief dispatch")
+        && event.sourceId === "daemon:goal-xyz:approval_required:approval-123"
+      ))).toBe(true);
+
+      vi.unstubAllGlobals();
     });
   });
 

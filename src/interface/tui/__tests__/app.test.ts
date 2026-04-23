@@ -78,6 +78,7 @@ function createChatRunnerMock() {
   return {
     startSession: vi.fn(),
     execute: vi.fn(async () => ({ success: true, output: "", elapsed_ms: 0 })),
+    executeIngressMessage: vi.fn(async () => ({ success: true, output: "", elapsed_ms: 0 })),
     onEvent: undefined,
   };
 }
@@ -182,7 +183,14 @@ describe("daemon-mode chat routing", () => {
 
     await testState.lastChatProps!.onSubmit("free form question");
 
-    expect(chatRunner.execute).toHaveBeenCalledWith("free form question", process.cwd());
+    expect(chatRunner.executeIngressMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "free form question",
+        channel: "tui",
+        platform: "local_tui",
+      }),
+      process.cwd()
+    );
     expect(daemonClient.chat).not.toHaveBeenCalled();
 
     screen.unmount();
@@ -224,7 +232,7 @@ describe("daemon-mode chat routing", () => {
     await testState.lastChatProps!.onSubmit("question for the active goal");
 
     expect(daemonClient.chat).toHaveBeenCalledWith("goal-123", "question for the active goal");
-    expect(chatRunner.execute).not.toHaveBeenCalled();
+    expect(chatRunner.executeIngressMessage).not.toHaveBeenCalled();
 
     screen.unmount();
   });
