@@ -66,20 +66,7 @@ import {
 } from "../soil/index.js";
 
 
-// Re-export for backward compatibility
-export {
-  searchKnowledge,
-  searchAcrossGoals,
-  searchByEmbedding,
-  querySharedKnowledge,
-  classifyDomainStability,
-  getStaleEntries,
-  generateRevalidationTasks,
-  computeRevalidationDue,
-};
-
-// Re-export standalone LLM query functions
-export { detectKnowledgeGap, generateAcquisitionTask, checkContradiction } from "./knowledge-manager-query.js";
+export * from "./public-api.js";
 
 // ─── KnowledgeManager ───
 

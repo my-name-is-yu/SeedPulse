@@ -59,15 +59,26 @@ export type { ProviderConfig, ValidationResult } from "./base/llm/provider-confi
 export { TaskLifecycle } from "./orchestrator/execution/task/task-lifecycle.js";
 export {
   ChatAgentLoopRunner,
-  ReviewAgentLoopRunner,
   TaskAgentLoopRunner,
   createNativeChatAgentLoopRunner,
-  createNativeReviewAgentLoopRunner,
   createNativeTaskAgentLoopRunner,
   shouldUseNativeTaskAgentLoop,
 } from "./orchestrator/execution/agent-loop/index.js";
 export { ReportingEngine } from "./reporting/reporting-engine.js";
-export { KnowledgeManager } from "./platform/knowledge/knowledge-manager.js";
+export {
+  KnowledgeManager,
+  searchKnowledge,
+  searchAcrossGoals,
+  searchByEmbedding,
+  querySharedKnowledge,
+  classifyDomainStability,
+  getStaleEntries,
+  generateRevalidationTasks,
+  computeRevalidationDue,
+  detectKnowledgeGap,
+  generateAcquisitionTask,
+  checkContradiction,
+} from "./platform/knowledge/index.js";
 export { CapabilityDetector } from "./platform/observation/capability-detector.js";
 export { PortfolioManager } from "./orchestrator/strategy/portfolio-manager.js";
 export { CoreLoop } from "./orchestrator/loop/core-loop.js";
