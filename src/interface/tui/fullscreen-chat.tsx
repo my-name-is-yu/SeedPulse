@@ -15,8 +15,8 @@ import { isBashModeInput } from "./bash-mode.js";
 import { buildChatViewport } from "./chat/viewport.js";
 import {
   getScrollRequest,
+  normalizeTerminalInputChunk,
   parseMouseEvent,
-  stripMouseEscapeSequences,
 } from "./chat/scroll.js";
 import { getMatchingSuggestions, type Suggestion } from "./chat/suggestions.js";
 import type { ChatMessage, ChatDisplayRow } from "./chat/types.js";
@@ -1123,7 +1123,7 @@ export function FullscreenChat({
     }
 
     if (inputChar && !key.ctrl && !key.meta) {
-      const clean = stripMouseEscapeSequences(inputChar);
+      const clean = normalizeTerminalInputChunk(inputChar);
       if (clean.length === 0) return;
       insertText(clean);
     }
