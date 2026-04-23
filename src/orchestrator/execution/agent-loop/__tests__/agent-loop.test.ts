@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { z } from "zod";
 import * as fs from "node:fs";
 import type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "../../../../base/llm/llm-client.js";
@@ -790,4 +790,5 @@ describe("agentloop phase 2", () => {
       message.role === "user" && message.content.includes("premature"))
     ).toBe(true);
   });
+
 });

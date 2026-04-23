@@ -9,8 +9,9 @@ import * as path from "node:path";
 import type { StateManager } from "../../base/state/state-manager.js";
 import type { IAdapter, AgentTask } from "../../orchestrator/execution/adapter-layer.js";
 import type { ILLMClient } from "../../base/llm/llm-client.js";
+import { getPulseedDirPath } from "../../base/utils/paths.js";
 import { loadProviderConfig } from "../../base/llm/provider-config.js";
-import type { Task } from "../../base/types/task.js";
+import { TaskSchema, type Task } from "../../base/types/task.js";
 import type { Goal } from "../../base/types/goal.js";
 import { ChatHistory, type ChatSession, type ChatUsageCounter } from "./chat-history.js";
 import {
@@ -20,7 +21,8 @@ import {
 } from "./chat-session-store.js";
 import { buildChatContext, resolveGitRoot } from "../../platform/observation/context-provider.js";
 import type { EscalationHandler } from "./escalation.js";
-import { buildDynamicContextPrompt, buildStaticSystemPrompt } from "./grounding.js";
+import { buildStaticSystemPrompt, createChatGroundingGateway } from "./grounding.js";
+import type { GroundingGateway } from "../../grounding/gateway.js";
 import { verifyChatAction } from "./chat-verifier.js";
 import type { ApprovalLevel } from "./mutation-tool-defs.js";
 import type { ToolRegistry } from "../../tools/registry.js";
@@ -52,16 +54,11 @@ import type {
   RuntimeControlReplyTarget,
 } from "../../runtime/store/runtime-operation-schemas.js";
 import {
-  formatAgentLoopResolvedProfileSummary,
-  resolveAgentLoopDefaultProfile,
-  summarizeAgentLoopResolvedProfile,
-} from "../../orchestrator/execution/agent-loop/agent-loop-default-profile.js";
-import {
+  resolveExecutionPolicy,
   summarizeExecutionPolicy,
   withExecutionPolicyOverrides,
   type ExecutionPolicy,
 } from "../../orchestrator/execution/agent-loop/execution-policy.js";
-import { ChatStateService, type ProviderConfigSummary } from "./chat-state-service.js";
 
 // ─── Types ───
 
@@ -140,6 +137,16 @@ interface AssistantBuffer {
 
 interface ResumeCommand {
   selector?: string;
+}
+
+interface ProviderConfigSummary {
+  provider: string;
+  model: string;
+  adapter: string;
+  light_model?: string;
+  base_url?: string;
+  codex_cli_path?: string;
+  has_api_key: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -235,6 +242,7 @@ function shouldUseDirectAnswerRoute(input: string): boolean {
 
 export class ChatRunner {
   private readonly deps: ChatRunnerDeps;
+  private readonly groundingGateway: GroundingGateway;
   private history: ChatHistory | null = null;
   private sessionCwd: string | null = null;
   /** True when startSession() has been called — enables session persistence across execute() calls. */
@@ -256,11 +264,13 @@ export class ChatRunner {
   private nativeAgentLoopStatePath: string | null = null;
   private runtimeControlContext: RuntimeControlChatContext | null = null;
   private sessionExecutionPolicy: ExecutionPolicy | null = null;
-  private readonly stateView: ChatStateService;
 
   constructor(deps: ChatRunnerDeps) {
     this.deps = deps;
-    this.stateView = new ChatStateService(deps.stateManager);
+    this.groundingGateway = createChatGroundingGateway({
+      stateManager: deps.stateManager,
+      pluginLoader: deps.pluginLoader,
+    });
   }
 
   /**
@@ -317,7 +327,6 @@ export class ChatRunner {
       ...(session.agentLoopResumable ? { agentLoopResumable: true } : {}),
       ...(session.agentLoopUpdatedAt ? { agentLoopUpdatedAt: session.agentLoopUpdatedAt } : {}),
       ...(session.agentLoop ? { agentLoop: session.agentLoop } : {}),
-      ...(session.usage ? { usage: session.usage } : {}),
     };
   }
 
@@ -344,15 +353,52 @@ export class ChatRunner {
   }
 
   private async loadGoals(): Promise<Goal[]> {
-    return this.stateView.loadGoals();
+    const goalIds = await this.deps.stateManager.listGoalIds();
+    const goals = await Promise.all(goalIds.map((id) => this.deps.stateManager.loadGoal(id)));
+    return goals.filter((goal): goal is Goal => goal !== null);
   }
 
   private async listAllGoalIds(): Promise<string[]> {
-    return this.stateView.listAllGoalIds();
+    const activeIds = await this.deps.stateManager.listGoalIds();
+    const archivedIds = await this.deps.stateManager.listArchivedGoals();
+    const recoverableArchivedIds = await this.listRecoverableArchivedGoalIds();
+    return [...new Set([...activeIds, ...archivedIds, ...recoverableArchivedIds])];
+  }
+
+  private resolveStatePath(baseDir: string, ...segments: string[]): string | null {
+    const base = path.resolve(baseDir);
+    const resolved = path.resolve(base, ...segments);
+    if (!resolved.startsWith(base + path.sep)) return null;
+    return resolved;
+  }
+
+  private async listRecoverableArchivedGoalIds(): Promise<string[]> {
+    const stateManager = this.deps.stateManager as StateManager & { getBaseDir?: () => string };
+    if (typeof stateManager.getBaseDir !== "function") return [];
+    const archiveDir = this.resolveStatePath(stateManager.getBaseDir(), "archive");
+    if (archiveDir === null) return [];
+    let entries: Array<{ name: string; isDirectory(): boolean }> = [];
+    try {
+      entries = await fsp.readdir(archiveDir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+
+    const goalIds: string[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name === ".staging") continue;
+      try {
+        await fsp.access(path.join(archiveDir, entry.name, "goal", "goal.json"));
+        goalIds.push(entry.name);
+      } catch {
+        continue;
+      }
+    }
+    return goalIds;
   }
 
   private activeGoals(goals: Goal[]): Goal[] {
-    return this.stateView.activeGoals(goals);
+    return goals.filter((goal) => goal.status === "active" || goal.status === "waiting" || goal.loop_status === "running");
   }
 
   private formatGoalLine(goal: Goal): string {
@@ -410,8 +456,39 @@ export class ChatRunner {
     };
   }
 
+  private async readTasksFromDir(tasksDir: string): Promise<Task[]> {
+    let entries: string[] = [];
+    try {
+      entries = await fsp.readdir(tasksDir);
+    } catch {
+      return [];
+    }
+
+    const tasks: Task[] = [];
+    for (const entry of entries) {
+      if (!entry.endsWith(".json") || entry === "task-history.json" || entry === "last-failure-context.json") continue;
+      let raw: unknown;
+      try {
+        raw = JSON.parse(await fsp.readFile(path.join(tasksDir, entry), "utf-8"));
+      } catch {
+        continue;
+      }
+      const parsed = TaskSchema.safeParse(raw);
+      if (parsed.success) tasks.push(parsed.data);
+    }
+    return tasks.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  }
+
   private async readTasksForGoal(goalId: string): Promise<Task[]> {
-    return this.stateView.readTasksForGoal(goalId);
+    const stateManager = this.deps.stateManager as StateManager & { getBaseDir?: () => string };
+    if (typeof stateManager.getBaseDir !== "function") return [];
+    const baseDir = stateManager.getBaseDir();
+    const activeTasksDir = this.resolveStatePath(baseDir, "tasks", goalId);
+    const archiveTasksDir = this.resolveStatePath(baseDir, "archive", goalId, "tasks");
+    if (activeTasksDir === null || archiveTasksDir === null) return [];
+    const activeTasks = await this.readTasksFromDir(activeTasksDir);
+    if (activeTasks.length > 0) return activeTasks;
+    return this.readTasksFromDir(archiveTasksDir);
   }
 
   private async resolveGoalForTasks(selector: string): Promise<{ goalId?: string; error?: string }> {
@@ -455,7 +532,25 @@ export class ChatRunner {
   }
 
   private async findTask(taskId: string, goalId?: string): Promise<{ task?: Task; matches: Array<{ goalId: string; task: Task }> }> {
-    return this.stateView.findTask(taskId, goalId);
+    const goalIds = goalId ? [goalId] : await this.listAllGoalIds();
+    const matches: Array<{ goalId: string; task: Task }> = [];
+    for (const candidateGoalId of goalIds) {
+      let raw: unknown | null = null;
+      try {
+        raw = await this.deps.stateManager.readRaw(`tasks/${candidateGoalId}/${taskId}.json`);
+      } catch {
+        raw = null;
+      }
+      if (!raw) {
+        const tasks = await this.readTasksForGoal(candidateGoalId);
+        const matched = tasks.find((task) => task.id === taskId || task.id.startsWith(taskId));
+        if (matched) matches.push({ goalId: candidateGoalId, task: matched });
+        continue;
+      }
+      const parsed = TaskSchema.safeParse(raw);
+      if (parsed.success) matches.push({ goalId: candidateGoalId, task: parsed.data });
+    }
+    return { task: matches.length === 1 ? matches[0].task : undefined, matches };
   }
 
   private formatTask(task: Task): string {
@@ -499,12 +594,32 @@ export class ChatRunner {
     return { success: true, output: this.formatTask(found.task), elapsed_ms: Date.now() - start };
   }
 
+  private providerConfigBaseDir(): string {
+    const stateManager = this.deps.stateManager as StateManager & { getBaseDir?: () => string };
+    return typeof stateManager.getBaseDir === "function" ? stateManager.getBaseDir() : getPulseedDirPath();
+  }
+
   private async readProviderConfigSummary(): Promise<ProviderConfigSummary> {
-    return this.stateView.readProviderConfigSummary();
+    const config = await loadProviderConfig({
+      baseDir: this.providerConfigBaseDir(),
+      saveMigration: false,
+    });
+    return {
+      provider: config.provider,
+      model: config.model,
+      adapter: config.adapter,
+      light_model: config.light_model,
+      base_url: config.base_url,
+      codex_cli_path: config.codex_cli_path,
+      has_api_key: Boolean(config.api_key),
+    };
   }
 
   private formatConfig(config: ProviderConfigSummary): string {
-    return this.stateView.formatConfig(config);
+    return Object.entries(config)
+      .filter(([, value]) => value !== undefined)
+      .map(([key, value]) => `${key}: ${typeof value === "string" && /key|token|secret/i.test(key) ? "[masked]" : String(value)}`)
+      .join("\n");
   }
 
   private async handleConfig(start: number): Promise<ChatRunResult> {
@@ -551,11 +666,7 @@ export class ChatRunner {
     const totalTokens = Number.isFinite(usage.totalTokens)
       ? Math.max(0, Math.floor(usage.totalTokens))
       : inputTokens + outputTokens;
-    return {
-      inputTokens,
-      outputTokens,
-      totalTokens,
-    };
+    return { inputTokens, outputTokens, totalTokens };
   }
 
   private usageFromLLMResponse(response: LLMResponse): ChatUsageCounter {
@@ -956,11 +1067,7 @@ export class ChatRunner {
     if (!args) {
       return {
         success: true,
-        output: this.formatExecutionPolicyOutput(
-          summarizeExecutionPolicy(policy),
-          "Profile",
-          await this.getAgentLoopProfileSummary("chat", policy),
-        ),
+        output: summarizeExecutionPolicy(policy),
         elapsed_ms: Date.now() - start,
       };
     }
@@ -1004,11 +1111,7 @@ export class ChatRunner {
     this.sessionExecutionPolicy = nextPolicy;
     return {
       success: true,
-      output: this.formatExecutionPolicyOutput(
-        summarizeExecutionPolicy(nextPolicy),
-        "Profile",
-        await this.getAgentLoopProfileSummary("chat", nextPolicy),
-      ),
+      output: summarizeExecutionPolicy(nextPolicy),
       elapsed_ms: Date.now() - start,
     };
   }
@@ -1016,8 +1119,10 @@ export class ChatRunner {
   private async handleReview(start: number): Promise<ChatRunResult> {
     const cwd = this.sessionCwd ?? process.cwd();
     const diffStat = await checkGitChanges(cwd);
-    const reviewProfile = await this.getAgentLoopDefaultProfile("review");
-    const reviewPolicy = reviewProfile.executionPolicy ?? await this.getSessionExecutionPolicy();
+    const reviewPolicy = withExecutionPolicyOverrides(await this.getSessionExecutionPolicy(), {
+      sandboxMode: "read_only",
+      approvalPolicy: "never",
+    });
     if (this.deps.reviewAgentLoopRunner) {
       const review = await this.deps.reviewAgentLoopRunner.execute({
         cwd,
@@ -1032,11 +1137,6 @@ export class ChatRunner {
       "",
       "Execution policy",
       summarizeExecutionPolicy(reviewPolicy),
-      "",
-      "Review profile",
-      formatAgentLoopResolvedProfileSummary(
-        summarizeAgentLoopResolvedProfile(reviewProfile, reviewPolicy),
-      ),
     ].join("\n");
     return { success: true, output, elapsed_ms: Date.now() - start };
   }
@@ -1424,18 +1524,22 @@ export class ChatRunner {
       }
     }
 
-    let dynamicSystemPrompt = "";
+    let systemPrompt = this.cachedStaticSystemPrompt ?? "";
     try {
       this.emitActivity("lifecycle", "Preparing context...", eventContext, "lifecycle:context");
-      dynamicSystemPrompt = await buildDynamicContextPrompt({ stateManager: this.deps.stateManager });
+      const groundingBundle = await this.groundingGateway.build({
+        surface: "chat",
+        purpose: "general_turn",
+        workspaceRoot: cwd,
+        goalId: this.deps.goalId,
+        userMessage: input,
+        query: input,
+        trustProjectInstructions: this.sessionExecutionPolicy?.trustProjectInstructions ?? true,
+      });
+      systemPrompt = String(groundingBundle.render("prompt"));
     } catch {
-      dynamicSystemPrompt = "";
+      systemPrompt = this.cachedStaticSystemPrompt ?? "";
     }
-
-    const systemPrompt = [this.cachedStaticSystemPrompt, dynamicSystemPrompt]
-      .filter((section) => section && section.trim().length > 0)
-      .join("\n\n")
-      .trim();
     const agentLoopSystemPrompt = [
       systemPrompt,
       compactionSummary ? `## Compacted Chat Summary\n${compactionSummary}` : "",
@@ -1509,7 +1613,9 @@ export class ChatRunner {
           ...(agentLoopSystemPrompt ? { systemPrompt: agentLoopSystemPrompt } : {}),
         });
         const elapsed_ms = Date.now() - start;
-        const agentLoopUsage = this.normalizeUsageCounter(result.agentLoop?.usage ?? this.zeroUsageCounter());
+        const agentLoopUsage = result.agentLoop?.usage
+          ? this.normalizeUsageCounter(result.agentLoop.usage)
+          : this.zeroUsageCounter();
         if (this.hasUsage(agentLoopUsage)) {
           history.recordUsage("agentloop", agentLoopUsage);
         }
@@ -1527,9 +1633,6 @@ export class ChatRunner {
           });
           this.emitLifecycleEndEvent("completed", elapsed_ms, eventContext, true);
         } else {
-          if (this.hasUsage(agentLoopUsage)) {
-            await history.persist();
-          }
           this.emitLifecycleErrorEvent(result.output || result.error || "Unknown error", assistantBuffer.text, eventContext);
           this.emitLifecycleEndEvent("error", elapsed_ms, eventContext, false);
         }
@@ -1736,12 +1839,12 @@ export class ChatRunner {
             ? { tools, ...(systemPrompt ? { system: systemPrompt } : {}) }
             : { system: buildPromptedToolProtocolSystemPrompt({ systemPrompt, tools }) }),
         }, assistantBuffer, eventContext);
-        this.addUsageCounter(usage, this.usageFromLLMResponse(response));
       } catch (err) {
         console.error("[chat-runner] executeWithTools error:", err);
         const hint = err instanceof Error ? `: ${err.message}` : "";
         throw new Error(`Sorry, I encountered an error processing your request${hint}.`);
       }
+      this.addUsageCounter(usage, this.usageFromLLMResponse(response));
 
       const toolCalls = response.tool_calls?.length
         ? response.tool_calls
@@ -1963,19 +2066,10 @@ export class ChatRunner {
     const raw = await this.deps.stateManager.readRaw(this.nativeAgentLoopStatePath);
     if (!this.isAgentLoopSessionState(raw)) return null;
     if (raw.status === "completed") return null;
-    const usageCandidate = raw.usage as Record<string, unknown> | undefined;
-    const usage = usageCandidate
-      ? this.normalizeUsageCounter({
-          inputTokens: typeof usageCandidate.inputTokens === "number" ? usageCandidate.inputTokens : 0,
-          outputTokens: typeof usageCandidate.outputTokens === "number" ? usageCandidate.outputTokens : 0,
-          totalTokens: typeof usageCandidate.totalTokens === "number" ? usageCandidate.totalTokens : 0,
-        })
-      : this.zeroUsageCounter();
     return {
       ...raw,
       messages: [...raw.messages],
       calledTools: [...raw.calledTools],
-      usage,
     };
   }
 
@@ -2259,41 +2353,12 @@ export class ChatRunner {
   /** Build a ToolCallContext from ChatRunnerDeps for tool dispatch. */
   private async getSessionExecutionPolicy(): Promise<ExecutionPolicy> {
     if (this.sessionExecutionPolicy) return this.sessionExecutionPolicy;
-    const profile = await this.getAgentLoopDefaultProfile("chat");
-    if (!profile.executionPolicy) {
-      throw new Error("Chat profile did not resolve an execution policy.");
-    }
-    this.sessionExecutionPolicy = profile.executionPolicy;
-    return this.sessionExecutionPolicy;
-  }
-
-  private async getAgentLoopDefaultProfile(
-    surface: "chat" | "review",
-  ): Promise<ReturnType<typeof resolveAgentLoopDefaultProfile>> {
     const config = await loadProviderConfig({ saveMigration: false });
-    return resolveAgentLoopDefaultProfile({
-      surface,
+    this.sessionExecutionPolicy = resolveExecutionPolicy({
       workspaceRoot: this.sessionCwd ?? process.cwd(),
       security: config.agent_loop?.security,
     });
-  }
-
-  private async getAgentLoopProfileSummary(
-    surface: "chat" | "review",
-    executionPolicy?: ExecutionPolicy,
-  ): Promise<string> {
-    const profile = await this.getAgentLoopDefaultProfile(surface);
-    return formatAgentLoopResolvedProfileSummary(
-      summarizeAgentLoopResolvedProfile(profile, executionPolicy),
-    );
-  }
-
-  private formatExecutionPolicyOutput(
-    policySummary: string,
-    profileHeading: string,
-    profileSummary: string,
-  ): string {
-    return [policySummary, "", profileHeading, profileSummary].join("\n");
+    return this.sessionExecutionPolicy;
   }
 
   private async buildToolCallContext(): Promise<ToolCallContext> {

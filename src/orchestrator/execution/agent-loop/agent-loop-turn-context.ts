@@ -24,8 +24,8 @@ export interface AgentLoopTurnContext<TOutput> {
   session: AgentLoopSession;
   turnId: string;
   goalId: string;
-  taskId?: string;
   profileName?: string;
+  taskId?: string;
   cwd: string;
   model: AgentLoopModelRef;
   modelInfo: AgentLoopModelInfo;

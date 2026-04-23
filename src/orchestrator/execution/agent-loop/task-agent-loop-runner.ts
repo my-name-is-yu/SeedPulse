@@ -18,6 +18,7 @@ import {
   type TaskAgentLoopOutput,
 } from "./task-agent-loop-result.js";
 import type { AgentLoopSessionState } from "./agent-loop-session-state.js";
+import type { AgentLoopWorkspaceInfo } from "./agent-loop-result.js";
 import { isTaskRelevantVerificationCommand } from "./task-agent-loop-verification.js";
 import {
   prepareTaskAgentLoopWorkspace,
@@ -72,53 +73,69 @@ export class TaskAgentLoopRunner {
       policy: { ...this.deps.defaultWorktreePolicy, ...input.worktreePolicy },
     });
     const contextAssembler = this.deps.contextAssembler ?? new AgentLoopContextAssembler();
-    const assembled = await contextAssembler.assembleTask({
-      task: input.task,
-      workspaceContext: input.workspaceContext,
-      knowledgeContext: input.knowledgeContext,
-      cwd: workspace.executionCwd,
-      soilPrefetch: this.deps.soilPrefetch,
-      trustProjectInstructions: this.deps.defaultToolCallContext?.executionPolicy?.trustProjectInstructions,
-    });
-    const turn = buildTaskAgentLoopTurnContext({
-      task: input.task,
-      model,
-      modelInfo,
-      session,
-      workspaceContext: input.workspaceContext,
-      knowledgeContext: input.knowledgeContext,
-      cwd: assembled.cwd,
-      systemPrompt: assembled.systemPrompt,
-      userPrompt: assembled.userPrompt,
-      budget: { ...this.deps.defaultBudget, ...input.budget },
-      toolPolicy: { ...this.deps.defaultToolPolicy, ...input.toolPolicy },
-      toolCallContext: this.deps.defaultToolCallContext,
-      ...(this.deps.defaultProfileName ? { profileName: this.deps.defaultProfileName } : {}),
-      ...(this.deps.defaultReasoningEffort ? { reasoningEffort: this.deps.defaultReasoningEffort } : {}),
-      ...(this.deps.defaultExecutionPolicy ? { executionPolicy: this.deps.defaultExecutionPolicy } : {}),
-      ...(input.resumeState ? { resumeState: input.resumeState } : {}),
-      abortSignal: input.abortSignal,
-      role: input.role,
-    });
+    let finalizationInput = { success: false, changedFiles: [] as string[] };
+    let finalResult: AgentLoopResult<TaskAgentLoopOutput> | null = null;
+    let runError: unknown = null;
     try {
+      const assembled = await contextAssembler.assembleTask({
+        task: input.task,
+        workspaceContext: input.workspaceContext,
+        knowledgeContext: input.knowledgeContext,
+        cwd: workspace.executionCwd,
+        soilPrefetch: this.deps.soilPrefetch,
+        trustProjectInstructions: this.deps.defaultToolCallContext?.executionPolicy?.trustProjectInstructions,
+      });
+      const turn = buildTaskAgentLoopTurnContext({
+        task: input.task,
+        model,
+        modelInfo,
+        session,
+        workspaceContext: input.workspaceContext,
+        knowledgeContext: input.knowledgeContext,
+        cwd: assembled.cwd,
+        systemPrompt: assembled.systemPrompt,
+        userPrompt: assembled.userPrompt,
+        budget: { ...this.deps.defaultBudget, ...input.budget },
+        toolPolicy: { ...this.deps.defaultToolPolicy, ...input.toolPolicy },
+        toolCallContext: this.deps.defaultToolCallContext,
+        ...(this.deps.defaultProfileName ? { profileName: this.deps.defaultProfileName } : {}),
+        ...(this.deps.defaultReasoningEffort ? { reasoningEffort: this.deps.defaultReasoningEffort } : {}),
+        ...(this.deps.defaultExecutionPolicy ? { executionPolicy: this.deps.defaultExecutionPolicy } : {}),
+        ...(input.resumeState ? { resumeState: input.resumeState } : {}),
+        abortSignal: input.abortSignal,
+        role: input.role,
+      });
       const result = await this.deps.boundedRunner.run(turn);
+      finalizationInput = {
+        success: result.success,
+        changedFiles: result.changedFiles,
+      };
       const commandResults = result.commandResults.map((commandResult) => ({
         ...commandResult,
         relevantToTask: isTaskRelevantVerificationCommand(input.task, commandResult),
       }));
-      const workspaceOutcome = await workspace.finalize({
-        success: result.success,
-        changedFiles: result.changedFiles,
-      });
-      return {
+      finalResult = {
         ...result,
         commandResults,
-        workspace: workspaceOutcome,
       };
     } catch (error) {
-      await workspace.finalize({ success: false, changedFiles: [] });
-      throw error;
+      runError = error;
     }
+    let workspaceOutcome: AgentLoopWorkspaceInfo | undefined;
+    try {
+      workspaceOutcome = await workspace.finalize(finalizationInput);
+    } catch (error) {
+      if (!runError) {
+        throw error;
+      }
+    }
+    if (runError) {
+      throw runError;
+    }
+    return {
+      ...finalResult!,
+      workspace: workspaceOutcome,
+    };
   }
 
   async runTaskAsAgentResult(input: TaskAgentLoopRunInput): Promise<AgentResult> {

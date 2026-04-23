@@ -142,6 +142,7 @@ async function buildDeps() {
   const { buildCliDataSourceRegistry } = await import("../cli/data-source-bootstrap.js");
   const {
     createNativeChatAgentLoopRunner,
+    createNativeReviewAgentLoopRunner,
     createNativeTaskAgentLoopRunner,
     shouldUseNativeTaskAgentLoop,
   } = await import("../../orchestrator/execution/agent-loop/index.js");
@@ -323,6 +324,7 @@ async function buildDeps() {
   const agentLoopRunner = shouldUseNativeTaskAgentLoop(providerConfig, llmClient)
       ? createNativeTaskAgentLoopRunner({
           llmClient,
+          stateManager,
           providerConfig,
           toolRegistry,
           toolExecutor,
@@ -445,6 +447,16 @@ async function buildDeps() {
           traceBaseDir: stateManager.getBaseDir(),
         })
       : undefined;
+    const reviewAgentLoopRunner = shouldUseNativeTaskAgentLoop(providerConfig, llmClient)
+      ? createNativeReviewAgentLoopRunner({
+          llmClient,
+          providerConfig,
+          toolRegistry,
+          toolExecutor,
+          cwd: process.cwd(),
+          traceBaseDir: stateManager.getBaseDir(),
+        })
+      : undefined;
     chatRunner = new ChatRunner({
       stateManager,
       adapter,
@@ -453,6 +465,7 @@ async function buildDeps() {
       registry: toolRegistry,
       toolExecutor,
       chatAgentLoopRunner,
+      reviewAgentLoopRunner,
       approvalFn: chatToolApprovalFn,
     });
   } catch (err) {
@@ -633,20 +646,18 @@ async function startTUIDaemonMode(): Promise<void> {
     });
     let requestApproval: ((req: ApprovalRequest) => void) | null = null;
     const pendingApprovals: ApprovalRequest[] = [];
-    const enqueueApproval = (task: Task): Promise<boolean> =>
-      new Promise((resolve) => {
+    const enqueueApproval = (task: Task): Promise<boolean> => {
+      return new Promise((resolve) => {
         const request = { task, resolve };
-        if (requestApproval) requestApproval(request);
-        else pendingApprovals.push(request);
+        if (requestApproval) {
+          requestApproval(request);
+        } else {
+          pendingApprovals.push(request);
+        }
       });
-    const setRequestApproval = (fn: (req: ApprovalRequest) => void) => {
-      requestApproval = fn;
-      while (pendingApprovals.length > 0) {
-        requestApproval(pendingApprovals.shift()!);
-      }
     };
-    const chatToolApprovalFn = async (description: string): Promise<boolean> =>
-      enqueueApproval({
+    const chatToolApprovalFn = async (description: string): Promise<boolean> => {
+      return enqueueApproval({
         id: randomUUID(),
         goal_id: "chat-tool-approval",
         strategy_id: null,
@@ -673,7 +684,15 @@ async function startTUIDaemonMode(): Promise<void> {
         timeout_at: null,
         heartbeat_at: null,
         created_at: new Date().toISOString(),
-      } as Task);
+      });
+    };
+    const setRequestApproval = (fn: (req: ApprovalRequest) => void) => {
+      requestApproval = fn;
+      while (pendingApprovals.length > 0) {
+        const pending = pendingApprovals.shift();
+        if (pending) requestApproval(pending);
+      }
+    };
 
     const providerConfig = await loadProviderConfig();
     const cwd = getCwd();
@@ -683,13 +702,27 @@ async function startTUIDaemonMode(): Promise<void> {
     try {
       const { ChatRunner } = await import("../../interface/chat/chat-runner.js");
       const { buildLLMClient, buildAdapterRegistry } = await import("../../base/llm/provider-factory.js");
-      const { createNativeChatAgentLoopRunner, shouldUseNativeTaskAgentLoop } = await import("../../orchestrator/execution/agent-loop/index.js");
+      const {
+        createNativeChatAgentLoopRunner,
+        createNativeReviewAgentLoopRunner,
+        shouldUseNativeTaskAgentLoop,
+      } = await import("../../orchestrator/execution/agent-loop/index.js");
       const llmClient = await buildLLMClient();
       const adapterRegistry = await buildAdapterRegistry(llmClient);
       const adapterType = providerConfig.adapter ?? "claude_code_cli";
       const adapter = adapterRegistry.getAdapter(adapterType);
       const chatAgentLoopRunner = shouldUseNativeTaskAgentLoop(providerConfig, llmClient)
         ? createNativeChatAgentLoopRunner({
+            llmClient,
+            providerConfig,
+            toolRegistry,
+            toolExecutor,
+            cwd: process.cwd(),
+            traceBaseDir: stateManager.getBaseDir(),
+          })
+        : undefined;
+      const reviewAgentLoopRunner = shouldUseNativeTaskAgentLoop(providerConfig, llmClient)
+        ? createNativeReviewAgentLoopRunner({
             llmClient,
             providerConfig,
             toolRegistry,
@@ -706,6 +739,7 @@ async function startTUIDaemonMode(): Promise<void> {
         registry: toolRegistry,
         toolExecutor,
         chatAgentLoopRunner,
+        reviewAgentLoopRunner,
         approvalFn: chatToolApprovalFn,
       });
     } catch (err) {

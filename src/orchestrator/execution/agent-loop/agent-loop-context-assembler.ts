@@ -1,8 +1,8 @@
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
-import { homedir } from "node:os";
+import { resolve } from "node:path";
 import type { Task } from "../../../base/types/task.js";
+import { createGroundingGateway, type GroundingGateway } from "../../../grounding/gateway.js";
+import { discoverAgentInstructionCandidates } from "../../../grounding/providers/agents-provider.js";
+import type { GroundingSection } from "../../../grounding/contracts.js";
 
 export interface AgentLoopContextBlock {
   id: string;
@@ -41,72 +41,92 @@ export interface TaskAgentLoopAssembly {
   contextBlocks: AgentLoopContextBlock[];
 }
 
+function sectionToBlock(section: GroundingSection): AgentLoopContextBlock {
+  const source = section.sources[0]?.path ?? section.sources[0]?.label ?? section.key;
+  const id = section.key === "soil_knowledge" ? "soil-prefetch" : section.key;
+  return {
+    id,
+    source,
+    content: section.content,
+    priority: section.priority,
+  };
+}
+
+function renderStaticSections(sections: GroundingSection[]): string {
+  return sections
+    .map((section) => `## ${section.title}\n${section.content}`.trim())
+    .join("\n\n")
+    .trim();
+}
+
 export class AgentLoopContextAssembler {
+  constructor(private readonly groundingGateway: GroundingGateway = createGroundingGateway()) {}
+
   async assembleTask(input: TaskAgentLoopAssemblyInput): Promise<TaskAgentLoopAssembly> {
     const cwd = resolve(input.cwd ?? process.cwd());
-    const blocks: AgentLoopContextBlock[] = [];
-    const projectDocs = await loadProjectInstructionBlocks(cwd, input.maxProjectDocChars ?? 20_000, {
+    const soilQuery = input.soilPrefetch
+      ? async ({ query, rootDir, limit }: { query: string; rootDir: string; limit: number }) => {
+          const soil = await input.soilPrefetch!({ query, rootDir, limit });
+          if (!soil?.content.trim()) {
+            return null;
+          }
+          return {
+            retrievalSource: (soil.retrievalSource ?? "prefetch") as "prefetch" | "index" | "manifest",
+            warnings: soil.warnings ?? [],
+            hits: [
+              {
+                soilId: soil.soilIds?.[0] ?? "soil:prefetch",
+                title: "Prefetched Soil context",
+                summary: soil.content,
+              },
+            ],
+          };
+        }
+      : undefined;
+
+    const query = [
+      input.task.work_description,
+      input.task.approach,
+      ...input.task.success_criteria.map((criterion) => criterion.description),
+      input.workspaceContext ?? "",
+      input.knowledgeContext ?? "",
+    ].join("\n");
+
+    const bundle = await this.groundingGateway.build({
+      surface: "agent_loop",
+      purpose: "task_execution",
+      workspaceRoot: cwd,
+      goalId: input.task.goal_id,
+      taskId: input.task.id,
+      query,
+      userMessage: input.task.work_description,
       trustProjectInstructions: input.trustProjectInstructions ?? true,
+      workspaceContext: input.workspaceContext,
+      knowledgeContext: input.knowledgeContext,
+      soilQuery,
+      include: {
+        session_history: false,
+        progress_history: false,
+        trust_state: false,
+        provider_state: false,
+        plugins: false,
+      },
     });
-    blocks.push(...projectDocs);
 
-    if (input.workspaceContext?.trim()) {
-      blocks.push({
-        id: "workspace-context",
-        source: "workspace",
-        content: input.workspaceContext,
-        priority: 20,
-      });
-    }
-
-    if (input.knowledgeContext?.trim()) {
-      blocks.push({
-        id: "knowledge-context",
-        source: "knowledge",
-        content: input.knowledgeContext,
-        priority: 30,
-      });
-    }
-
-    if (input.soilPrefetch) {
-      const query = [
-        input.task.work_description,
-        input.task.approach,
-        ...input.task.success_criteria.map((criterion) => criterion.description),
-        input.workspaceContext ?? "",
-        input.knowledgeContext ?? "",
-      ].join("\n");
-      const soil = await input.soilPrefetch({ query, rootDir: cwd, limit: 5 });
-      if (soil?.content.trim()) {
-        blocks.push({
-          id: "soil-prefetch",
-          source: `soil:${soil.retrievalSource ?? "unknown"}`,
-          content: [
-            soil.content,
-            soil.soilIds?.length ? `Soil IDs: ${soil.soilIds.join(", ")}` : "",
-            soil.warnings?.length ? `Warnings: ${soil.warnings.join("; ")}` : "",
-          ].filter(Boolean).join("\n"),
-          priority: 15,
-        });
-      }
-    }
-
+    const blocks = bundle.dynamicSections.map(sectionToBlock).sort((a, b) => a.priority - b.priority);
     const userPrompt = [
       `Task: ${input.task.work_description}`,
       `Approach: ${input.task.approach}`,
       `Success criteria:\n${input.task.success_criteria.map((c) => `- ${c.description}`).join("\n")}`,
-      blocks.length ? `Context:\n${blocks.sort((a, b) => a.priority - b.priority).map((b) => `[${b.source}]\n${b.content}`).join("\n\n")}` : "",
+      blocks.length > 0
+        ? `Context:\n${blocks.map((block) => `[${block.source}]\n${block.content}`).join("\n\n")}`
+        : "",
       "Return final output as JSON matching the required schema.",
     ].filter(Boolean).join("\n\n");
 
     return {
       cwd,
-      systemPrompt: [
-        "You are PulSeed's task agentloop.",
-        "Choose tools, inspect results, and continue until this task has a final answer.",
-        "Do not decide goal completion, global priority, stall, or replan.",
-        "Keep changes scoped to the task and run appropriate verification.",
-      ].join("\n"),
+      systemPrompt: renderStaticSections(bundle.staticSections),
       userPrompt,
       contextBlocks: blocks,
     };
@@ -118,62 +138,13 @@ export async function loadProjectInstructionBlocks(
   maxChars: number,
   options: { trustProjectInstructions?: boolean } = {},
 ): Promise<AgentLoopContextBlock[]> {
-  const root = findProjectRoot(cwd);
-  const dirs: string[] = [];
-  let cursor = resolve(cwd);
-  while (true) {
-    dirs.push(cursor);
-    if (cursor === root) break;
-    const next = dirname(cursor);
-    if (next === cursor) break;
-    cursor = next;
-  }
-
-  const blocks: AgentLoopContextBlock[] = [];
-  let remaining = maxChars;
-  const homeCandidates = [
-    join(homedir(), ".pulseed", "AGENTS.md"),
-    join(homedir(), ".pulseed", "AGENTS.override.md"),
-  ];
-  for (const filePath of homeCandidates) {
-    if (!existsSync(filePath) || remaining <= 0) continue;
-    const content = (await readFile(filePath, "utf-8")).slice(0, remaining);
-    remaining -= content.length;
-    blocks.push({
-      id: `project-doc:${filePath}`,
-      source: filePath,
-      content,
-      priority: filePath.endsWith("override.md") ? 1 : 2,
-    });
-  }
-
-  if (options.trustProjectInstructions === false) {
-    return blocks;
-  }
-
-  for (const dir of dirs.reverse()) {
-    const candidates = [join(dir, "AGENTS.md"), join(dir, "AGENTS.override.md")];
-    for (const filePath of candidates) {
-      if (!existsSync(filePath) || remaining <= 0) continue;
-      const content = (await readFile(filePath, "utf-8")).slice(0, remaining);
-      remaining -= content.length;
-      blocks.push({
-        id: `project-doc:${filePath}`,
-        source: filePath,
-        content,
-        priority: filePath.endsWith("override.md") ? 3 : 5,
-      });
-    }
-  }
-  return blocks;
-}
-
-export function findProjectRoot(cwd: string): string {
-  let cursor = resolve(cwd);
-  while (true) {
-    if (existsSync(join(cursor, ".git"))) return cursor;
-    const next = dirname(cursor);
-    if (next === cursor) return resolve(cwd);
-    cursor = next;
-  }
+  const candidates = await discoverAgentInstructionCandidates(cwd, maxChars, options);
+  return candidates
+    .filter((candidate) => candidate.accepted)
+    .map((candidate) => ({
+      id: `project-doc:${candidate.filePath}`,
+      source: candidate.filePath,
+      content: candidate.content,
+      priority: candidate.priority,
+    }));
 }

@@ -164,32 +164,6 @@ describe("chat viewport", () => {
     expect(keys.indexOf("indicator-bottom")).toBeLessThan(keys.indexOf("processing"));
     expect(keys.indexOf("processing")).toBeLessThan(keys.indexOf("composer-helper"));
   });
-
-  it("preserves markdown segments in fullscreen render lines", () => {
-    const messages = [
-      {
-        id: "m1",
-        role: "pulseed" as const,
-        text: "**hello** `world`",
-        timestamp: new Date(),
-      },
-    ];
-    const viewport = buildChatViewport(messages, 40, 6, 0);
-
-    const lines = buildFullscreenChatRenderLines({
-      availableCols: 40,
-      availableRows: 10,
-      viewport,
-      composerLines: [{ key: "composer-input", text: "input" }],
-      isProcessing: false,
-      spinnerGlyph: "⠋",
-      spinnerVerb: "Thinking",
-    });
-
-    const messageLine = lines.find((line) => line.key.startsWith("m1:pulseed:0:0"));
-    expect(messageLine?.segments?.length).toBeGreaterThan(1);
-    expect(messageLine?.segments?.some((segment) => segment.bold)).toBe(true);
-  });
 });
 
 describe("composer sizing", () => {

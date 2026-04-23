@@ -3,11 +3,7 @@ import { cwd as processCwd } from "node:process";
 import type { Task } from "../../../base/types/task.js";
 import type { ToolCallContext } from "../../../tools/types.js";
 import type { AgentLoopBudget } from "./agent-loop-budget.js";
-import type {
-  AgentLoopModelInfo,
-  AgentLoopModelRef,
-  AgentLoopReasoningEffort,
-} from "./agent-loop-model.js";
+import type { AgentLoopModelInfo, AgentLoopModelRef } from "./agent-loop-model.js";
 import type { AgentLoopCompletionValidationResult } from "./agent-loop-result.js";
 import type { AgentLoopSession } from "./agent-loop-session.js";
 import type { AgentLoopSessionState } from "./agent-loop-session-state.js";
@@ -16,7 +12,7 @@ import { withDefaultBudget } from "./agent-loop-turn-context.js";
 import { TaskAgentLoopOutputSchema, type TaskAgentLoopOutput } from "./task-agent-loop-result.js";
 import { buildAgentLoopBaseInstructions } from "./agent-loop-prompts.js";
 import { isTaskRelevantVerificationCommand } from "./task-agent-loop-verification.js";
-import type { ExecutionPolicy, SubagentRole } from "./execution-policy.js";
+import type { SubagentRole } from "./execution-policy.js";
 
 export interface TaskAgentLoopContextInput {
   task: Task;
@@ -31,9 +27,6 @@ export interface TaskAgentLoopContextInput {
   budget?: Partial<AgentLoopBudget>;
   toolPolicy?: AgentLoopToolPolicy;
   toolCallContext?: Partial<ToolCallContext>;
-  profileName?: string;
-  reasoningEffort?: AgentLoopReasoningEffort;
-  executionPolicy?: ExecutionPolicy;
   resumeState?: AgentLoopSessionState;
   abortSignal?: AbortSignal;
   role?: SubagentRole;
@@ -43,6 +36,15 @@ export function buildTaskAgentLoopTurnContext(
   input: TaskAgentLoopContextInput,
 ): AgentLoopTurnContext<TaskAgentLoopOutput> {
   const cwd = input.cwd ?? processCwd();
+  const baseSystemPrompt = buildAgentLoopBaseInstructions({
+    mode: "task",
+    extraRules: [
+      "When you return status=done, include concrete completionEvidence.",
+      "If files changed or you claim files changed, run at least one focused verification command through tools before the final answer.",
+      "Do not return status=done while blockers remain.",
+    ],
+    role: input.role,
+  });
   const userPrompt = input.userPrompt ?? [
     `Task: ${input.task.work_description}`,
     `Approach: ${input.task.approach}`,
@@ -57,30 +59,19 @@ export function buildTaskAgentLoopTurnContext(
     turnId: randomUUID(),
     goalId: input.task.goal_id,
     taskId: input.task.id,
-    ...(input.profileName ? { profileName: input.profileName } : {}),
     cwd,
     model: input.model,
     modelInfo: input.modelInfo,
-    ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
     messages: [
       {
         role: "system",
-        content: input.systemPrompt ?? buildAgentLoopBaseInstructions({
-          mode: "task",
-          extraRules: [
-            "When you return status=done, include concrete completionEvidence.",
-            "If files changed or you claim files changed, run at least one focused verification command through tools before the final answer.",
-            "Do not return status=done while blockers remain.",
-          ],
-          role: input.role,
-        }),
+        content: [baseSystemPrompt, input.systemPrompt?.trim() ?? ""].filter(Boolean).join("\n\n"),
       },
       { role: "user", content: userPrompt },
     ],
     outputSchema: TaskAgentLoopOutputSchema,
     budget: withDefaultBudget(input.budget),
     toolPolicy: input.toolPolicy ?? {},
-    ...(input.executionPolicy ? { executionPolicy: input.executionPolicy } : {}),
     completionValidator: ({ output, changedFiles, commandResults }): AgentLoopCompletionValidationResult => {
       if (output.status !== "done") return { ok: true, reasons: [] };
 

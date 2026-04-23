@@ -285,6 +285,7 @@ export async function buildDeps(
   const agentLoopRunner = shouldUseNativeTaskAgentLoop(providerConfig, llmClient)
     ? createNativeTaskAgentLoopRunner({
         llmClient,
+      stateManager,
       providerConfig,
       toolRegistry,
       toolExecutor,

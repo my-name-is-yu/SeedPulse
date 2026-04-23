@@ -121,12 +121,11 @@ export class ChatAgentLoopRunner {
         session,
         turnId,
         goalId: input.goalId ?? "chat",
+        ...(this.deps.defaultProfileName ? { profileName: this.deps.defaultProfileName } : {}),
         cwd,
         model,
         modelInfo,
-        ...(this.deps.defaultProfileName ? { profileName: this.deps.defaultProfileName } : {}),
         ...(this.deps.defaultReasoningEffort ? { reasoningEffort: this.deps.defaultReasoningEffort } : {}),
-        loadPersistedState: input.resumeOnly || input.resumeState !== undefined,
         messages: input.resumeOnly
           ? []
           : [
@@ -151,6 +150,7 @@ export class ChatAgentLoopRunner {
         budget: withDefaultBudget({ ...this.deps.defaultBudget, ...input.budget }),
         toolPolicy: { ...this.deps.defaultToolPolicy, ...input.toolPolicy },
         ...(input.resumeState ? { resumeState: input.resumeState } : {}),
+        loadPersistedState: input.resumeOnly === true || input.resumeState !== undefined || input.resumeStatePath !== undefined,
         ...(this.deps.defaultExecutionPolicy ? { executionPolicy: this.deps.defaultExecutionPolicy } : {}),
         toolCallContext: {
           cwd,

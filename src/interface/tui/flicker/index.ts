@@ -4,7 +4,7 @@ export { ENTER_ALT_SCREEN, EXIT_ALT_SCREEN, BSU, ESU, CURSOR_HOME, ERASE_SCREEN,
 export { isSynchronizedOutputSupported, isTmuxCC } from "./terminal-detect.js";
 export { createFrameWriter, type FrameWriter } from "./frame-writer.js";
 export { AlternateScreen } from "./AlternateScreen.js";
-export { MouseTracking, attachMouseTracking } from "./MouseTracking.js";
+export { MouseTracking, attachMouseTracking, isMouseTrackingEnabled } from "./MouseTracking.js";
 
 /**
  * Check if no-flicker mode is enabled.
@@ -19,14 +19,4 @@ export async function isNoFlickerEnabled(): Promise<boolean> {
   // Fall back to config file
   const config = await loadGlobalConfig();
   return config.no_flicker;
-}
-
-/**
- * Mouse tracking blocks normal terminal text selection in many terminals.
- * Keep it opt-in until we have a better mode switch inside the TUI.
- */
-export function isMouseTrackingEnabled(): boolean {
-  const envVal = process.env.PULSEED_TUI_MOUSE_TRACKING;
-  if (!envVal) return false;
-  return envVal === "1" || envVal.toLowerCase() === "true";
 }

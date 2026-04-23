@@ -18,6 +18,17 @@ vi.mock("../../../platform/observation/context-provider.js", () => ({
 vi.mock("../grounding.js", () => ({
   buildStaticSystemPrompt: () => "",
   buildDynamicContextPrompt: async () => "",
+  createChatGroundingGateway: () => ({
+    build: async () => ({
+      profile: "chat/general_turn",
+      staticSections: [],
+      dynamicSections: [],
+      warnings: [],
+      metrics: { totalEstimatedTokens: 0, buildMs: 0, cacheHits: 0 },
+      traces: { source: [], retrievalIds: [] },
+      render: () => "",
+    }),
+  }),
 }));
 
 function makeMockStateManager(): StateManager {

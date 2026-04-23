@@ -1,5 +1,7 @@
 import type { ILLMClient } from "../../../base/llm/llm-client.js";
 import type { ProviderConfig } from "../../../base/llm/provider-config.js";
+import type { StateManager } from "../../../base/state/state-manager.js";
+import { createGroundingGateway } from "../../../grounding/gateway.js";
 import type { ToolExecutor } from "../../../tools/executor.js";
 import type { ToolRegistry } from "../../../tools/registry.js";
 import {
@@ -18,15 +20,17 @@ import { ChatAgentLoopRunner } from "./chat-agent-loop-runner.js";
 import { ReviewAgentLoopRunner } from "./review-agent-loop-runner.js";
 import { TaskAgentLoopRunner } from "./task-agent-loop-runner.js";
 import type { AgentLoopBudget } from "./agent-loop-budget.js";
+import { AgentLoopContextAssembler } from "./agent-loop-context-assembler.js";
+import { resolveAgentLoopDefaultProfile } from "./agent-loop-default-profile.js";
 import type { AgentLoopToolPolicy } from "./agent-loop-turn-context.js";
 import type { SoilPrefetchQuery, SoilPrefetchResult } from "./agent-loop-context-assembler.js";
-import { resolveAgentLoopDefaultProfile } from "./agent-loop-default-profile.js";
 import { createPersistentAgentLoopSessionFactory } from "./agent-loop-session-factory.js";
 import type { AgentLoopWorktreePolicy } from "./task-agent-loop-worktree.js";
 
 export interface NativeTaskAgentLoopRuntimeDeps {
   llmClient: ILLMClient;
   providerConfig: ProviderConfig;
+  stateManager?: StateManager;
   toolRegistry: ToolRegistry;
   toolExecutor: ToolExecutor;
   cwd?: string;
@@ -66,10 +70,13 @@ export function createNativeTaskAgentLoopRunner(
     defaultBudget: profile.budget,
     defaultToolPolicy: profile.toolPolicy,
     defaultToolCallContext: profile.executionPolicy ? { executionPolicy: profile.executionPolicy } : undefined,
-    defaultWorktreePolicy: profile.worktreePolicy ?? deps.defaultWorktreePolicy,
+    defaultWorktreePolicy: profile.worktreePolicy,
     defaultReasoningEffort: profile.reasoningEffort,
     defaultProfileName: profile.name,
     defaultExecutionPolicy: profile.executionPolicy,
+    contextAssembler: new AgentLoopContextAssembler(createGroundingGateway({
+      ...(deps.stateManager ? { stateManager: deps.stateManager } : {}),
+    })),
     soilPrefetch: deps.soilPrefetch,
     cwd: deps.cwd,
     createSession: deps.traceBaseDir
@@ -119,6 +126,8 @@ export function createNativeReviewAgentLoopRunner(
     surface: "review",
     workspaceRoot: deps.cwd ?? process.cwd(),
     security: deps.providerConfig.agent_loop?.security,
+    budget: deps.defaultBudget,
+    toolPolicy: deps.defaultToolPolicy,
   });
 
   return new ReviewAgentLoopRunner({

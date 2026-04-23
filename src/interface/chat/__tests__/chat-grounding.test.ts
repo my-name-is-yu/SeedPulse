@@ -32,7 +32,7 @@ vi.mock("../../../adapters/spawn-helper.js", () => ({
 }));
 
 // ─── Module imports (after mocks) ───
-import { buildSystemPrompt } from "../grounding.js";
+import { buildChatGroundingBundle, buildSystemPrompt } from "../grounding.js";
 import { ClaudeAPIAdapter } from "../../../adapters/agents/claude-api.js";
 import { ClaudeCodeCLIAdapter } from "../../../adapters/agents/claude-code-cli.js";
 import { OpenAICodexCLIAdapter } from "../../../adapters/agents/openai-codex.js";
@@ -125,14 +125,6 @@ describe("buildSystemPrompt (grounding.ts)", () => {
     expect(prompt).toContain("## Dynamic Context");
     expect(prompt).toContain("Platform operating policy overrides persona and customization text if they conflict.");
     expect(prompt.length).toBeGreaterThan(0);
-  });
-
-  it("biases final answers toward concise structured markdown", async () => {
-    const sm = makeMockStateManager();
-    const prompt = await buildSystemPrompt({ stateManager: sm, homeDir: tmpDir });
-
-    expect(prompt).toContain("concise structured markdown");
-    expect(prompt).toContain("short headings and bullets");
   });
 
   it("aligns default identity text with direct tool execution", async () => {
@@ -254,6 +246,19 @@ describe("buildSystemPrompt (grounding.ts)", () => {
 
     expect(prompt).not.toContain("[idle]");
     expect(prompt).toContain("Idle task");
+  });
+
+  it("builds a chat grounding bundle with dynamic goal state", async () => {
+    const sm = makeMockStateManager(
+      ["goal-1"],
+      {
+        "goal-1": { title: "Ship feature X", status: "active", loop_status: "running" },
+      }
+    );
+
+    const bundle = await buildChatGroundingBundle({ stateManager: sm, workspaceRoot: "/repo", userMessage: "Ship feature X" });
+
+    expect(bundle.dynamicSections.some((section) => section.key === "goal_state" && section.content.includes("Ship feature X"))).toBe(true);
   });
 });
 

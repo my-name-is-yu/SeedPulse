@@ -4,6 +4,14 @@ import { getTrustedTuiControlStream } from "../terminal-output.js";
 
 type MouseTrackingStream = Pick<NodeJS.WriteStream, "write">;
 
+export function isMouseTrackingEnabled(): boolean {
+  const envVal = process.env.PULSEED_MOUSE_TRACKING;
+  if (!envVal) {
+    return true;
+  }
+  return envVal === "1" || envVal.toLowerCase() === "true";
+}
+
 export function attachMouseTracking(stream: MouseTrackingStream): () => void {
   stream.write(ENABLE_MOUSE_TRACKING);
 

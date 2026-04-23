@@ -99,5 +99,6 @@ describe("AgentLoopContextAssembler", () => {
 
     expect(assembled.userPrompt).toContain("Home instruction");
     expect(assembled.userPrompt).toContain("Repo instruction");
+    expect(assembled.systemPrompt).toContain("## Identity");
   });
 });

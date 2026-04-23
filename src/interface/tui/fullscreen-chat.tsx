@@ -51,8 +51,6 @@ type RenderSegment = {
   backgroundColor?: string;
   bold?: boolean;
   dim?: boolean;
-  italic?: boolean;
-  code?: boolean;
 };
 
 type RenderLine = {
@@ -561,34 +559,6 @@ function buildComposerLines(args: {
 function renderMessageRow(row: ChatDisplayRow, cols: number): RenderLine {
   if (row.kind === "spacer") {
     return { key: row.key, text: " ".repeat(cols) };
-  }
-
-  if (row.segments && row.segments.length > 0) {
-    const segments = row.segments.map((segment) => ({
-      text: segment.text,
-      color: segment.color,
-      bold: segment.bold,
-      italic: segment.italic,
-      code: segment.code,
-    }));
-    const remainingWidth = cols - stringWidth(row.text);
-    if (remainingWidth > 0) {
-      segments.push({
-        text: " ".repeat(remainingWidth),
-        color: row.color,
-        bold: undefined,
-        italic: undefined,
-        code: undefined,
-      });
-    }
-    return {
-      key: row.key,
-      segments,
-      color: row.color,
-      backgroundColor: row.backgroundColor,
-      bold: row.bold,
-      dim: row.dim,
-    };
   }
 
   return {
@@ -1188,11 +1158,10 @@ export function FullscreenChat({
             line.segments.map((segment, index) => (
               <Text
                 key={`${line.key}-${index}`}
-                color={segment.color ?? (segment.code ? theme.codeInline : line.color)}
+                color={segment.color ?? line.color}
                 backgroundColor={segment.backgroundColor ?? line.backgroundColor}
                 bold={segment.bold ?? line.bold}
                 dimColor={segment.dim ?? line.dim}
-                italic={segment.italic}
               >
                 {index === 0 && line.protected
                   ? `${PROTECTED_ROW_MARKER}${segment.text}`
