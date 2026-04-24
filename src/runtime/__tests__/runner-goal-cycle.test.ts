@@ -309,4 +309,113 @@ describe("runDaemonGoalCycleLoop", () => {
     expect(context.maybeRefreshProviderRuntime).toHaveBeenCalledWith(1);
     expect(context.sleep).toHaveBeenCalledWith(0);
   });
+
+  it("broadcasts structured wait status and daemon waiting fields", async () => {
+    const broadcast = vi.fn();
+    const run = vi.fn().mockResolvedValue(makeLoopResult({
+      iterations: [
+        {
+          ...makeLoopResult().iterations[0]!,
+          waitStrategyId: "wait-1",
+          waitObserveOnly: true,
+          waitExpired: true,
+          waitApprovalId: "wait-goal-1-wait-1",
+          waitExpiryOutcome: {
+            status: "approval_required",
+            goal_id: "goal-1",
+            strategy_id: "wait-1",
+            details: "external submit approval required",
+          },
+          skipped: true,
+          skipReason: "wait_observe_only",
+        },
+      ],
+    }));
+
+    let context: Record<string, unknown>;
+    context = {
+      running: true,
+      shuttingDown: false,
+      currentGoalIds: ["goal-1"],
+      config: { iterations_per_cycle: 1 },
+      state: {
+        loop_count: 0,
+        last_loop_at: null,
+        status: "running",
+        active_goals: [],
+      },
+      consecutiveIdleCycles: 0,
+      currentLoopIndex: 0,
+      coreLoop: { run },
+      eventServer: { broadcast },
+      stateManager: {
+        loadGoal: vi.fn().mockResolvedValue({ status: "active" }),
+      },
+      logger: { info: vi.fn() },
+      refreshOperationalState: vi.fn(),
+      collectGoalCycleSnapshot: vi.fn().mockResolvedValue([]),
+      determineActiveGoals: vi.fn().mockResolvedValue([]),
+      maybeRefreshProviderRuntime: vi.fn().mockResolvedValue(undefined),
+      broadcastGoalUpdated: vi.fn().mockResolvedValue(undefined),
+      handleLoopError: vi.fn(),
+      saveDaemonState: vi.fn().mockResolvedValue(undefined),
+      processCronTasks: vi.fn().mockResolvedValue(undefined),
+      processScheduleEntries: vi.fn().mockResolvedValue(undefined),
+      expireCronTasks: vi.fn().mockResolvedValue(undefined),
+      proactiveTick: vi.fn().mockResolvedValue(undefined),
+      runRuntimeStoreMaintenance: vi.fn().mockResolvedValue(undefined),
+      getNextInterval: vi.fn().mockReturnValue(300_000),
+      getMaxGapScore: vi.fn().mockResolvedValue(0.5),
+      calculateAdaptiveInterval: vi.fn().mockReturnValue(300_000),
+      resolveWaitDeadlines: vi.fn().mockResolvedValue({
+        next_observe_at: "2026-04-24T12:00:00.000Z",
+        waiting_goals: [
+          {
+            goal_id: "goal-1",
+            strategy_id: "wait-1",
+            next_observe_at: "2026-04-24T12:00:00.000Z",
+            wait_until: "2026-04-24T12:00:00.000Z",
+            wait_reason: "approval required for external submit",
+          },
+        ],
+      }),
+      clampIntervalToWaitDeadline: vi.fn().mockReturnValue(0),
+      sleep: vi.fn().mockImplementation(async () => {
+        context.running = false;
+      }),
+      handleCriticalError: vi.fn(),
+      cleanup: vi.fn().mockResolvedValue(undefined),
+    };
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-24T12:00:00.000Z"));
+    try {
+      await runDaemonGoalCycleLoop(context);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(broadcast).toHaveBeenCalledWith(
+      "wait_status",
+      expect.objectContaining({
+        goalId: "goal-1",
+        strategyId: "wait-1",
+        approvalId: "wait-goal-1-wait-1",
+        skipReason: "wait_observe_only",
+      })
+    );
+    expect(broadcast).toHaveBeenCalledWith(
+      "daemon_status",
+      expect.objectContaining({
+        waitingGoals: [
+          expect.objectContaining({
+            goal_id: "goal-1",
+            strategy_id: "wait-1",
+          }),
+        ],
+        nextObserveAt: "2026-04-24T12:00:00.000Z",
+        approvalPendingCount: 1,
+      })
+    );
+  });
 });

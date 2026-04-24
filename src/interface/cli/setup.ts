@@ -54,6 +54,7 @@ import { formatOperationError } from "./utils.js";
 import { ToolRegistry, ToolExecutor, ToolPermissionManager, ConcurrencyController, createBuiltinTools } from "../../tools/index.js";
 import { isSafeBashCommand } from "../tui/bash-mode.js";
 import {
+  createNativeCorePhaseRunner,
   createNativeTaskAgentLoopRunner,
   shouldUseNativeTaskAgentLoop,
   type SoilPrefetchQuery,
@@ -302,6 +303,18 @@ export async function buildDeps(
         : undefined,
     })
     : undefined;
+  const corePhaseRunner = shouldUseNativeTaskAgentLoop(providerConfig, llmClient)
+    ? createNativeCorePhaseRunner({
+        llmClient,
+        stateManager,
+        providerConfig,
+        toolRegistry,
+        toolExecutor,
+        cwd: resolvedWorkspacePath,
+        traceBaseDir: stateManager.getBaseDir(),
+        soilPrefetch,
+      })
+    : undefined;
 
   const taskLifecycle = new TaskLifecycle({
     stateManager,
@@ -388,6 +401,7 @@ export async function buildDeps(
     goalRefiner,
     toolExecutor,
     toolRegistry,
+    corePhaseRunner,
   }, config);
 
   coreLoop.setTimeHorizonEngine(new TimeHorizonEngine());

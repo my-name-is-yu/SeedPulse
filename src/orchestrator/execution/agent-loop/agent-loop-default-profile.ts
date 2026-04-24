@@ -88,6 +88,13 @@ const DEFAULT_CORE_PHASE_BUDGET: Partial<Record<CorePhaseKind, Partial<AgentLoop
     maxWallClockMs: 90_000,
     compactionMaxMessages: 6,
   },
+  wait_observation: {
+    maxModelTurns: 3,
+    maxToolCalls: 8,
+    maxWallClockMs: 45_000,
+    maxRepeatedToolCalls: 1,
+    compactionMaxMessages: 4,
+  },
   knowledge_refresh: {
     maxModelTurns: 6,
     maxToolCalls: 8,
@@ -171,6 +178,26 @@ const CORE_PHASE_PROFILE_DEFAULTS: Record<CorePhaseKind, CorePhaseProfileDefault
       ],
     },
     failPolicy: "fallback_deterministic",
+  },
+  wait_observation: {
+    enabled: true,
+    maxInvocationsPerIteration: 1,
+    budget: DEFAULT_CORE_PHASE_BUDGET.wait_observation ?? {},
+    toolPolicy: {
+      allowedTools: [
+        "process_session_read",
+        "process_session_list",
+        "process-status",
+        "goal_state",
+        "task_get",
+        "progress_history",
+        "read-pulseed-file",
+        "json_query",
+        "glob",
+      ],
+      requiredTools: ["process_session_read", "process_session_list"],
+    },
+    failPolicy: "return_low_confidence",
   },
   knowledge_refresh: {
     enabled: true,

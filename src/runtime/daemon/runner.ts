@@ -699,6 +699,11 @@ export class DaemonRunner {
         activeGoals: this.state.active_goals,
         loopCount: this.state.loop_count,
         lastLoopAt: this.state.last_loop_at,
+        waitingGoals: this.state.waiting_goals ?? [],
+        nextObserveAt: this.state.next_observe_at ?? null,
+        lastObserveAt: this.state.last_observe_at ?? null,
+        lastWaitReason: this.state.last_wait_reason ?? null,
+        approvalPendingCount: this.state.approval_pending_count ?? 0,
       });
     }
     await this.broadcastGoalUpdated(goalId, result.status);

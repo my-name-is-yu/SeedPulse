@@ -15,7 +15,45 @@ function buildLoopCompletePayload(goalId: string, result: LoopResult): Record<st
     iterations: result.totalIterations,
     gap: lastIteration?.gapAggregate,
     status: result.finalStatus,
+    wait: lastIteration?.waitExpiryOutcome
+      ? {
+          strategyId: lastIteration.waitStrategyId,
+          status: lastIteration.waitExpiryOutcome.status,
+          details: lastIteration.waitExpiryOutcome.details,
+          approvalId: lastIteration.waitApprovalId,
+          observeOnly: lastIteration.waitObserveOnly ?? false,
+        }
+      : undefined,
   };
+}
+
+function buildDaemonStatusPayload(context: GoalCycleRunnerContext): Record<string, unknown> {
+  return {
+    status: context.state.status,
+    activeGoals: context.state.active_goals,
+    loopCount: context.state.loop_count,
+    lastLoopAt: context.state.last_loop_at,
+    waitingGoals: context.state.waiting_goals ?? [],
+    nextObserveAt: context.state.next_observe_at ?? null,
+    lastObserveAt: context.state.last_observe_at ?? null,
+    lastWaitReason: context.state.last_wait_reason ?? null,
+    approvalPendingCount: context.state.approval_pending_count ?? 0,
+  };
+}
+
+function applyWaitDeadlineStatus(context: GoalCycleRunnerContext, waitDeadlines: unknown): void {
+  const resolution = waitDeadlines as {
+    next_observe_at?: string | null;
+    waiting_goals?: Array<{ wait_reason?: string; approval_pending?: boolean }>;
+  } | null | undefined;
+  const waitingGoals = Array.isArray(resolution?.waiting_goals) ? resolution.waiting_goals : [];
+  context.state.waiting_goals = waitingGoals;
+  context.state.next_observe_at = resolution?.next_observe_at ?? null;
+  context.state.last_wait_reason = waitingGoals[0]?.wait_reason ?? null;
+  context.state.approval_pending_count = waitingGoals.filter((goal) =>
+    goal.approval_pending === true
+      || (typeof goal.wait_reason === "string" && goal.wait_reason.toLowerCase().includes("approval"))
+  ).length;
 }
 
 function buildLoopErrorPayload(goalId: string, error: unknown, context: GoalCycleRunnerContext): Record<string, unknown> {
@@ -37,6 +75,9 @@ export async function runDaemonGoalCycleLoop(context: GoalCycleRunnerContext): P
       context.refreshOperationalState();
       const cycleSnapshot = await context.collectGoalCycleSnapshot(goalIds);
       const waitDeadlines = await context.resolveWaitDeadlines?.(goalIds);
+      if (waitDeadlines) {
+        applyWaitDeadlineStatus(context, waitDeadlines);
+      }
       const scheduledActiveGoals = await context.determineActiveGoals(goalIds, cycleSnapshot);
       const dueWaitGoalIds = waitDeadlines ? getDueWaitGoalIds(waitDeadlines) : [];
       const activeGoals = [...new Set([...scheduledActiveGoals, ...dueWaitGoalIds])];
@@ -72,6 +113,17 @@ export async function runDaemonGoalCycleLoop(context: GoalCycleRunnerContext): P
           });
           if (context.eventServer) {
             const goal = await context.stateManager.loadGoal(goalId).catch(() => null);
+            const lastIteration = result.iterations.at(-1);
+            if (lastIteration?.waitObserveOnly) {
+              context.state.last_observe_at = new Date().toISOString();
+              void context.eventServer.broadcast?.("wait_status", {
+                goalId,
+                strategyId: lastIteration.waitStrategyId,
+                outcome: lastIteration.waitExpiryOutcome,
+                approvalId: lastIteration.waitApprovalId,
+                skipReason: lastIteration.skipReason,
+              });
+            }
             void context.eventServer.broadcast?.("iteration_complete", {
               goalId,
               loopCount: context.state.loop_count,
@@ -93,12 +145,7 @@ export async function runDaemonGoalCycleLoop(context: GoalCycleRunnerContext): P
       context.refreshOperationalState();
       await context.saveDaemonState();
       if (context.eventServer) {
-        void context.eventServer.broadcast?.("daemon_status", {
-          status: context.state.status,
-          activeGoals: context.state.active_goals,
-          loopCount: context.state.loop_count,
-          lastLoopAt: context.state.last_loop_at,
-        });
+        void context.eventServer.broadcast?.("daemon_status", buildDaemonStatusPayload(context));
       }
 
       await context.processCronTasks();

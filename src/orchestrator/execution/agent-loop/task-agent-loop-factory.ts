@@ -19,6 +19,7 @@ import { ToolRegistryAgentLoopToolRouter } from "./agent-loop-tool-router.js";
 import { ChatAgentLoopRunner } from "./chat-agent-loop-runner.js";
 import { ReviewAgentLoopRunner } from "./review-agent-loop-runner.js";
 import { TaskAgentLoopRunner } from "./task-agent-loop-runner.js";
+import { CorePhaseRunner } from "./core-phase-runner.js";
 import type { AgentLoopBudget } from "./agent-loop-budget.js";
 import { AgentLoopContextAssembler } from "./agent-loop-context-assembler.js";
 import { resolveAgentLoopDefaultProfileFromProviderConfig } from "./agent-loop-default-profile.js";
@@ -85,6 +86,18 @@ export function createNativeTaskAgentLoopRunner(
           return (_input: { task: import("../../../base/types/task.js").Task }) => createSession();
         })()
       : undefined,
+  });
+}
+
+export function createNativeCorePhaseRunner(
+  deps: NativeTaskAgentLoopRuntimeDeps,
+): CorePhaseRunner {
+  const runtime = createNativeAgentLoopRuntime(deps);
+  return new CorePhaseRunner({
+    boundedRunner: runtime.boundedRunner,
+    model: runtime.modelInfo.ref,
+    modelInfo: runtime.modelInfo,
+    cwd: deps.cwd ?? process.cwd(),
   });
 }
 

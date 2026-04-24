@@ -10,6 +10,7 @@ import type { BoundedAgentLoopRunner } from "./bounded-agent-loop-runner.js";
 
 export type CorePhaseKind =
   | "observe_evidence"
+  | "wait_observation"
   | "knowledge_refresh"
   | "stall_investigation"
   | "replanning_options"

@@ -34,6 +34,7 @@ import {
   buildObserveEvidenceSpec,
   buildReplanningOptionsSpec,
   buildStallInvestigationSpec,
+  buildWaitObservationSpec,
   buildVerificationEvidenceSpec,
 } from "./phase-specs.js";
 import type { CorePhasePolicyRegistry } from "./phase-policy.js";
@@ -205,6 +206,23 @@ export class CoreIterationKernel {
         .map((g: any) => `${g.dimension_name}=${g.normalized_weighted_gap.toFixed(2)}`)
         .join(", ")}`
     );
+
+    const activeWait = await this.findActiveWaitObservationInput(goalId, goal.title);
+    if (activeWait) {
+      const waitObservationPhase = await runPhase("wait-observation-agentic", () =>
+        corePhaseRuntime.run(
+          {
+            ...buildWaitObservationSpec(),
+            requiredTools: [],
+            allowedTools: [],
+            budget: {},
+          },
+          activeWait,
+          { goalId, gapAggregate },
+        )
+      );
+      rememberPhase(waitObservationPhase);
+    }
 
     const waitObservationDecision = await runPhase("wait-observation", () =>
       evaluateWaitStrategiesForObserveOnly(ctx, goalId, goal, result)
@@ -566,5 +584,56 @@ export class CoreIterationKernel {
 
     result.elapsedMs = Date.now() - startTime;
     return result;
+  }
+
+  private async findActiveWaitObservationInput(
+    goalId: string,
+    goalTitle: string
+  ): Promise<{
+    goalTitle: string;
+    waitStrategyId: string;
+    waitReason: string;
+    waitUntil: string;
+    nextObserveAt?: string | null;
+    conditions: string[];
+    processRefs: string[];
+    artifactRefs: string[];
+    approvalPending: boolean;
+  } | null> {
+    if (typeof this.deps.deps.strategyManager.getPortfolio !== "function") return null;
+    const portfolio = await Promise.resolve(this.deps.deps.strategyManager.getPortfolio(goalId)).catch(() => null);
+    if (!portfolio || !this.deps.deps.portfolioManager) return null;
+    const strategy = portfolio.strategies.find((candidate) =>
+      candidate.state === "active" && this.deps.deps.portfolioManager?.isWaitStrategy(candidate)
+    ) as { id: string; wait_reason?: string; wait_until?: string } | undefined;
+    if (!strategy || typeof strategy.wait_until !== "string") return null;
+
+    const metadataPath = `strategies/${goalId}/wait-meta/${strategy.id}.json`;
+    const rawMetadata = await Promise.resolve(this.deps.deps.stateManager.readRaw(metadataPath)).catch(() => null);
+    const metadata = rawMetadata && typeof rawMetadata === "object" ? rawMetadata as Record<string, unknown> : {};
+    const nextObserveAt = typeof metadata["next_observe_at"] === "string" ? metadata["next_observe_at"] : strategy.wait_until;
+    const nextObserveAtMs = Date.parse(nextObserveAt);
+    if (!Number.isFinite(nextObserveAtMs) || nextObserveAtMs > Date.now()) return null;
+    const conditions = Array.isArray(metadata["conditions"]) ? metadata["conditions"] : [];
+    const processRefs = Array.isArray(metadata["process_refs"]) ? metadata["process_refs"] : [];
+    const artifactRefs = Array.isArray(metadata["artifact_refs"]) ? metadata["artifact_refs"] : [];
+    const latestObservation = metadata["latest_observation"];
+    const latest = latestObservation && typeof latestObservation === "object"
+      ? latestObservation as Record<string, unknown>
+      : {};
+    const latestEvidence = latest["evidence"] && typeof latest["evidence"] === "object"
+      ? latest["evidence"] as Record<string, unknown>
+      : {};
+    return {
+      goalTitle,
+      waitStrategyId: strategy.id,
+      waitReason: typeof strategy.wait_reason === "string" ? strategy.wait_reason : "waiting",
+      waitUntil: strategy.wait_until,
+      nextObserveAt,
+      conditions: conditions.map((condition) => JSON.stringify(condition)),
+      processRefs: processRefs.map((ref) => JSON.stringify(ref)),
+      artifactRefs: artifactRefs.map((ref) => JSON.stringify(ref)),
+      approvalPending: Boolean(metadata["approval_pending"] ?? latestEvidence["approval_pending"]),
+    };
   }
 }

@@ -71,6 +71,18 @@ export const DaemonStateSchema = z.object({
   interrupted_goals: z.array(z.string()).optional(),
   last_resident_at: z.string().datetime().nullable().default(null),
   resident_activity: ResidentActivitySchema.nullable().default(null),
+  waiting_goals: z.array(z.object({
+    goal_id: z.string(),
+    strategy_id: z.string(),
+    next_observe_at: z.string(),
+    wait_until: z.string(),
+    wait_reason: z.string(),
+    approval_pending: z.boolean().optional(),
+  })).optional(),
+  next_observe_at: z.string().nullable().optional(),
+  last_observe_at: z.string().datetime().nullable().optional(),
+  last_wait_reason: z.string().nullable().optional(),
+  approval_pending_count: z.number().int().nonnegative().optional(),
 });
 export type DaemonState = z.infer<typeof DaemonStateSchema>;
 

@@ -141,6 +141,7 @@ async function buildDeps() {
   const { ToolRegistry, ToolExecutor, ToolPermissionManager, ConcurrencyController, createBuiltinTools } = await import("../../tools/index.js");
   const { buildCliDataSourceRegistry } = await import("../cli/data-source-bootstrap.js");
   const {
+    createNativeCorePhaseRunner,
     createNativeChatAgentLoopRunner,
     createNativeReviewAgentLoopRunner,
     createNativeTaskAgentLoopRunner,
@@ -341,6 +342,18 @@ async function buildDeps() {
             : undefined,
         })
     : undefined;
+  const corePhaseRunner = shouldUseNativeTaskAgentLoop(providerConfig, llmClient)
+      ? createNativeCorePhaseRunner({
+          llmClient,
+          stateManager,
+          providerConfig,
+          toolRegistry,
+          toolExecutor,
+          cwd: process.cwd(),
+          traceBaseDir: stateManager.getBaseDir(),
+          soilPrefetch,
+        })
+    : undefined;
 
   const taskLifecycle = new TaskLifecycle({
     stateManager,
@@ -388,6 +401,7 @@ async function buildDeps() {
     memoryLifecycleManager,
     driveScoreAdapter,
     contextProvider,
+    corePhaseRunner,
   });
 
   const scheduleEngine = new ScheduleEngine({

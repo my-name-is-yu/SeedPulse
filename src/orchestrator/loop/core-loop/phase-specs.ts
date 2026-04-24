@@ -17,6 +17,17 @@ export const ObservationEvidenceSchema = z.object({
 });
 export type ObservationEvidence = z.infer<typeof ObservationEvidenceSchema>;
 
+export const WaitObservationEvidenceSchema = z.object({
+  summary: z.string(),
+  observed_conditions: z.array(z.string()).default([]),
+  process_refs: z.array(z.string()).default([]),
+  artifact_refs: z.array(z.string()).default([]),
+  approval_pending: z.boolean().default(false),
+  next_observe_at: z.string().nullable().default(null),
+  confidence: z.number().min(0).max(1).default(0.5),
+});
+export type WaitObservationEvidence = z.infer<typeof WaitObservationEvidenceSchema>;
+
 export const KnowledgeRefreshEvidenceSchema = z.object({
   summary: z.string(),
   required_knowledge: z.array(z.string()).default([]),
@@ -85,6 +96,36 @@ export function buildObserveEvidenceSpec(): ReturnType<typeof baseSpec<{
     }),
     outputSchema: ObservationEvidenceSchema,
     failPolicy: "fallback_deterministic",
+    runWhen: () => true,
+  });
+}
+
+export function buildWaitObservationSpec(): ReturnType<typeof baseSpec<{
+  goalTitle: string;
+  waitStrategyId: string;
+  waitReason: string;
+  waitUntil: string;
+  nextObserveAt?: string | null;
+  conditions: string[];
+  processRefs: string[];
+  artifactRefs: string[];
+  approvalPending: boolean;
+}, WaitObservationEvidence>> {
+  return baseSpec({
+    phase: "wait_observation",
+    inputSchema: z.object({
+      goalTitle: z.string(),
+      waitStrategyId: z.string(),
+      waitReason: z.string(),
+      waitUntil: z.string(),
+      nextObserveAt: z.string().nullable().optional(),
+      conditions: z.array(z.string()).default([]),
+      processRefs: z.array(z.string()).default([]),
+      artifactRefs: z.array(z.string()).default([]),
+      approvalPending: z.boolean().default(false),
+    }),
+    outputSchema: WaitObservationEvidenceSchema,
+    failPolicy: "return_low_confidence",
     runWhen: () => true,
   });
 }

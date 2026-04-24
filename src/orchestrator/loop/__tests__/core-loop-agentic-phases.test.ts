@@ -16,6 +16,13 @@ import type { DriveScore } from "../../../base/types/drive.js";
 import { makeGoal } from "../../../../tests/helpers/fixtures.js";
 import { makeTempDir } from "../../../../tests/helpers/temp-dir.js";
 import { StaticCorePhasePolicyRegistry } from "../core-loop/phase-policy.js";
+import { ToolRegistry } from "../../../tools/registry.js";
+import { ToolRegistryAgentLoopToolRouter } from "../../execution/agent-loop/agent-loop-tool-router.js";
+import {
+  ProcessSessionListTool,
+  ProcessSessionReadTool,
+} from "../../../tools/system/ProcessSessionTool/ProcessSessionTool.js";
+import { ProcessStatusTool } from "../../../tools/system/ProcessStatusTool/ProcessStatusTool.js";
 
 function makeGapVector(goalId = "goal-1"): GapVector {
   return {
@@ -267,6 +274,14 @@ function createDeps(tmpDir: string, options?: { stall?: boolean }) {
         requiredTools: [],
         failPolicy: "return_low_confidence",
       },
+      wait_observation: {
+        enabled: true,
+        maxInvocationsPerIteration: 1,
+        budget: {},
+        allowedTools: ["process_session_read", "process_session_list", "process-status"],
+        requiredTools: ["process_session_read", "process_session_list"],
+        failPolicy: "return_low_confidence",
+      },
     }),
   };
 
@@ -326,6 +341,85 @@ describe("CoreLoop agentic phase hooks", () => {
       expect.anything(),
       expect.anything(),
     );
+  });
+
+  it("keeps wait observation on a short read-only budget separate from normal AgentLoop execution", async () => {
+    const policy = new StaticCorePhasePolicyRegistry().get("wait_observation");
+
+    expect(policy.enabled).toBe(true);
+    expect(policy.budget.maxWallClockMs).toBeLessThan(90_000);
+    expect(policy.budget.maxToolCalls).toBeLessThan(12);
+    expect(policy.allowedTools).toEqual(
+      expect.arrayContaining(["process_session_read", "process_session_list", "process-status", "progress_history", "read-pulseed-file"])
+    );
+    expect(policy.allowedTools).not.toEqual(
+      expect.arrayContaining(["process_session_start", "process_session_write", "process_session_stop", "shell_command"])
+    );
+    expect(policy.requiredTools).toEqual(expect.arrayContaining(["process_session_read", "process_session_list"]));
+  });
+
+  it("makes deferred process observation tools visible to the wait observation phase", () => {
+    const policy = new StaticCorePhasePolicyRegistry().get("wait_observation");
+    const registry = new ToolRegistry();
+    registry.register(new ProcessSessionReadTool());
+    registry.register(new ProcessSessionListTool());
+    registry.register(new ProcessStatusTool());
+
+    const router = new ToolRegistryAgentLoopToolRouter(registry);
+    const tools = router.modelVisibleTools({
+      cwd: tmpDir,
+      goalId: "goal-1",
+      toolPolicy: {
+        allowedTools: policy.allowedTools,
+        requiredTools: policy.requiredTools,
+      },
+    } as never);
+
+    expect(tools.map((tool) => tool.function.name)).toEqual(
+      expect.arrayContaining(["process_session_read", "process_session_list", "process-status"])
+    );
+  });
+
+  it("does not run agentic wait observation before the durable next observe time is due", async () => {
+    const { deps, mocks } = createDeps(tmpDir);
+    const waitStrategy = {
+      id: "wait-1",
+      type: "wait",
+      state: "active",
+      wait_reason: "waiting for external metric",
+      wait_until: "2026-04-24T13:00:00.000Z",
+    };
+    deps.strategyManager = {
+      ...deps.strategyManager,
+      getPortfolio: vi.fn().mockResolvedValue({ strategies: [waitStrategy] }),
+    } as never;
+    deps.portfolioManager = {
+      isWaitStrategy: vi.fn().mockReturnValue(true),
+      handleWaitStrategyExpiry: vi.fn().mockResolvedValue({
+        status: "not_due",
+        goal_id: "goal-1",
+        strategy_id: "wait-1",
+        details: "not due yet",
+      }),
+    } as never;
+    await mocks.stateManager.saveGoal(makeGoal());
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-24T12:00:00.000Z"));
+    try {
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.skipReason).toBe("wait_not_due");
+      expect(mocks.corePhaseRunner.run).not.toHaveBeenCalledWith(
+        expect.objectContaining({ phase: "wait_observation" }),
+        expect.anything(),
+        expect.anything(),
+      );
+      expect(mocks.taskLifecycle.runTaskCycle).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("auto-acquires knowledge from refresh evidence and skips task cycle", async () => {

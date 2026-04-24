@@ -1,6 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { z } from "zod";
+import { getPulseedDirPath } from "../../../base/utils/paths.js";
 import type { ITool, PermissionCheckResult, ToolCallContext, ToolMetadata, ToolResult } from "../../types.js";
 
 const MAX_BUFFER_CHARS = 1_000_000;
@@ -12,6 +15,9 @@ export const ProcessSessionStartInputSchema = z.object({
   cwd: z.string().optional(),
   env: z.record(z.string()).optional(),
   label: z.string().min(1).max(120).optional(),
+  task_id: z.string().optional(),
+  strategy_id: z.string().optional(),
+  artifact_refs: z.array(z.string()).optional(),
 });
 export type ProcessSessionStartInput = z.infer<typeof ProcessSessionStartInputSchema>;
 
@@ -48,6 +54,9 @@ export interface ProcessSessionSnapshot {
   command: string;
   args: string[];
   cwd: string;
+  goal_id?: string;
+  task_id?: string;
+  strategy_id?: string;
   pid?: number;
   running: boolean;
   exitCode: number | null;
@@ -55,6 +64,9 @@ export interface ProcessSessionSnapshot {
   startedAt: string;
   exitedAt?: string;
   bufferedChars: number;
+  metadataPath?: string;
+  metadataRelativePath?: string;
+  artifactRefs?: string[];
 }
 
 export interface ProcessSessionReadOutput extends ProcessSessionSnapshot {
@@ -68,6 +80,10 @@ interface ProcessSessionRecord {
   command: string;
   args: string[];
   cwd: string;
+  goalId?: string;
+  taskId?: string;
+  strategyId?: string;
+  artifactRefs: string[];
   child: ChildProcessWithoutNullStreams;
   startedAt: Date;
   exitedAt?: Date;
@@ -80,7 +96,7 @@ interface ProcessSessionRecord {
 export class ProcessSessionManager {
   private readonly sessions = new Map<string, ProcessSessionRecord>();
 
-  start(input: ProcessSessionStartInput, cwd: string): ProcessSessionSnapshot {
+  start(input: ProcessSessionStartInput, cwd: string, context?: Pick<ToolCallContext, "goalId">): ProcessSessionSnapshot {
     const id = randomUUID();
     const resolvedCwd = input.cwd ?? cwd;
     const child = spawn(input.command, input.args, {
@@ -94,6 +110,10 @@ export class ProcessSessionManager {
       command: input.command,
       args: input.args,
       cwd: resolvedCwd,
+      goalId: context?.goalId,
+      taskId: input.task_id,
+      strategyId: input.strategy_id,
+      artifactRefs: input.artifact_refs ?? [],
       child,
       startedAt: new Date(),
       exitCode: null,
@@ -114,10 +134,14 @@ export class ProcessSessionManager {
       record.signal = signal;
       record.exitedAt = new Date();
       this.append(record, `[process exited code=${code ?? "null"} signal=${signal ?? "null"}]\n`);
+      this.persistSnapshot(record);
     });
 
     this.sessions.set(id, record);
-    return this.snapshot(record);
+    const snapshot = this.snapshot(record);
+    this.persistSnapshot(record);
+    this.linkWaitMetadata(record, snapshot);
+    return snapshot;
   }
 
   async read(input: ProcessSessionReadInput): Promise<ProcessSessionReadOutput | null> {
@@ -132,6 +156,7 @@ export class ProcessSessionManager {
     if (input.consume) {
       record.readOffset += output.length;
     }
+    this.persistSnapshot(record);
     return { ...this.snapshot(record), output, truncated };
   }
 
@@ -139,6 +164,7 @@ export class ProcessSessionManager {
     const record = this.sessions.get(input.session_id);
     if (!record || record.child.killed || record.exitCode !== null) return null;
     record.child.stdin.write(input.appendNewline ? `${input.input}\n` : input.input);
+    this.persistSnapshot(record);
     return this.snapshot(record);
   }
 
@@ -154,6 +180,7 @@ export class ProcessSessionManager {
         ]);
       }
     }
+    this.persistSnapshot(record);
     return this.snapshot(record);
   }
 
@@ -187,6 +214,9 @@ export class ProcessSessionManager {
       command: record.command,
       args: record.args,
       cwd: record.cwd,
+      goal_id: record.goalId,
+      task_id: record.taskId,
+      strategy_id: record.strategyId,
       pid: record.child.pid,
       running: record.exitCode === null && !record.child.killed,
       exitCode: record.exitCode,
@@ -194,7 +224,86 @@ export class ProcessSessionManager {
       startedAt: record.startedAt.toISOString(),
       exitedAt: record.exitedAt?.toISOString(),
       bufferedChars: record.combined.length,
+      metadataPath: this.metadataPath(record.id),
+      metadataRelativePath: this.metadataRelativePath(record.id),
+      artifactRefs: record.artifactRefs,
     };
+  }
+
+  private metadataRelativePath(sessionId: string): string {
+    return path.join("runtime", "process-sessions", `${sessionId}.json`);
+  }
+
+  private metadataPath(sessionId: string): string {
+    return path.join(getPulseedDirPath(), this.metadataRelativePath(sessionId));
+  }
+
+  private persistSnapshot(record: ProcessSessionRecord): void {
+    try {
+      const metadataPath = this.metadataPath(record.id);
+      fs.mkdirSync(path.dirname(metadataPath), { recursive: true });
+      fs.writeFileSync(metadataPath, JSON.stringify(this.snapshot(record), null, 2), "utf8");
+    } catch {
+      // Process metadata is best-effort; tool behavior must not depend on the sidecar write.
+    }
+  }
+
+  private linkWaitMetadata(record: ProcessSessionRecord, snapshot: ProcessSessionSnapshot): void {
+    if (!record.goalId || !record.strategyId) return;
+    const metadataPath = path.join(
+      getPulseedDirPath(),
+      "strategies",
+      record.goalId,
+      "wait-meta",
+      `${record.strategyId}.json`
+    );
+    try {
+      const existing = readJsonObject(metadataPath);
+      const processRefs = Array.isArray(existing["process_refs"]) ? existing["process_refs"] : [];
+      const artifactRefs = Array.isArray(existing["artifact_refs"]) ? existing["artifact_refs"] : [];
+      const processRef = {
+        session_id: snapshot.session_id,
+        command: snapshot.command,
+        args: snapshot.args,
+        cwd: snapshot.cwd,
+        pid: snapshot.pid,
+        started_at: snapshot.startedAt,
+        metadata_path: snapshot.metadataPath,
+        metadata_relative_path: snapshot.metadataRelativePath,
+        task_id: snapshot.task_id ?? null,
+        strategy_id: snapshot.strategy_id ?? null,
+      };
+      const metadataArtifactRef = snapshot.metadataPath
+        ? {
+            kind: "process_metadata",
+            path: snapshot.metadataPath,
+            relative_path: snapshot.metadataRelativePath,
+            session_id: snapshot.session_id,
+          }
+        : null;
+      fs.mkdirSync(path.dirname(metadataPath), { recursive: true });
+      fs.writeFileSync(
+        metadataPath,
+        JSON.stringify({
+          ...existing,
+          schema_version: 1,
+          process_refs: dedupeByJson([...processRefs, processRef]),
+          artifact_refs: dedupeByJson([
+            ...artifactRefs,
+            ...(metadataArtifactRef ? [metadataArtifactRef] : []),
+            ...record.artifactRefs.map((artifactPath) => ({
+              kind: "process_artifact",
+              path: artifactPath,
+              relative_path: relativePulseedPath(artifactPath),
+              session_id: snapshot.session_id,
+            })),
+          ]),
+        }, null, 2),
+        "utf8"
+      );
+    } catch {
+      // Wait metadata linkage is best-effort; the session metadata sidecar remains authoritative.
+    }
   }
 }
 
@@ -234,12 +343,13 @@ export class ProcessSessionStartTool extends ProcessSessionBaseTool<ProcessSessi
   async call(input: ProcessSessionStartInput, context: ToolCallContext): Promise<ToolResult> {
     const startTime = Date.now();
     try {
-      const data = this.manager.start(input, context.cwd);
+      const data = this.manager.start(input, context.cwd, context);
       return {
         success: true,
         data,
         summary: `Started process session ${data.session_id}${data.pid ? ` (pid ${data.pid})` : ""}: ${data.command} ${data.args.join(" ")}`.trim(),
         durationMs: Date.now() - startTime,
+        artifacts: data.metadataPath ? [data.metadataPath, ...(data.artifactRefs ?? [])] : data.artifactRefs,
       };
     } catch (err) {
       return failureResult(`Failed to start process session: ${(err as Error).message}`, startTime);
@@ -285,6 +395,7 @@ export class ProcessSessionReadTool extends ProcessSessionBaseTool<ProcessSessio
       data,
       summary: `Read ${data.output.length} chars from process session ${input.session_id}${data.truncated ? " (truncated)" : ""}`,
       durationMs: Date.now() - startTime,
+      artifacts: data.metadataPath ? [data.metadataPath, ...(data.artifactRefs ?? [])] : data.artifactRefs,
     };
   }
 
@@ -369,6 +480,7 @@ export class ProcessSessionStopTool extends ProcessSessionBaseTool<ProcessSessio
       data,
       summary: `Stopped process session ${input.session_id}`,
       durationMs: Date.now() - startTime,
+      artifacts: data.metadataPath ? [data.metadataPath, ...(data.artifactRefs ?? [])] : data.artifactRefs,
     };
   }
 
@@ -408,6 +520,10 @@ export class ProcessSessionListTool extends ProcessSessionBaseTool<ProcessSessio
       data,
       summary: `Found ${data.length} process session(s)`,
       durationMs: Date.now() - startTime,
+      artifacts: data.flatMap((session) => [
+        ...(session.metadataPath ? [session.metadataPath] : []),
+        ...(session.artifactRefs ?? []),
+      ]),
     };
   }
 
@@ -437,4 +553,34 @@ function failureResult(message: string, startTime: number): ToolResult {
     error: message,
     durationMs: Date.now() - startTime,
   };
+}
+
+function readJsonObject(filePath: string): Record<string, unknown> {
+  try {
+    const raw = fs.readFileSync(filePath, "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function dedupeByJson(items: unknown[]): unknown[] {
+  const seen = new Set<string>();
+  const result: unknown[] = [];
+  for (const item of items) {
+    const key = JSON.stringify(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+  return result;
+}
+
+function relativePulseedPath(filePath: string): string | null {
+  const base = path.resolve(getPulseedDirPath());
+  const resolved = path.resolve(filePath);
+  const relativePath = path.relative(base, resolved);
+  if (relativePath === "" || relativePath.startsWith("..") || path.isAbsolute(relativePath)) return null;
+  return relativePath;
 }

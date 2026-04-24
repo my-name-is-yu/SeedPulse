@@ -16,6 +16,7 @@ export interface WaitDeadlineResolution {
     next_observe_at: string;
     wait_until: string;
     wait_reason: string;
+    approval_pending?: boolean;
   }>;
 }
 
@@ -54,6 +55,7 @@ export class WaitDeadlineResolver {
           next_observe_at: nextObserveAt,
           wait_until: waitStrategy.wait_until,
           wait_reason: waitStrategy.wait_reason,
+          approval_pending: isApprovalPending(metadata),
         });
       }
     }
@@ -69,6 +71,15 @@ export class WaitDeadlineResolver {
   clampInterval(intervalMs: number, resolution: WaitDeadlineResolution, nowMs = Date.now()): number {
     return clampIntervalToNextWaitDeadline(intervalMs, resolution.next_observe_at, nowMs);
   }
+}
+
+function isApprovalPending(metadata: WaitMetadata): boolean {
+  const extra = metadata as WaitMetadata & {
+    approval_pending?: unknown;
+  };
+  if (extra.approval_pending) return true;
+  const evidence = metadata.latest_observation?.evidence;
+  return Boolean(evidence && typeof evidence === "object" && evidence["approval_pending"]);
 }
 
 function normalizeWaitMetadataFailSoft(
