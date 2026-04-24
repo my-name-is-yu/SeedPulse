@@ -89,6 +89,32 @@ describe("WaitDeadlineResolver", () => {
     expect(resolution.next_observe_at).toBe("2026-04-24T12:10:00.000Z");
   });
 
+  it("does not throw and falls back to wait_until when wait metadata is malformed", async () => {
+    await stateManager.writeRaw("strategies/goal-1/portfolio.json", {
+      goal_id: "goal-1",
+      strategies: [makeActiveWaitStrategy()],
+      rebalance_interval: { value: 1, unit: "hours" },
+      last_rebalanced_at: "2026-04-24T12:00:00.000Z",
+    });
+    await stateManager.writeRaw("strategies/goal-1/wait-meta/wait-1.json", {
+      schema_version: 1,
+      wait_until: "2026-04-24T12:10:00.000Z",
+      conditions: [{ type: "metric_threshold", metric: "quality", operator: "gte" }],
+      resume_plan: { action: "complete_wait" },
+    });
+
+    const resolution = await new WaitDeadlineResolver(stateManager).resolve(["goal-1"]);
+
+    expect(resolution.next_observe_at).toBe("2026-04-24T12:10:00.000Z");
+    expect(resolution.waiting_goals).toEqual([
+      expect.objectContaining({
+        goal_id: "goal-1",
+        strategy_id: "wait-1",
+        next_observe_at: "2026-04-24T12:10:00.000Z",
+      }),
+    ]);
+  });
+
   it("lets durable next_observe_at postpone an original wait_until after re-wait", async () => {
     await stateManager.writeRaw("strategies/goal-1/portfolio.json", {
       goal_id: "goal-1",

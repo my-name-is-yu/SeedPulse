@@ -1,5 +1,6 @@
 import { PortfolioSchema } from "../../base/types/strategy.js";
 import {
+  buildDefaultWaitMetadata,
   normalizeWaitMetadata,
   resolveWaitNextObserveAt,
   type WaitMetadata,
@@ -43,7 +44,7 @@ export class WaitDeadlineResolver {
         const rawMetadata = await this.stateManager.readRaw(
           `strategies/${goalId}/wait-meta/${waitStrategy.id}.json`
         );
-        const metadata = normalizeWaitMetadata(waitStrategy, rawMetadata);
+        const metadata = normalizeWaitMetadataFailSoft(waitStrategy, rawMetadata);
         const nextObserveAt = resolveNextObserveAt(waitStrategy, metadata);
         if (!nextObserveAt) continue;
 
@@ -67,6 +68,17 @@ export class WaitDeadlineResolver {
 
   clampInterval(intervalMs: number, resolution: WaitDeadlineResolution, nowMs = Date.now()): number {
     return clampIntervalToNextWaitDeadline(intervalMs, resolution.next_observe_at, nowMs);
+  }
+}
+
+function normalizeWaitMetadataFailSoft(
+  waitStrategy: WaitStrategy,
+  data: unknown
+): WaitMetadata {
+  try {
+    return normalizeWaitMetadata(waitStrategy, data);
+  } catch {
+    return buildDefaultWaitMetadata(waitStrategy);
   }
 }
 
