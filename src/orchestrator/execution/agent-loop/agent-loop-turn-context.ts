@@ -20,6 +20,8 @@ export interface AgentLoopToolPolicy {
   includeDeferred?: boolean;
 }
 
+export type AgentLoopFinalOutputMode = "schema" | "display_text";
+
 export interface AgentLoopTurnContext<TOutput> {
   session: AgentLoopSession;
   turnId: string;
@@ -32,6 +34,7 @@ export interface AgentLoopTurnContext<TOutput> {
   reasoningEffort?: AgentLoopReasoningEffort;
   messages: AgentLoopMessage[];
   outputSchema: z.ZodType<TOutput, z.ZodTypeDef, unknown>;
+  finalOutputMode?: AgentLoopFinalOutputMode;
   budget: AgentLoopBudget;
   toolPolicy: AgentLoopToolPolicy;
   toolCallContext: ToolCallContext;

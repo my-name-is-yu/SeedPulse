@@ -14,9 +14,10 @@ import type { AgentLoopToolPolicy } from "./agent-loop-turn-context.js";
 import { withDefaultBudget } from "./agent-loop-turn-context.js";
 import type { BoundedAgentLoopRunner } from "./bounded-agent-loop-runner.js";
 import type { AgentLoopSessionState } from "./agent-loop-session-state.js";
-import { buildAgentLoopBaseInstructions } from "./agent-loop-prompts.js";
+import { buildAgentLoopBaseInstructions, buildChatStructuredOutputInstructions } from "./agent-loop-prompts.js";
 import type { ApprovalRequest, ToolCallContext } from "../../../tools/types.js";
 import type { ExecutionPolicy, SubagentRole } from "./execution-policy.js";
+import { normalizeAssistantDisplayText } from "./chat-display-output.js";
 
 const ChatAgentLoopFinalAnswerSectionSchema = z.object({
   title: z.string(),
@@ -61,6 +62,10 @@ export const ChatAgentLoopOutputSchema = ChatAgentLoopOutputBaseSchema.transform
 });
 export type ChatAgentLoopOutput = z.infer<typeof ChatAgentLoopOutputSchema>;
 
+export type ChatAgentLoopOutputMode =
+  | { kind: "display_text" }
+  | { kind: "structured"; schema?: z.ZodType<unknown, z.ZodTypeDef, unknown> };
+
 export interface ChatAgentLoopRunnerDeps {
   boundedRunner: BoundedAgentLoopRunner;
   modelClient: AgentLoopModelClient;
@@ -98,6 +103,7 @@ export interface ChatAgentLoopInput {
   resumeStatePath?: string;
   resumeOnly?: boolean;
   role?: SubagentRole;
+  outputMode?: ChatAgentLoopOutputMode;
 }
 
 export class ChatAgentLoopRunner {
@@ -109,6 +115,10 @@ export class ChatAgentLoopRunner {
     const modelInfo = await this.deps.modelClient.getModelInfo(model);
     const cwd = input.cwd ?? this.deps.cwd ?? process.cwd();
     const turnId = randomUUID();
+    const outputMode = input.outputMode ?? { kind: "display_text" as const };
+    const outputSchema: z.ZodType<unknown, z.ZodTypeDef, unknown> = outputMode.kind === "structured"
+      ? outputMode.schema ?? ChatAgentLoopOutputSchema
+      : ChatAgentLoopOutputSchema;
     const session = this.deps.createSession?.({
       goalId: input.goalId,
       eventSink: input.eventSink,
@@ -139,6 +149,7 @@ export class ChatAgentLoopRunner {
                     extraRules: [
                       "Use tools to answer the user and operate CoreLoop only through tools.",
                       "Do not call CoreLoop internals directly.",
+                      ...(outputMode.kind === "structured" ? [buildChatStructuredOutputInstructions()] : []),
                     ],
                     role: input.role,
                   }),
@@ -148,7 +159,8 @@ export class ChatAgentLoopRunner {
               ...(input.history ?? []).map((m) => ({ role: m.role, content: m.content })),
               { role: "user" as const, content: input.message },
             ],
-        outputSchema: ChatAgentLoopOutputSchema,
+        outputSchema,
+        finalOutputMode: outputMode.kind === "structured" ? "schema" : "display_text",
         budget: withDefaultBudget({ ...this.deps.defaultBudget, ...input.budget }),
         toolPolicy: { ...this.deps.defaultToolPolicy, ...input.toolPolicy },
         ...(input.resumeState ? { resumeState: input.resumeState } : {}),
@@ -182,17 +194,24 @@ export class ChatAgentLoopRunner {
         },
       });
 
-      const success = result.success && result.output?.status === "done";
+      const chatOutput = isRecord(result.output) ? result.output as ChatAgentLoopOutput : null;
+      const outputStatus = isRecord(result.output) && typeof result.output.status === "string"
+        ? result.output.status
+        : "done";
+      const success = outputMode.kind === "structured"
+        ? result.success && outputStatus === "done"
+        : result.success;
       const hadApprovalDeniedError = result.commandResults.some((entry) =>
         /approval denied|user denied approval|requires approval/i.test(entry.outputSummary),
       );
       const fallbackOutput = success
-        ? this.buildSuccessfulOutput(result.finalText, result.output)
-        : this.buildFailureOutput(result.stopReason, hadApprovalDeniedError, result.finalText, result.output, result.output?.blockers);
+        ? this.buildSuccessfulOutput(result.finalText, chatOutput)
+        : this.buildFailureOutput(result.stopReason, hadApprovalDeniedError, result.finalText, chatOutput, extractStringArray(result.output, "blockers"));
       return {
         success,
         output: fallbackOutput,
-        error: success ? null : result.output?.blockers.join("; ") || result.stopReason,
+        ...(outputMode.kind === "structured" && result.output !== null ? { structuredOutput: result.output } : {}),
+        error: success ? null : extractStringArray(result.output, "blockers").join("; ") || result.stopReason,
         exit_code: null,
         elapsed_ms: Date.now() - started,
         stopped_reason: success ? "completed" : result.stopReason === "timeout" ? "timeout" : "error",
@@ -207,8 +226,8 @@ export class ChatAgentLoopRunner {
           compactions: result.compactions,
           ...(result.profileName ? { profileName: result.profileName } : {}),
           ...(result.reasoningEffort ? { reasoningEffort: result.reasoningEffort } : {}),
-          completionEvidence: result.output?.evidence ?? [],
-          verificationHints: result.output?.blockers ?? [],
+          completionEvidence: extractStringArray(result.output, "evidence"),
+          verificationHints: extractStringArray(result.output, "blockers"),
           filesChangedPaths: result.changedFiles,
           ...(result.executionPolicy
             ? {
@@ -252,13 +271,8 @@ export class ChatAgentLoopRunner {
   }
 
   private buildSuccessfulOutput(finalText: string, output?: ChatAgentLoopOutput | null): string {
-    const formattedOutput = this.formatChatOutput(output);
-    if (formattedOutput) return formattedOutput;
-    const formatted = this.formatStructuredFinalText(finalText);
-    if (formatted) return formatted;
-    if (output?.message && output.message.trim().length > 0) return output.message.trim();
-    if (output?.answer && output.answer.trim().length > 0) return output.answer.trim();
-    if (finalText && finalText.trim().length > 0) return finalText.trim();
+    const displayText = normalizeAssistantDisplayText({ finalText, output });
+    if (displayText) return displayText;
     return "(no response)";
   }
 
@@ -288,118 +302,20 @@ export class ChatAgentLoopRunner {
       return "I stopped because the tool loop repeated without making progress.";
     }
 
-    const formattedOutput = this.formatChatOutput(output);
-    if (formattedOutput) return formattedOutput;
-    const formatted = this.formatStructuredFinalText(finalText);
-    if (formatted) return formatted;
+    const displayText = normalizeAssistantDisplayText({ finalText, output });
+    if (displayText) return displayText;
     if (blockers && blockers.length > 0) return blockers.join("; ");
-    if (finalText && !/^Calling\s+/i.test(finalText.trim())) return finalText.trim();
     return `Interrupted: ${stopReason}`;
   }
+}
 
-  private formatChatOutput(output?: ChatAgentLoopOutput | null): string | null {
-    if (!output) return null;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
 
-    const finalAnswer = output.finalAnswer;
-    const outputEvidence = Array.isArray(output.evidence) ? output.evidence : [];
-    const outputBlockers = Array.isArray(output.blockers) ? output.blockers : [];
-    const summary = finalAnswer?.summary.trim() || output.message?.trim() || output.answer?.trim() || "";
-    const sections: string[] = [];
-    const handledKeys = new Set<string>(["status", "message", "answer", "evidence", "blockers", "finalAnswer"]);
-
-    if (summary.length > 0) {
-      sections.push(summary);
-    }
-
-    for (const section of finalAnswer?.sections ?? []) {
-      const bullets = section.bullets.map((item) => item.trim()).filter((item) => item.length > 0);
-      if (bullets.length === 0) continue;
-      sections.push(`### ${section.title.trim()}\n${bullets.map((bullet) => `- ${bullet}`).join("\n")}`);
-    }
-
-    const evidence = [...new Set([
-      ...(finalAnswer?.evidence ?? []),
-      ...outputEvidence,
-    ].map((item) => item.trim()).filter((item) => item.length > 0))];
-    if (evidence.length > 0) {
-      sections.push(`### Evidence\n${evidence.map((item) => `- ${item}`).join("\n")}`);
-    }
-
-    const blockers = [...new Set([
-      ...(finalAnswer?.blockers ?? []),
-      ...outputBlockers,
-    ].map((item) => item.trim()).filter((item) => item.length > 0))];
-    if (blockers.length > 0) {
-      sections.push(`### Blockers\n${blockers.map((item) => `- ${item}`).join("\n")}`);
-    }
-
-    const nextActions = [
-      ...(finalAnswer?.nextActions ?? []),
-      ...(typeof finalAnswer?.nextAction === "string" ? [finalAnswer.nextAction] : []),
-    ].map((item) => item.trim()).filter((item) => item.length > 0);
-    if (nextActions.length > 0) {
-      sections.push(`### Next steps\n${nextActions.map((item) => `- ${item}`).join("\n")}`);
-    }
-
-    for (const [key, fieldValue] of Object.entries(output)) {
-      if (handledKeys.has(key) || !Array.isArray(fieldValue)) continue;
-      const lines = fieldValue.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
-      if (lines.length === 0) continue;
-      sections.push(`### ${this.humanizeFieldLabel(this.normalizeOutputFieldLabel(key))}\n${lines.map((line) => `- ${line}`).join("\n")}`);
-    }
-
-    for (const [key, fieldValue] of Object.entries(output)) {
-      if (handledKeys.has(key) || typeof fieldValue !== "string") continue;
-      const value = fieldValue.trim();
-      if (!value) continue;
-      if (key === "nextAction" || key === "next_action" || key === "nextStep" || key === "next_step") {
-        sections.push(`### Next step\n- ${value}`);
-      }
-    }
-
-    const rendered = sections.join("\n\n").trim();
-    return rendered.length > 0 ? rendered : null;
-  }
-
-  private humanizeFieldLabel(key: string): string {
-    return key
-      .split(/[_\s-]+/g)
-      .filter(Boolean)
-      .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-      .join(" ");
-  }
-
-  private normalizeOutputFieldLabel(key: string): string {
-    switch (key) {
-      case "steps":
-        return "recommended_steps";
-      case "files":
-      case "relevantFiles":
-        return "relevant_files";
-      case "nextActions":
-      case "next_actions":
-        return "next_steps";
-      default:
-        return key;
-    }
-  }
-
-  private formatStructuredFinalText(finalText: string): string | null {
-    const raw = finalText?.trim();
-    if (!raw) return null;
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      return null;
-    }
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return null;
-    }
-
-    const parsedOutput = ChatAgentLoopOutputSchema.safeParse(parsed);
-    if (!parsedOutput.success) return null;
-    return this.formatChatOutput(parsedOutput.data);
-  }
+function extractStringArray(value: unknown, key: string): string[] {
+  if (!isRecord(value)) return [];
+  const field = value[key];
+  if (!Array.isArray(field)) return [];
+  return field.filter((item): item is string => typeof item === "string" && item.length > 0);
 }

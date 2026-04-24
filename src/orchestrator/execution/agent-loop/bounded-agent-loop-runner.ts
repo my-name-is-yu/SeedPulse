@@ -143,6 +143,55 @@ export class BoundedAgentLoopRunner {
       }
 
       if (response.toolCalls.length === 0) {
+        if (turn.finalOutputMode === "display_text") {
+          if (response.content.trim().length === 0) {
+            schemaRepairAttempts++;
+            if (schemaRepairAttempts > turn.budget.maxSchemaRepairAttempts) {
+              return this.stop(turn, "schema_error", startedAt, modelTurns, toolCalls, response.content, null, false, compactions, await this.collectChangedFiles(turn.cwd, initialWorkspaceSnapshot), commandResults, messages, calledTools, lastToolLoopSignature, repeatedToolLoopCount);
+            }
+
+            messages.push({ role: "assistant", content: response.content, phase: "final_answer" });
+            messages.push({
+              role: "user",
+              content: "Your final answer was empty. Return a user-visible Markdown or plain text answer for the user.",
+            });
+            const compacted = await this.compactIfNeeded(turn, messages, "mid_turn", "context_limit", this.responseUsageTokens(protocol), compactions);
+            if (compacted.error) {
+              return this.stop(turn, "fatal_error", startedAt, modelTurns, toolCalls, finalText, null, false, compactions, await this.collectChangedFiles(turn.cwd, initialWorkspaceSnapshot), commandResults, messages, calledTools, lastToolLoopSignature, repeatedToolLoopCount);
+            }
+            messages = compacted.messages;
+            compactions += compacted.compacted ? 1 : 0;
+            await this.saveState(turn, messages, modelTurns, toolCalls, compactions, completionValidationAttempts, calledTools, lastToolLoopSignature, repeatedToolLoopCount, finalText, "running");
+            continue;
+          }
+
+          const missingRequiredTools = this.missingRequiredTools(turn, calledTools);
+          if (missingRequiredTools.length > 0) {
+            messages.push({ role: "assistant", content: response.content, phase: "final_answer" });
+            messages.push({
+              role: "user",
+              content: `Before the final answer, call these required tool(s) at least once: ${missingRequiredTools.join(", ")}.`,
+            });
+            const compacted = await this.compactIfNeeded(turn, messages, "mid_turn", "context_limit", this.responseUsageTokens(protocol), compactions);
+            if (compacted.error) {
+              return this.stop(turn, "fatal_error", startedAt, modelTurns, toolCalls, finalText, null, false, compactions, await this.collectChangedFiles(turn.cwd, initialWorkspaceSnapshot), commandResults, messages, calledTools, lastToolLoopSignature, repeatedToolLoopCount);
+            }
+            messages = compacted.messages;
+            compactions += compacted.compacted ? 1 : 0;
+            await this.saveState(turn, messages, modelTurns, toolCalls, compactions, completionValidationAttempts, calledTools, lastToolLoopSignature, repeatedToolLoopCount, finalText, "running");
+            continue;
+          }
+
+          const changedFiles = await this.collectChangedFiles(turn.cwd, initialWorkspaceSnapshot);
+          await this.record(turn, {
+            type: "final",
+            ...this.baseEvent(turn),
+            success: true,
+            outputPreview: this.preview(response.content),
+          });
+          return this.stop(turn, "completed", startedAt, modelTurns, toolCalls, response.content, null, true, compactions, changedFiles, commandResults, messages, calledTools, lastToolLoopSignature, repeatedToolLoopCount, completionValidationAttempts);
+        }
+
         const parsed = this.parseFinal(response.content, turn.outputSchema);
         if (parsed.success) {
           const missingRequiredTools = this.missingRequiredTools(turn, calledTools);

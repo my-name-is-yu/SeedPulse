@@ -487,6 +487,118 @@ describe("agentloop phase 6 CorePhaseRunner", () => {
 });
 
 describe("agentloop phase 7 ChatAgentLoopRunner and CoreLoopControlTools", () => {
+  it("accepts plain final markdown in default display text chat mode", async () => {
+    const modelInfo = makeModelInfo();
+    const modelClient = new ScriptedModelClient(modelInfo, [
+      {
+        content: "Plain **Markdown** answer.",
+        toolCalls: [],
+        stopReason: "end_turn",
+      },
+    ]);
+    const registry = new ToolRegistry();
+    const { router, runtime } = makeRuntime(registry);
+    const registryModel = new StaticAgentLoopModelRegistry([modelInfo]);
+    const chat = new ChatAgentLoopRunner({
+      boundedRunner: new BoundedAgentLoopRunner({ modelClient, toolRouter: router, toolRuntime: runtime }),
+      modelClient,
+      modelRegistry: registryModel,
+      defaultModel: modelInfo.ref,
+    });
+
+    const result = await chat.execute({ message: "answer plainly" });
+
+    expect(result.success).toBe(true);
+    expect(result.output).toBe("Plain **Markdown** answer.");
+    expect(result.structuredOutput).toBeUndefined();
+    expect(modelClient.calls).toHaveLength(1);
+  });
+
+  it("repairs empty final text before completing default display text chat mode", async () => {
+    const modelInfo = makeModelInfo();
+    const modelClient = new ScriptedModelClient(modelInfo, [
+      {
+        content: "   ",
+        toolCalls: [],
+        stopReason: "end_turn",
+      },
+      {
+        content: "Recovered answer.",
+        toolCalls: [],
+        stopReason: "end_turn",
+      },
+    ]);
+    const registry = new ToolRegistry();
+    const { router, runtime } = makeRuntime(registry);
+    const registryModel = new StaticAgentLoopModelRegistry([modelInfo]);
+    const chat = new ChatAgentLoopRunner({
+      boundedRunner: new BoundedAgentLoopRunner({ modelClient, toolRouter: router, toolRuntime: runtime }),
+      modelClient,
+      modelRegistry: registryModel,
+      defaultModel: modelInfo.ref,
+    });
+
+    const result = await chat.execute({
+      message: "answer plainly",
+      budget: { maxSchemaRepairAttempts: 1 },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.output).toBe("Recovered answer.");
+    expect(modelClient.calls).toHaveLength(2);
+    expect(modelClient.calls[1].messages.some((m) => m.content.includes("final answer was empty"))).toBe(true);
+  });
+
+  it("uses schema repair and structuredOutput only for explicit structured chat mode", async () => {
+    const modelInfo = makeModelInfo();
+    const modelClient = new ScriptedModelClient(modelInfo, [
+      {
+        content: "Plain text is invalid for this structured turn.",
+        toolCalls: [],
+        stopReason: "end_turn",
+      },
+      {
+        content: JSON.stringify({
+          status: "done",
+          answer: "Structured answer.",
+          payload: { ok: true },
+        }),
+        toolCalls: [],
+        stopReason: "end_turn",
+      },
+    ]);
+    const registry = new ToolRegistry();
+    const { router, runtime } = makeRuntime(registry);
+    const registryModel = new StaticAgentLoopModelRegistry([modelInfo]);
+    const chat = new ChatAgentLoopRunner({
+      boundedRunner: new BoundedAgentLoopRunner({ modelClient, toolRouter: router, toolRuntime: runtime }),
+      modelClient,
+      modelRegistry: registryModel,
+      defaultModel: modelInfo.ref,
+    });
+    const schema = z.object({
+      status: z.literal("done"),
+      answer: z.string(),
+      payload: z.object({ ok: z.boolean() }),
+    });
+
+    const result = await chat.execute({
+      message: "return structured data",
+      outputMode: { kind: "structured", schema },
+      budget: { maxSchemaRepairAttempts: 1 },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.output).toBe("Structured answer.");
+    expect(result.structuredOutput).toEqual({
+      status: "done",
+      answer: "Structured answer.",
+      payload: { ok: true },
+    });
+    expect(modelClient.calls).toHaveLength(2);
+    expect(modelClient.calls[1].messages.some((m) => m.content.includes("required JSON schema"))).toBe(true);
+  });
+
   it("lets chat use CoreLoop control only as tools", async () => {
     const modelInfo = makeModelInfo();
     const modelClient = new ScriptedModelClient(modelInfo, [

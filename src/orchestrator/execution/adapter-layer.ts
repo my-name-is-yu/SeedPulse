@@ -59,6 +59,8 @@ export interface AgentResult {
   success: boolean;
   /** stdout from CLI / LLM response text */
   output: string;
+  /** Parsed machine-readable result, when a caller explicitly requested structured output. */
+  structuredOutput?: unknown;
   /** stderr / error message, null on success */
   error: string | null;
   /** Process exit code for CLI adapters; null for API adapters */

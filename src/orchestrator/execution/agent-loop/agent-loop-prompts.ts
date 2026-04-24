@@ -23,9 +23,9 @@ export function buildAgentLoopBaseInstructions(options?: {
     "Preserve and follow AGENTS.md and project instructions from the workspace context.",
     ...(mode === "chat"
       ? [
-          "When returning structured output, keep the main response in finalAnswer with a short summary, optional sections, evidence, blockers, and next steps; keep compatibility fields brief.",
-          "For the final answer, use concise structured markdown with short headings and bullets instead of long unbroken prose.",
-          "Keep the summary tight and put supporting evidence, blockers, and next steps in separate short sections when relevant.",
+          "Write the final assistant answer as user-visible Markdown or plain text.",
+          "Do not wrap the final answer in JSON, schema fields, or code fences unless the user explicitly asks to see JSON.",
+          "The CLI/TUI renders Markdown directly, so use short headings and bullets when they improve readability.",
         ]
       : []),
     buildSubagentRoleInstructions(options?.role ?? "default"),
@@ -33,6 +33,14 @@ export function buildAgentLoopBaseInstructions(options?: {
   ];
 
   return rules.join("\n");
+}
+
+export function buildChatStructuredOutputInstructions(): string {
+  return [
+    "This turn explicitly requested structured output for automation.",
+    "Return only JSON that matches the requested schema.",
+    "Keep any user-visible prose in display fields such as message, answer, or finalAnswer.summary when the schema provides them.",
+  ].join("\n");
 }
 
 export function buildSubagentRoleInstructions(role: SubagentRole): string {
