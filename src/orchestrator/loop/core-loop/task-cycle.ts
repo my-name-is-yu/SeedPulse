@@ -446,16 +446,17 @@ async function rebalancePortfolio(
     if (portfolio) {
       for (const strategy of portfolio.strategies) {
         if (ctx.deps.portfolioManager.isWaitStrategy(strategy)) {
-          const waitTrigger = await ctx.deps.portfolioManager.handleWaitStrategyExpiry(
+          const waitOutcome = await ctx.deps.portfolioManager.handleWaitStrategyExpiry(
             goalId,
             strategy.id
           );
+          const waitTrigger = waitOutcome?.rebalance_trigger ?? null;
+          if (waitOutcome && waitOutcome.status !== "not_due" && result) {
+            result.waitExpired = true;
+            result.waitStrategyId = strategy.id;
+          }
           if (waitTrigger) {
             await ctx.deps.portfolioManager.rebalance(goalId, waitTrigger);
-            if (result) {
-              result.waitExpired = true;
-              result.waitStrategyId = strategy.id;
-            }
           }
         }
       }

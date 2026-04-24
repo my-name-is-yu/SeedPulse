@@ -4,6 +4,7 @@ export type { ShutdownMarker } from "./types.js";
 export * from "./runtime-ownership.js";
 export * from "./runner-lifecycle.js";
 export * from "./signals.js";
+export * from "./wait-deadline-resolver.js";
 export {
   checkCrashRecoveryMarker,
   cleanupDaemonRun,

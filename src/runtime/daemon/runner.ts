@@ -91,6 +91,7 @@ import {
   handleScheduleRunNowCommand as handleScheduleRunNowCommandFn,
 } from "./runner-commands.js";
 import { runDaemonGoalCycleLoop } from "./runner-goal-cycle.js";
+import { WaitDeadlineResolver, type WaitDeadlineResolution } from "./wait-deadline-resolver.js";
 import {
   beginGracefulShutdown as beginGracefulShutdownFn,
   failRuntimeLeadership as failRuntimeLeadershipFn,
@@ -452,6 +453,17 @@ export class DaemonRunner {
    */
   private getNextInterval(goalIds: string[]): number {
     return getNextIntervalForGoals(this.config, goalIds);
+  }
+
+  private async resolveWaitDeadlines(goalIds: string[]): Promise<WaitDeadlineResolution> {
+    return new WaitDeadlineResolver(this.stateManager).resolve(goalIds);
+  }
+
+  private clampIntervalToWaitDeadline(
+    intervalMs: number,
+    resolution: WaitDeadlineResolution
+  ): number {
+    return new WaitDeadlineResolver(this.stateManager).clampInterval(intervalMs, resolution);
   }
 
   // ─── Private: Error Handling ───

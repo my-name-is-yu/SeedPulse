@@ -15,7 +15,13 @@ import type {
   RebalanceTrigger,
   TaskSelectionResult,
 } from "../../base/types/portfolio.js";
-import type { Strategy, WaitStrategy } from "../../base/types/strategy.js";
+import {
+  normalizeWaitMetadata,
+  resolveWaitNextObserveAt,
+  type Strategy,
+  type WaitExpiryOutcome,
+  type WaitStrategy,
+} from "../../base/types/strategy.js";
 
 /**
  * Get the current gap value for a specific dimension of a goal.
@@ -290,25 +296,57 @@ export async function handleWaitStrategyExpiry(
   isWaitStrategy: (s: Strategy) => boolean,
   getGap: (goalId: string, dimension: string) => number | null | Promise<number | null>,
   updateState: (strategyId: string, state: string) => void | Promise<void>,
-  getPortfolioStrategies: (goalId: string) => Strategy[] | Promise<Strategy[]>
-): Promise<RebalanceTrigger | null> {
-  if (!isWaitStrategy(strategy)) return null;
+  getPortfolioStrategies: (goalId: string) => Strategy[] | Promise<Strategy[]>,
+  getWaitMetadata?: (goalId: string, strategyId: string) => unknown | null | Promise<unknown | null>
+): Promise<WaitExpiryOutcome> {
+  if (!isWaitStrategy(strategy)) {
+    return {
+      status: "unknown",
+      goal_id: goalId,
+      strategy_id: strategyId,
+      details: "Strategy is not a WaitStrategy",
+    };
+  }
 
   const waitStrategy = strategy as unknown as WaitStrategy;
-  const waitUntil = new Date(waitStrategy.wait_until).getTime();
+  const metadata = normalizeWaitMetadata(
+    waitStrategy,
+    await getWaitMetadata?.(goalId, strategyId)
+  );
+  const nextObserveAt = resolveWaitNextObserveAt(waitStrategy, metadata);
+  const waitUntil = nextObserveAt ? new Date(nextObserveAt).getTime() : new Date(waitStrategy.wait_until).getTime();
   const now = Date.now();
 
-  if (now < waitUntil) return null;
+  if (now < waitUntil) {
+    return {
+      status: "not_due",
+      goal_id: goalId,
+      strategy_id: strategyId,
+      details: `WaitStrategy is not due until ${nextObserveAt ?? waitStrategy.wait_until}`,
+    };
+  }
 
   const currentGap = await getGap(goalId, strategy.primary_dimension);
-  if (currentGap === null) return null;
+  if (currentGap === null) {
+    return {
+      status: "unknown",
+      goal_id: goalId,
+      strategy_id: strategyId,
+      details: `WaitStrategy expired but current gap is unavailable for ${strategy.primary_dimension}`,
+    };
+  }
 
   const startGap = strategy.gap_snapshot_at_start ?? currentGap;
   const gapDelta = currentGap - startGap;
 
   if (gapDelta < 0) {
     await updateState(strategyId, "completed");
-    return null;
+    return {
+      status: "improved",
+      goal_id: goalId,
+      strategy_id: strategyId,
+      details: `WaitStrategy expired with gap improvement: ${startGap.toFixed(3)} → ${currentGap.toFixed(3)}`,
+    };
   }
 
   if (gapDelta === 0) {
@@ -320,23 +358,48 @@ export async function handleWaitStrategyExpiry(
       if (fallback && fallback.state === "candidate") {
         await updateState(fallback.id, "active");
         await updateState(strategyId, "terminated");
-        return null;
+        return {
+          status: "fallback_activated",
+          goal_id: goalId,
+          strategy_id: strategyId,
+          details: `WaitStrategy expired unchanged; activated fallback strategy ${fallback.id}`,
+        };
       }
     }
     await updateState(strategyId, "terminated");
-    return {
+    const rebalanceTrigger: RebalanceTrigger = {
       type: "stall_detected",
       strategy_id: strategyId,
       details: `WaitStrategy expired with no gap improvement: ${startGap.toFixed(3)} → ${currentGap.toFixed(3)}`,
     };
+    return {
+      status: "unchanged",
+      goal_id: goalId,
+      strategy_id: strategyId,
+      details: rebalanceTrigger.details,
+      rebalance_trigger: rebalanceTrigger,
+    };
   }
 
   await updateState(strategyId, "terminated");
-  return {
+  const rebalanceTrigger: RebalanceTrigger = {
     type: "stall_detected",
     strategy_id: strategyId,
     details: `WaitStrategy expired with gap worsening: ${startGap.toFixed(3)} → ${currentGap.toFixed(3)}`,
   };
+  return {
+    status: "worsened",
+    goal_id: goalId,
+    strategy_id: strategyId,
+    details: rebalanceTrigger.details,
+    rebalance_trigger: rebalanceTrigger,
+  };
+}
+
+export function rebalanceTriggerFromWaitExpiryOutcome(
+  outcome: WaitExpiryOutcome | null | undefined
+): RebalanceTrigger | null {
+  return outcome?.rebalance_trigger ?? null;
 }
 
 /**

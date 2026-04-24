@@ -1,7 +1,7 @@
 import { StrategyManager } from "./strategy-manager.js";
 import { StateManager } from "../../base/state/state-manager.js";
 import { StrategySchema, parseStrategy } from "../../base/types/strategy.js";
-import type { Strategy, Portfolio } from "../../base/types/strategy.js";
+import type { Strategy, Portfolio, WaitExpiryOutcome } from "../../base/types/strategy.js";
 import type { StrategyState } from "../../base/types/core.js";
 import { PortfolioConfigSchema } from "../../base/types/portfolio.js";
 import type {
@@ -382,7 +382,7 @@ export class PortfolioManager {
   async handleWaitStrategyExpiry(
     goalId: string,
     strategyId: string
-  ): Promise<RebalanceTrigger | null> {
+  ): Promise<WaitExpiryOutcome | null> {
     const portfolio = await this.strategyManager.getPortfolio(goalId);
     if (!portfolio) return null;
 
@@ -396,7 +396,8 @@ export class PortfolioManager {
       (s) => this.isWaitStrategy(s),
       (gId, dim) => this.getCurrentGapForDimension(gId, dim),
       (sId, state) => this.strategyManager.updateState(sId, state as StrategyState),
-      async (gId) => (await this.strategyManager.getPortfolio(gId))?.strategies ?? []
+      async (gId) => (await this.strategyManager.getPortfolio(gId))?.strategies ?? [],
+      (gId, sId) => this.stateManager.readRaw(`strategies/${gId}/wait-meta/${sId}.json`)
     );
   }
 

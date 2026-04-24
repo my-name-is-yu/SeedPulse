@@ -1,6 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
-import { parseStrategy, parseStrategies, PortfolioSchema, WaitStrategySchema, StrategySchema } from "../../../base/types/strategy.js";
+import {
+  parseStrategy,
+  parseStrategies,
+  normalizeWaitMetadata,
+  PortfolioSchema,
+  StrategySchema,
+  WaitMetadataSchema,
+  WaitStrategySchema,
+} from "../../../base/types/strategy.js";
 import { isWaitStrategy } from "../portfolio-allocation.js";
 import { StateManager } from "../../../base/state/state-manager.js";
 import { StrategyManager } from "../strategy-manager.js";
@@ -178,6 +186,35 @@ describe("WaitStrategy persistence round-trip", () => {
     expect(loaded).toBeDefined();
     expect(isWaitStrategy(loaded as Record<string, unknown>)).toBe(true);
     expect((loaded as Record<string, unknown>)["wait_until"]).toBe("2026-04-14T00:00:00.000Z");
+
+    const metadata = WaitMetadataSchema.parse(
+      await stateManager.readRaw(`strategies/goal-1/wait-meta/${waitStrategy.id}.json`)
+    );
+    expect(metadata.wait_until).toBe("2026-04-14T00:00:00.000Z");
+    expect(metadata.conditions).toEqual([
+      { type: "time_until", until: "2026-04-14T00:00:00.000Z" },
+    ]);
+    expect(metadata.resume_plan).toEqual({ action: "complete_wait" });
+  });
+
+  it("normalizes legacy wait-meta sidecars into the durable wait metadata contract", async () => {
+    const waitStrategy = WaitStrategySchema.parse(makeWaitStrategyData({
+      wait_until: "2026-04-14T00:00:00.000Z",
+      fallback_strategy_id: "fallback-1",
+    }));
+
+    const metadata = normalizeWaitMetadata(waitStrategy, {
+      wait_until: "2026-04-14T00:00:00.000Z",
+    });
+
+    expect(metadata.schema_version).toBe(1);
+    expect(metadata.conditions).toEqual([
+      { type: "time_until", until: "2026-04-14T00:00:00.000Z" },
+    ]);
+    expect(metadata.resume_plan).toEqual({
+      action: "activate_fallback",
+      strategy_id: "fallback-1",
+    });
   });
 
   it("WaitStrategy fields preserved after updateState (terminated)", async () => {

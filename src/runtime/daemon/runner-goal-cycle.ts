@@ -2,6 +2,7 @@ import type { LoopResult } from "../../orchestrator/loop/core-loop.js";
 import type { ProgressEvent } from "../../orchestrator/loop/core-loop.js";
 import type { GoalCycleScheduleSnapshotEntry } from "./maintenance.js";
 import { errorMessage } from "./runner-errors.js";
+import { getDueWaitGoalIds } from "./wait-deadline-resolver.js";
 
 const MAX_IDLE_SLEEP_MS = 5_000;
 
@@ -35,7 +36,10 @@ export async function runDaemonGoalCycleLoop(context: GoalCycleRunnerContext): P
       const goalIds = [...context.currentGoalIds];
       context.refreshOperationalState();
       const cycleSnapshot = await context.collectGoalCycleSnapshot(goalIds);
-      const activeGoals = await context.determineActiveGoals(goalIds, cycleSnapshot);
+      const waitDeadlines = await context.resolveWaitDeadlines?.(goalIds);
+      const scheduledActiveGoals = await context.determineActiveGoals(goalIds, cycleSnapshot);
+      const dueWaitGoalIds = waitDeadlines ? getDueWaitGoalIds(waitDeadlines) : [];
+      const activeGoals = [...new Set([...scheduledActiveGoals, ...dueWaitGoalIds])];
       await context.maybeRefreshProviderRuntime(activeGoals.length);
 
       if (activeGoals.length === 0) {
@@ -127,8 +131,11 @@ export async function runDaemonGoalCycleLoop(context: GoalCycleRunnerContext): P
           maxGapScore,
           context.consecutiveIdleCycles,
         );
-        const sleepIntervalMs =
+        const idleAwareIntervalMs =
           activeGoals.length === 0 ? Math.min(intervalMs, MAX_IDLE_SLEEP_MS) : intervalMs;
+        const sleepIntervalMs = waitDeadlines
+          ? context.clampIntervalToWaitDeadline(idleAwareIntervalMs, waitDeadlines)
+          : idleAwareIntervalMs;
         context.logger.info(`Sleeping for ${sleepIntervalMs}ms until next check`);
         await context.sleep(sleepIntervalMs);
       }

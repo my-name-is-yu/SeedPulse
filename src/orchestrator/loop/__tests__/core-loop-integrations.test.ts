@@ -1025,10 +1025,19 @@ describe("CoreLoop", async () => {
         last_rebalanced_at: new Date().toISOString(),
       });
 
-      const waitTrigger = { type: "wait_expired" as const, details: "wait period elapsed" };
+      const waitTrigger = {
+        type: "stall_detected" as const,
+        strategy_id: waitStrategy.id,
+        details: "wait period elapsed",
+      };
       const portfolioManager = createMockPortfolioManager();
       portfolioManager.isWaitStrategy.mockReturnValue(true);
-      portfolioManager.handleWaitStrategyExpiry.mockReturnValue(waitTrigger);
+      portfolioManager.handleWaitStrategyExpiry.mockReturnValue({
+        status: "worsened",
+        goal_id: "goal-1",
+        strategy_id: waitStrategy.id,
+        rebalance_trigger: waitTrigger,
+      });
 
       const depsWithPM = { ...deps, portfolioManager: portfolioManager as any };
       const loop = new CoreLoop(depsWithPM, { delayBetweenLoopsMs: 0 });
@@ -1036,6 +1045,39 @@ describe("CoreLoop", async () => {
 
       expect(portfolioManager.handleWaitStrategyExpiry).toHaveBeenCalledWith("goal-1", waitStrategy.id);
       expect(portfolioManager.rebalance).toHaveBeenCalledWith("goal-1", waitTrigger);
+    });
+
+    it("marks waitExpired when WaitStrategy expiry does not require rebalance", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      await mocks.stateManager.saveGoal(makeGoal());
+
+      const waitStrategy = {
+        id: "wait-strategy-1",
+        state: "active",
+        goal_id: "goal-1",
+      };
+      mocks.strategyManager.getPortfolio.mockReturnValue({
+        goal_id: "goal-1",
+        strategies: [waitStrategy],
+        rebalance_interval: { value: 7, unit: "days" },
+        last_rebalanced_at: new Date().toISOString(),
+      });
+
+      const portfolioManager = createMockPortfolioManager();
+      portfolioManager.isWaitStrategy.mockReturnValue(true);
+      portfolioManager.handleWaitStrategyExpiry.mockReturnValue({
+        status: "improved",
+        goal_id: "goal-1",
+        strategy_id: waitStrategy.id,
+      });
+
+      const depsWithPM = { ...deps, portfolioManager: portfolioManager as any };
+      const loop = new CoreLoop(depsWithPM, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.waitExpired).toBe(true);
+      expect(result.waitStrategyId).toBe(waitStrategy.id);
+      expect(portfolioManager.rebalance).not.toHaveBeenCalled();
     });
 
     it("uses WaitStrategy.wait_until to suppress stall checks for its primary dimension", async () => {

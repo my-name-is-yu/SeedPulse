@@ -753,7 +753,7 @@ describe("PortfolioManager", () => {
   });
 
   describe("handleWaitStrategyExpiry", () => {
-    it("returns null when not expired", async () => {
+    it("returns not_due when not expired", async () => {
       const wait = makeWaitStrategy({
         id: "ws1",
         state: "active",
@@ -765,7 +765,31 @@ describe("PortfolioManager", () => {
       (mockStrategyManager.getPortfolio as ReturnType<typeof vi.fn>).mockReturnValue(portfolio);
 
       const result = await pm.handleWaitStrategyExpiry("goal-1", "ws1");
-      expect(result).toBeNull();
+      expect(result).toMatchObject({ status: "not_due", strategy_id: "ws1" });
+    });
+
+    it("uses durable next_observe_at instead of expiring on stale wait_until", async () => {
+      const wait = makeWaitStrategy({
+        id: "ws1",
+        state: "active",
+        wait_until: new Date(Date.now() - 100_000).toISOString(),
+        gap_snapshot_at_start: 0.8,
+        primary_dimension: "quality",
+      });
+      const portfolio = makePortfolio([wait]);
+      (mockStrategyManager.getPortfolio as ReturnType<typeof vi.fn>).mockReturnValue(portfolio);
+      (mockStateManager.readRaw as ReturnType<typeof vi.fn>).mockResolvedValue({
+        schema_version: 1,
+        wait_until: wait.wait_until,
+        conditions: [{ type: "time_until", until: wait.wait_until }],
+        next_observe_at: new Date(Date.now() + 100_000).toISOString(),
+        resume_plan: { action: "complete_wait" },
+      });
+
+      const result = await pm.handleWaitStrategyExpiry("goal-1", "ws1");
+
+      expect(result).toMatchObject({ status: "not_due", strategy_id: "ws1" });
+      expect(mockStrategyManager.updateState).not.toHaveBeenCalled();
     });
 
     it("completes the WaitStrategy when expired and gap improved", async () => {
@@ -782,7 +806,8 @@ describe("PortfolioManager", () => {
       (mockStateManager.readRaw as ReturnType<typeof vi.fn>).mockResolvedValue({ quality: 0.5 });
 
       const result = await pm.handleWaitStrategyExpiry("goal-1", "ws1");
-      expect(result).toBeNull();
+      expect(result).toMatchObject({ status: "improved", strategy_id: "ws1" });
+      expect(result?.rebalance_trigger).toBeUndefined();
       expect(mockStrategyManager.updateState).toHaveBeenCalledWith("ws1", "completed");
     });
 
@@ -806,7 +831,8 @@ describe("PortfolioManager", () => {
 
       const result = await pm.handleWaitStrategyExpiry("goal-1", "ws1");
 
-      expect(result).toBeNull();
+      expect(result).toMatchObject({ status: "fallback_activated", strategy_id: "ws1" });
+      expect(result?.rebalance_trigger).toBeUndefined();
       expect(mockStrategyManager.updateState).toHaveBeenNthCalledWith(1, "fallback-1", "active");
       expect(mockStrategyManager.updateState).toHaveBeenNthCalledWith(2, "ws1", "terminated");
     });
@@ -826,8 +852,9 @@ describe("PortfolioManager", () => {
 
       const result = await pm.handleWaitStrategyExpiry("goal-1", "ws1");
       expect(result).not.toBeNull();
-      expect(result!.type).toBe("stall_detected");
-      expect(result!.strategy_id).toBe("ws1");
+      expect(result!.status).toBe("worsened");
+      expect(result!.rebalance_trigger?.type).toBe("stall_detected");
+      expect(result!.rebalance_trigger?.strategy_id).toBe("ws1");
       expect(mockStrategyManager.updateState).toHaveBeenCalledWith("ws1", "terminated");
     });
 

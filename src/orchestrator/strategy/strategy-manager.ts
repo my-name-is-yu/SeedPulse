@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import { StrategySchema, WaitStrategySchema, parseStrategy } from "../../base/types/strategy.js";
+import { StrategySchema, WaitStrategySchema, buildDefaultWaitMetadata, parseStrategy } from "../../base/types/strategy.js";
 import { isWaitStrategy } from "./portfolio-allocation.js";
 import type { Strategy } from "../../base/types/strategy.js";
 import { redistributeAllocation } from "./strategy-helpers.js";
@@ -311,10 +311,10 @@ export class StrategyManager extends StrategyManagerBase {
     portfolio.strategies.push(waitStrategy);
     await this.savePortfolio(goalId, portfolio);
 
-    // Persist wait-specific fields in a sidecar so activateMultiple can read wait_until
+    // Persist wait-specific fields in a sidecar so wait observation can survive schema changes.
     await this.stateManager.writeRaw(
       `strategies/${goalId}/wait-meta/${waitStrategy.id}.json`,
-      { wait_until: params.wait_until }
+      buildDefaultWaitMetadata(waitStrategy)
     );
 
     this.strategyIndex.set(waitStrategy.id, goalId);
