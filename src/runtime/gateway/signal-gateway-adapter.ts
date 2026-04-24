@@ -136,6 +136,7 @@ export class SignalGatewayAdapter implements ChannelAdapter {
         conversation_id: normalized.conversationId,
         sender_id: normalized.senderId,
         message_id: normalized.messageId,
+        goal_id: route.goalId,
         metadata: {
           ...route.metadata,
           ...normalized.metadata,

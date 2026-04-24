@@ -4,6 +4,10 @@ import { IngressGateway, HttpChannelAdapter } from "../gateway/index.js";
 import type { LoopSupervisor, SupervisorState } from "../executor/index.js";
 import { PulSeedEventSchema } from "../../base/types/drive.js";
 import { RuntimeOperationStore, type RuntimeControlOperationKind } from "../store/index.js";
+import {
+  publishRuntimeControlResult,
+  type RuntimeControlResultEventPublisher,
+} from "../control/runtime-control-result-routing.js";
 import { ProcessShutdownCoordinator, startDaemonStatusHeartbeat, type ProcessSignalTarget } from "./runner-lifecycle.js";
 import { handleCriticalDaemonError, handleDaemonLoopError } from "./runner-errors.js";
 import type { Envelope } from "../types/envelope.js";
@@ -322,6 +326,7 @@ export async function reconcileRuntimeControlOperationsAfterStartup(
   runtimeRoot: string | null,
   state: { status: string },
   logger: { info(message: string, meta?: Record<string, unknown>): void },
+  publisher?: RuntimeControlResultEventPublisher,
 ): Promise<void> {
   const operationStore = new RuntimeOperationStore(runtimeRoot ?? undefined);
   const pending = await operationStore.listPending();
@@ -333,7 +338,7 @@ export async function reconcileRuntimeControlOperationsAfterStartup(
     ) {
       continue;
     }
-    await operationStore.save({
+    const verified = await operationStore.save({
       ...operation,
       state: "verified",
       updated_at: now,
@@ -342,10 +347,15 @@ export async function reconcileRuntimeControlOperationsAfterStartup(
         ok: true,
         message:
           operation.kind === "restart_gateway"
-            ? "gateway restart verified after daemon startup."
-            : "daemon restart verified after startup.",
+            ? "gateway の再起動を確認しました。"
+            : "PulSeed daemon の再起動を確認しました。",
         daemon_status: state.status,
       },
+    });
+    await publishRuntimeControlResult({
+      operation: verified,
+      publisher,
+      runtimeRoot,
     });
     logger.info("Runtime control restart operation verified after startup", {
       operation_id: operation.operation_id,

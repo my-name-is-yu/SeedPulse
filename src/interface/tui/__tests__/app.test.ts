@@ -139,7 +139,7 @@ describe("standalone slash command routing", () => {
 
     await testState.lastChatProps!.onSubmit("/permissions workspace-write");
 
-    expect(chatRunner.execute).toHaveBeenCalledWith("/permissions workspace-write", process.cwd());
+    expect(chatRunner.execute).toHaveBeenCalledWith("/permissions workspace-write", "~/workspace");
     expect(intentRecognizer.recognize).not.toHaveBeenCalled();
     expect(actionHandler.handle).not.toHaveBeenCalled();
 
@@ -178,19 +178,19 @@ describe("daemon-mode chat routing", () => {
 
     await flush();
 
-    expect(chatRunner.startSession).toHaveBeenCalledWith(process.cwd());
+    expect(chatRunner.startSession).toHaveBeenCalledWith("~/workspace");
     expect(testState.lastChatProps).not.toBeNull();
 
     await testState.lastChatProps!.onSubmit("free form question");
 
-    expect(chatRunner.execute).toHaveBeenCalledWith("free form question", process.cwd());
+    expect(chatRunner.execute).toHaveBeenCalledWith("free form question", "~/workspace");
     expect(chatRunner.executeIngressMessage).not.toHaveBeenCalled();
     expect(daemonClient.chat).not.toHaveBeenCalled();
 
     screen.unmount();
   });
 
-  it("routes free-form text to daemon chat once an active goal is present", async () => {
+  it("keeps free-form text on ChatRunner even when a daemon goal is active", async () => {
     const daemonClient = createDaemonClientMock();
     const stateManager = createStateManagerMock();
     const chatRunner = createChatRunnerMock();
@@ -225,7 +225,8 @@ describe("daemon-mode chat routing", () => {
 
     await testState.lastChatProps!.onSubmit("question for the active goal");
 
-    expect(daemonClient.chat).toHaveBeenCalledWith("goal-123", "question for the active goal");
+    expect(chatRunner.execute).toHaveBeenCalledWith("question for the active goal", "~/workspace");
+    expect(daemonClient.chat).not.toHaveBeenCalled();
     expect(chatRunner.executeIngressMessage).not.toHaveBeenCalled();
 
     screen.unmount();
@@ -256,7 +257,7 @@ describe("daemon-mode chat routing", () => {
 
     await testState.lastChatProps!.onSubmit("/permissions read-only");
 
-    expect(chatRunner.execute).toHaveBeenCalledWith("/permissions read-only", process.cwd());
+    expect(chatRunner.execute).toHaveBeenCalledWith("/permissions read-only", "~/workspace");
     expect(daemonClient.chat).not.toHaveBeenCalled();
 
     screen.unmount();

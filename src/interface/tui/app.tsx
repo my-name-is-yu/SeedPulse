@@ -66,13 +66,35 @@ export function resolveFreeformInputRoute({
   daemonGoalId: string | null;
   hasChatRunner: boolean;
 }): FreeformInputRoute {
-  if (isDaemonMode && daemonGoalId) {
-    return "daemon_goal_chat";
-  }
   if (hasChatRunner) {
     return "chat_runner";
   }
+  if (isDaemonMode && daemonGoalId) {
+    return "daemon_goal_chat";
+  }
   return "unavailable";
+}
+
+const CHAT_RUNNER_OWNED_COMMANDS = new Set([
+  "/resume",
+  "/sessions",
+  "/history",
+  "/compact",
+  "/tend",
+  "/permissions",
+]);
+
+export function isChatRunnerOwnedSlashCommand(input: string): boolean {
+  const command = input.trim().toLowerCase().split(/\s+/)[0] ?? "";
+  return CHAT_RUNNER_OWNED_COMMANDS.has(command);
+}
+
+export function deriveDaemonGoalIdFromActiveGoals(
+  currentGoalId: string | null,
+  activeGoals: string[],
+): string | null {
+  if (activeGoals.length === 0) return null;
+  return currentGoalId && activeGoals.includes(currentGoalId) ? currentGoalId : activeGoals[0]!;
 }
 
 interface AppProps {
@@ -189,11 +211,34 @@ export function App({
       setDaemonLoopState((prev) => ({
         ...prev,
         running: (d.running as boolean) ?? prev.running,
-        goalId: (d.goalId as string | null) ?? prev.goalId,
+        goalId: Object.hasOwn(d, "goalId") ? (d.goalId as string | null) : prev.goalId,
         iteration: (d.iteration as number) ?? prev.iteration,
         status: (d.status as string) ?? prev.status,
         trustScore: (d.trustScore as number) ?? prev.trustScore,
       }));
+    };
+
+    const onDaemonStatus = (data: unknown) => {
+      const d = data as Record<string, unknown>;
+      const activeGoals = Array.isArray(d.activeGoals)
+        ? d.activeGoals.filter((goalId): goalId is string => typeof goalId === "string" && goalId.length > 0)
+        : null;
+      setDaemonLoopState((prev) => {
+        const nextGoalId = activeGoals
+          ? deriveDaemonGoalIdFromActiveGoals(prev.goalId, activeGoals)
+          : prev.goalId;
+        return {
+          ...prev,
+          goalId: nextGoalId,
+          running: activeGoals ? activeGoals.length > 0 : prev.running,
+          status: typeof d.status === "string"
+            ? d.status
+            : activeGoals && activeGoals.length === 0
+              ? "idle"
+              : prev.status,
+          iteration: typeof d.loopCount === "number" ? d.loopCount : prev.iteration,
+        };
+      });
     };
 
     const onApproval = (data: unknown) => {
@@ -214,12 +259,14 @@ export function App({
     daemonClient.on("_connected", onConnected);
     daemonClient.on("_disconnected", onDisconnected);
     daemonClient.on("loop_update", onLoopUpdate);
+    daemonClient.on("daemon_status", onDaemonStatus);
     daemonClient.on("approval_required", onApproval);
 
     return () => {
       daemonClient.off("_connected", onConnected);
       daemonClient.off("_disconnected", onDisconnected);
       daemonClient.off("loop_update", onLoopUpdate);
+      daemonClient.off("daemon_status", onDaemonStatus);
       daemonClient.off("approval_required", onApproval);
     };
   }, [isDaemonMode, daemonClient]);
@@ -260,12 +307,12 @@ export function App({
   // Start ChatRunner session on mount (standalone mode)
   useEffect(() => {
     if (chatRunner) {
-      chatRunner.startSession(process.cwd());
+      chatRunner.startSession(cwd ?? process.cwd());
       chatRunner.onEvent = (event) => {
         setMessages((prev) => applyChatEventToMessages(prev, event, MAX_MESSAGES) as ChatMessage[]);
       };
     }
-  }, [chatRunner]);
+  }, [chatRunner, cwd]);
 
   // Pre-load active/waiting goal names for fuzzy completion in Chat
   useEffect(() => {
@@ -340,8 +387,6 @@ export function App({
       try {
         // Local-only commands — no LLM round-trip needed
         const trimmedInput = input.trim().toLowerCase();
-        const isPermissionsCommand =
-          trimmedInput === "/permissions" || trimmedInput.startsWith("/permissions ");
         const bashCommand = extractBashCommand(input);
         if (bashCommand !== null) {
           if (!bashCommand) {
@@ -384,8 +429,8 @@ export function App({
           return;
         }
 
-        if (isPermissionsCommand && !isDaemonMode && chatRunner) {
-          await chatRunner.execute(input, process.cwd());
+        if (chatRunner && isChatRunnerOwnedSlashCommand(input)) {
+          await chatRunner.execute(input, cwd ?? process.cwd());
           return;
         }
 
@@ -441,11 +486,6 @@ export function App({
           const trimmed = input.trim().toLowerCase();
           if (trimmed === "/help" || trimmed === "/?") {
             setShowHelp(true);
-          } else if (
-            (trimmed === "/permissions" || trimmed.startsWith("/permissions ")) &&
-            chatRunner
-          ) {
-            await chatRunner.execute(input, process.cwd());
           } else if (trimmed === "/settings" || trimmed === "/config") {
             setShowSettings(true);
           } else if (trimmed === "/dashboard" || trimmed === "/d") {
@@ -494,7 +534,7 @@ export function App({
               }].slice(-MAX_MESSAGES));
             }
           } else if (freeformRoute === "chat_runner" && chatRunner) {
-            await chatRunner.execute(input, process.cwd());
+            await chatRunner.execute(input, cwd ?? process.cwd());
           } else {
             setMessages((prev) => [...prev, {
               id: randomUUID(), role: "pulseed" as const,
@@ -521,7 +561,7 @@ export function App({
         setIsProcessing(false);
       }
     },
-    [intentRecognizer, actionHandler, chatRunner, daemonClient, isDaemonMode, daemonLoopState.goalId, startLoop, stopLoop, isProcessing]
+    [intentRecognizer, actionHandler, chatRunner, daemonClient, isDaemonMode, daemonLoopState.goalId, startLoop, stopLoop, isProcessing, cwd]
   );
 
   // goalCount: 1 when there is an active goal in the loop, 0 otherwise

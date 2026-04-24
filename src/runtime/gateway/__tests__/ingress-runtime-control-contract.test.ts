@@ -159,10 +159,15 @@ describe("IngressGateway runtime-control contract", () => {
         },
         reply_target: {
           surface: "gateway",
+          channel: "plugin_gateway",
           platform: "slack",
           conversation_id: "slack-thread-1",
+          message_id: "slack-msg-1",
           identity_key: "owner",
           user_id: "owner-user",
+          metadata: {
+            runtime_control_approved: true,
+          },
         },
       });
       expect(daemonRestart).toMatchObject({
@@ -176,10 +181,15 @@ describe("IngressGateway runtime-control contract", () => {
         },
         reply_target: {
           surface: "gateway",
+          channel: "plugin_gateway",
           platform: "telegram",
           conversation_id: "telegram-chat-1",
+          message_id: "telegram-msg-1",
           identity_key: "owner",
           user_id: "owner-user",
+          metadata: {
+            runtime_control_approved: true,
+          },
         },
       });
       expect(daemonRestart?.reply_target.platform).not.toBe(gatewayRestart?.reply_target.platform);

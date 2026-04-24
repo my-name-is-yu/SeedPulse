@@ -35,6 +35,7 @@ export interface ChatIngressMessage {
   identity_key?: string;
   conversation_id?: string;
   message_id?: string;
+  goal_id?: string;
   user_id?: string;
   user_name?: string;
   text: string;
@@ -228,6 +229,7 @@ export interface NormalizeLegacyIngressInput {
   user_name?: string;
   sender_id?: string;
   message_id?: string;
+  goal_id?: string;
   cwd?: string;
   timeoutMs?: number;
   metadata?: Record<string, unknown>;
@@ -244,8 +246,17 @@ export function normalizeLegacyIngressInput(input: NormalizeLegacyIngressInput):
   const identityKey = normalizeIdentity(input.identity_key);
   const conversationId = normalizeIdentity(input.conversation_id);
   const userId = normalizeIdentity(input.user_id ?? input.sender_id);
+  const metadataGoalId = typeof input.metadata?.["goal_id"] === "string"
+    ? input.metadata["goal_id"].trim()
+    : typeof input.metadata?.["routed_goal_id"] === "string"
+      ? input.metadata["routed_goal_id"].trim()
+      : "";
+  const goalId = normalizeIdentity(input.goal_id ?? metadataGoalId);
   const actorSurface = inferActorSurface(channel);
-  const metadata = { ...(input.metadata ?? {}) };
+  const metadata: Record<string, unknown> = {
+    ...(input.metadata ?? {}),
+    ...(goalId ? { goal_id: goalId } : {}),
+  };
   const preapproved = input.runtimeControl?.approvalMode === "preapproved"
     || input.runtimeControl?.approval_mode === "preapproved"
     || metadata["runtime_control_approved"] === true;
@@ -282,6 +293,7 @@ export function normalizeLegacyIngressInput(input: NormalizeLegacyIngressInput):
     ...(identityKey ? { identity_key: identityKey } : {}),
     ...(conversationId ? { conversation_id: conversationId } : {}),
     ...(input.message_id ? { message_id: input.message_id } : {}),
+    ...(goalId ? { goal_id: goalId } : {}),
     ...(userId ? { user_id: userId } : {}),
     ...(input.user_name ? { user_name: input.user_name } : {}),
     text: input.text,

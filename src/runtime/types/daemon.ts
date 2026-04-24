@@ -29,6 +29,7 @@ export const DaemonConfigSchema = z.object({
     slack: z.object({
       enabled: z.boolean().default(false),
       signing_secret: z.string().optional(),
+      bot_token: z.string().optional(),
       path: z.string().default("/slack/events"),
       channel_goal_map: z.record(z.string()).default({}),
     }).default({}),

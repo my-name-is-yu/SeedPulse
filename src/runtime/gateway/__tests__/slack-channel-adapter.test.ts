@@ -1,9 +1,14 @@
 import { createHmac } from "crypto";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { dispatchGatewayChatInput } from "../chat-session-dispatch.js";
 import {
   SlackChannelAdapter,
   type SlackChannelAdapterConfig,
 } from "../slack-channel-adapter.js";
+
+vi.mock("../chat-session-dispatch.js", () => ({
+  dispatchGatewayChatInput: vi.fn().mockResolvedValue("ok"),
+}));
 
 const SIGNING_SECRET = "test-signing-secret-abc123";
 
@@ -24,6 +29,14 @@ function makeAdapter(extra?: Partial<SlackChannelAdapterConfig>): SlackChannelAd
     ...extra,
   });
 }
+
+beforeEach(() => {
+  vi.mocked(dispatchGatewayChatInput).mockClear();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 // ---------------------------------------------------------------------------
 // Basic adapter properties
@@ -195,7 +208,7 @@ describe("SlackChannelAdapter — event_callback to Envelope", () => {
       type: "event_callback",
       team_id: "T_TEAM1",
       event_id: "Ev_001",
-      event: { type: "message", text: "hello", channel: "C_GENERAL" },
+      event: { type: "reaction_added", reaction: "eyes", channel: "C_GENERAL" },
     });
     adapter.handleRequest(body, buildHeaders(body));
 
@@ -203,7 +216,7 @@ describe("SlackChannelAdapter — event_callback to Envelope", () => {
     const envelope = handler.mock.calls[0][0];
     expect(envelope.type).toBe("event");
     expect(envelope.source).toBe("slack");
-    expect(envelope.name).toBe("message");
+    expect(envelope.name).toBe("reaction_added");
   });
 
   it("sets envelope.name from slack event type", () => {
@@ -215,12 +228,12 @@ describe("SlackChannelAdapter — event_callback to Envelope", () => {
       type: "event_callback",
       team_id: "T1",
       event_id: "E1",
-      event: { type: "app_mention", channel: "C1" },
+      event: { type: "reaction_added", channel: "C1" },
     });
     adapter.handleRequest(body, buildHeaders(body));
 
     const envelope = handler.mock.calls[0][0];
-    expect(envelope.name).toBe("app_mention");
+    expect(envelope.name).toBe("reaction_added");
   });
 
   it("sets payload to the Slack event object", () => {
@@ -228,7 +241,7 @@ describe("SlackChannelAdapter — event_callback to Envelope", () => {
     const handler = vi.fn();
     adapter.onEnvelope(handler);
 
-    const slackEvent = { type: "message", text: "ping", channel: "C_TEST", user: "U123" };
+    const slackEvent = { type: "reaction_added", reaction: "thumbsup", channel: "C_TEST", user: "U123" };
     const body = JSON.stringify({
       type: "event_callback",
       team_id: "T1",
@@ -250,7 +263,7 @@ describe("SlackChannelAdapter — event_callback to Envelope", () => {
       type: "event_callback",
       team_id: "T_META",
       event_id: "Ev_META",
-      event: { type: "message" },
+      event: { type: "reaction_added" },
     });
     adapter.handleRequest(body, buildHeaders(body));
 
@@ -269,12 +282,163 @@ describe("SlackChannelAdapter — event_callback to Envelope", () => {
       type: "event_callback",
       team_id: "T1",
       event_id: "Ev_DEDUP",
-      event: { type: "message" },
+      event: { type: "reaction_added" },
     });
     adapter.handleRequest(body, buildHeaders(body));
 
     const envelope = handler.mock.calls[0][0];
     expect(envelope.dedupe_key).toBe("Ev_DEDUP");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Chat dispatch
+// ---------------------------------------------------------------------------
+
+describe("SlackChannelAdapter — chat dispatch", () => {
+  it("dispatches Slack message text to the cross-platform chat path", () => {
+    const adapter = makeAdapter({
+      botToken: "xoxb-test-token",
+      channelGoalMap: { C_GENERAL: "goal-001" },
+      routing: { identityKey: "shared-slack-user" },
+    });
+    vi.mocked(dispatchGatewayChatInput).mockResolvedValueOnce(null);
+    const handler = vi.fn();
+    adapter.onEnvelope(handler);
+
+    const body = JSON.stringify({
+      type: "event_callback",
+      team_id: "T_TEAM1",
+      event_id: "Ev_001",
+      event: {
+        type: "message",
+        text: "  hello from slack  ",
+        channel: "C_GENERAL",
+        user: "U123",
+        ts: "171234.567",
+      },
+    });
+    const res = adapter.handleRequest(body, buildHeaders(body));
+
+    expect(res.status).toBe(200);
+    expect(handler).not.toHaveBeenCalled();
+    expect(dispatchGatewayChatInput).toHaveBeenCalledWith(expect.objectContaining({
+      text: "hello from slack",
+      platform: "slack",
+      identity_key: "shared-slack-user",
+      conversation_id: "C_GENERAL",
+      sender_id: "U123",
+      message_id: "171234.567",
+      goal_id: "goal-001",
+      metadata: expect.objectContaining({
+        goal_id: "goal-001",
+        routed_goal_id: "goal-001",
+        slack_team_id: "T_TEAM1",
+        slack_event_id: "Ev_001",
+      }),
+    }));
+  });
+
+  it("dispatches app_mention text through the same chat path", () => {
+    const adapter = makeAdapter({ botToken: "xoxb-test-token" });
+    vi.mocked(dispatchGatewayChatInput).mockResolvedValueOnce(null);
+    const body = JSON.stringify({
+      type: "event_callback",
+      team_id: "T1",
+      event_id: "E1",
+      event: { type: "app_mention", text: "<@BOT> help", channel: "C_HELP", user: "U_HELP" },
+    });
+
+    adapter.handleRequest(body, buildHeaders(body));
+
+    expect(dispatchGatewayChatInput).toHaveBeenCalledWith(expect.objectContaining({
+      text: "<@BOT> help",
+      platform: "slack",
+      conversation_id: "C_HELP",
+      sender_id: "U_HELP",
+      message_id: "E1",
+    }));
+  });
+
+  it("posts the chat reply back to Slack when a bot token is configured", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.mocked(dispatchGatewayChatInput).mockResolvedValueOnce("Slack reply text");
+    const adapter = makeAdapter({ botToken: "xoxb-test-token" });
+    const body = JSON.stringify({
+      type: "event_callback",
+      team_id: "T1",
+      event_id: "E1",
+      event: { type: "message", text: "hello", channel: "C_HELP", user: "U_HELP", ts: "123.456" },
+    });
+
+    adapter.handleRequest(body, buildHeaders(body));
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://slack.com/api/chat.postMessage",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            Authorization: "Bearer xoxb-test-token",
+          }),
+          body: JSON.stringify({
+            channel: "C_HELP",
+            text: "Slack reply text",
+            thread_ts: "123.456",
+          }),
+        })
+      );
+    });
+  });
+
+  it("keeps signing-secret-only Slack text events on the envelope path", () => {
+    const adapter = makeAdapter();
+    const handler = vi.fn();
+    adapter.onEnvelope(handler);
+    const body = JSON.stringify({
+      type: "event_callback",
+      team_id: "T1",
+      event_id: "E1",
+      event: { type: "message", text: "hello", channel: "C_HELP", user: "U_HELP", ts: "123.456" },
+    });
+
+    adapter.handleRequest(body, buildHeaders(body));
+
+    expect(dispatchGatewayChatInput).not.toHaveBeenCalled();
+    expect(handler).toHaveBeenCalledOnce();
+    expect(handler.mock.calls[0][0]).toMatchObject({
+      type: "event",
+      source: "slack",
+      name: "message",
+    });
+  });
+
+  it("does not dispatch bot messages back into chat", () => {
+    const adapter = makeAdapter();
+    const handler = vi.fn();
+    adapter.onEnvelope(handler);
+    const body = JSON.stringify({
+      type: "event_callback",
+      team_id: "T1",
+      event_id: "E1",
+      event: {
+        type: "message",
+        subtype: "bot_message",
+        text: "bot echo",
+        channel: "C_HELP",
+        user: "U_BOT",
+        bot_id: "B1",
+      },
+    });
+
+    adapter.handleRequest(body, buildHeaders(body));
+
+    expect(dispatchGatewayChatInput).not.toHaveBeenCalled();
+    expect(handler).toHaveBeenCalledOnce();
   });
 });
 

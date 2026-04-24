@@ -62,6 +62,8 @@ export interface CrossPlatformChatSessionOptions {
   channel?: ChatIngressChannel;
   /** Optional per-turn message id from the transport. */
   message_id?: string;
+  /** Optional goal selected by gateway routing for this turn. */
+  goal_id?: string;
   /** Explicit typed actor override for routing/runtime control. */
   actor?: Partial<RuntimeControlActor>;
   /** Explicit reply target override for outbound routing. */
@@ -89,6 +91,7 @@ export interface CrossPlatformIncomingChatMessage {
   user_id?: string;
   user_name?: string;
   message_id?: string;
+  goal_id?: string;
   cwd?: string;
   timeoutMs?: number;
   actor?: Partial<RuntimeControlActor>;
@@ -315,6 +318,7 @@ export class CrossPlatformChatSessionManager {
       user_id: options.user_id,
       user_name: options.user_name,
       message_id: options.message_id,
+      goal_id: options.goal_id,
       channel: options.channel ?? (options.platform ? "plugin_gateway" : "cli"),
       actor: options.actor,
       replyTarget: options.replyTarget,
@@ -364,8 +368,15 @@ export class CrossPlatformChatSessionManager {
     input: CrossPlatformIncomingChatMessage | (CrossPlatformChatSessionOptions & { text: string })
   ): CrossPlatformIngressMessage {
     const channel = resolveChannel(input);
-    const metadata = {
+    const metadataGoalId = typeof input.metadata?.["goal_id"] === "string"
+      ? input.metadata["goal_id"].trim()
+      : typeof input.metadata?.["routed_goal_id"] === "string"
+        ? input.metadata["routed_goal_id"].trim()
+        : "";
+    const goalId = normalizeIdentity(input.goal_id ?? metadataGoalId) ?? undefined;
+    const metadata: Record<string, unknown> = {
       ...(input.metadata ?? {}),
+      ...(goalId ? { goal_id: goalId } : {}),
       ...("sender_id" in input && input.sender_id ? { sender_id: input.sender_id } : {}),
       ...(input.message_id ? { message_id: input.message_id } : {}),
     };
@@ -383,6 +394,7 @@ export class CrossPlatformChatSessionManager {
       ...(identityKey ? { identity_key: identityKey } : {}),
       ...(conversationId ? { conversation_id: conversationId } : {}),
       ...(messageId ? { message_id: messageId } : {}),
+      ...(goalId ? { goal_id: goalId } : {}),
       ...(userId ? { user_id: userId } : {}),
       text: input.text,
       actor: normalizeActor(channel, {

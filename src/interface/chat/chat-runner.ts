@@ -62,6 +62,7 @@ import {
   buildStandaloneIngressMessage,
   createIngressRouter,
   type ChatIngressMessage,
+  type IngressReplyTarget,
   type SelectedChatRoute,
 } from "./ingress-router.js";
 
@@ -139,6 +140,7 @@ export interface RuntimeControlChatContext {
 export interface ChatRunnerExecutionOptions {
   selectedRoute?: SelectedChatRoute;
   runtimeControlContext?: RuntimeControlChatContext | null;
+  goalId?: string;
 }
 
 interface AssistantBuffer {
@@ -309,7 +311,11 @@ export class ChatRunner {
     }
 
     const runtimeControlContext = this.buildRuntimeControlContextFromIngress(ingress);
-    return this.execute(ingress.text, cwd, timeoutMs, { selectedRoute, runtimeControlContext });
+    return this.execute(ingress.text, cwd, timeoutMs, {
+      selectedRoute,
+      runtimeControlContext,
+      goalId: ingress.goal_id,
+    });
   }
 
   private resolveRouteFromIngress(ingress: ChatIngressMessage): SelectedChatRoute {
@@ -351,6 +357,24 @@ export class ChatRunner {
     const runtimeApprovalFn = runtimeControlContext?.approvalFn
       ?? this.deps.runtimeControlApprovalFn
       ?? this.deps.approvalFn;
+    const replyTarget = runtimeControlContext?.replyTarget ?? this.deps.runtimeReplyTarget;
+    const replyTargetInput: Partial<IngressReplyTarget> | undefined = replyTarget
+      ? {
+          ...(replyTarget.surface ? { surface: replyTarget.surface } : {}),
+          channel,
+          ...(replyTarget.platform ? { platform: replyTarget.platform } : {}),
+          ...(replyTarget.conversation_id ? { conversation_id: replyTarget.conversation_id } : {}),
+          ...(replyTarget.message_id ? { message_id: replyTarget.message_id } : {}),
+          ...(replyTarget.response_channel ? { response_channel: replyTarget.response_channel } : {}),
+          ...(replyTarget.outbox_topic ? { outbox_topic: replyTarget.outbox_topic } : {}),
+          ...(replyTarget.identity_key ? { identity_key: replyTarget.identity_key } : {}),
+          ...(replyTarget.user_id ? { user_id: replyTarget.user_id } : {}),
+          ...(replyTarget.deliveryMode === "reply" || replyTarget.deliveryMode === "notify" || replyTarget.deliveryMode === "thread_reply"
+            ? { deliveryMode: replyTarget.deliveryMode }
+            : {}),
+          ...(replyTarget.metadata ? { metadata: replyTarget.metadata } : {}),
+        }
+      : undefined;
     return buildStandaloneIngressMessage({
       text: input,
       channel,
@@ -359,7 +383,7 @@ export class ChatRunner {
       conversation_id: runtimeControlContext?.replyTarget?.conversation_id ?? this.deps.runtimeReplyTarget?.conversation_id,
       user_id: runtimeControlContext?.replyTarget?.user_id ?? this.deps.runtimeReplyTarget?.user_id,
       actor: runtimeControlContext?.actor ?? this.deps.runtimeControlActor,
-      replyTarget: runtimeControlContext?.replyTarget ?? this.deps.runtimeReplyTarget,
+      replyTarget: replyTargetInput,
       runtimeControl: {
         allowed: true,
         approvalMode: "interactive",
@@ -1411,6 +1435,7 @@ export class ChatRunner {
     const resumeCommand = this.parseResumeCommand(input);
     const resumeOnly = resumeCommand !== null;
     const runtimeControlContext = options.runtimeControlContext ?? this.runtimeControlContext;
+    const executionGoalId = options.goalId ?? this.deps.goalId;
 
     // Intercept commands before any adapter call
     const commandResult = resumeOnly ? null : await this.handleCommand(input);
@@ -1486,6 +1511,7 @@ export class ChatRunner {
       this.nativeAgentLoopStatePath = `chat/agentloop/${sessionId}.state.json`;
       this.history.setAgentLoopStatePath(this.nativeAgentLoopStatePath);
     }
+    const executionCwd = this.sessionCwd ?? cwd;
     const gitRoot = this.sessionCwd ?? resolveGitRoot(cwd);
 
     // history is always assigned by this point (either by startSession or the block above)
@@ -1543,7 +1569,7 @@ export class ChatRunner {
       const runtimeControlResult = await this.executeRuntimeControlRoute(
         selectedRoute,
         runtimeControlContext,
-        cwd,
+        executionCwd,
         start
       );
       if (runtimeControlResult.success) {
@@ -1625,7 +1651,7 @@ export class ChatRunner {
 
     const usesNativeAgentLoop = resumeOnly || selectedRoute?.kind === "agent_loop";
     const groundingWorkspaceContext = !resumeOnly && usesNativeAgentLoop
-      ? await buildChatContext(input, cwd)
+      ? await buildChatContext(input, executionCwd)
       : undefined;
 
     let systemPrompt = this.cachedStaticSystemPrompt ?? "";
@@ -1636,8 +1662,8 @@ export class ChatRunner {
           systemPrompt = await buildChatAgentLoopSystemPrompt({
             stateManager: this.deps.stateManager,
             pluginLoader: this.deps.pluginLoader,
-            workspaceRoot: cwd,
-            goalId: this.deps.goalId,
+            workspaceRoot: executionCwd,
+            goalId: executionGoalId,
             userMessage: input,
             trustProjectInstructions: this.sessionExecutionPolicy?.trustProjectInstructions ?? true,
             workspaceContext: groundingWorkspaceContext,
@@ -1646,8 +1672,8 @@ export class ChatRunner {
           const groundingBundle = await this.groundingGateway.build({
             surface: "chat",
             purpose: "general_turn",
-            workspaceRoot: cwd,
-            goalId: this.deps.goalId,
+            workspaceRoot: executionCwd,
+            goalId: executionGoalId,
             userMessage: input,
             query: input,
             trustProjectInstructions: this.sessionExecutionPolicy?.trustProjectInstructions ?? true,
@@ -1710,8 +1736,8 @@ export class ChatRunner {
         this.emitActivity("lifecycle", "Calling model...", eventContext, "lifecycle:model");
         const result = await chatAgentLoopRunner!.execute({
           message: basePrompt,
-          cwd,
-          goalId: this.deps.goalId,
+          cwd: executionCwd,
+          goalId: executionGoalId,
           history: priorTurns.map((m: { role: string; content: string }) => ({
             role: m.role === "assistant" ? "assistant" : "user",
             content: m.content,
@@ -1777,7 +1803,13 @@ export class ChatRunner {
     // Prefer the local LLM/tool loop over the external adapter fallback whenever a client is available.
     if (selectedRoute?.kind === "tool_loop") {
       try {
-        const toolResult = await this.executeWithTools(prompt, eventContext, assistantBuffer, systemPrompt || undefined);
+        const toolResult = await this.executeWithTools(
+          prompt,
+          eventContext,
+          assistantBuffer,
+          systemPrompt || undefined,
+          executionGoalId
+        );
         const elapsed_ms = Date.now() - start;
         if (this.hasUsage(toolResult.usage)) {
           history.recordUsage("execution", toolResult.usage);
@@ -1947,11 +1979,12 @@ export class ChatRunner {
     prompt: string,
     eventContext: ChatEventContext,
     assistantBuffer: AssistantBuffer,
-    systemPrompt?: string
+    systemPrompt?: string,
+    goalId?: string
   ): Promise<{ output: string; usage: ChatUsageCounter }> {
     const llmClient = this.deps.llmClient!;
     const messages: LLMMessage[] = [{ role: "user", content: prompt }];
-    const toolCallContext = await this.buildToolCallContext();
+    const toolCallContext = await this.buildToolCallContext(goalId);
     const usage = this.zeroUsageCounter();
 
     for (let loop = 0; loop < MAX_TOOL_LOOPS; loop++) {
@@ -2490,11 +2523,11 @@ export class ChatRunner {
     return this.sessionExecutionPolicy;
   }
 
-  private async buildToolCallContext(): Promise<ToolCallContext> {
+  private async buildToolCallContext(goalId = this.deps.goalId): Promise<ToolCallContext> {
     const executionPolicy = await this.getSessionExecutionPolicy();
     return {
       cwd: this.sessionCwd ?? process.cwd(),
-      goalId: this.deps.goalId ?? "",
+      goalId: goalId ?? "",
       trustBalance: 0,
       preApproved: false,
       approvalFn: async (req) => {

@@ -31,12 +31,17 @@ export type RuntimeControlActor = z.infer<typeof RuntimeControlActorSchema>;
 
 export const RuntimeControlReplyTargetSchema = z.object({
   surface: z.enum(["chat", "gateway", "cli", "tui"]).optional(),
+  channel: z.enum(["tui", "plugin_gateway", "cli", "web"]).optional(),
   platform: z.string().optional(),
   conversation_id: z.string().optional(),
+  message_id: z.string().optional(),
   response_channel: z.string().optional(),
   outbox_topic: z.string().optional(),
   identity_key: z.string().optional(),
   user_id: z.string().optional(),
+  deliveryMode: z.enum(["reply", "notify", "thread_reply"]).optional(),
+  delivery_mode: z.enum(["reply", "notify", "thread_reply"]).optional(),
+  metadata: z.record(z.unknown()).optional(),
 });
 export type RuntimeControlReplyTarget = z.infer<typeof RuntimeControlReplyTargetSchema>;
 

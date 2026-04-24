@@ -248,4 +248,51 @@ describe("CrossPlatformChatSessionManager", () => {
     expect(adapter.execute).toHaveBeenCalledTimes(2);
     expect(maxConcurrentCalls).toBe(1);
   });
+
+  it("passes gateway-routed goal_id into ChatRunner agent-loop execution", async () => {
+    const chatAgentLoopRunner = {
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        output: "Agent loop response",
+        error: null,
+        exit_code: 0,
+        elapsed_ms: 42,
+        stopped_reason: "completed",
+      }),
+    };
+    const adapter = makeMockAdapter();
+    const manager = new CrossPlatformChatSessionManager(makeDeps({
+      stateManager: makeMockStateManager(),
+      adapter,
+      chatAgentLoopRunner: chatAgentLoopRunner as never,
+    }));
+
+    const result = await manager.processIncomingMessage({
+      text: "implement this",
+      platform: "slack",
+      conversation_id: "C_GENERAL",
+      sender_id: "U123",
+      goal_id: "goal-routed",
+      metadata: { goal_id: "goal-metadata-only" },
+      cwd: "/repo",
+    });
+    await manager.processIncomingMessage({
+      text: "implement next thing",
+      platform: "slack",
+      conversation_id: "C_GENERAL",
+      sender_id: "U123",
+      goal_id: "goal-next",
+      cwd: "/repo",
+    });
+
+    expect(result).toBe("Agent loop response");
+    expect(adapter.execute).not.toHaveBeenCalled();
+    expect(chatAgentLoopRunner.execute).toHaveBeenCalledTimes(2);
+    expect(chatAgentLoopRunner.execute).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      goalId: "goal-routed",
+    }));
+    expect(chatAgentLoopRunner.execute).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      goalId: "goal-next",
+    }));
+  });
 });

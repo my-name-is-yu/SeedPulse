@@ -32,6 +32,39 @@ describe("createPersistentAgentLoopSessionFactory", () => {
     expect(content).toContain("\"type\":\"started\"");
     expect(content).toContain(session.traceId);
   });
+
+  it("resolves relative resume state paths under the configured base directory", async () => {
+    const baseDir = makeTempDir();
+    const createSession = createPersistentAgentLoopSessionFactory({
+      traceBaseDir: baseDir,
+      kind: "chat",
+    });
+    const session = createSession({ resumeStatePath: "chat/agentloop/session-1.state.json" });
+
+    await session.stateStore.save({
+      sessionId: session.sessionId,
+      traceId: session.traceId,
+      turnId: "turn-1",
+      goalId: "chat",
+      cwd: baseDir,
+      modelRef: "openai/gpt-test",
+      messages: [{ role: "user", content: "continue" }],
+      modelTurns: 1,
+      toolCalls: 0,
+      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      compactions: 0,
+      completionValidationAttempts: 0,
+      calledTools: [],
+      lastToolLoopSignature: null,
+      repeatedToolLoopCount: 0,
+      finalText: "",
+      status: "running",
+      updatedAt: new Date().toISOString(),
+    });
+
+    const statePath = path.join(baseDir, "chat", "agentloop", "session-1.state.json");
+    await expect(fs.readFile(statePath, "utf-8")).resolves.toContain(session.sessionId);
+  });
 });
 
 describe("JsonAgentLoopSessionStateStore", () => {

@@ -192,6 +192,7 @@ export class WhatsAppGatewayAdapter implements ChannelAdapter {
       conversation_id: message.from,
       sender_id: message.from,
       message_id: message.id,
+      goal_id: route.goalId,
       metadata: {
         ...route.metadata,
         message_type: message.type,

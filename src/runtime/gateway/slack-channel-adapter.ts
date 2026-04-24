@@ -7,9 +7,12 @@ import {
   type ChannelAccessPolicy,
   type ChannelRoutingPolicy,
 } from "./channel-policy.js";
+import { dispatchGatewayChatInput } from "./chat-session-dispatch.js";
 
 export interface SlackChannelAdapterConfig {
   signingSecret: string;
+  /** Optional bot token used to send chat replies back to Slack channels. */
+  botToken?: string;
   /** Optional: map Slack channel IDs to PulSeed goal IDs */
   channelGoalMap?: Record<string, string>;
   security?: ChannelAccessPolicy;
@@ -36,9 +39,11 @@ export class SlackChannelAdapter implements ChannelAdapter {
   readonly name = "slack";
   private handler: EnvelopeHandler | null = null;
   private readonly config: SlackChannelAdapterConfig;
+  private readonly api: SlackAPI | null;
 
   constructor(config: SlackChannelAdapterConfig) {
     this.config = config;
+    this.api = config.botToken ? new SlackAPI(config.botToken) : null;
   }
 
   onEnvelope(handler: EnvelopeHandler): void {
@@ -140,11 +145,6 @@ export class SlackChannelAdapter implements ChannelAdapter {
       return { status: 400, body: "missing event field" };
     }
 
-    if (!this.handler) {
-      console.warn("SlackChannelAdapter: no handler registered, dropping event");
-      return { status: 200, body: "ok" };
-    }
-
     const slackChannelId = slackEvent["channel"] as string | undefined;
     const userId = slackEvent["user"] as string | undefined;
     const context = {
@@ -169,6 +169,35 @@ export class SlackChannelAdapter implements ChannelAdapter {
     );
 
     const eventType = String(slackEvent["type"] ?? "slack_event");
+    const metadata = {
+      ...route.metadata,
+      slack_team_id: parsed["team_id"],
+      slack_event_id: parsed["event_id"],
+      ...(route.goalId ? { goal_id: route.goalId } : {}),
+      ...(access.runtimeControlApproved ? { runtime_control_approved: true } : {}),
+    };
+
+    if (isSlackChatTextEvent(slackEvent, eventType) && this.api) {
+      void this.dispatchSlackChat({
+        text: slackEvent["text"].trim(),
+        channel: slackEvent["channel"],
+        user: slackEvent["user"],
+        messageId: typeof slackEvent["ts"] === "string"
+          ? slackEvent["ts"]
+          : parsed["event_id"] as string | undefined,
+        identityKey: route.identityKey,
+        goalId: route.goalId,
+        metadata,
+      }).catch((err: unknown) => {
+        console.warn("SlackChannelAdapter: chat dispatch failed", err);
+      });
+      return { status: 200, body: "ok" };
+    }
+
+    if (!this.handler) {
+      console.warn("SlackChannelAdapter: no handler registered, dropping event");
+      return { status: 200, body: "ok" };
+    }
 
     const envelope = createEnvelope({
       type: "event",
@@ -182,15 +211,96 @@ export class SlackChannelAdapter implements ChannelAdapter {
     });
 
     // Attach Slack-specific metadata via a plain property merge (envelope is a plain object)
-    (envelope as Record<string, unknown>)["metadata"] = {
-      ...route.metadata,
-      slack_team_id: parsed["team_id"],
-      slack_event_id: parsed["event_id"],
-      ...(access.runtimeControlApproved ? { runtime_control_approved: true } : {}),
-    };
+    (envelope as Record<string, unknown>)["metadata"] = metadata;
 
     this.handler(envelope);
 
     return { status: 200, body: "ok" };
   }
+
+  private async dispatchSlackChat(input: {
+    text: string;
+    channel: string;
+    user: string;
+    messageId?: string;
+    identityKey?: string;
+    goalId?: string;
+    metadata: Record<string, unknown>;
+  }): Promise<void> {
+    let sentAssistantOutput = false;
+    const sendReply = async (text: string): Promise<void> => {
+      const trimmed = text.trim();
+      if (!trimmed || sentAssistantOutput || !this.api) return;
+      sentAssistantOutput = true;
+      await this.api.postMessage(input.channel, trimmed, input.messageId);
+    };
+
+    const reply = await dispatchGatewayChatInput({
+      text: input.text,
+      platform: "slack",
+      identity_key: input.identityKey,
+      conversation_id: input.channel,
+      sender_id: input.user,
+      message_id: input.messageId,
+      goal_id: input.goalId,
+      cwd: process.cwd(),
+      onEvent: (event) => {
+        if (event.type === "assistant_final") {
+          void sendReply(event.text).catch((err: unknown) => {
+            console.warn("SlackChannelAdapter: failed to send assistant event", err);
+          });
+        }
+      },
+      metadata: input.metadata,
+    });
+    if (reply) {
+      await sendReply(reply);
+    }
+  }
+}
+
+class SlackAPI {
+  constructor(private readonly botToken: string) {}
+
+  async postMessage(channel: string, text: string, threadTs?: string): Promise<void> {
+    const response = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.botToken}`,
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify({
+        channel,
+        text,
+        ...(threadTs ? { thread_ts: threadTs } : {}),
+      }),
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => "(unreadable)");
+      throw new Error(`slack-api: chat.postMessage returned ${response.status}: ${body}`);
+    }
+    const json = await response.json().catch(() => ({})) as { ok?: boolean; error?: string };
+    if (json.ok === false) {
+      throw new Error(`slack-api: chat.postMessage failed: ${json.error ?? "unknown error"}`);
+    }
+  }
+}
+
+function isSlackChatTextEvent(
+  slackEvent: Record<string, unknown>,
+  eventType: string
+): slackEvent is Record<string, unknown> & { text: string; channel: string; user: string } {
+  if (eventType !== "message" && eventType !== "app_mention") {
+    return false;
+  }
+  if (typeof slackEvent["text"] !== "string" || slackEvent["text"].trim().length === 0) {
+    return false;
+  }
+  if (typeof slackEvent["channel"] !== "string" || slackEvent["channel"].trim().length === 0) {
+    return false;
+  }
+  if (typeof slackEvent["user"] !== "string" || slackEvent["user"].trim().length === 0) {
+    return false;
+  }
+  return typeof slackEvent["bot_id"] !== "string" && slackEvent["subtype"] !== "bot_message";
 }

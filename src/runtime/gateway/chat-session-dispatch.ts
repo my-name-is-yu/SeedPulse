@@ -8,6 +8,7 @@ export interface GatewayChatDispatchInput {
   conversation_id: string;
   sender_id: string;
   message_id?: string;
+  goal_id?: string;
   cwd?: string;
   metadata?: Record<string, unknown>;
   onEvent?: ChatEventHandler;
@@ -25,6 +26,7 @@ export async function dispatchGatewayChatInput(
       conversation_id: input.conversation_id,
       sender_id: input.sender_id,
       message_id: input.message_id,
+      goal_id: input.goal_id,
       cwd: input.cwd,
       metadata: input.metadata,
       onEvent: input.onEvent,

@@ -499,7 +499,7 @@ export class DaemonRunner {
   }
 
   private async reconcileRuntimeControlOperationsAfterStartup(): Promise<void> {
-    await reconcileRuntimeControlOperationsAfterStartupFn(this.runtimeRoot, this.state, this.logger);
+    await reconcileRuntimeControlOperationsAfterStartupFn(this.runtimeRoot, this.state, this.logger, this.eventServer ?? undefined);
   }
 
   // ─── Private: Cleanup ───

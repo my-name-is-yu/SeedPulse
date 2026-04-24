@@ -58,6 +58,14 @@ export class RuntimeControlService {
   }
 
   async request(request: RuntimeControlRequest): Promise<RuntimeControlResult> {
+    if (!isExecutableRuntimeControlKind(request.intent.kind)) {
+      return {
+        success: false,
+        message: `Runtime control operation ${request.intent.kind} is not supported by the production executor.`,
+        state: "failed",
+      };
+    }
+
     const initial = await this.createInitialOperation(request);
     const approved = await this.approveIfRequired(initial, request.approvalFn);
     if (!approved.ok) return approved.result;
@@ -75,7 +83,7 @@ export class RuntimeControlService {
       requested_at: requestedAt,
       updated_at: requestedAt,
       requested_by: request.requestedBy ?? { surface: "chat" },
-      reply_target: request.replyTarget ?? { surface: "chat" },
+      reply_target: normalizeReplyTarget(request.replyTarget ?? { surface: "chat" }),
       reason: request.intent.reason,
       expected_health: expectedHealthFor(request.intent.kind),
     };
@@ -200,14 +208,42 @@ export class RuntimeControlService {
   }
 }
 
+export function isExecutableRuntimeControlKind(
+  kind: RuntimeControlOperationKind
+): kind is Extract<RuntimeControlOperationKind, "restart_daemon" | "restart_gateway"> {
+  return kind === "restart_daemon" || kind === "restart_gateway";
+}
+
 function requiresApproval(kind: RuntimeControlOperationKind): boolean {
-  return kind === "restart_daemon" || kind === "restart_gateway" || kind === "self_update";
+  return isExecutableRuntimeControlKind(kind);
+}
+
+function normalizeReplyTarget(target: RuntimeControlReplyTarget): RuntimeControlReplyTarget {
+  return {
+    ...target,
+    channel: target.channel ?? defaultChannelForSurface(target.surface),
+  };
+}
+
+function defaultChannelForSurface(
+  surface: RuntimeControlReplyTarget["surface"]
+): RuntimeControlReplyTarget["channel"] {
+  switch (surface) {
+    case "gateway":
+      return "plugin_gateway";
+    case "cli":
+    case "tui":
+      return surface;
+    case "chat":
+    case undefined:
+      return undefined;
+  }
 }
 
 function expectedHealthFor(kind: RuntimeControlOperationKind): { daemon_ping: boolean; gateway_acceptance: boolean } {
   return {
-    daemon_ping: kind !== "reload_config",
-    gateway_acceptance: kind === "restart_gateway" || kind === "restart_daemon" || kind === "self_update",
+    daemon_ping: isExecutableRuntimeControlKind(kind),
+    gateway_acceptance: isExecutableRuntimeControlKind(kind),
   };
 }
 

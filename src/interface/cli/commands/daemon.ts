@@ -340,6 +340,7 @@ export async function cmdStart(
     } else {
       const slackAdapter = new SlackChannelAdapter({
         signingSecret: slackGatewayConfig.signing_secret,
+        botToken: slackGatewayConfig.bot_token,
         channelGoalMap: slackGatewayConfig.channel_goal_map,
       });
       eventServer.setSlackChannelAdapter(slackAdapter, slackGatewayConfig.path);

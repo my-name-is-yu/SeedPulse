@@ -2,6 +2,10 @@ export { recognizeRuntimeControlIntent } from "./runtime-control-intent.js";
 export type { RuntimeControlIntent } from "./runtime-control-intent.js";
 export { RuntimeControlService } from "./runtime-control-service.js";
 export { createDaemonRuntimeControlExecutor } from "./daemon-runtime-control-executor.js";
+export {
+  publishRuntimeControlResult,
+  toRuntimeControlResultPayload,
+} from "./runtime-control-result-routing.js";
 export type {
   DaemonRuntimeControlExecutorOptions,
   DaemonRuntimeControlRequestBody,

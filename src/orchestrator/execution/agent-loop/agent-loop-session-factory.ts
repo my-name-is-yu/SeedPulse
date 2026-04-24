@@ -33,7 +33,8 @@ export function createPersistentAgentLoopSessionFactory(
       `${timestamp}-${sessionId}.jsonl`,
     );
     const statePath = input.resumeStatePath
-      ?? tracePath.replace(/\.jsonl$/, ".state.json");
+      ? path.resolve(options.traceBaseDir, input.resumeStatePath)
+      : tracePath.replace(/\.jsonl$/, ".state.json");
     const traceStore = new JsonlAgentLoopTraceStore(tracePath);
     const stateStore = new JsonAgentLoopSessionStateStore(statePath);
 

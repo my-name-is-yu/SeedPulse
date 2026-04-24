@@ -209,6 +209,7 @@ export class DiscordGatewayAdapter implements ChannelAdapter {
       conversation_id: conversationId,
       sender_id: senderId,
       message_id: payload.id,
+      goal_id: route.goalId,
       metadata: {
         ...route.metadata,
         interaction_type: payload.type,

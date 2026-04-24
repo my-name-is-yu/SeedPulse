@@ -576,7 +576,7 @@ describe("ChatRunner", () => {
         await stateManager.init();
         await stateManager.writeRaw("chat/sessions/saved-session.json", {
           id: "saved-session",
-          cwd: "/repo",
+          cwd: "/loaded-repo",
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:01.000Z",
           title: "Work Session",
@@ -589,7 +589,7 @@ describe("ChatRunner", () => {
           traceId: "trace-1",
           turnId: "turn-1",
           goalId: "chat",
-          cwd: "/repo",
+          cwd: "/loaded-repo",
           modelRef: "openai/gpt-5.4-mini",
           messages: [{ role: "assistant", content: "continuing..." }],
           modelTurns: 1,
@@ -622,10 +622,12 @@ describe("ChatRunner", () => {
         expect(result.output).toBe("Resumed selected session");
         expect(runner.getSessionId()).toBe("saved-session");
         const input = (chatAgentLoopRunner.execute as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+          cwd?: string;
           resumeOnly?: boolean;
           resumeState?: { sessionId: string };
           resumeStatePath?: string;
         };
+        expect(input.cwd).toBe("/loaded-repo");
         expect(input.resumeOnly).toBe(true);
         expect(input.resumeState?.sessionId).toBe("saved-session");
         expect(input.resumeStatePath).toBe("chat/agentloop/saved-session.state.json");
@@ -1127,7 +1129,7 @@ describe("ChatRunner", () => {
       const adapter = makeMockAdapter();
       const runner = new ChatRunner(makeDeps({ adapter }));
 
-      const result = await runner.execute("PulSeed 自身を更新して", "/repo");
+      const result = await runner.execute("PulSeed を再起動して", "/repo");
 
       expect(result.success).toBe(false);
       expect(result.output).toContain("Runtime control is not available");

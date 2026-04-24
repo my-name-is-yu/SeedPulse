@@ -164,6 +164,7 @@ export class TelegramGatewayAdapter implements ChannelAdapter {
       identity_key: route.identityKey ?? this.config.identity_key,
       conversation_id: String(chatId),
       sender_id: String(fromUserId),
+      goal_id: route.goalId,
       cwd: process.cwd(),
       onEvent: (event) => eventAdapter.handle(event),
       metadata: {
