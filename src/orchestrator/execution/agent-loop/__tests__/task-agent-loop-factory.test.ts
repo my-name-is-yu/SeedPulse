@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ILLMClient } from "../../../../base/llm/llm-client.js";
 import type { ProviderConfig } from "../../../../base/llm/provider-config.js";
+import { createBuiltinTools } from "../../../../tools/builtin/index.js";
 import { ToolRegistry } from "../../../../tools/registry.js";
 import { ToolExecutor } from "../../../../tools/executor.js";
 import { ToolPermissionManager } from "../../../../tools/permission.js";
 import { ConcurrencyController } from "../../../../tools/concurrency.js";
+import { ToolRegistryAgentLoopToolRouter } from "../agent-loop-tool-router.js";
 import { resolveAgentLoopDefaultProfileFromProviderConfig } from "../agent-loop-default-profile.js";
 import {
   createNativeChatAgentLoopRunner,
@@ -148,6 +150,57 @@ describe("createNative*AgentLoopRunner", () => {
     expect(deps.defaultReasoningEffort).toBe(profile.reasoningEffort);
     expect(deps.defaultProfileName).toBe(profile.name);
     expect(deps.defaultExecutionPolicy).toEqual(profile.executionPolicy);
+    expect(profile.toolPolicy.allowedTools).toEqual(
+      expect.arrayContaining([
+        "kaggle_workspace_prepare",
+        "kaggle_experiment_start",
+        "kaggle_experiment_read",
+        "kaggle_experiment_list",
+        "kaggle_experiment_stop",
+        "kaggle_metric_report",
+        "kaggle_compare_experiments",
+        "kaggle_submission_prepare",
+        "kaggle_list_submissions",
+        "kaggle_leaderboard_snapshot",
+      ]),
+    );
+    expect(profile.toolPolicy.allowedTools).not.toContain("kaggle_submit");
+  });
+
+  it("makes registered Kaggle training tools model-visible in chat while hiding submit", () => {
+    const providerConfig = makeProviderConfig();
+    const registry = new ToolRegistry();
+    for (const tool of createBuiltinTools({ registry })) {
+      registry.register(tool);
+    }
+    const profile = resolveAgentLoopDefaultProfileFromProviderConfig({
+      surface: "chat",
+      workspaceRoot: "/repo",
+      providerConfig,
+    });
+    const router = new ToolRegistryAgentLoopToolRouter(registry);
+
+    const visibleTools = router.modelVisibleTools({
+      cwd: "/repo",
+      goalId: "chat",
+      toolPolicy: profile.toolPolicy,
+    } as never).map((tool) => tool.function.name);
+
+    expect(visibleTools).toEqual(
+      expect.arrayContaining([
+        "kaggle_workspace_prepare",
+        "kaggle_experiment_start",
+        "kaggle_experiment_read",
+        "kaggle_experiment_list",
+        "kaggle_experiment_stop",
+        "kaggle_metric_report",
+        "kaggle_compare_experiments",
+        "kaggle_submission_prepare",
+        "kaggle_list_submissions",
+        "kaggle_leaderboard_snapshot",
+      ]),
+    );
+    expect(visibleTools).not.toContain("kaggle_submit");
   });
 
   it("keeps review profile defaults for budget, tools, and execution posture", () => {

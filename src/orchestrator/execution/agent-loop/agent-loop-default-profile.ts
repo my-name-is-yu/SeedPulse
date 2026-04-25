@@ -143,6 +143,16 @@ const CHAT_ALLOWED_TOOLS = [
   "soil_query",
   "knowledge_query",
   "memory_recall",
+  "kaggle_workspace_prepare",
+  "kaggle_experiment_start",
+  "kaggle_experiment_read",
+  "kaggle_experiment_list",
+  "kaggle_experiment_stop",
+  "kaggle_metric_report",
+  "kaggle_compare_experiments",
+  "kaggle_submission_prepare",
+  "kaggle_list_submissions",
+  "kaggle_leaderboard_snapshot",
 ] as const;
 
 const REVIEW_ALLOWED_TOOLS = [
