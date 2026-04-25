@@ -66,6 +66,13 @@ import {
   type IngressReplyTarget,
   type SelectedChatRoute,
 } from "./ingress-router.js";
+import { createRuntimeSessionRegistry } from "../../runtime/session-registry/index.js";
+import type {
+  BackgroundRun,
+  RuntimeSession,
+  RuntimeSessionRegistrySnapshot,
+  RuntimeSessionRegistryWarning,
+} from "../../runtime/session-registry/types.js";
 
 // ─── Types ───
 
@@ -444,14 +451,106 @@ export class ChatRunner {
     };
   }
 
-  private formatSessionsList(entries: Array<{ id: string; title: string | null; cwd: string; updatedAt: string; messageCount: number; agentLoopResumable: boolean }>): string {
-    if (entries.length === 0) return "No chat sessions found.";
-    const lines = entries.map((entry) => {
-      const title = entry.title ? ` "${entry.title}"` : "";
-      const resumable = entry.agentLoopResumable ? " resumable" : "";
-      return `${entry.id}${title} - ${entry.messageCount} message(s), updated ${entry.updatedAt}, cwd ${entry.cwd}${resumable}`;
-    });
-    return `Chat sessions:\n${lines.join("\n")}`;
+  private formatRuntimeTimestamp(value: string | null | undefined): string {
+    return value ?? "unknown";
+  }
+
+  private formatRuntimeTitle(value: string | null | undefined): string {
+    return value ? ` "${value}"` : "";
+  }
+
+  private runtimeWarningLine(warnings: RuntimeSessionRegistryWarning[]): string | null {
+    return warnings.length > 0 ? `Warnings: ${warnings.length}` : null;
+  }
+
+  private activeRuntimeSession(session: RuntimeSession): boolean {
+    return session.status === "active";
+  }
+
+  private statusRuntimeRun(run: BackgroundRun): boolean {
+    return run.status === "queued"
+      || run.status === "running"
+      || run.status === "failed"
+      || run.status === "timed_out"
+      || run.status === "lost";
+  }
+
+  private compactRunLine(run: BackgroundRun): string {
+    const title = this.formatRuntimeTitle(run.title);
+    const updated = this.formatRuntimeTimestamp(run.updated_at ?? run.started_at ?? run.created_at);
+    const summary = run.summary ? ` - ${run.summary.replace(/\s+/g, " ").trim()}` : "";
+    const error = run.error ? ` - error: ${run.error.replace(/\s+/g, " ").trim()}` : "";
+    return `- ${run.id}${title} [${run.kind}, ${run.status}], updated ${updated}${summary}${error}`;
+  }
+
+  private compactSessionLine(session: RuntimeSession): string {
+    const displayId = session.kind === "conversation"
+      ? session.transcript_ref?.id ?? session.id.replace(/^session:conversation:/, "")
+      : session.id;
+    const title = this.formatRuntimeTitle(session.title);
+    const updated = this.formatRuntimeTimestamp(session.updated_at ?? session.last_event_at ?? session.created_at);
+    const workspace = session.workspace ? `, cwd ${session.workspace}` : "";
+    const resumable = session.resumable ? ", resumable" : "";
+    const attachable = session.attachable ? ", attachable" : "";
+    const runtimeId = displayId === session.id ? "" : `, runtime ${session.id}`;
+    return `- ${displayId}${title} [${session.kind}, ${session.status}], updated ${updated}${workspace}${resumable}${attachable}${runtimeId}`;
+  }
+
+  private formatRuntimeSessionsList(snapshot: RuntimeSessionRegistrySnapshot): string {
+    const chatSessions = snapshot.sessions.filter((session) => session.kind === "conversation");
+    const nonChatSessions = snapshot.sessions.filter((session) => session.kind !== "conversation");
+    const lines: string[] = ["Chat sessions:"];
+
+    if (chatSessions.length === 0) {
+      lines.push("No chat sessions found.");
+    } else {
+      for (const session of chatSessions) {
+        lines.push(this.compactSessionLine(session));
+        const runs = snapshot.background_runs.filter((run) => run.parent_session_id === session.id);
+        for (const run of runs) {
+          lines.push(`  ${this.compactRunLine(run)}`);
+        }
+      }
+    }
+
+    if (nonChatSessions.length > 0) {
+      lines.push("", "Other runtime sessions:");
+      lines.push(...nonChatSessions.map((session) => this.compactSessionLine(session)));
+    }
+
+    if (snapshot.background_runs.length > 0) {
+      lines.push("", "Background runs:");
+      lines.push(...snapshot.background_runs.map((run) => this.compactRunLine(run)));
+    }
+
+    const warningLine = this.runtimeWarningLine(snapshot.warnings);
+    if (warningLine) lines.push("", warningLine);
+    return lines.join("\n");
+  }
+
+  private formatRuntimeStatus(snapshot: RuntimeSessionRegistrySnapshot): string {
+    const activeSessions = snapshot.sessions.filter((session) => this.activeRuntimeSession(session));
+    const statusRuns = snapshot.background_runs.filter((run) => this.statusRuntimeRun(run));
+    const lines: string[] = [];
+
+    if (activeSessions.length > 0) {
+      lines.push("Active runtime sessions:");
+      lines.push(...activeSessions.map((session) => this.compactSessionLine(session)));
+    }
+
+    if (statusRuns.length > 0) {
+      if (lines.length > 0) lines.push("");
+      lines.push("Background runs (queued/running/attention-needed):");
+      lines.push(...statusRuns.map((run) => this.compactRunLine(run)));
+    }
+
+    const warningLine = this.runtimeWarningLine(snapshot.warnings);
+    if (warningLine) {
+      if (lines.length > 0) lines.push("");
+      lines.push(warningLine);
+    }
+
+    return lines.length > 0 ? lines.join("\n") : "No active runtime sessions or running/failed/lost background runs found.";
   }
 
   private formatHistory(session: LoadedChatSession): string {
@@ -546,14 +645,19 @@ export class ChatRunner {
       return { success: true, output: lines.join("\n"), elapsed_ms: Date.now() - start };
     }
 
-    const goals = await this.loadGoals();
+    const registry = createRuntimeSessionRegistry({ stateManager: this.deps.stateManager });
+    const [goals, runtimeSnapshot] = await Promise.all([
+      this.loadGoals(),
+      registry.snapshot(),
+    ]);
     const active = this.activeGoals(goals);
+    const runtimeStatus = this.formatRuntimeStatus(runtimeSnapshot);
     if (active.length === 0) {
-      return { success: true, output: "No active goals found.", elapsed_ms: Date.now() - start };
+      return { success: true, output: `No active goals found.\n\n${runtimeStatus}`, elapsed_ms: Date.now() - start };
     }
     return {
       success: true,
-      output: `Active goals:\n${active.map((goal) => this.formatGoalLine(goal)).join("\n")}`,
+      output: `Active goals:\n${active.map((goal) => this.formatGoalLine(goal)).join("\n")}\n\n${runtimeStatus}`,
       elapsed_ms: Date.now() - start,
     };
   }
@@ -1037,9 +1141,9 @@ export class ChatRunner {
       return { success: true, output: "Conversation history cleared.", elapsed_ms: Date.now() - start };
     }
     if (cmd === "/sessions") {
-      const catalog = new ChatSessionCatalog(this.deps.stateManager);
-      const sessions = await catalog.listSessions();
-      return { success: true, output: this.formatSessionsList(sessions), elapsed_ms: Date.now() - start };
+      const registry = createRuntimeSessionRegistry({ stateManager: this.deps.stateManager });
+      const snapshot = await registry.snapshot();
+      return { success: true, output: this.formatRuntimeSessionsList(snapshot), elapsed_ms: Date.now() - start };
     }
     if (cmd === "/history") {
       const catalog = new ChatSessionCatalog(this.deps.stateManager);
@@ -1491,11 +1595,24 @@ export class ChatRunner {
 
     if (resumeOnly && resumeCommand.selector) {
       try {
+        const selectorResolution = await this.resolveChatResumeSelector(resumeCommand.selector);
+        if (selectorResolution.nonResumableMessage) {
+          const elapsed_ms = 0;
+          const output = selectorResolution.nonResumableMessage;
+          this.emitEvent({
+            type: "assistant_final",
+            text: output,
+            persisted: false,
+            ...this.eventBase(eventContext),
+          });
+          this.emitLifecycleEndEvent("error", elapsed_ms, eventContext, false);
+          return { success: false, output, elapsed_ms };
+        }
         const catalog = new ChatSessionCatalog(this.deps.stateManager);
-        const session = await catalog.loadSessionBySelector(resumeCommand.selector);
+        const session = await catalog.loadSessionBySelector(selectorResolution.chatSelector);
         if (!session) {
           const elapsed_ms = 0;
-          const output = `No chat session matched selector "${resumeCommand.selector}".`;
+          const output = `No chat session matched selector "${selectorResolution.chatSelector}".`;
           this.emitEvent({
             type: "assistant_final",
             text: output,
@@ -2249,6 +2366,43 @@ export class ChatRunner {
       // fall through
     }
     return preview ? { preview } : {};
+  }
+
+  private async resolveChatResumeSelector(selector: string): Promise<{
+    chatSelector: string;
+    nonResumableMessage?: string;
+  }> {
+    if (selector.startsWith("session:conversation:")) {
+      return { chatSelector: selector.slice("session:conversation:".length) };
+    }
+
+    if (selector.startsWith("session:") || selector.startsWith("run:")) {
+      const registry = createRuntimeSessionRegistry({ stateManager: this.deps.stateManager });
+      if (selector.startsWith("session:")) {
+        const session = await registry.getSession(selector);
+        if (session?.kind === "conversation") {
+          return { chatSelector: selector.slice("session:conversation:".length) };
+        }
+        if (
+          session?.kind === "agent"
+          && session.resumable
+          && session.parent_session_id?.startsWith("session:conversation:")
+        ) {
+          return { chatSelector: session.parent_session_id.slice("session:conversation:".length) };
+        }
+        return {
+          chatSelector: selector,
+          nonResumableMessage: `Runtime session ${selector} is not chat-resumable. Inspect it with 'pulseed runtime session ${selector}'.`,
+        };
+      }
+
+      return {
+        chatSelector: selector,
+        nonResumableMessage: `Background run ${selector} is not chat-resumable. Inspect it with 'pulseed runtime run ${selector}'.`,
+      };
+    }
+
+    return { chatSelector: selector };
   }
 
   private parseResumeCommand(input: string): ResumeCommand | null {

@@ -17,6 +17,7 @@ import type { Goal } from "../../../base/types/goal.js";
 import type { Task } from "../../../base/types/task.js";
 import type { ChatEvent } from "../chat-events.js";
 import { clearIdentityCache } from "../../../base/config/identity-loader.js";
+import type { ProcessSessionSnapshot } from "../../../tools/system/ProcessSessionTool/ProcessSessionTool.js";
 // Mock context-provider so tests don't walk the real filesystem
 vi.mock("../../../platform/observation/context-provider.js", () => ({
   resolveGitRoot: (cwd: string) => cwd,
@@ -51,6 +52,51 @@ function makeDeps(overrides: Partial<ChatRunnerDeps> = {}): ChatRunnerDeps {
     stateManager: makeMockStateManager(),
     adapter: makeMockAdapter(),
     ...overrides,
+  };
+}
+
+function makeAgentLoopState(overrides: Partial<{
+  sessionId: string;
+  status: "running" | "completed" | "failed";
+  updatedAt: string;
+}> = {}) {
+  return {
+    sessionId: overrides.sessionId ?? "agent-session-a",
+    traceId: "trace-a",
+    turnId: "turn-a",
+    goalId: "goal-a",
+    cwd: "/repo",
+    modelRef: "native:test",
+    messages: [],
+    modelTurns: 1,
+    toolCalls: 0,
+    compactions: 0,
+    completionValidationAttempts: 0,
+    calledTools: [],
+    lastToolLoopSignature: null,
+    repeatedToolLoopCount: 0,
+    finalText: "",
+    status: overrides.status ?? "running",
+    updatedAt: overrides.updatedAt ?? "2026-04-25T00:12:00.000Z",
+  };
+}
+
+function makeProcessSnapshot(overrides: Partial<ProcessSessionSnapshot> = {}): ProcessSessionSnapshot {
+  return {
+    session_id: overrides.session_id ?? "proc-1",
+    label: overrides.label ?? "training",
+    command: overrides.command ?? "node",
+    args: overrides.args ?? ["train.js"],
+    cwd: overrides.cwd ?? "/repo",
+    pid: overrides.pid ?? 12345,
+    running: overrides.running ?? true,
+    exitCode: overrides.exitCode ?? null,
+    signal: overrides.signal ?? null,
+    startedAt: overrides.startedAt ?? "2026-04-25T00:00:00.000Z",
+    ...(overrides.exitedAt ? { exitedAt: overrides.exitedAt } : {}),
+    bufferedChars: overrides.bufferedChars ?? 0,
+    metadataRelativePath: overrides.metadataRelativePath ?? `runtime/process-sessions/${overrides.session_id ?? "proc-1"}.json`,
+    artifactRefs: overrides.artifactRefs ?? [],
   };
 }
 
@@ -637,7 +683,99 @@ describe("ChatRunner", () => {
       }
     });
 
-    it("/sessions lists prior chat sessions", async () => {
+    it("/resume maps runtime conversation and agent ids to owning chat ids", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pulseed-chat-resume-runtime-conversation-"));
+      try {
+        const stateManager = new StateManager(tmpDir);
+        await stateManager.init();
+        await stateManager.writeRaw("chat/sessions/chat-runtime.json", {
+          id: "chat-runtime",
+          cwd: "/loaded-repo",
+          createdAt: "2026-04-25T00:00:00.000Z",
+          updatedAt: "2026-04-25T00:10:00.000Z",
+          title: "Runtime Chat",
+          messages: [],
+          agentLoopStatePath: "chat/agentloop/chat-runtime.state.json",
+          agentLoopStatus: "running",
+          agentLoopResumable: true,
+        });
+        await stateManager.writeRaw("chat/agentloop/chat-runtime.state.json", makeAgentLoopState({
+          sessionId: "agent-runtime",
+        }));
+        const chatAgentLoopRunner = {
+          execute: vi.fn().mockResolvedValue({
+            success: true,
+            output: "Resumed runtime conversation",
+            error: null,
+            exit_code: null,
+            elapsed_ms: 30,
+            stopped_reason: "completed",
+          }),
+        } as unknown as ChatAgentLoopRunner;
+        const runner = new ChatRunner(makeDeps({ stateManager, chatAgentLoopRunner }));
+
+        const conversation = await runner.execute("/resume session:conversation:chat-runtime", "/repo");
+        const agent = await runner.execute("/resume session:agent:agent-runtime", "/repo");
+
+        expect(conversation.success).toBe(true);
+        expect(conversation.output).toBe("Resumed runtime conversation");
+        expect(agent.success).toBe(true);
+        expect(agent.output).toBe("Resumed runtime conversation");
+        expect(runner.getSessionId()).toBe("chat-runtime");
+        expect(chatAgentLoopRunner.execute).toHaveBeenCalledTimes(2);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("/resume rejects non-chat runtime sessions and runs before native agentloop execution", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pulseed-chat-resume-runtime-negative-"));
+      try {
+        const stateManager = new StateManager(tmpDir);
+        await stateManager.init();
+        await stateManager.writeRaw("supervisor-state.json", {
+          workers: [
+            {
+              workerId: "worker-1",
+              goalId: "goal-a",
+              startedAt: Date.parse("2026-04-25T00:00:00.000Z"),
+            },
+          ],
+          updatedAt: Date.parse("2026-04-25T00:30:00.000Z"),
+        });
+        await stateManager.writeRaw("runtime/process-sessions/proc-running.json", makeProcessSnapshot({
+          session_id: "proc-running",
+          pid: process.pid,
+          running: true,
+        }));
+        const chatAgentLoopRunner = {
+          execute: vi.fn().mockResolvedValue({
+            success: true,
+            output: "should not run",
+            error: null,
+            exit_code: null,
+            elapsed_ms: 30,
+            stopped_reason: "completed",
+          }),
+        } as unknown as ChatAgentLoopRunner;
+        const runner = new ChatRunner(makeDeps({ stateManager, chatAgentLoopRunner }));
+
+        const coreloop = await runner.execute("/resume session:coreloop:worker-1", "/repo");
+        const processRun = await runner.execute("/resume run:process:proc-running", "/repo");
+
+        expect(coreloop.success).toBe(false);
+        expect(coreloop.output).toContain("not chat-resumable");
+        expect(coreloop.output).toContain("pulseed runtime session session:coreloop:worker-1");
+        expect(processRun.success).toBe(false);
+        expect(processRun.output).toContain("not chat-resumable");
+        expect(processRun.output).toContain("pulseed runtime run run:process:proc-running");
+        expect(chatAgentLoopRunner.execute).not.toHaveBeenCalled();
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("/sessions lists chat sessions with registry runtime run summaries", async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pulseed-chat-sessions-"));
       try {
         const stateManager = new StateManager(tmpDir);
@@ -649,14 +787,44 @@ describe("ChatRunner", () => {
           updatedAt: "2026-01-01T00:00:01.000Z",
           title: "Prior",
           messages: [],
+          agentLoopStatePath: "chat/agentloop/prior-session.state.json",
+          agentLoopStatus: "running",
+          agentLoopResumable: true,
+          agentLoopUpdatedAt: "2026-01-01T00:00:02.000Z",
         });
+        await stateManager.writeRaw("chat/agentloop/prior-session.state.json", makeAgentLoopState({
+          sessionId: "agent-prior",
+          updatedAt: "2026-01-01T00:00:02.000Z",
+        }));
+        await stateManager.writeRaw("supervisor-state.json", {
+          workers: [
+            {
+              workerId: "worker-1",
+              goalId: "goal-a",
+              startedAt: Date.parse("2026-04-25T00:00:00.000Z"),
+            },
+          ],
+          updatedAt: Date.parse("2026-04-25T00:30:00.000Z"),
+        });
+        await stateManager.writeRaw("runtime/process-sessions/proc-running.json", makeProcessSnapshot({
+          session_id: "proc-running",
+          pid: process.pid,
+          running: true,
+        }));
         const runner = new ChatRunner(makeDeps({ stateManager }));
 
         const result = await runner.execute("/sessions", "/repo");
 
         expect(result.success).toBe(true);
+        expect(result.output).toContain("Chat sessions:");
         expect(result.output).toContain("prior-session");
+        expect(result.output).toContain("runtime session:conversation:prior-session");
         expect(result.output).toContain("Prior");
+        expect(result.output).toContain("run:agent:agent-prior");
+        expect(result.output).toContain("session:coreloop:worker-1");
+        expect(result.output).toContain("run:coreloop:worker-1");
+        expect(result.output).toContain("run:process:proc-running");
+        expect(result.output).not.toContain("{");
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
@@ -668,6 +836,33 @@ describe("ChatRunner", () => {
         const stateManager = new StateManager(tmpDir);
         await stateManager.init();
         await stateManager.saveGoal(makeGoal("goal-a"));
+        await stateManager.writeRaw("chat/sessions/chat-runtime.json", {
+          id: "chat-runtime",
+          cwd: "/repo",
+          createdAt: "2026-04-25T00:00:00.000Z",
+          updatedAt: "2026-04-25T00:10:00.000Z",
+          title: "Runtime Chat",
+          messages: [],
+          agentLoopStatePath: "chat/agentloop/chat-runtime.state.json",
+          agentLoopStatus: "running",
+          agentLoopResumable: true,
+        });
+        await stateManager.writeRaw("chat/agentloop/chat-runtime.state.json", makeAgentLoopState({
+          sessionId: "agent-runtime",
+          updatedAt: "2026-04-25T00:12:00.000Z",
+        }));
+        await stateManager.writeRaw("runtime/process-sessions/proc-failed.json", makeProcessSnapshot({
+          session_id: "proc-failed",
+          running: false,
+          exitCode: 1,
+          exitedAt: "2026-04-25T01:00:00.000Z",
+        }));
+        await stateManager.writeRaw("runtime/process-sessions/proc-lost.json", makeProcessSnapshot({
+          session_id: "proc-lost",
+          running: false,
+          exitCode: null,
+          signal: null,
+        }));
         const adapter = makeMockAdapter();
         const runner = new ChatRunner(makeDeps({ stateManager, adapter }));
 
@@ -678,9 +873,16 @@ describe("ChatRunner", () => {
         expect(status.success).toBe(true);
         expect(status.output).toContain("Active goals");
         expect(status.output).toContain("goal-a");
+        expect(status.output).toContain("Active runtime sessions:");
+        expect(status.output).toContain("session:agent:agent-runtime");
+        expect(status.output).toContain("Background runs (queued/running/attention-needed):");
+        expect(status.output).toContain("run:agent:agent-runtime");
+        expect(status.output).toContain("run:process:proc-failed");
+        expect(status.output).toContain("run:process:proc-lost");
         expect(focused.success).toBe(true);
         expect(focused.output).toContain("Goal status: Goal goal-a");
         expect(focused.output).toContain("Dimensions:");
+        expect(focused.output).not.toContain("Active runtime sessions:");
         expect(goals.success).toBe(true);
         expect(goals.output).toContain("Goals:");
         expect(adapter.execute).not.toHaveBeenCalled();
