@@ -83,6 +83,15 @@ export { CapabilityDetector } from "./platform/observation/capability-detector.j
 export { PortfolioManager } from "./orchestrator/strategy/portfolio-manager.js";
 export { CoreLoop } from "./orchestrator/loop/core-loop.js";
 export type { CoreLoopDeps, LoopConfig, LoopResult } from "./orchestrator/loop/core-loop.js";
+export { RuntimeSessionRegistry, createRuntimeSessionRegistry } from "./runtime/session-registry/index.js";
+export type {
+  RuntimeSession,
+  RuntimeSessionRegistrySnapshot,
+  RuntimeSessionRegistryWarning,
+  RuntimeSessionFilter,
+  BackgroundRun,
+  BackgroundRunFilter,
+} from "./runtime/session-registry/index.js";
 export { CLIRunner } from "./interface/cli/cli-runner.js";
 export { ChatRunner } from "./interface/chat/chat-runner.js";
 export type { ChatRunnerDeps, ChatRunResult } from "./interface/chat/chat-runner.js";
