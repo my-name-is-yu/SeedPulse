@@ -145,6 +145,44 @@ describe("standalone slash command routing", () => {
 
     screen.unmount();
   });
+
+  it("routes /status to ChatRunner instead of standalone intent handlers", async () => {
+    const stateManager = createStateManagerMock();
+    const chatRunner = createChatRunnerMock();
+    const intentRecognizer = {
+      recognize: vi.fn(async () => ({ intent: "status", raw: "/status" })),
+    };
+    const actionHandler = {
+      handle: vi.fn(async () => ({ messages: ["unexpected"] })),
+    };
+
+    const screen = render(React.createElement(App, {
+      stateManager: stateManager as unknown as StateManager,
+      chatRunner: chatRunner as unknown as TuiChatSurface,
+      intentRecognizer: intentRecognizer as any,
+      actionHandler: actionHandler as any,
+      noFlicker: false,
+      controlStream: process.stdout,
+      cwd: "~/workspace",
+      gitBranch: "main",
+      providerName: "claude",
+    }), {
+      patchConsole: false,
+      stdout: process.stdout,
+      stderr: process.stderr,
+    });
+
+    await flush();
+    expect(testState.lastChatProps).not.toBeNull();
+
+    await testState.lastChatProps!.onSubmit("/status");
+
+    expect(chatRunner.execute).toHaveBeenCalledWith("/status", "~/workspace");
+    expect(intentRecognizer.recognize).not.toHaveBeenCalled();
+    expect(actionHandler.handle).not.toHaveBeenCalled();
+
+    screen.unmount();
+  });
 });
 
 describe("daemon-mode chat routing", () => {

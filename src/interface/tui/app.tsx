@@ -78,6 +78,7 @@ export function resolveFreeformInputRoute({
 const CHAT_RUNNER_OWNED_COMMANDS = new Set([
   "/resume",
   "/sessions",
+  "/status",
   "/history",
   "/compact",
   "/tend",

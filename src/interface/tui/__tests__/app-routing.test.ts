@@ -25,6 +25,8 @@ describe("TUI app routing helpers", () => {
   it("recognizes ChatRunner-owned slash commands from the TUI surface", () => {
     expect(isChatRunnerOwnedSlashCommand("/resume Work Session")).toBe(true);
     expect(isChatRunnerOwnedSlashCommand("/sessions")).toBe(true);
+    expect(isChatRunnerOwnedSlashCommand("/status")).toBe(true);
+    expect(isChatRunnerOwnedSlashCommand("/status goal-1")).toBe(true);
     expect(isChatRunnerOwnedSlashCommand("/history saved")).toBe(true);
     expect(isChatRunnerOwnedSlashCommand("/compact")).toBe(true);
     expect(isChatRunnerOwnedSlashCommand("/tend")).toBe(true);
