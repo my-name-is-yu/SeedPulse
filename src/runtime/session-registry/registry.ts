@@ -4,6 +4,7 @@ import type { StateManager } from "../../base/state/state-manager.js";
 import { ChatSessionCatalog } from "../../interface/chat/chat-session-store.js";
 import { normalizeAgentLoopSessionState } from "../../orchestrator/execution/agent-loop/agent-loop-session-state.js";
 import type { ProcessSessionManager, ProcessSessionSnapshot } from "../../tools/system/ProcessSessionTool/ProcessSessionTool.js";
+import { BackgroundRunLedger } from "../store/background-run-store.js";
 import {
   BackgroundRunSchema,
   RuntimeSessionRegistrySnapshotSchema,
@@ -23,6 +24,7 @@ interface RuntimeSessionRegistryDeps {
   stateManager: StateManager;
   stateBaseDir?: string;
   processSessionManager?: Pick<ProcessSessionManager, "list">;
+  backgroundRunLedger?: Pick<BackgroundRunLedger, "list">;
   now?: () => Date;
   isPidAlive?: (pid: number) => boolean | "unknown";
 }
@@ -39,6 +41,7 @@ export class RuntimeSessionRegistry {
   private readonly stateBaseDir: string;
   private readonly chatCatalog: ChatSessionCatalog;
   private readonly processSessionManager?: Pick<ProcessSessionManager, "list">;
+  private readonly backgroundRunLedger: Pick<BackgroundRunLedger, "list">;
   private readonly now: () => Date;
   private readonly isPidAlive: (pid: number) => boolean | "unknown";
 
@@ -47,6 +50,7 @@ export class RuntimeSessionRegistry {
     this.stateBaseDir = deps.stateBaseDir ?? deps.stateManager.getBaseDir();
     this.chatCatalog = new ChatSessionCatalog(this.stateManager);
     this.processSessionManager = deps.processSessionManager;
+    this.backgroundRunLedger = deps.backgroundRunLedger ?? new BackgroundRunLedger(path.join(this.stateBaseDir, "runtime"));
     this.now = deps.now ?? (() => new Date());
     this.isPidAlive = deps.isPidAlive ?? defaultIsPidAlive;
   }
@@ -60,6 +64,7 @@ export class RuntimeSessionRegistry {
     await this.projectChatAndAgentSessions(sessions, backgroundRuns, warnings);
     await this.projectSupervisorState(sessions, backgroundRuns, warnings);
     await this.projectProcessSessions(backgroundRuns, warnings);
+    await this.projectLedgerRuns(backgroundRuns, warnings);
 
     sessions.sort(compareByUpdatedAtThenId);
     backgroundRuns.sort(compareByUpdatedAtThenId);
@@ -225,6 +230,8 @@ export class RuntimeSessionRegistry {
         process_session_id: null,
         status: agentStatusToRunStatus(normalizedStatus),
         notify_policy: "done_only",
+        reply_target_source: "none",
+        pinned_reply_target: null,
         title: chat.title ?? stableAgentId,
         workspace: chat.cwd,
         created_at: chat.createdAt,
@@ -312,6 +319,8 @@ export class RuntimeSessionRegistry {
           process_session_id: null,
           status: agentStatusToRunStatus(state.status),
           notify_policy: "done_only",
+          reply_target_source: "none",
+          pinned_reply_target: null,
           title: state.taskId ?? state.goalId,
           workspace: state.cwd,
           created_at: null,
@@ -394,6 +403,8 @@ export class RuntimeSessionRegistry {
         process_session_id: null,
         status: "running",
         notify_policy: "state_changes",
+        reply_target_source: "none",
+        pinned_reply_target: null,
         title,
         workspace: null,
         created_at: startedAt,
@@ -442,6 +453,8 @@ export class RuntimeSessionRegistry {
         process_session_id: snapshot.session_id,
         status,
         notify_policy: "done_only",
+        reply_target_source: "none",
+        pinned_reply_target: null,
         title: snapshot.label ?? `${snapshot.command} ${snapshot.args.join(" ")}`.trim(),
         workspace: snapshot.cwd,
         created_at: snapshot.startedAt,
@@ -459,6 +472,29 @@ export class RuntimeSessionRegistry {
         ],
       }));
     }
+  }
+
+  private async projectLedgerRuns(
+    backgroundRuns: BackgroundRun[],
+    warnings: RuntimeSessionRegistryWarning[],
+  ): Promise<void> {
+    let ledgerRuns: BackgroundRun[];
+    try {
+      ledgerRuns = await this.backgroundRunLedger.list();
+    } catch (error) {
+      warnings.push({
+        code: "source_unavailable",
+        source: sourceRef("task_ledger", null, null, path.join("runtime", "background-runs"), null),
+        message: `Failed to list background run ledger records: ${messageFromError(error)}`,
+      });
+      return;
+    }
+
+    const byId = new Map(backgroundRuns.map((run) => [run.id, run]));
+    for (const run of ledgerRuns) {
+      byId.set(run.id, mergeLedgerRunWithProjection(run, byId.get(run.id)));
+    }
+    backgroundRuns.splice(0, backgroundRuns.length, ...byId.values());
   }
 
   private async readProcessSidecars(warnings: RuntimeSessionRegistryWarning[]): Promise<ProcessSessionSnapshot[]> {
@@ -573,6 +609,26 @@ function filterRuns(runs: BackgroundRun[], filter: BackgroundRunFilter): Backgro
     if (filter.attentionOnly && run.status !== "failed" && run.status !== "timed_out" && run.status !== "lost") return false;
     return true;
   });
+}
+
+function mergeLedgerRunWithProjection(ledgerRun: BackgroundRun, projectedRun: BackgroundRun | undefined): BackgroundRun {
+  if (!projectedRun) return ledgerRun;
+  if (!isActiveRunStatus(ledgerRun.status) || isActiveRunStatus(projectedRun.status)) {
+    return ledgerRun;
+  }
+
+  return BackgroundRunSchema.parse({
+    ...ledgerRun,
+    status: projectedRun.status,
+    updated_at: projectedRun.updated_at ?? ledgerRun.updated_at,
+    completed_at: projectedRun.completed_at ?? ledgerRun.completed_at,
+    error: projectedRun.error ?? ledgerRun.error,
+    source_refs: [...ledgerRun.source_refs, ...projectedRun.source_refs],
+  });
+}
+
+function isActiveRunStatus(status: BackgroundRunStatus): boolean {
+  return status === "queued" || status === "running";
 }
 
 function sourceRef(

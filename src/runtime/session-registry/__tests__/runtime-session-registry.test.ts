@@ -8,6 +8,7 @@ import {
   RuntimeSessionRegistrySnapshotSchema,
 } from "../index.js";
 import type { ProcessSessionSnapshot } from "../../../tools/system/ProcessSessionTool/ProcessSessionTool.js";
+import { BackgroundRunLedger } from "../../store/background-run-store.js";
 
 describe("RuntimeSessionRegistry", () => {
   let tmpDir: string;
@@ -133,6 +134,127 @@ describe("RuntimeSessionRegistry", () => {
       id: "run:process:proc-terminal",
       status: "succeeded",
       completed_at: "2026-04-25T01:00:00.000Z",
+    }));
+  });
+
+  it("projects durable pinned reply targets after restart without in-memory active routing", async () => {
+    const ledger = new BackgroundRunLedger(path.join(tmpDir, "runtime"));
+    await ledger.ensureReady();
+    await ledger.create({
+      id: "run:agent:restart-safe",
+      kind: "agent_run",
+      notify_policy: "done_only",
+      reply_target_source: "pinned_run",
+      pinned_reply_target: {
+        channel: "slack",
+        target_id: "C123",
+        thread_id: "1700000000.000200",
+      },
+      parent_session_id: "session:conversation:chat-a",
+      title: "Restart safe",
+      workspace: "/repo",
+      created_at: "2026-04-25T00:00:00.000Z",
+    });
+    await ledger.terminal("run:agent:restart-safe", {
+      status: "succeeded",
+      completed_at: "2026-04-25T00:10:00.000Z",
+      summary: "completed after restart",
+    });
+
+    const snapshot = await new RuntimeSessionRegistry({ stateManager }).snapshot();
+
+    expect(snapshot.background_runs).toContainEqual(expect.objectContaining({
+      id: "run:agent:restart-safe",
+      status: "succeeded",
+      reply_target_source: "pinned_run",
+      pinned_reply_target: expect.objectContaining({
+        channel: "slack",
+        target_id: "C123",
+        thread_id: "1700000000.000200",
+      }),
+      summary: "completed after restart",
+    }));
+  });
+
+  it("lets durable ledger records beat synthetic process projections with the same run id", async () => {
+    await stateManager.writeRaw("runtime/process-sessions/proc-ledger.json", makeProcessSnapshot({
+      session_id: "proc-ledger",
+      running: true,
+      pid: process.pid,
+      label: "synthetic process",
+    }));
+
+    const ledger = new BackgroundRunLedger(path.join(tmpDir, "runtime"));
+    await ledger.ensureReady();
+    await ledger.create({
+      id: "run:process:proc-ledger",
+      kind: "process_run",
+      notify_policy: "silent",
+      reply_target_source: "none",
+      process_session_id: "proc-ledger",
+      title: "durable process",
+      workspace: "/repo",
+      created_at: "2026-04-25T00:00:00.000Z",
+      started_at: "2026-04-25T00:00:00.000Z",
+      status: "running",
+    });
+    await ledger.terminal("run:process:proc-ledger", {
+      status: "failed",
+      completed_at: "2026-04-25T00:30:00.000Z",
+      error: "durable failure",
+    });
+
+    const snapshot = await new RuntimeSessionRegistry({ stateManager }).snapshot();
+    const run = snapshot.background_runs.find((candidate) => candidate.id === "run:process:proc-ledger");
+
+    expect(run).toMatchObject({
+      id: "run:process:proc-ledger",
+      kind: "process_run",
+      status: "failed",
+      title: "durable process",
+      error: "durable failure",
+      reply_target_source: "none",
+    });
+    expect(snapshot.background_runs.filter((candidate) => candidate.id === "run:process:proc-ledger")).toHaveLength(1);
+  });
+
+  it("does not let a stale running ledger record hide a dead process sidecar", async () => {
+    await stateManager.writeRaw("runtime/process-sessions/proc-stale-ledger.json", makeProcessSnapshot({
+      session_id: "proc-stale-ledger",
+      running: true,
+      pid: 999_999,
+      label: "stale ledger process",
+    }));
+
+    const ledger = new BackgroundRunLedger(path.join(tmpDir, "runtime"));
+    await ledger.ensureReady();
+    await ledger.create({
+      id: "run:process:proc-stale-ledger",
+      kind: "process_run",
+      notify_policy: "silent",
+      reply_target_source: "none",
+      process_session_id: "proc-stale-ledger",
+      title: "durable running process",
+      workspace: "/repo",
+      created_at: "2026-04-25T00:00:00.000Z",
+      started_at: "2026-04-25T00:00:00.000Z",
+      status: "running",
+    });
+
+    const snapshot = await new RuntimeSessionRegistry({
+      stateManager,
+      isPidAlive: () => false,
+    }).snapshot();
+    const run = snapshot.background_runs.find((candidate) => candidate.id === "run:process:proc-stale-ledger");
+
+    expect(run).toMatchObject({
+      id: "run:process:proc-stale-ledger",
+      status: "lost",
+      title: "durable running process",
+      process_session_id: "proc-stale-ledger",
+    });
+    expect(snapshot.warnings).toContainEqual(expect.objectContaining({
+      code: "dead_process_sidecar",
     }));
   });
 

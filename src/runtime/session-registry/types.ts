@@ -21,6 +21,9 @@ export const BackgroundRunStatusSchema = z.enum([
 ]);
 export type BackgroundRunStatus = z.infer<typeof BackgroundRunStatusSchema>;
 
+export const BackgroundRunReplyTargetSourceSchema = z.enum(["pinned_run", "parent_session", "none"]);
+export type BackgroundRunReplyTargetSource = z.infer<typeof BackgroundRunReplyTargetSourceSchema>;
+
 export const RuntimeSessionRefKindSchema = z.enum([
   "chat_session",
   "agentloop_state",
@@ -102,6 +105,8 @@ export const BackgroundRunSchema = z.object({
   process_session_id: z.string().nullable(),
   status: BackgroundRunStatusSchema,
   notify_policy: z.enum(["silent", "done_only", "state_changes"]),
+  reply_target_source: BackgroundRunReplyTargetSourceSchema,
+  pinned_reply_target: RuntimeReplyTargetSchema.nullable(),
   title: z.string().nullable(),
   workspace: z.string().nullable(),
   created_at: z.string().nullable(),

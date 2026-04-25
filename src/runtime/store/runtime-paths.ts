@@ -16,6 +16,7 @@ export interface RuntimeStorePaths {
   approvalsPendingDir: string;
   approvalsResolvedDir: string;
   outboxDir: string;
+  backgroundRunsDir: string;
   leasesDir: string;
   goalLeasesDir: string;
   dlqDir: string;
@@ -27,6 +28,7 @@ export interface RuntimeStorePaths {
   approvalPendingPath(approvalId: string): string;
   approvalResolvedPath(approvalId: string): string;
   outboxRecordPath(seq: number): string;
+  backgroundRunPath(runId: string): string;
   goalLeasePath(goalId: string): string;
   completedByIdempotencyPath(idempotencyKey: string): string;
   completedByMessagePath(messageId: string): string;
@@ -71,6 +73,7 @@ export function createRuntimeStorePaths(runtimeRoot?: string): RuntimeStorePaths
   const approvalsPendingDir = path.join(approvalsDir, "pending");
   const approvalsResolvedDir = path.join(approvalsDir, "resolved");
   const outboxDir = path.join(rootDir, "outbox");
+  const backgroundRunsDir = path.join(rootDir, "background-runs");
   const leasesDir = path.join(rootDir, "leases");
   const goalLeasesDir = path.join(leasesDir, "goal");
   const dlqDir = path.join(rootDir, "dlq");
@@ -89,6 +92,7 @@ export function createRuntimeStorePaths(runtimeRoot?: string): RuntimeStorePaths
     approvalsPendingDir,
     approvalsResolvedDir,
     outboxDir,
+    backgroundRunsDir,
     leasesDir,
     goalLeasesDir,
     dlqDir,
@@ -109,6 +113,9 @@ export function createRuntimeStorePaths(runtimeRoot?: string): RuntimeStorePaths
     },
     outboxRecordPath(seq: number) {
       return path.join(outboxDir, outboxFileName(seq));
+    },
+    backgroundRunPath(runId: string) {
+      return path.join(backgroundRunsDir, recordFileName(encodeRuntimePathSegment(runId)));
     },
     goalLeasePath(goalId: string) {
       return path.join(goalLeasesDir, `${encodeRuntimePathSegment(goalId)}.json`);
@@ -139,6 +146,7 @@ export async function ensureRuntimeStorePaths(paths: RuntimeStorePaths): Promise
       paths.approvalsPendingDir,
       paths.approvalsResolvedDir,
       paths.outboxDir,
+      paths.backgroundRunsDir,
       paths.leasesDir,
       paths.goalLeasesDir,
       paths.dlqDir,

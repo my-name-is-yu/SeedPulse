@@ -9,6 +9,10 @@ import {
   runtimeDateKey,
 } from "../store/runtime-paths.js";
 import {
+  BackgroundRunLedger,
+  normalizeTerminalStatus,
+} from "../store/background-run-store.js";
+import {
   RuntimeJournal,
   listRuntimeJson,
   loadRuntimeJson,
@@ -43,6 +47,9 @@ describe("runtime store basics", () => {
       path.join(tmpDir, "approvals", "pending", "approval-1.json")
     );
     expect(paths.outboxRecordPath(12)).toBe(path.join(tmpDir, "outbox", "000000000012.json"));
+    expect(paths.backgroundRunPath("run:agent/a")).toBe(
+      path.join(tmpDir, "background-runs", `${encodeRuntimePathSegment("run:agent/a")}.json`)
+    );
     const goalId = "goal%/a";
     expect(paths.goalLeasePath(goalId)).toBe(
       path.join(tmpDir, "leases", "goal", `${encodeRuntimePathSegment(goalId)}.json`)
@@ -57,7 +64,98 @@ describe("runtime store basics", () => {
     expect(fs.existsSync(paths.leaderDir)).toBe(true);
     expect(fs.existsSync(paths.approvalsPendingDir)).toBe(true);
     expect(fs.existsSync(paths.outboxDir)).toBe(true);
+    expect(fs.existsSync(paths.backgroundRunsDir)).toBe(true);
     expect(fs.existsSync(paths.healthDir)).toBe(true);
+  });
+
+  it("persists background runs with pinned reply targets across ledger reloads", async () => {
+    const ledger = new BackgroundRunLedger(paths);
+    await ledger.ensureReady();
+
+    await ledger.create({
+      id: "run:agent:durable",
+      kind: "agent_run",
+      notify_policy: "done_only",
+      reply_target_source: "pinned_run",
+      pinned_reply_target: {
+        channel: "slack",
+        target_id: "C123",
+        thread_id: "1700000000.000100",
+        metadata: { team: "T123" },
+      },
+      parent_session_id: "session:conversation:chat-a",
+      title: "Durable run",
+      workspace: "/repo",
+      created_at: "2026-04-25T00:00:00.000Z",
+    });
+    await ledger.link("run:agent:durable", {
+      child_session_id: "session:agent:durable",
+      updated_at: "2026-04-25T00:01:00.000Z",
+    });
+    await ledger.started("run:agent:durable", {
+      started_at: "2026-04-25T00:02:00.000Z",
+    });
+    await ledger.terminal("run:agent:durable", {
+      status: "completed",
+      completed_at: "2026-04-25T00:03:00.000Z",
+      summary: "done",
+    });
+
+    const reloaded = await new BackgroundRunLedger(paths).load("run:agent:durable");
+
+    expect(reloaded).toMatchObject({
+      id: "run:agent:durable",
+      child_session_id: "session:agent:durable",
+      status: "succeeded",
+      reply_target_source: "pinned_run",
+      pinned_reply_target: {
+        channel: "slack",
+        target_id: "C123",
+        thread_id: "1700000000.000100",
+      },
+      completed_at: "2026-04-25T00:03:00.000Z",
+      summary: "done",
+    });
+  });
+
+  it("rejects non-silent background runs without a durable pinned reply source", async () => {
+    const ledger = new BackgroundRunLedger(paths);
+    await ledger.ensureReady();
+
+    await expect(ledger.create({
+      id: "run:agent:no-target",
+      kind: "agent_run",
+      notify_policy: "done_only",
+      reply_target_source: "parent_session",
+      pinned_reply_target: null,
+      created_at: "2026-04-25T00:00:00.000Z",
+    })).rejects.toThrow(/requires pinned_run reply target/);
+  });
+
+  it("normalizes terminal background run statuses to the durable terminal set", async () => {
+    const ledger = new BackgroundRunLedger(paths);
+    await ledger.ensureReady();
+
+    expect(normalizeTerminalStatus("completed")).toBe("succeeded");
+    expect(normalizeTerminalStatus("timeout")).toBe("timed_out");
+    expect(normalizeTerminalStatus("canceled")).toBe("cancelled");
+    expect(() => normalizeTerminalStatus("running" as never)).toThrow(/Unsupported/);
+
+    await ledger.create({
+      id: "run:agent:terminal",
+      kind: "agent_run",
+      notify_policy: "silent",
+      reply_target_source: "none",
+      created_at: "2026-04-25T00:00:00.000Z",
+    });
+
+    const terminal = await ledger.terminal("run:agent:terminal", {
+      status: "timedout",
+      completed_at: "2026-04-25T00:05:00.000Z",
+    });
+
+    expect(terminal.status).toBe("timed_out");
+    expect(terminal.completed_at).toBe("2026-04-25T00:05:00.000Z");
   });
 
   it("formats date buckets deterministically", () => {

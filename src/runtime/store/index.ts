@@ -78,3 +78,15 @@ export type { ApprovalResolutionInput } from "./approval-store.js";
 export { OutboxStore } from "./outbox-store.js";
 export { RuntimeHealthStore } from "./health-store.js";
 export { RuntimeOperationStore } from "./runtime-operation-store.js";
+export {
+  BackgroundRunLedger,
+  normalizeTerminalStatus,
+  validateBackgroundRunLedgerRecord,
+} from "./background-run-store.js";
+export type {
+  BackgroundRunCreateInput,
+  BackgroundRunLinkInput,
+  BackgroundRunStartedInput,
+  BackgroundRunTerminalInput,
+  BackgroundRunTerminalStatus,
+} from "./background-run-store.js";
