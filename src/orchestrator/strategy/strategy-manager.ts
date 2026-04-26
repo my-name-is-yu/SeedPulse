@@ -5,25 +5,14 @@ import { StrategySchema, WaitStrategySchema, buildDefaultWaitMetadata, parseStra
 import { isWaitStrategy } from "./portfolio-allocation.js";
 import type { Strategy } from "../../base/types/strategy.js";
 import { redistributeAllocation } from "./strategy-helpers.js";
-import { StrategyManagerBase } from "./strategy-manager-base.js";
+import {
+  StrategyManagerBase,
+  type WaitStrategyActivationContext,
+} from "./strategy-manager-base.js";
 import { getCurrentGapForDimension } from "./portfolio-rebalance.js";
 
 export { VALID_TRANSITIONS, StrategyArraySchema, buildGenerationPrompt, redistributeAllocation, detectStrategyGap } from "./strategy-helpers.js";
 export { StrategyManagerBase } from "./strategy-manager-base.js";
-
-export interface WaitStrategyActivationContext {
-  getCurrentGap?: (
-    goalId: string,
-    dimension: string
-  ) => number | null | Promise<number | null>;
-  canAffordWait?: (input: {
-    strategy: Strategy;
-    waitHours: number;
-    currentGap: number;
-    initialGap: number;
-    startedAt: string;
-  }) => boolean | Promise<boolean>;
-}
 
 /**
  * StrategyManager manages strategy lifecycle for a goal:
@@ -166,10 +155,28 @@ export class StrategyManager extends StrategyManagerBase {
         // exists only as tasks/{goalId}/{taskId}.json with status="running". Scan directory first.
         let taskId: string | undefined;
         const tasksDir = path.join(this.stateManager.getBaseDir(), "tasks", goalId);
+        const preferMatchingStrategyTask = <T extends {
+          id: string;
+          strategyId: string | null;
+          statusRank: number;
+          startedAtMs: number;
+          createdAtMs: number;
+        }>(tasks: T[]): T | undefined => {
+          const sorted = [...tasks].sort((left, right) =>
+            Number(right.strategyId === strategy.id) - Number(left.strategyId === strategy.id)
+            || right.statusRank - left.statusRank
+            || right.startedAtMs - left.startedAtMs
+            || right.createdAtMs - left.createdAtMs
+            || left.id.localeCompare(right.id)
+          );
+          return sorted[0];
+        };
         try {
           const files = await fsp.readdir(tasksDir);
           const runningTasks: Array<{
             id: string;
+            strategyId: string | null;
+            statusRank: number;
             startedAtMs: number;
             createdAtMs: number;
           }> = [];
@@ -187,17 +194,14 @@ export class StrategyManager extends StrategyManagerBase {
                 : Number.NaN;
               runningTasks.push({
                 id: raw["id"] as string,
+                strategyId: typeof raw["strategy_id"] === "string" ? raw["strategy_id"] : null,
+                statusRank: raw["status"] === "running" ? 3 : raw["status"] === "in_progress" ? 2 : 1,
                 startedAtMs: Number.isFinite(startedAtMs) ? startedAtMs : Number.NEGATIVE_INFINITY,
                 createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : Number.NEGATIVE_INFINITY,
               });
             }
           }
-          runningTasks.sort((left, right) =>
-            right.startedAtMs - left.startedAtMs
-            || right.createdAtMs - left.createdAtMs
-            || left.id.localeCompare(right.id)
-          );
-          taskId = runningTasks[0]?.id;
+          taskId = preferMatchingStrategyTask(runningTasks)?.id;
         } catch {
           // Directory may not exist yet — fall through to history scan
         }
@@ -209,24 +213,38 @@ export class StrategyManager extends StrategyManagerBase {
           );
           if (Array.isArray(rawHistory) && rawHistory.length > 0) {
             const history = rawHistory as Array<Record<string, unknown>>;
-            let targetTask: Record<string, unknown> | undefined;
-            for (let i = history.length - 1; i >= 0; i--) {
-              const entry = history[i];
-              if (!entry) continue;
-              if (entry["status"] === "running" || entry["status"] === "in_progress" || entry["status"] === "pending") {
-                targetTask = entry;
-                break;
-              }
-            }
-            if (!targetTask) {
-              targetTask = history[history.length - 1];
-            }
+            const rankedHistory = history
+              .map((entry, index) => {
+                if (!entry) return null;
+                const tid = typeof entry["task_id"] === "string"
+                  ? entry["task_id"]
+                  : entry["id"];
+                if (typeof tid !== "string") return null;
+                const status = entry["status"];
+                const statusRank =
+                  status === "running" ? 3 :
+                  status === "in_progress" ? 2 :
+                  status === "pending" ? 1 :
+                  0;
+                return {
+                  id: tid,
+                  strategyId: typeof entry["strategy_id"] === "string" ? entry["strategy_id"] : null,
+                  statusRank,
+                  startedAtMs: index,
+                  createdAtMs: index,
+                };
+              })
+              .filter((entry): entry is {
+                id: string;
+                strategyId: string | null;
+                statusRank: number;
+                startedAtMs: number;
+                createdAtMs: number;
+              } => entry !== null);
+            const targetTask = preferMatchingStrategyTask(rankedHistory);
             if (targetTask) {
               // Support both the current { task_id } shape and older { id } entries.
-              const tid = typeof targetTask["task_id"] === "string"
-                ? targetTask["task_id"]
-                : targetTask["id"];
-              if (typeof tid === "string") taskId = tid;
+              taskId = targetTask.id;
             }
           }
         }

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import { z } from "zod";
 import { StateManager } from "../../../base/state/state-manager.js";
@@ -421,6 +421,33 @@ describe("activateBestCandidate", () => {
 
     expect(activated.started_at! >= before).toBe(true);
     expect(activated.started_at! <= after).toBe(true);
+  });
+
+  it("routes wait candidates through activateMultiple so canAffordWait is enforced", async () => {
+    const mock = createMockLLMClient([]);
+    const manager = new StrategyManager(stateManager, mock);
+    const wait = await manager.createWaitStrategy("goal-1", {
+      hypothesis: "Wait for external signal",
+      wait_reason: "Awaiting external signal",
+      wait_until: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
+      measurement_plan: "Check signal after wait",
+      fallback_strategy_id: null,
+      target_dimensions: ["word_count"],
+      primary_dimension: "word_count",
+    });
+    const canAffordWait = vi.fn().mockReturnValue(false);
+
+    await expect(
+      manager.activateBestCandidate("goal-1", {
+        getCurrentGap: async () => 0.5,
+        canAffordWait,
+      })
+    ).rejects.toThrow("cannot be activated because the goal cannot afford waiting");
+
+    expect(canAffordWait).toHaveBeenCalledTimes(1);
+    const portfolio = await manager.getPortfolio("goal-1");
+    const stored = portfolio!.strategies.find((strategy) => strategy.id === wait.id);
+    expect(stored?.state).toBe("candidate");
   });
 });
 

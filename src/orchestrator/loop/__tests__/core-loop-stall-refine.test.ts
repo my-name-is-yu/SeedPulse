@@ -33,6 +33,7 @@ import type { AdapterRegistry } from "../../execution/adapter-layer.js";
 import type { GoalRefiner } from "../../goal/goal-refiner.js";
 import type { Goal } from "../../../base/types/goal.js";
 import type { StallReport } from "../../../base/types/stall.js";
+import type { ITimeHorizonEngine } from "../../../platform/time/time-horizon-engine.js";
 import type { LoopIterationResult } from "../core-loop/contracts.js";
 import type { PhaseCtx } from "../core-loop/preparation.js";
 import { makeTempDir } from "../../../../tests/helpers/temp-dir.js";
@@ -637,17 +638,17 @@ describe("detectStallsAndRebalance — gap history indexing reuse", () => {
       },
     ]);
 
-    const dimensionHistories = new Map<string, Array<{ normalized_gap: number }>>();
+    const dimensionHistories = new Map<string, Array<{ normalized_gap: number; timestamp?: string }>>();
     (deps.stallDetector.checkDimensionStall as ReturnType<typeof vi.fn>).mockImplementation(
-      (_goalId: string, dimName: string, dimGapHistory: Array<{ normalized_gap: number }>) => {
+      (_goalId: string, dimName: string, dimGapHistory: Array<{ normalized_gap: number; timestamp?: string }>) => {
         dimensionHistories.set(dimName, dimGapHistory);
         return null;
       }
     );
 
-    const globalHistories: Array<Map<string, Array<{ normalized_gap: number }>>> = [];
+    const globalHistories: Array<Map<string, Array<{ normalized_gap: number; timestamp?: string }>>> = [];
     (deps.stallDetector.checkGlobalStall as ReturnType<typeof vi.fn>).mockImplementation(
-      (_goalId: string, allDimGaps: Map<string, Array<{ normalized_gap: number }>>) => {
+      (_goalId: string, allDimGaps: Map<string, Array<{ normalized_gap: number; timestamp?: string }>>) => {
         globalHistories.push(allDimGaps);
         return null;
       }
@@ -659,12 +660,12 @@ describe("detectStallsAndRebalance — gap history indexing reuse", () => {
     await detectStallsAndRebalance(ctx, "goal-1", goal, result);
 
     expect(dimensionHistories.get("dim1")).toEqual([
-      { normalized_gap: 0.8 },
-      { normalized_gap: 0.6 },
+      expect.objectContaining({ normalized_gap: 0.8 }),
+      expect.objectContaining({ normalized_gap: 0.6 }),
     ]);
     expect(dimensionHistories.get("dim2")).toEqual([
-      { normalized_gap: 0.4 },
-      { normalized_gap: 0.3 },
+      expect.objectContaining({ normalized_gap: 0.4 }),
+      expect.objectContaining({ normalized_gap: 0.3 }),
     ]);
 
     const globalHistory = globalHistories[0];
@@ -828,11 +829,11 @@ describe("detectStallsAndRebalance — gap history indexing reuse", () => {
     expect(depsWithPortfolio.stallDetector.checkDimensionStall).toHaveBeenCalledWith(
       "goal-1",
       "dim2",
-      [{ normalized_gap: 0.4 }]
+      [expect.objectContaining({ normalized_gap: 0.4 })]
     );
-    const globalHistory = globalCheck.mock.calls[0]?.[1] as Map<string, Array<{ normalized_gap: number }>>;
+    const globalHistory = globalCheck.mock.calls[0]?.[1] as Map<string, Array<{ normalized_gap: number; timestamp?: string }>>;
     expect(globalHistory.has("dim1")).toBe(false);
-    expect(globalHistory.get("dim2")).toEqual([{ normalized_gap: 0.4 }]);
+    expect(globalHistory.get("dim2")).toEqual([expect.objectContaining({ normalized_gap: 0.4 })]);
   });
 
   it("suppresses only the WaitStrategy primary_dimension, not every target_dimension", async () => {
@@ -924,7 +925,7 @@ describe("detectStallsAndRebalance — gap history indexing reuse", () => {
     const globalCheck = depsWithPortfolio.stallDetector.checkGlobalStall as ReturnType<typeof vi.fn>;
     globalCheck.mockReturnValue(null);
 
-    const ctx = buildPhaseCtx(depsWithPortfolio, { maxIterations: 10, adapterType: "openai_codex_cli" });
+    const ctx = buildPhaseCtx(depsWithPortfolio as unknown as CoreLoopDeps, { maxIterations: 10, adapterType: "openai_codex_cli" });
     const result = makeIterationResult();
 
     await detectStallsAndRebalance(ctx, "goal-1", goal, result);
@@ -933,9 +934,9 @@ describe("detectStallsAndRebalance — gap history indexing reuse", () => {
     expect(depsWithPortfolio.stallDetector.checkDimensionStall).toHaveBeenCalledWith(
       "goal-1",
       "dim2",
-      [{ normalized_gap: 0.4 }]
+      [expect.objectContaining({ normalized_gap: 0.4 })]
     );
-    const globalHistory = globalCheck.mock.calls[0]?.[1] as Map<string, Array<{ normalized_gap: number }>>;
+    const globalHistory = globalCheck.mock.calls[0]?.[1] as Map<string, Array<{ normalized_gap: number; timestamp?: string }>>;
     expect(globalHistory.has("dim1")).toBe(false);
     expect(globalHistory.has("dim2")).toBe(true);
   });
@@ -1011,5 +1012,122 @@ describe("detectStallsAndRebalance — gap history indexing reuse", () => {
     expect(depsWithPortfolio.stallDetector.checkGlobalStall).not.toHaveBeenCalled();
     expect(result.stallDetected).toBe(false);
     expect(result.waitSuppressed).toBe(true);
+  });
+
+  it("passes a TimeHorizon-derived canAffordWait hook into stall-driven regeneration", async () => {
+    const deps = createBaseDeps(tmpDir);
+    const goal = makeGoal({
+      id: "goal-1",
+      deadline: "2026-05-01T00:00:00.000Z",
+      dimensions: [
+        {
+          name: "dim1",
+          label: "Dim 1",
+          current_value: 0.2,
+          threshold: { type: "min", value: 1.0 },
+          confidence: 0.5,
+          observation_method: {
+            type: "manual",
+            source: "manual",
+            schedule: null,
+            endpoint: null,
+            confidence_tier: "self_report",
+          },
+          last_updated: new Date().toISOString(),
+          history: [],
+          weight: 1.0,
+          uncertainty_weight: null,
+          state_integrity: "ok",
+          dimension_mapping: null,
+        },
+      ],
+    });
+    await deps.stateManager.saveGoal(goal);
+    await deps.stateManager.saveGapHistory("goal-1", [
+      {
+        iteration: 0,
+        timestamp: "2026-04-27T00:00:00.000Z",
+        gap_vector: [{ dimension_name: "dim1", normalized_weighted_gap: 0.8 }],
+        confidence_vector: [],
+      },
+      {
+        iteration: 1,
+        timestamp: "2026-04-27T01:00:00.000Z",
+        gap_vector: [{ dimension_name: "dim1", normalized_weighted_gap: 0.6 }],
+        confidence_vector: [],
+      },
+    ]);
+
+    const timeHorizonEngine: ITimeHorizonEngine = {
+      evaluatePacing: vi.fn().mockReturnValue({
+        status: "on_track",
+        velocityPerHour: 0.2,
+        velocityStddev: 0,
+        projectedCompletionDate: null,
+        timeRemainingHours: 48,
+        pacingRatio: 1,
+        confidence: 1,
+        recommendation: "maintain_course",
+      }),
+      projectCompletion: vi.fn(),
+      suggestObservationInterval: vi.fn(),
+      getTimeBudget: vi.fn().mockReturnValue({
+        totalHours: 48,
+        elapsedHours: 1,
+        remainingHours: 47,
+        percentElapsed: 0.02,
+        percentGapRemaining: 0.6,
+        canAffordWait: (waitHours: number) => waitHours <= 4,
+      }),
+    };
+
+    const ctx = {
+      ...buildPhaseCtx(deps, { maxIterations: 10, adapterType: "openai_codex_cli" }),
+      timeHorizonEngine,
+    };
+    const result = makeIterationResult();
+    (deps.stallDetector.checkDimensionStall as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeStallReport({ escalation_level: 1 })
+    );
+    (deps.strategyManager.onStallDetected as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_goalId: string, _stallCount: number, _goalType: string | undefined, activationContext?: {
+        canAffordWait?: (input: {
+          strategy: { primary_dimension: string };
+          waitHours: number;
+          currentGap: number;
+          initialGap: number;
+          startedAt: string;
+        }) => boolean | Promise<boolean>;
+      }) => {
+        const canAfford = await activationContext?.canAffordWait?.({
+          strategy: { primary_dimension: "dim1" },
+          waitHours: 3,
+          currentGap: 0.6,
+          initialGap: 0.8,
+          startedAt: "2026-04-27T01:00:00.000Z",
+        });
+        return canAfford ? { id: "wait-1", state: "active" } : null;
+      }
+    );
+
+    await detectStallsAndRebalance(ctx, "goal-1", goal, result);
+
+    expect(deps.strategyManager.onStallDetected).toHaveBeenCalledWith(
+      "goal-1",
+      1,
+      goal.origin ?? "general",
+      expect.objectContaining({
+        canAffordWait: expect.any(Function),
+      })
+    );
+    expect(timeHorizonEngine.evaluatePacing).toHaveBeenCalled();
+    expect(timeHorizonEngine.getTimeBudget).toHaveBeenCalledWith(
+      goal.deadline,
+      goal.created_at,
+      0.6,
+      0.8,
+      0.2
+    );
+    expect(result.pivotOccurred).toBe(true);
   });
 });

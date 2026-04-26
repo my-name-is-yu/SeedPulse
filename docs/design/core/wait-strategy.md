@@ -141,11 +141,12 @@ and expiry judgment are all anchored to one canonical dimension. The task field
 `plateau_until` is a mirror for task-local consumers that do not load the
 portfolio. Suppression lifts automatically once the wait timestamp becomes past.
 
-**Current gap**: The `canAffordWait` gate from TimeHorizonEngine is only
-partially wired. `StrategyManager.activateMultiple()` accepts a
-`canAffordWait` hook and blocks activation when the caller supplies one, but
-CoreLoop does not yet derive and pass the closure from
-`TimeHorizonEngine.getTimeBudget()`. See §6 for planned integration.
+**Current gap**: The `canAffordWait` gate from TimeHorizonEngine is now wired
+through CoreLoop stall recovery and wait-expiry fallback activation using
+dimension-specific gap history. The remaining limitation is architectural:
+external/manual activation paths can still omit the hook, and goals without
+usable per-dimension history currently fail closed (the wait cannot be afforded)
+rather than falling back to a softer heuristic.
 
 ---
 
@@ -153,7 +154,8 @@ CoreLoop does not yet derive and pass the closure from
 
 | Gap | Description |
 |-----|-------------|
-| **canAffordWait gate wiring** | `TimeHorizonEngine.getTimeBudget()` returns a `canAffordWait` closure, but CoreLoop does not yet pass that closure into `StrategyManager.activateMultiple()`. Activation-time enforcement exists once the caller supplies the hook. |
+| **canAffordWait coverage outside CoreLoop** | CoreLoop now passes a dimension-specific `canAffordWait` closure into wait activation and fallback activation, but callers outside that path can still invoke activation without supplying the hook. |
+| **History-poor wait activation policy** | When a wait candidate has insufficient per-dimension gap history to estimate velocity, the current policy is fail-closed (`canAffordWait` returns false). This is safer than silently allowing waits, but it may be too strict for very new goals. |
 | **Authoritative wait state is split across portfolio + task mirror** | The portfolio WaitStrategy is authoritative for CoreLoop suppression and expiry, while `task.plateau_until` is a best-effort mirror for task-local consumers. Consumers that only read task state must tolerate stale mirrors. |
 | **Effect latency estimation** | Heuristic categorization of action types (e.g., "deploy" → hours, "marketing" → days) to auto-suggest `wait_until` durations. Currently the LLM proposes durations without structured guidance. |
 | **Adaptive observation frequency** | Reducing observation frequency during waits to save tokens. `TimeHorizonEngine.suggestObservationInterval` exists (time-horizon.md §7) but is not connected to wait state. |

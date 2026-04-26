@@ -204,6 +204,7 @@ console.log("benchmark training completed");
         () => true,
         async () => 0.5,
         async () => undefined,
+        async () => undefined,
         async () => [],
         async () => ({
           schema_version: 1,
@@ -217,7 +218,7 @@ console.log("benchmark training completed");
         }),
         async () => ({ capabilities: [], last_checked: "2026-04-25T00:00:00.000Z" }),
         async () => null,
-        async (_goalId, _strategyId, metadata) => {
+        async (_goalId: string, _strategyId: string, metadata: unknown) => {
           writtenWaitMetadata = metadata as unknown as Record<string, unknown>;
         },
         () => pulseedHome,

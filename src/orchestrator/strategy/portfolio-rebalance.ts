@@ -304,6 +304,7 @@ export async function handleWaitStrategyExpiry(
   isWaitStrategy: (s: Strategy) => boolean,
   getGap: (goalId: string, dimension: string) => number | null | Promise<number | null>,
   updateState: (strategyId: string, state: string) => void | Promise<void>,
+  activateStrategy: ((goalId: string, strategyId: string) => void | Promise<void>) | undefined,
   getPortfolioStrategies: (goalId: string) => Strategy[] | Promise<Strategy[]>,
   getWaitMetadata?: (goalId: string, strategyId: string) => unknown | null | Promise<unknown | null>,
   getCapabilityRegistry?: () => unknown | null | Promise<unknown | null>,
@@ -428,14 +429,34 @@ export async function handleWaitStrategyExpiry(
         (s) => s.id === waitStrategy.fallback_strategy_id
       );
       if (fallback && fallback.state === "candidate") {
-        await updateState(fallback.id, "active");
-        await updateState(strategyId, "terminated");
-        return {
-          status: "fallback_activated",
-          goal_id: goalId,
-          strategy_id: strategyId,
-          details: `WaitStrategy expired unchanged; activated fallback strategy ${fallback.id}`,
-        };
+        try {
+          if (activateStrategy) {
+            await activateStrategy(goalId, fallback.id);
+          } else {
+            await updateState(fallback.id, "active");
+          }
+          await updateState(strategyId, "terminated");
+          return {
+            status: "fallback_activated",
+            goal_id: goalId,
+            strategy_id: strategyId,
+            details: `WaitStrategy expired unchanged; activated fallback strategy ${fallback.id}`,
+          };
+        } catch (err) {
+          await updateState(strategyId, "terminated");
+          const details = `WaitStrategy expired unchanged; fallback strategy ${fallback.id} could not be activated: ${err instanceof Error ? err.message : String(err)}`;
+          return {
+            status: "unchanged",
+            goal_id: goalId,
+            strategy_id: strategyId,
+            details,
+            rebalance_trigger: {
+              type: "stall_detected",
+              strategy_id: strategyId,
+              details,
+            },
+          };
+        }
       }
     }
     await updateState(strategyId, "terminated");

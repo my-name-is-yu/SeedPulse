@@ -254,11 +254,6 @@ describe("Phase 2 methods", () => {
       const mock = createMockLLMClient([]);
       const manager = new StrategyManager(stateManager, mock);
       const waitUntil = "2026-04-27T03:00:00.000Z";
-      await writeTaskFixture("goal-1", "task-running", {
-        status: "running",
-        started_at: "2026-04-27T00:00:00.000Z",
-      });
-
       const wait = await manager.createWaitStrategy("goal-1", {
         hypothesis: "Wait for external signal",
         wait_reason: "Awaiting external signal",
@@ -267,6 +262,11 @@ describe("Phase 2 methods", () => {
         fallback_strategy_id: null,
         target_dimensions: ["quality"],
         primary_dimension: "quality",
+      });
+      await writeTaskFixture("goal-1", "task-running", {
+        status: "running",
+        started_at: "2026-04-27T00:00:00.000Z",
+        strategy_id: wait.id,
       });
 
       await manager.activateMultiple("goal-1", [wait.id]);
@@ -279,14 +279,6 @@ describe("Phase 2 methods", () => {
       const mock = createMockLLMClient([]);
       const manager = new StrategyManager(stateManager, mock);
       const waitUntil = "2026-04-27T03:00:00.000Z";
-      await writeTaskFixture("goal-1", "task-pending");
-      await stateManager.writeRaw("tasks/goal-1/task-history.json", [
-        {
-          task_id: "task-pending",
-          status: "pending",
-        },
-      ]);
-
       const wait = await manager.createWaitStrategy("goal-1", {
         hypothesis: "Wait for external signal",
         wait_reason: "Awaiting external signal",
@@ -296,6 +288,16 @@ describe("Phase 2 methods", () => {
         target_dimensions: ["quality"],
         primary_dimension: "quality",
       });
+      await writeTaskFixture("goal-1", "task-pending", {
+        strategy_id: wait.id,
+      });
+      await stateManager.writeRaw("tasks/goal-1/task-history.json", [
+        {
+          task_id: "task-pending",
+          strategy_id: wait.id,
+          status: "pending",
+        },
+      ]);
 
       await manager.activateMultiple("goal-1", [wait.id]);
 
@@ -307,14 +309,6 @@ describe("Phase 2 methods", () => {
       const mock = createMockLLMClient([]);
       const manager = new StrategyManager(stateManager, mock);
       const waitUntil = "2026-04-27T03:00:00.000Z";
-      await writeTaskFixture("goal-1", "task-legacy");
-      await stateManager.writeRaw("tasks/goal-1/task-history.json", [
-        {
-          id: "task-legacy",
-          status: "pending",
-        },
-      ]);
-
       const wait = await manager.createWaitStrategy("goal-1", {
         hypothesis: "Wait for external signal",
         wait_reason: "Awaiting external signal",
@@ -324,6 +318,16 @@ describe("Phase 2 methods", () => {
         target_dimensions: ["quality"],
         primary_dimension: "quality",
       });
+      await writeTaskFixture("goal-1", "task-legacy", {
+        strategy_id: wait.id,
+      });
+      await stateManager.writeRaw("tasks/goal-1/task-history.json", [
+        {
+          id: "task-legacy",
+          strategy_id: wait.id,
+          status: "pending",
+        },
+      ]);
 
       await manager.activateMultiple("goal-1", [wait.id]);
 
@@ -335,18 +339,6 @@ describe("Phase 2 methods", () => {
       const mock = createMockLLMClient([]);
       const manager = new StrategyManager(stateManager, mock);
       const waitUntil = "2026-04-27T03:00:00.000Z";
-      await writeTaskFixture("goal-1", "task-running", {
-        status: "running",
-        started_at: "2026-04-27T00:00:00.000Z",
-      });
-      await writeTaskFixture("goal-1", "task-stale");
-      await stateManager.writeRaw("tasks/goal-1/task-history.json", [
-        {
-          task_id: "task-stale",
-          status: "pending",
-        },
-      ]);
-
       const wait = await manager.createWaitStrategy("goal-1", {
         hypothesis: "Wait for external signal",
         wait_reason: "Awaiting external signal",
@@ -356,6 +348,18 @@ describe("Phase 2 methods", () => {
         target_dimensions: ["quality"],
         primary_dimension: "quality",
       });
+      await writeTaskFixture("goal-1", "task-running", {
+        status: "running",
+        started_at: "2026-04-27T00:00:00.000Z",
+        strategy_id: wait.id,
+      });
+      await writeTaskFixture("goal-1", "task-stale");
+      await stateManager.writeRaw("tasks/goal-1/task-history.json", [
+        {
+          task_id: "task-stale",
+          status: "pending",
+        },
+      ]);
 
       await manager.activateMultiple("goal-1", [wait.id]);
 
@@ -363,6 +367,78 @@ describe("Phase 2 methods", () => {
       const staleTask = await stateManager.readRaw("tasks/goal-1/task-stale.json") as Record<string, unknown>;
       expect(runningTask["plateau_until"]).toBe(waitUntil);
       expect(staleTask["plateau_until"]).toBeNull();
+    });
+
+    it("prefers a strategy-matching running task over a newer unrelated running task", async () => {
+      const mock = createMockLLMClient([]);
+      const manager = new StrategyManager(stateManager, mock);
+      const waitUntil = "2026-04-27T03:00:00.000Z";
+      const wait = await manager.createWaitStrategy("goal-1", {
+        hypothesis: "Wait for external signal",
+        wait_reason: "Awaiting external signal",
+        wait_until: waitUntil,
+        measurement_plan: "Check signal after wait",
+        fallback_strategy_id: null,
+        target_dimensions: ["quality"],
+        primary_dimension: "quality",
+      });
+      await writeTaskFixture("goal-1", "task-target", {
+        status: "running",
+        started_at: "2026-04-27T00:00:00.000Z",
+        strategy_id: wait.id,
+      });
+      await writeTaskFixture("goal-1", "task-other", {
+        status: "running",
+        started_at: "2026-04-27T00:30:00.000Z",
+        strategy_id: "other-strategy",
+      });
+
+      await manager.activateMultiple("goal-1", [wait.id]);
+
+      const targetTask = await stateManager.readRaw("tasks/goal-1/task-target.json") as Record<string, unknown>;
+      const otherTask = await stateManager.readRaw("tasks/goal-1/task-other.json") as Record<string, unknown>;
+      expect(targetTask["plateau_until"]).toBe(waitUntil);
+      expect(otherTask["plateau_until"]).toBeNull();
+    });
+
+    it("prefers a strategy-matching task-history entry over unrelated pending tasks", async () => {
+      const mock = createMockLLMClient([]);
+      const manager = new StrategyManager(stateManager, mock);
+      const waitUntil = "2026-04-27T03:00:00.000Z";
+      const wait = await manager.createWaitStrategy("goal-1", {
+        hypothesis: "Wait for external signal",
+        wait_reason: "Awaiting external signal",
+        wait_until: waitUntil,
+        measurement_plan: "Check signal after wait",
+        fallback_strategy_id: null,
+        target_dimensions: ["quality"],
+        primary_dimension: "quality",
+      });
+      await writeTaskFixture("goal-1", "task-other", {
+        strategy_id: "other-strategy",
+      });
+      await writeTaskFixture("goal-1", "task-target", {
+        strategy_id: wait.id,
+      });
+      await stateManager.writeRaw("tasks/goal-1/task-history.json", [
+        {
+          task_id: "task-other",
+          strategy_id: "other-strategy",
+          status: "pending",
+        },
+        {
+          task_id: "task-target",
+          strategy_id: wait.id,
+          status: "pending",
+        },
+      ]);
+
+      await manager.activateMultiple("goal-1", [wait.id]);
+
+      const targetTask = await stateManager.readRaw("tasks/goal-1/task-target.json") as Record<string, unknown>;
+      const otherTask = await stateManager.readRaw("tasks/goal-1/task-other.json") as Record<string, unknown>;
+      expect(targetTask["plateau_until"]).toBe(waitUntil);
+      expect(otherTask["plateau_until"]).toBeNull();
     });
   });
 

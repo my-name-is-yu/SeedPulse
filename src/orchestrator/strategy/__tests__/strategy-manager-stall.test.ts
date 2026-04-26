@@ -76,6 +76,30 @@ afterEach(() => {
 // ─── onStallDetected ───
 
 describe("onStallDetected", () => {
+  it("activateBestCandidate enforces wait budgets for WaitStrategy candidates", async () => {
+    const manager = new StrategyManager(stateManager, createMockLLMClient([]));
+    const wait = await manager.createWaitStrategy("goal-1", {
+      hypothesis: "Wait for external signal",
+      wait_reason: "External process needs time",
+      wait_until: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      measurement_plan: "Check again later",
+      fallback_strategy_id: null,
+      target_dimensions: ["word_count"],
+      primary_dimension: "word_count",
+    });
+
+    await expect(
+      manager.activateBestCandidate("goal-1", {
+        getCurrentGap: async () => 0.4,
+        canAffordWait: async () => false,
+      })
+    ).rejects.toThrow("cannot be activated because the goal cannot afford waiting");
+
+    const stored = await manager.getPortfolio("goal-1");
+    const candidate = stored?.strategies.find((strategy) => strategy.id === wait.id);
+    expect(candidate?.state).toBe("candidate");
+  });
+
   it("returns null when stallCount === 1", async () => {
     const mock = createMockLLMClient([CANDIDATE_RESPONSE_ONE]);
     const manager = new StrategyManager(stateManager, mock);

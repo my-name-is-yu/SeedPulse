@@ -1008,7 +1008,7 @@ describe("CoreLoop", async () => {
       const loop = new CoreLoop(depsWithPM, { delayBetweenLoopsMs: 0 });
       await loop.runOneIteration("goal-1", 0);
 
-      expect(mocks.strategyManager.onStallDetected).toHaveBeenCalledWith("goal-1", 3, expect.any(String));
+      expect(mocks.strategyManager.onStallDetected).toHaveBeenCalledWith("goal-1", 3, expect.any(String), undefined);
     });
 
     it("handles WaitStrategy expiry check — calls rebalance when handleWaitStrategyExpiry returns a trigger", async () => {
@@ -1046,7 +1046,7 @@ describe("CoreLoop", async () => {
       const loop = new CoreLoop(depsWithPM, { delayBetweenLoopsMs: 0 });
       await loop.runOneIteration("goal-1", 0);
 
-      expect(portfolioManager.handleWaitStrategyExpiry).toHaveBeenCalledWith("goal-1", waitStrategy.id);
+      expect(portfolioManager.handleWaitStrategyExpiry).toHaveBeenCalledWith("goal-1", waitStrategy.id, undefined);
       expect(portfolioManager.rebalance).toHaveBeenCalledWith("goal-1", waitTrigger);
     });
 
@@ -1093,7 +1093,7 @@ describe("CoreLoop", async () => {
 
       expect(result.waitExpired).toBe(true);
       expect(result.waitObserveOnly).toBe(false);
-      expect(mocks.strategyManager.onStallDetected).toHaveBeenCalledWith("goal-1", 3, expect.any(String));
+      expect(mocks.strategyManager.onStallDetected).toHaveBeenCalledWith("goal-1", 3, expect.any(String), undefined);
       expect(mocks.taskLifecycle.runTaskCycle).toHaveBeenCalledOnce();
     });
 
@@ -1405,7 +1405,7 @@ describe("CoreLoop", async () => {
       const loop = new CoreLoop(depsWithPM, { delayBetweenLoopsMs: 0 });
       const result = await loop.runOneIteration("goal-1", 0);
 
-      expect(portfolioManager.handleWaitStrategyExpiry).toHaveBeenCalledWith("goal-1", waitStrategy.id);
+      expect(portfolioManager.handleWaitStrategyExpiry).toHaveBeenCalledWith("goal-1", waitStrategy.id, undefined);
       expect(mocks.stallDetector.isSuppressed).not.toHaveBeenCalled();
       expect(mocks.stallDetector.checkDimensionStall).not.toHaveBeenCalled();
       expect(result.waitSuppressed).toBe(true);

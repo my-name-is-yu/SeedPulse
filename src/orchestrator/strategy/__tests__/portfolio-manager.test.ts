@@ -713,34 +713,18 @@ describe("PortfolioManager", () => {
   describe("activateStrategies", () => {
     it("single strategy gets allocation 1.0", async () => {
       const s1 = makeStrategy({ id: "s1", state: "candidate", allocation: 0 });
-      const portfolio = makePortfolio([s1]);
-      (mockStrategyManager.getPortfolio as ReturnType<typeof vi.fn>).mockReturnValue(portfolio);
-
-      pm.activateStrategies("goal-1", ["s1"]);
-      await Promise.resolve(); // flush microtasks so async updateStrategyAllocation completes
-
-      expect(mockStrategyManager.updateState).toHaveBeenCalledWith("s1", "active");
-      expect(mockStrategyManager.savePortfolio).toHaveBeenCalled();
+      await pm.activateStrategies("goal-1", ["s1"]);
+      expect(mockStrategyManager.activateMultiple).toHaveBeenCalledWith("goal-1", ["s1"], undefined);
     });
 
     it("multiple strategies get equal split", async () => {
-      const s1 = makeStrategy({ id: "s1", state: "candidate", allocation: 0 });
-      const s2 = makeStrategy({ id: "s2", state: "candidate", allocation: 0 });
-      const s3 = makeStrategy({ id: "s3", state: "candidate", allocation: 0 });
-      const portfolio = makePortfolio([s1, s2, s3]);
-      (mockStrategyManager.getPortfolio as ReturnType<typeof vi.fn>).mockReturnValue(portfolio);
-
-      pm.activateStrategies("goal-1", ["s1", "s2", "s3"]);
-      await Promise.resolve(); // flush microtasks so async updateStrategyAllocation completes
-
-      expect(mockStrategyManager.updateState).toHaveBeenCalledTimes(3);
-      // savePortfolio called once per strategy for allocation update
-      expect(mockStrategyManager.savePortfolio).toHaveBeenCalledTimes(3);
+      await pm.activateStrategies("goal-1", ["s1", "s2", "s3"]);
+      expect(mockStrategyManager.activateMultiple).toHaveBeenCalledWith("goal-1", ["s1", "s2", "s3"], undefined);
     });
 
     it("does nothing when no strategy IDs provided", async () => {
-      pm.activateStrategies("goal-1", []);
-      expect(mockStrategyManager.updateState).not.toHaveBeenCalled();
+      await pm.activateStrategies("goal-1", []);
+      expect(mockStrategyManager.activateMultiple).not.toHaveBeenCalled();
     });
   });
 
@@ -839,8 +823,52 @@ describe("PortfolioManager", () => {
 
       expect(result).toMatchObject({ status: "fallback_activated", strategy_id: "ws1" });
       expect(result?.rebalance_trigger).toBeUndefined();
-      expect(mockStrategyManager.updateState).toHaveBeenNthCalledWith(1, "fallback-1", "active");
-      expect(mockStrategyManager.updateState).toHaveBeenNthCalledWith(2, "ws1", "terminated");
+      expect(mockStrategyManager.activateMultiple).toHaveBeenCalledWith("goal-1", ["fallback-1"], undefined);
+      expect(mockStrategyManager.updateState).toHaveBeenCalledWith("ws1", "terminated");
+    });
+
+    it("terminates and returns a rebalance trigger when fallback activation is denied", async () => {
+      const fallback = makeWaitStrategy({
+        id: "fallback-1",
+        state: "candidate",
+        allocation: 0,
+      });
+      const wait = makeWaitStrategy({
+        id: "ws1",
+        state: "active",
+        wait_until: new Date(Date.now() - 100_000).toISOString(),
+        gap_snapshot_at_start: 0.5,
+        primary_dimension: "quality",
+        fallback_strategy_id: fallback.id,
+      });
+      const portfolio = makePortfolio([wait, fallback]);
+      (mockStrategyManager.getPortfolio as ReturnType<typeof vi.fn>).mockReturnValue(portfolio);
+      (mockStateManager.readRaw as ReturnType<typeof vi.fn>).mockResolvedValue({ quality: 0.5 });
+      (mockStrategyManager.activateMultiple as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error("cannot be activated because the goal cannot afford waiting")
+      );
+
+      const result = await pm.handleWaitStrategyExpiry("goal-1", "ws1", {
+        canAffordWait: async () => false,
+      });
+
+      expect(result).toMatchObject({
+        status: "unchanged",
+        strategy_id: "ws1",
+        rebalance_trigger: {
+          type: "stall_detected",
+          strategy_id: "ws1",
+        },
+      });
+      expect(result?.details).toContain("could not be activated");
+      expect(mockStrategyManager.activateMultiple).toHaveBeenCalledWith(
+        "goal-1",
+        ["fallback-1"],
+        expect.objectContaining({
+          canAffordWait: expect.any(Function),
+        })
+      );
+      expect(mockStrategyManager.updateState).toHaveBeenCalledWith("ws1", "terminated");
     });
 
     it("terminates and returns rebalance trigger when expired and gap worsened", async () => {

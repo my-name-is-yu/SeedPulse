@@ -27,6 +27,7 @@ import {
   isWaitStrategy,
   checkStrategyTermination,
 } from "./portfolio-allocation.js";
+import type { WaitStrategyActivationContext } from "./strategy-manager-base.js";
 
 /**
  * PortfolioManager provides portfolio-level orchestration on top of StrategyManager.
@@ -351,19 +352,17 @@ export class PortfolioManager {
    * Single strategy: allocation = 1.0
    * Multiple: equal split as default, respecting min 0.1 and max 0.7, sum = 1.0
    */
-  activateStrategies(goalId: string, strategyIds: string[]): void {
+  async activateStrategies(
+    goalId: string,
+    strategyIds: string[],
+    activationContext?: WaitStrategyActivationContext
+  ): Promise<void> {
     if (strategyIds.length === 0) return;
-
-    const allocations = calculateInitialAllocations(
-      strategyIds.length,
-      this.config
+    await this.strategyManager.activateMultiple(
+      goalId,
+      strategyIds,
+      activationContext
     );
-
-    for (let i = 0; i < strategyIds.length; i++) {
-      const strategyId = strategyIds[i];
-      this.strategyManager.updateState(strategyId, "active");
-      this.updateStrategyAllocation(goalId, strategyId, allocations[i]);
-    }
   }
 
   /**
@@ -383,7 +382,8 @@ export class PortfolioManager {
    */
   async handleWaitStrategyExpiry(
     goalId: string,
-    strategyId: string
+    strategyId: string,
+    activationContext?: WaitStrategyActivationContext
   ): Promise<WaitExpiryOutcome | null> {
     const portfolio = await this.strategyManager.getPortfolio(goalId);
     if (!portfolio) return null;
@@ -398,6 +398,9 @@ export class PortfolioManager {
       (s) => this.isWaitStrategy(s),
       (gId, dim) => this.getCurrentGapForDimension(gId, dim),
       (sId, state) => this.strategyManager.updateState(sId, state as StrategyState),
+      async (gId, sId) => {
+        await this.strategyManager.activateMultiple(gId, [sId], activationContext);
+      },
       async (gId) => (await this.strategyManager.getPortfolio(gId))?.strategies ?? [],
       (gId, sId) => this.stateManager.readRaw(`strategies/${gId}/wait-meta/${sId}.json`),
       () => this.stateManager.readRaw("capability_registry.json"),

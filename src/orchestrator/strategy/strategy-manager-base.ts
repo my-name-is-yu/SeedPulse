@@ -42,6 +42,20 @@ export interface ExecutionFeedback {
   timestamp: number;
 }
 
+export interface WaitStrategyActivationContext {
+  getCurrentGap?: (
+    goalId: string,
+    dimension: string
+  ) => number | null | Promise<number | null>;
+  canAffordWait?: (input: {
+    strategy: Strategy;
+    waitHours: number;
+    currentGap: number;
+    initialGap: number;
+    startedAt: string;
+  }) => boolean | Promise<boolean>;
+}
+
 /**
  * Base class for StrategyManager.
  * Contains constructor, core lifecycle methods, and private persistence helpers.
@@ -288,7 +302,10 @@ export class StrategyManagerBase {
    * Activate the first candidate strategy for a goal.
    * Sets state="active" and started_at=now.
    */
-  async activateBestCandidate(goalId: string): Promise<Strategy> {
+  async activateBestCandidate(
+    goalId: string,
+    activationContext?: WaitStrategyActivationContext
+  ): Promise<Strategy> {
     const portfolio = await this.loadOrCreatePortfolio(goalId);
     const candidates = portfolio.strategies.filter(
       (s) => s.state === "candidate"
@@ -347,23 +364,32 @@ export class StrategyManagerBase {
         best = candidates[0]!;
       }
     }
-    const now = new Date().toISOString();
+    const multiActivator = (this as unknown as {
+      activateMultiple?: (
+        goalId: string,
+        strategyIds: string[],
+        activationContext?: WaitStrategyActivationContext
+      ) => Promise<Strategy[]>;
+    }).activateMultiple;
+    if (typeof multiActivator === "function") {
+      const activated = await multiActivator.call(this, goalId, [best.id], activationContext);
+      if (!activated[0]) {
+        throw new Error(`activateBestCandidate: failed to activate strategy "${best.id}"`);
+      }
+      return activated[0];
+    }
 
+    const now = new Date().toISOString();
     const activated = parseStrategy({
       ...best,
       state: "active",
       started_at: now,
     });
-
-    // Update in portfolio
     portfolio.strategies = portfolio.strategies.map((s) =>
       s.id === activated.id ? activated : s
     );
     await this.savePortfolio(goalId, portfolio);
-
-    // Ensure index entry
     this.strategyIndex.set(activated.id, goalId);
-
     return activated;
   }
 
@@ -457,7 +483,8 @@ export class StrategyManagerBase {
   async onStallDetected(
     goalId: string,
     stallCount: number,
-    goalType?: string
+    goalType?: string,
+    activationContext?: WaitStrategyActivationContext
   ): Promise<Strategy | null> {
     if (stallCount < 2) {
       return null;
@@ -547,7 +574,7 @@ export class StrategyManagerBase {
     }
 
     try {
-      return await this.activateBestCandidate(goalId);
+      return await this.activateBestCandidate(goalId, activationContext);
     } catch (err) {
       this.logger?.warn(`[StrategyManager] activateBestCandidate failed: ${String(err)}`);
       return null;
