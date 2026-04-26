@@ -162,9 +162,11 @@ export class StrategyManager extends StrategyManagerBase {
           startedAtMs: number;
           createdAtMs: number;
         }>(tasks: T[]): T | undefined => {
-          const sorted = [...tasks].sort((left, right) =>
-            Number(right.strategyId === strategy.id) - Number(left.strategyId === strategy.id)
-            || right.statusRank - left.statusRank
+          const matchingTasks = tasks.filter((task) => task.strategyId === strategy.id);
+          const unscopedTasks = tasks.filter((task) => task.strategyId === null);
+          const eligibleTasks = matchingTasks.length > 0 ? matchingTasks : unscopedTasks;
+          const sorted = [...eligibleTasks].sort((left, right) =>
+            right.statusRank - left.statusRank
             || right.startedAtMs - left.startedAtMs
             || right.createdAtMs - left.createdAtMs
             || left.id.localeCompare(right.id)

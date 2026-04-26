@@ -440,6 +440,38 @@ describe("Phase 2 methods", () => {
       expect(targetTask["plateau_until"]).toBe(waitUntil);
       expect(otherTask["plateau_until"]).toBeNull();
     });
+
+    it("does not mirror wait_until into a task owned by a different strategy", async () => {
+      const mock = createMockLLMClient([]);
+      const manager = new StrategyManager(stateManager, mock);
+      const waitUntil = "2026-04-27T03:00:00.000Z";
+      const wait = await manager.createWaitStrategy("goal-1", {
+        hypothesis: "Wait for external signal",
+        wait_reason: "Awaiting external signal",
+        wait_until: waitUntil,
+        measurement_plan: "Check signal after wait",
+        fallback_strategy_id: null,
+        target_dimensions: ["quality"],
+        primary_dimension: "quality",
+      });
+      await writeTaskFixture("goal-1", "task-other", {
+        status: "running",
+        started_at: "2026-04-27T00:30:00.000Z",
+        strategy_id: "other-strategy",
+      });
+      await stateManager.writeRaw("tasks/goal-1/task-history.json", [
+        {
+          task_id: "task-other",
+          strategy_id: "other-strategy",
+          status: "running",
+        },
+      ]);
+
+      await manager.activateMultiple("goal-1", [wait.id]);
+
+      const otherTask = await stateManager.readRaw("tasks/goal-1/task-other.json") as Record<string, unknown>;
+      expect(otherTask["plateau_until"]).toBeNull();
+    });
   });
 
   describe("terminateStrategy", () => {
