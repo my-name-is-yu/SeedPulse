@@ -165,8 +165,10 @@ function selectRouteForText(
     concurrencyPolicy: "session_serial" as const,
     daemonChatPolicy: "compatibility_only" as const,
   };
+  const canUseDurableControl =
+    runtimeControl.allowed && runtimeControl.approvalMode !== "disallowed";
 
-  if (runtimeControl.allowed && runtimeControl.approvalMode !== "disallowed") {
+  if (canUseDurableControl) {
     const intent = recognizeRuntimeControlIntent(text);
     if (intent !== null) {
       return {
@@ -179,7 +181,7 @@ function selectRouteForText(
     }
   }
 
-  if (deps.hasDaemonTend && shouldUseDaemonTendRoute(text)) {
+  if (canUseDurableControl && deps.hasDaemonTend && shouldUseDaemonTendRoute(text)) {
     return {
       lane: "durable",
       kind: "daemon_tend",
