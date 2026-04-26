@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyChatEventToMessages } from "../chat-event-state.js";
+import { classifyFailureRecovery } from "../failure-recovery.js";
 
 describe("applyChatEventToMessages", () => {
   it("keeps activity as one updatable row per turn", () => {
@@ -99,11 +100,14 @@ describe("applyChatEventToMessages", () => {
       error: "boom",
       partialText: "Partial",
       persisted: false,
+      recovery: classifyFailureRecovery("boom"),
     }, 20);
 
     expect(afterError).toHaveLength(1);
     expect(afterError[0]!.id).toBe("turn-1");
     expect(afterError[0]!.messageType).toBe("error");
+    expect(afterError[0]!.text).toContain("Recovery");
+    expect(afterError[0]!.text).toContain("Next actions");
   });
 
   it("removes transient activity on lifecycle end", () => {

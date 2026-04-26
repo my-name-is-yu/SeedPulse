@@ -428,7 +428,9 @@ describe("ChatRunner", () => {
       const result = await runner.execute("Do something risky", "/repo");
 
       expect(result.success).toBe(false);
-      expect(result.output).toBe("Agent failed");
+      expect(result.output).toContain("Agent failed");
+      expect(result.output).toContain("Recovery");
+      expect(result.output).toContain("Next actions");
     });
   });
 
@@ -745,6 +747,20 @@ describe("ChatRunner", () => {
       expect(adapter.execute).not.toHaveBeenCalled();
     });
 
+    it("/retry explains safe recovery options without replaying the prior turn", async () => {
+      const adapter = makeMockAdapter();
+      const runner = new ChatRunner(makeDeps({ adapter }));
+
+      const result = await runner.execute("/retry", "/repo");
+
+      expect(result.success).toBe(false);
+      expect(result.output).toContain("/retry is not supported yet");
+      expect(result.output).toContain("Retry unavailable");
+      expect(result.output).toContain("/review");
+      expect(result.output).toContain("/resume");
+      expect(adapter.execute).not.toHaveBeenCalled();
+    });
+
     it("unknown /command returns error message without calling adapter", async () => {
       const adapter = makeMockAdapter();
       const runner = new ChatRunner(makeDeps({ adapter }));
@@ -823,6 +839,25 @@ describe("ChatRunner", () => {
       const writeRawMock = stateManager.writeRaw as ReturnType<typeof vi.fn>;
       expect(writeRawMock).toHaveBeenCalledTimes(1);
       expect((stateManager.readRaw as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("/resume without saved state returns recovery guidance", async () => {
+      const stateManager = makeMockStateManager();
+      (stateManager.readRaw as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+      const chatAgentLoopRunner = {
+        execute: vi.fn(),
+      } as unknown as ChatAgentLoopRunner;
+      const runner = new ChatRunner(makeDeps({ stateManager, chatAgentLoopRunner }));
+
+      runner.startSession("/repo");
+      const result = await runner.execute("/resume", "/repo");
+
+      expect(result.success).toBe(false);
+      expect(result.output).toContain("No resumable native agentloop state found");
+      expect(result.output).toContain("Type: Resume failure");
+      expect(result.output).toContain("/sessions");
+      expect(result.output).toContain("/resume <id|title>");
+      expect(chatAgentLoopRunner.execute).not.toHaveBeenCalled();
     });
 
     it("/resume <selector> loads the selected session before resuming native agentloop state", async () => {
@@ -1792,6 +1827,8 @@ describe("ChatRunner", () => {
       const result = await runner.execute("Break the stream", "/repo");
 
       expect(result.success).toBe(false);
+      expect(result.output).toContain("Recovery");
+      expect(result.output).toContain("Type: Runtime interruption");
       const writeRawMock = stateManager.writeRaw as ReturnType<typeof vi.fn>;
       expect(writeRawMock).toHaveBeenCalledTimes(1);
       const onlyWrite = writeRawMock.mock.calls[0][1] as { messages: Array<{ role: string; content: string }> };

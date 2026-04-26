@@ -1,3 +1,5 @@
+import type { FailureRecoveryGuidance } from "./failure-recovery.js";
+
 export interface ChatEventBase {
   runId: string;
   turnId: string;
@@ -67,6 +69,7 @@ export interface LifecycleErrorEvent extends ChatEventBase {
   error: string;
   partialText: string;
   persisted: false;
+  recovery: FailureRecoveryGuidance;
 }
 
 export type ChatEvent =

@@ -1,4 +1,5 @@
 import type { ChatEvent } from "./chat-events.js";
+import { formatLifecycleFailureMessage } from "./failure-recovery.js";
 
 type ToolActivityState = "reading" | "planning" | "editing" | "verifying" | "waiting" | "running" | "completed" | "failed";
 
@@ -272,9 +273,7 @@ export function applyChatEventToMessages(
   if (event.type === "lifecycle_error") {
     const next = closeToolActivityForTurn(removeTransientActivityForTurn(messages, event.turnId), event.turnId);
     const messageId = event.partialText ? event.turnId : `error:${event.runId}`;
-    const text = event.partialText
-      ? `${event.partialText}\n\n[interrupted: ${event.error}]`
-      : `Error: ${event.error}`;
+    const text = formatLifecycleFailureMessage(event.error, event.partialText, event.recovery);
     return upsertMessage(next, {
       id: messageId,
       role: "pulseed",

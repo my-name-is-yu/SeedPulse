@@ -48,6 +48,7 @@ import {
   buildPromptedToolProtocolSystemPrompt,
   extractPromptedToolCalls,
 } from "../../orchestrator/execution/agent-loop/prompted-tool-protocol.js";
+import { classifyFailureRecovery, formatFailureRecovery, formatLifecycleFailureMessage } from "./failure-recovery.js";
 import type { RuntimeControlService } from "../../runtime/control/index.js";
 import type {
   RuntimeControlActor,
@@ -1317,6 +1318,26 @@ export class ChatRunner {
     if (cmd === "/undo") {
       return this.handleUndo(start);
     }
+    if (cmd === "/retry") {
+      return {
+        success: false,
+        output: [
+          "/retry is not supported yet.",
+          "",
+          formatFailureRecovery({
+            kind: "runtime_interruption",
+            label: "Retry unavailable",
+            summary: "PulSeed does not yet have a safe replay contract for the previous turn.",
+            nextActions: [
+              "Use /review to inspect any current diff before continuing.",
+              "Use /resume when PulSeed reports resumable agent-loop state.",
+              "Ask for the exact next step to rerun instead of replaying the full turn.",
+            ],
+          }),
+        ].join("\n"),
+        elapsed_ms: Date.now() - start,
+      };
+    }
     if (cmd === "/exit") {
       return { success: true, output: "Exiting chat mode.", elapsed_ms: Date.now() - start };
     }
@@ -1857,7 +1878,7 @@ export class ChatRunner {
         });
         this.emitLifecycleEndEvent("completed", runtimeControlResult.elapsed_ms, eventContext, true);
       } else {
-        this.emitLifecycleErrorEvent(runtimeControlResult.output, assistantBuffer.text, eventContext);
+        runtimeControlResult.output = this.emitLifecycleErrorEvent(runtimeControlResult.output, assistantBuffer.text, eventContext);
         this.emitLifecycleEndEvent("error", runtimeControlResult.elapsed_ms, eventContext, false);
       }
       return runtimeControlResult;
@@ -1910,13 +1931,11 @@ export class ChatRunner {
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        this.emitLifecycleErrorEvent(message, assistantBuffer.text, eventContext);
+        const output = this.emitLifecycleErrorEvent(message, assistantBuffer.text, eventContext);
         this.emitLifecycleEndEvent("error", Date.now() - start, eventContext, false);
         return {
           success: false,
-          output: assistantBuffer.text
-            ? `${assistantBuffer.text}\n\n[interrupted: ${message}]`
-            : `Error: ${message}`,
+          output,
           elapsed_ms: Date.now() - start,
           diagnostics: {
             route: "direct",
@@ -1980,13 +1999,11 @@ export class ChatRunner {
 
     if (resumeOnly && !this.deps.chatAgentLoopRunner) {
       const elapsed_ms = Date.now() - start;
-      const output = "Resume requires the native chat agentloop runtime.";
-      this.emitEvent({
-        type: "assistant_final",
-        text: output,
-        persisted: false,
-        ...this.eventBase(eventContext),
-      });
+      const output = this.emitLifecycleErrorEvent(
+        "Resume requires the native chat agentloop runtime.",
+        assistantBuffer.text,
+        eventContext
+      );
       this.emitLifecycleEndEvent("error", elapsed_ms, eventContext, false);
       return {
         success: false,
@@ -2001,13 +2018,11 @@ export class ChatRunner {
         const resumeState = resumeOnly ? await this.loadResumableAgentLoopState() : null;
         if (resumeOnly && !resumeState) {
           const elapsed_ms = Date.now() - start;
-          const output = "No resumable native agentloop state found.";
-          this.emitEvent({
-            type: "assistant_final",
-            text: output,
-            persisted: false,
-            ...this.eventBase(eventContext),
-          });
+          const output = this.emitLifecycleErrorEvent(
+            "No resumable native agentloop state found.",
+            assistantBuffer.text,
+            eventContext
+          );
           this.emitLifecycleEndEvent("error", elapsed_ms, eventContext, false);
           return {
             success: false,
@@ -2068,7 +2083,7 @@ export class ChatRunner {
           });
           this.emitLifecycleEndEvent("completed", elapsed_ms, eventContext, true);
         } else {
-          this.emitLifecycleErrorEvent(result.output || result.error || "Unknown error", assistantBuffer.text, eventContext);
+          result.output = this.emitLifecycleErrorEvent(result.output || result.error || "Unknown error", assistantBuffer.text, eventContext);
           this.emitLifecycleEndEvent("error", elapsed_ms, eventContext, false);
         }
         return {
@@ -2078,13 +2093,11 @@ export class ChatRunner {
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        this.emitLifecycleErrorEvent(message, assistantBuffer.text, eventContext);
+        const output = this.emitLifecycleErrorEvent(message, assistantBuffer.text, eventContext);
         this.emitLifecycleEndEvent("error", Date.now() - start, eventContext, false);
         return {
           success: false,
-          output: assistantBuffer.text
-            ? `${assistantBuffer.text}\n\n[interrupted: ${message}]`
-            : `Error: ${message}`,
+          output,
           elapsed_ms: Date.now() - start,
         };
       }
@@ -2122,13 +2135,11 @@ export class ChatRunner {
         return { success: true, output: toolResult.output, elapsed_ms };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        this.emitLifecycleErrorEvent(message, assistantBuffer.text, eventContext);
+        const output = this.emitLifecycleErrorEvent(message, assistantBuffer.text, eventContext);
         this.emitLifecycleEndEvent("error", Date.now() - start, eventContext, false);
         return {
           success: false,
-          output: assistantBuffer.text
-            ? `${assistantBuffer.text}\n\n[interrupted: ${message}]`
-            : `Error: ${message}`,
+          output,
           elapsed_ms: Date.now() - start,
         };
       }
@@ -2136,8 +2147,7 @@ export class ChatRunner {
 
     if (!resumeOnly && selectedRoute && selectedRoute.kind !== "adapter") {
       const elapsed_ms = Date.now() - start;
-      const output = `Unsupported chat route: ${selectedRoute.kind}`;
-      this.emitLifecycleErrorEvent(output, assistantBuffer.text, eventContext);
+      const output = this.emitLifecycleErrorEvent(`Unsupported chat route: ${selectedRoute.kind}`, assistantBuffer.text, eventContext);
       this.emitLifecycleEndEvent("error", elapsed_ms, eventContext, false);
       return {
         success: false,
@@ -2199,7 +2209,7 @@ export class ChatRunner {
           this.emitDiffArtifact(finalDiffArtifact, eventContext);
         }
         this.emitCheckpoint("Verification failed", `Checks are still failing after ${MAX_VERIFY_RETRIES} retries.`, eventContext, "verification");
-        this.emitLifecycleErrorEvent(
+        const failureOutput = this.emitLifecycleErrorEvent(
           `Changes applied but tests are still failing after ${MAX_VERIFY_RETRIES} retries.`,
           assistantBuffer.text,
           eventContext
@@ -2207,7 +2217,7 @@ export class ChatRunner {
         this.emitLifecycleEndEvent("error", Date.now() - start, eventContext, false);
         return {
           success: false,
-          output: `${assistantBuffer.text}\n\n[interrupted: tests are still failing after ${MAX_VERIFY_RETRIES} retries]\n\nTest output:\n${verification.testOutput ?? verification.errors.join("\n")}`.trim(),
+          output: `${failureOutput}\n\nTest output:\n${verification.testOutput ?? verification.errors.join("\n")}`.trim(),
           elapsed_ms: Date.now() - start,
         };
       }
@@ -2231,7 +2241,7 @@ export class ChatRunner {
       this.emitLifecycleEndEvent("completed", elapsed_ms, eventContext, true);
     } else {
       const partialText = assistantBuffer.text !== result.output ? assistantBuffer.text : "";
-      this.emitLifecycleErrorEvent(result.output || result.error || "Unknown error", partialText, eventContext);
+      result.output = this.emitLifecycleErrorEvent(result.output || result.error || "Unknown error", partialText, eventContext);
       this.emitLifecycleEndEvent("error", elapsed_ms, eventContext, false);
     }
 
@@ -2921,14 +2931,17 @@ export class ChatRunner {
     error: string,
     partialText: string,
     eventContext: ChatEventContext
-  ): void {
+  ): string {
+    const recovery = classifyFailureRecovery(error);
     this.emitEvent({
       type: "lifecycle_error",
       error,
       partialText,
       persisted: false,
+      recovery,
       ...this.eventBase(eventContext),
     });
+    return formatLifecycleFailureMessage(error, partialText, recovery);
   }
 
   /** Build a ToolCallContext from ChatRunnerDeps for tool dispatch. */

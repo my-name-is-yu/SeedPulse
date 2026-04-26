@@ -83,6 +83,7 @@ const CHAT_RUNNER_OWNED_COMMANDS = new Set([
   "/compact",
   "/tend",
   "/permissions",
+  "/retry",
 ]);
 
 export function isChatRunnerOwnedSlashCommand(input: string): boolean {

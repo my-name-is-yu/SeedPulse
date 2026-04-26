@@ -31,6 +31,7 @@ describe("TUI app routing helpers", () => {
     expect(isChatRunnerOwnedSlashCommand("/compact")).toBe(true);
     expect(isChatRunnerOwnedSlashCommand("/tend")).toBe(true);
     expect(isChatRunnerOwnedSlashCommand("/permissions read-only")).toBe(true);
+    expect(isChatRunnerOwnedSlashCommand("/retry")).toBe(true);
     expect(isChatRunnerOwnedSlashCommand("/start goal-1")).toBe(false);
   });
 

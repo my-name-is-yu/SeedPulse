@@ -5,6 +5,7 @@ import { dispatchGatewayChatInput } from "./chat-session-dispatch.js";
 import { formatTelegramNotification, supportsCoreGatewayNotification } from "./core-channel-notification.js";
 import { writeJsonFileAtomic } from "../../base/utils/json-io.js";
 import type { ChatEvent, ChatEventHandler } from "../../interface/chat/chat-events.js";
+import { formatLifecycleFailureMessage } from "../../interface/chat/failure-recovery.js";
 import { evaluateChannelAccess, resolveChannelRoute } from "./channel-policy.js";
 import type { INotifier, NotificationEvent, NotificationEventType } from "../../base/types/plugin.js";
 
@@ -345,7 +346,7 @@ class TelegramChatEventAdapter {
         );
         return;
       case "lifecycle_error":
-        await this.sendFinalFallback(event.partialText ? `${event.partialText}\n\n[interrupted: ${event.error}]` : `Error: ${event.error}`);
+        await this.sendFinalFallback(formatLifecycleFailureMessage(event.error, event.partialText, event.recovery));
         return;
       case "lifecycle_end":
         return;

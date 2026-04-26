@@ -151,6 +151,32 @@ describe("CrossPlatformChatSessionManager", () => {
     expect(events.at(-1)?.type).toBe("lifecycle_end");
   });
 
+  it("returns recovery guidance for gateway-visible failures", async () => {
+    const adapter = makeMockAdapter({
+      ...CANNED_RESULT,
+      success: false,
+      output: "Agent failed",
+      error: "boom",
+      exit_code: 1,
+    });
+    const manager = new CrossPlatformChatSessionManager(makeDeps({
+      stateManager: makeMockStateManager(),
+      adapter,
+    }));
+
+    const result = await manager.processIncomingMessage({
+      text: "do risky work",
+      platform: "slack",
+      conversation_id: "C_GENERAL",
+      sender_id: "U123",
+      cwd: "/repo",
+    });
+
+    expect(result).toContain("Agent failed");
+    expect(result).toContain("Recovery");
+    expect(result).toContain("Next actions");
+  });
+
   it("routes natural-language restart with the current platform reply target", async () => {
     const stateManager = makeMockStateManager();
     const adapter = makeMockAdapter();
