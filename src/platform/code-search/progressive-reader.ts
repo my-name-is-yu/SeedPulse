@@ -34,6 +34,56 @@ function expandRange(candidate: RankedCandidate, phase: ReadSessionState["phase"
   };
 }
 
+function sliceIndexesForRanges(indexes: CodeSearchIndexes | undefined, ranges: ReadRangeResult[]): Pick<ContextBundle, "repoMap" | "packageContext" | "testContext" | "configContext"> {
+  if (!indexes || ranges.length === 0) return {};
+  const readFiles = new Set(ranges.map((range) => range.file));
+  const readPackages = new Set(
+    indexes.packages.packages
+      .filter((pkg) => [...readFiles].some((file) => pkg.root === "" || file === pkg.root || file.startsWith(`${pkg.root}/`)))
+      .map((pkg) => pkg.root)
+  );
+  const repoFiles = indexes.repoMap.files
+    .filter((entry) =>
+      readFiles.has(entry.file)
+      || entry.imports.some((specifier) => [...readFiles].some((file) => file.includes(specifier.replace(/^\.\//, "").replace(/\.(js|ts|tsx|jsx)$/, ""))))
+    )
+    .slice(0, 12)
+    .map((entry) => ({
+      file: entry.file,
+      imports: entry.imports.slice(0, 12),
+      exports: entry.exports.slice(0, 12),
+    }));
+  const tests = indexes.tests.tests
+    .filter((test) =>
+      readFiles.has(test.file)
+      || test.imports.some((specifier) => [...readFiles].some((file) => file.includes(specifier.replace(/^\.\//, "").replace(/\.(js|ts|tsx|jsx)$/, ""))))
+    )
+    .slice(0, 8)
+    .map((test) => ({
+      file: test.file,
+      names: test.names.slice(0, 12),
+      imports: test.imports.slice(0, 12),
+    }));
+  const packages = indexes.packages.packages
+    .filter((pkg) => readPackages.has(pkg.root))
+    .slice(0, 4)
+    .map((pkg) => ({
+      name: pkg.name,
+      root: pkg.root,
+      dependencies: pkg.dependencies.slice(0, 24),
+    }));
+  const configs = indexes.configs.files
+    .filter((file) => file === "package.json" || file.includes("tsconfig") || file.includes("vitest"))
+    .slice(0, 8);
+
+  return {
+    repoMap: repoFiles.length > 0 ? { files: repoFiles } : undefined,
+    packageContext: packages.length > 0 ? { packages } : undefined,
+    testContext: tests.length > 0 ? { tests } : undefined,
+    configContext: configs.length > 0 ? { files: configs } : undefined,
+  };
+}
+
 async function readRange(root: string, candidate: RankedCandidate, key: ReadRangeKey): Promise<ReadRangeResult | null> {
   try {
     const absolute = path.resolve(root, key.file);
@@ -127,15 +177,13 @@ export class ProgressiveReader {
     trace.readCandidates = ranges.map((range) => range.candidateId);
     trace.omittedCandidates = omittedCandidates;
     trace.warnings = warnings;
+    const contextSlices = sliceIndexesForRanges(this.indexes, ranges);
 
     return {
       queryId,
       state: nextState,
       ranges,
-      repoMap: this.indexes?.repoMap,
-      packageContext: this.indexes?.packages,
-      testContext: this.indexes?.tests,
-      configContext: this.indexes?.configs,
+      ...contextSlices,
       omittedCandidates,
       warnings,
       tokenEstimate: ranges.reduce((sum, range) => sum + range.tokenEstimate, 0),

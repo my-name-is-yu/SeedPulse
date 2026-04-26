@@ -11,6 +11,7 @@ import { CodeReadContextTool } from "../../CodeReadContextTool/CodeReadContextTo
 import { CodeSearchRepairTool } from "../../CodeSearchRepairTool/CodeSearchRepairTool.js";
 import { CodeSearchTool } from "../CodeSearchTool.js";
 import { MAX_OUTPUT_CHARS } from "../constants.js";
+import { MAX_OUTPUT_CHARS as READ_CONTEXT_MAX_OUTPUT_CHARS } from "../../CodeReadContextTool/constants.js";
 import type { ToolCallContext } from "../../../types.js";
 
 describe("code search tools", () => {
@@ -89,6 +90,7 @@ describe("code search tools", () => {
     }, context);
     expect(read.success).toBe(true);
     expect(read.truncated).toBeUndefined();
+    expect(JSON.stringify(read.data).length).toBeLessThan(READ_CONTEXT_MAX_OUTPUT_CHARS);
     expect(JSON.stringify(read.data)).toContain("alphaValue");
   });
 
