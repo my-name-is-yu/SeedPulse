@@ -273,6 +273,21 @@ describe("ChatRunner", () => {
             event.type === "activity" && event.kind === "checkpoint"
           )
           .map((event) => event.message);
+        const diffEvent = events.find((event): event is Extract<ChatEvent, { type: "activity" }> =>
+          event.type === "activity" && event.kind === "diff"
+        );
+        expect(diffEvent).toMatchObject({
+          type: "activity",
+          kind: "diff",
+          sourceId: "diff:working-tree",
+          transient: false,
+        });
+        expect(diffEvent?.message).toContain("Changed files");
+        expect(diffEvent?.message).toContain("Modified files");
+        expect(diffEvent?.message).toContain("M\tREADME.md");
+        expect(diffEvent?.message).toContain("Inline patch");
+        expect(diffEvent?.message).toContain("-before");
+        expect(diffEvent?.message).toContain("+after");
         expect(checkpointMessages).toEqual(expect.arrayContaining([
           expect.stringContaining("Context gathered"),
           expect.stringContaining("Adapter started"),
@@ -282,6 +297,125 @@ describe("ChatRunner", () => {
         ]));
         expect(checkpointMessages.findIndex((message) => message.includes("Changes detected")))
           .toBeLessThan(checkpointMessages.findIndex((message) => message.includes("Verification passed")));
+      } finally {
+        fs.rmSync(workspaceDir, { recursive: true, force: true });
+      }
+    });
+
+    it("emits a diff artifact when a turn only creates an untracked file", async () => {
+      const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "pulseed-chat-untracked-diff-"));
+      const events: ChatEvent[] = [];
+      try {
+        execFileSync("git", ["init"], { cwd: workspaceDir, stdio: "ignore" });
+        execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: workspaceDir, stdio: "ignore" });
+        execFileSync("git", ["config", "user.name", "Test User"], { cwd: workspaceDir, stdio: "ignore" });
+        fs.writeFileSync(path.join(workspaceDir, "README.md"), "base\n", "utf-8");
+        execFileSync("git", ["add", "README.md"], { cwd: workspaceDir, stdio: "ignore" });
+        execFileSync("git", ["commit", "-m", "init"], { cwd: workspaceDir, stdio: "ignore" });
+
+        const adapter = {
+          adapterType: "mock",
+          execute: vi.fn().mockImplementation(async () => {
+            fs.writeFileSync(path.join(workspaceDir, "new-file.txt"), "new content\n", "utf-8");
+            return CANNED_RESULT;
+          }),
+        } as unknown as IAdapter;
+        const toolExecutor = {
+          execute: vi.fn().mockImplementation(async (toolName: string) => {
+            if (toolName === "git_diff") {
+              return { success: true, data: "", summary: "", durationMs: 0 };
+            }
+            return {
+              success: true,
+              data: { passed: 1, failed: 0, skipped: 0, total: 1, success: true, rawOutput: "PASS" },
+              summary: "",
+              durationMs: 0,
+            };
+          }),
+        } as unknown as NonNullable<ChatRunnerDeps["toolExecutor"]>;
+        const runner = new ChatRunner(makeDeps({
+          adapter,
+          toolExecutor,
+          onEvent: (event) => { events.push(event); },
+        }));
+
+        const result = await runner.execute("Create a new file", workspaceDir);
+
+        expect(result.success).toBe(true);
+        const diffEvent = events.find((event): event is Extract<ChatEvent, { type: "activity" }> =>
+          event.type === "activity" && event.kind === "diff"
+        );
+        expect(diffEvent?.message).toContain("A\tnew-file.txt");
+        expect(diffEvent?.message).toContain("+++ b/new-file.txt");
+        expect(diffEvent?.message).toContain("+new content");
+        expect(toolExecutor.execute).toHaveBeenCalledWith(
+          "test-runner",
+          { command: "npx vitest run", timeout: 30_000 },
+          expect.objectContaining({ cwd: workspaceDir })
+        );
+      } finally {
+        fs.rmSync(workspaceDir, { recursive: true, force: true });
+      }
+    });
+
+    it("emits the final diff after verification retry repairs files", async () => {
+      const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "pulseed-chat-retry-diff-"));
+      const events: ChatEvent[] = [];
+      try {
+        execFileSync("git", ["init"], { cwd: workspaceDir, stdio: "ignore" });
+        execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: workspaceDir, stdio: "ignore" });
+        execFileSync("git", ["config", "user.name", "Test User"], { cwd: workspaceDir, stdio: "ignore" });
+        fs.writeFileSync(path.join(workspaceDir, "README.md"), "before\n", "utf-8");
+        execFileSync("git", ["add", "README.md"], { cwd: workspaceDir, stdio: "ignore" });
+        execFileSync("git", ["commit", "-m", "init"], { cwd: workspaceDir, stdio: "ignore" });
+
+        let adapterCalls = 0;
+        const adapter = {
+          adapterType: "mock",
+          execute: vi.fn().mockImplementation(async () => {
+            adapterCalls += 1;
+            fs.writeFileSync(path.join(workspaceDir, "README.md"), adapterCalls === 1 ? "bad\n" : "good\n", "utf-8");
+            return CANNED_RESULT;
+          }),
+        } as unknown as IAdapter;
+        let testRuns = 0;
+        const toolExecutor = {
+          execute: vi.fn().mockImplementation(async (toolName: string) => {
+            if (toolName === "git_diff") {
+              return { success: true, data: "diff --git a/README.md b/README.md", summary: "", durationMs: 0 };
+            }
+            testRuns += 1;
+            return {
+              success: true,
+              data: {
+                passed: testRuns === 1 ? 0 : 1,
+                failed: testRuns === 1 ? 1 : 0,
+                skipped: 0,
+                total: 1,
+                success: testRuns !== 1,
+                rawOutput: testRuns === 1 ? "FAIL README" : "PASS README",
+              },
+              summary: "",
+              durationMs: 0,
+            };
+          }),
+        } as unknown as NonNullable<ChatRunnerDeps["toolExecutor"]>;
+        const runner = new ChatRunner(makeDeps({
+          adapter,
+          toolExecutor,
+          onEvent: (event) => { events.push(event); },
+        }));
+
+        const result = await runner.execute("Fix README", workspaceDir);
+
+        expect(result.success).toBe(true);
+        expect(adapter.execute).toHaveBeenCalledTimes(2);
+        const diffEvents = events.filter((event): event is Extract<ChatEvent, { type: "activity" }> =>
+          event.type === "activity" && event.kind === "diff"
+        );
+        expect(diffEvents).toHaveLength(1);
+        expect(diffEvents[0]?.message).toContain("+good");
+        expect(diffEvents[0]?.message).not.toContain("+bad");
       } finally {
         fs.rmSync(workspaceDir, { recursive: true, force: true });
       }

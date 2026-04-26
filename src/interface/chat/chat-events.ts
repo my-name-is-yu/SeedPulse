@@ -21,7 +21,7 @@ export interface AssistantFinalEvent extends ChatEventBase {
   persisted: boolean;
 }
 
-export type ActivityKind = "lifecycle" | "commentary" | "checkpoint" | "tool" | "plugin" | "skill";
+export type ActivityKind = "lifecycle" | "commentary" | "checkpoint" | "diff" | "tool" | "plugin" | "skill";
 
 export interface ActivityEvent extends ChatEventBase {
   type: "activity";

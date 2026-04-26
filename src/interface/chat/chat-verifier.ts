@@ -28,6 +28,7 @@ function makeContext(cwd: string): ToolCallContext {
 export async function verifyChatAction(
   cwd: string,
   toolExecutor?: ToolExecutor,
+  options: { force?: boolean } = {},
 ): Promise<ChatVerificationResult> {
   if (!toolExecutor) return { passed: true, errors: [] };
 
@@ -41,7 +42,7 @@ export async function verifyChatAction(
   ).catch(() => null);
 
   if (!diffResult || !diffResult.success) return { passed: true, errors: [] };
-  if (!diffResult.data || (diffResult.data as string).trim() === "") {
+  if (!options.force && (!diffResult.data || (diffResult.data as string).trim() === "")) {
     return { passed: true, errors: [] };
   }
 

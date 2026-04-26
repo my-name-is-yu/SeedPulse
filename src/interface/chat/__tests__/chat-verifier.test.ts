@@ -89,6 +89,17 @@ describe("verifyChatAction", () => {
     expect(result.errors).toHaveLength(0);
   });
 
+  it("runs tests when verification is forced even if tracked diff is empty", async () => {
+    const execute = vi.fn()
+      .mockResolvedValueOnce({ success: true, data: "", summary: "", durationMs: 0 })
+      .mockResolvedValueOnce({ success: true, data: passedTestOutput(), summary: "", durationMs: 0 });
+    const executor = { execute } as unknown as ToolExecutor;
+    const result = await verifyChatAction("/fake/cwd", executor, { force: true });
+    expect(result.passed).toBe(true);
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls[1]?.[0]).toBe("test-runner");
+  });
+
   it("returns passed=true when git diff throws (graceful degradation)", async () => {
     const execute = vi.fn().mockRejectedValueOnce(new Error("git: command not found"));
     const executor = { execute } as unknown as ToolExecutor;

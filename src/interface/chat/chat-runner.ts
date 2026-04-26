@@ -173,6 +173,7 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_VERIFY_RETRIES = 2;
 const MAX_TOOL_LOOPS = 5;
 const ACTIVITY_PREVIEW_CHARS = 40;
+const DIFF_ARTIFACT_MAX_LINES = 80;
 const standaloneIngressRouter = createIngressRouter();
 
 // ─── Command help text ───
@@ -221,6 +222,92 @@ function checkGitChanges(cwd: string): Promise<string | null> {
       resolve(err ? null : (stdout + stderr).trim());
     });
   });
+}
+
+function runGit(cwd: string, args: string[], timeout = 5_000): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile("git", args, { cwd, timeout }, (err, stdout, stderr) => {
+      if (err) {
+        resolve(null);
+        return;
+      }
+      resolve((stdout + stderr).trim());
+    });
+  });
+}
+
+interface GitDiffArtifact {
+  stat: string;
+  nameStatus: string;
+  patch: string;
+  truncated: boolean;
+}
+
+function parseGitLines(output: string | null): string[] {
+  return output ? output.split("\n").map((line) => line.trim()).filter(Boolean) : [];
+}
+
+async function buildUntrackedFilePatch(cwd: string, relativePath: string): Promise<string> {
+  const absolutePath = path.resolve(cwd, relativePath);
+  const relativeFromCwd = path.relative(cwd, absolutePath);
+  if (relativeFromCwd.startsWith("..") || path.isAbsolute(relativeFromCwd)) {
+    return `diff --git a/${relativePath} b/${relativePath}\nnew file skipped: path outside workspace`;
+  }
+  try {
+    const stat = await fsp.stat(absolutePath);
+    if (!stat.isFile()) {
+      return `diff --git a/${relativePath} b/${relativePath}\nnew file skipped: not a regular file`;
+    }
+    if (stat.size > 100_000) {
+      return `diff --git a/${relativePath} b/${relativePath}\nnew file skipped: ${stat.size} bytes`;
+    }
+    const content = await fsp.readFile(absolutePath, "utf-8");
+    const lines = content.split("\n");
+    const body = lines.map((line) => `+${line}`).join("\n");
+    return [
+      `diff --git a/${relativePath} b/${relativePath}`,
+      "new file mode 100644",
+      "--- /dev/null",
+      `+++ b/${relativePath}`,
+      `@@ -0,0 +1,${lines.length} @@`,
+      body,
+    ].join("\n");
+  } catch {
+    return `diff --git a/${relativePath} b/${relativePath}\nnew file skipped: unreadable`;
+  }
+}
+
+async function collectGitDiffArtifact(cwd: string): Promise<GitDiffArtifact | null> {
+  const trackedStat = await runGit(cwd, ["diff", "HEAD", "--stat"]);
+  const untrackedFiles = parseGitLines(await runGit(cwd, ["ls-files", "--others", "--exclude-standard"]));
+  if (!trackedStat && untrackedFiles.length === 0) return null;
+  const trackedNameStatus = await runGit(cwd, ["diff", "HEAD", "--name-status"]) ?? "";
+  const trackedPatch = await runGit(cwd, ["diff", "HEAD", "--patch", "--unified=3"], 10_000) ?? "";
+  const untrackedPatchParts = await Promise.all(
+    untrackedFiles.slice(0, 10).map((file) => buildUntrackedFilePatch(cwd, file))
+  );
+  if (untrackedFiles.length > 10) {
+    untrackedPatchParts.push(`... ${untrackedFiles.length - 10} additional untracked file(s) omitted`);
+  }
+  const stat = [
+    trackedStat,
+    untrackedFiles.length > 0
+      ? ["Untracked files:", ...untrackedFiles.map((file) => `  ${file}`)].join("\n")
+      : "",
+  ].filter(Boolean).join("\n");
+  const nameStatus = [
+    trackedNameStatus,
+    ...untrackedFiles.map((file) => `A\t${file}`),
+  ].filter(Boolean).join("\n");
+  const patch = [trackedPatch, ...untrackedPatchParts].filter(Boolean).join("\n");
+  const patchLines = patch.split("\n");
+  const truncated = patchLines.length > DIFF_ARTIFACT_MAX_LINES;
+  return {
+    stat,
+    nameStatus,
+    patch: patchLines.slice(0, DIFF_ARTIFACT_MAX_LINES).join("\n"),
+    truncated,
+  };
 }
 
 function previewActivityText(value: string, maxChars = ACTIVITY_PREVIEW_CHARS): string {
@@ -1796,6 +1883,10 @@ export class ChatRunner {
         if (this.hasUsage(turnUsage)) {
           history.recordUsage("execution", turnUsage);
         }
+        const diffArtifact = await collectGitDiffArtifact(gitRoot);
+        if (diffArtifact) {
+          this.emitDiffArtifact(diffArtifact, eventContext);
+        }
         await history.appendAssistantMessage(output);
         this.emitCheckpoint("Response ready", "The direct answer has been persisted for this turn.", eventContext, "complete");
         this.emitActivity("lifecycle", "Finalizing response...", eventContext, "lifecycle:finalizing");
@@ -1962,6 +2053,10 @@ export class ChatRunner {
           this.pushAssistantDelta(result.output, assistantBuffer, eventContext);
         }
         if (result.success) {
+          const diffArtifact = await collectGitDiffArtifact(gitRoot);
+          if (diffArtifact) {
+            this.emitDiffArtifact(diffArtifact, eventContext);
+          }
           await history.appendAssistantMessage(result.output);
           this.emitCheckpoint("Response ready", "The agent-loop response has been persisted for this turn.", eventContext, "complete");
           this.emitActivity("lifecycle", "Finalizing response...", eventContext, "lifecycle:finalizing");
@@ -2009,6 +2104,10 @@ export class ChatRunner {
         const elapsed_ms = Date.now() - start;
         if (this.hasUsage(toolResult.usage)) {
           history.recordUsage("execution", toolResult.usage);
+        }
+        const diffArtifact = await collectGitDiffArtifact(gitRoot);
+        if (diffArtifact) {
+          this.emitDiffArtifact(diffArtifact, eventContext);
         }
         await history.appendAssistantMessage(toolResult.output);
         this.emitCheckpoint("Response ready", "The tool-loop response has been persisted for this turn.", eventContext, "complete");
@@ -2072,14 +2171,14 @@ export class ChatRunner {
     }
 
     // Verification loop: check if git has uncommitted changes; if so, run tests
-    const gitChanges = await checkGitChanges(gitRoot);
-    if (gitChanges !== null && gitChanges !== "") {
+    const diffArtifact = await collectGitDiffArtifact(gitRoot);
+    if (diffArtifact) {
       let retries = 0;
       const VERIFY_TIMEOUT_MS = 30_000;
       this.emitCheckpoint("Changes detected", "Verification is starting because the turn changed the working tree.", eventContext, "changes");
       this.emitActivity("lifecycle", "Checking result...", eventContext, "lifecycle:checking");
       let verification = await Promise.race([
-        verifyChatAction(gitRoot, this.deps.toolExecutor),
+        verifyChatAction(gitRoot, this.deps.toolExecutor, { force: true }),
         new Promise<{ passed: true }>((resolve) =>
           setTimeout(() => resolve({ passed: true }), VERIFY_TIMEOUT_MS)
         ),
@@ -2091,10 +2190,14 @@ export class ChatRunner {
         const retryPrompt = `The previous changes caused test failures. Please fix them.\n\nTest output:\n${verification.testOutput ?? verification.errors.join("\n")}`;
         const retryTask: AgentTask = { ...task, prompt: retryPrompt };
         result = await this.deps.adapter.execute(retryTask);
-        verification = await verifyChatAction(gitRoot, this.deps.toolExecutor);
+        verification = await verifyChatAction(gitRoot, this.deps.toolExecutor, { force: true });
       }
 
       if (!verification.passed) {
+        const finalDiffArtifact = await collectGitDiffArtifact(gitRoot);
+        if (finalDiffArtifact) {
+          this.emitDiffArtifact(finalDiffArtifact, eventContext);
+        }
         this.emitCheckpoint("Verification failed", `Checks are still failing after ${MAX_VERIFY_RETRIES} retries.`, eventContext, "verification");
         this.emitLifecycleErrorEvent(
           `Changes applied but tests are still failing after ${MAX_VERIFY_RETRIES} retries.`,
@@ -2107,6 +2210,10 @@ export class ChatRunner {
           output: `${assistantBuffer.text}\n\n[interrupted: tests are still failing after ${MAX_VERIFY_RETRIES} retries]\n\nTest output:\n${verification.testOutput ?? verification.errors.join("\n")}`.trim(),
           elapsed_ms: Date.now() - start,
         };
+      }
+      const finalDiffArtifact = await collectGitDiffArtifact(gitRoot);
+      if (finalDiffArtifact) {
+        this.emitDiffArtifact(finalDiffArtifact, eventContext);
       }
       this.emitCheckpoint("Verification passed", "Changed files passed the configured chat verification.", eventContext, "verification");
     }
@@ -2754,6 +2861,30 @@ export class ChatRunner {
       ? `Checkpoint\n- ${title}: ${detail}`
       : `Checkpoint\n- ${title}`;
     this.emitActivity("checkpoint", message, eventContext, `checkpoint:${sourceKey}`, false);
+  }
+
+  private emitDiffArtifact(
+    artifact: GitDiffArtifact,
+    eventContext: ChatEventContext
+  ): void {
+    const sections = [
+      "Changed files",
+      "",
+      "Modified files",
+      artifact.nameStatus || artifact.stat,
+      "",
+      "Diff summary",
+      artifact.stat,
+      "",
+      "Inline patch",
+      "```diff",
+      artifact.patch || "(patch unavailable)",
+      artifact.truncated ? `... truncated after ${DIFF_ARTIFACT_MAX_LINES} lines; run /review for the full diff.` : "",
+      "```",
+      "",
+      "Files inspected are shown separately in the activity log.",
+    ].filter((line) => line !== "").join("\n");
+    this.emitActivity("diff", sections, eventContext, "diff:working-tree", false);
   }
 
   private pushAssistantDelta(
