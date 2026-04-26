@@ -126,6 +126,28 @@ describe("code search tools", () => {
     expect((read.data as { ranges: Array<{ file: string }> }).ranges[0].file).toBe("src/alpha.ts");
   });
 
+  it("refuses to default-search the home directory", async () => {
+    const result = await new CodeSearchTool().call(
+      { task: "find alphaValue", intent: "explain" },
+      { ...context, cwd: os.homedir() },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("refused broad root");
+  });
+
+  it("defaults nested package searches to the project root", async () => {
+    const nested = path.join(root, "src");
+    const result = await new CodeSearchTool().call(
+      { task: "find alphaValue", intent: "explain" },
+      { ...context, cwd: nested },
+    );
+
+    expect(result.success).toBe(true);
+    const data = result.data as { candidates: Array<{ file: string }> };
+    expect(data.candidates[0]?.file).toBe("src/alpha.ts");
+  });
+
   it("code_search_repair parses verification output and suggests candidates", async () => {
     const result = await new CodeSearchRepairTool().call({
       priorTask: { task: "fix alphaValue", intent: "bugfix" },

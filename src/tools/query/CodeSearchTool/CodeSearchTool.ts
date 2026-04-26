@@ -1,3 +1,6 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { z } from "zod";
 import { SearchOrchestrator } from "../../../platform/code-search/orchestrator.js";
 import type { RankedCandidate } from "../../../platform/code-search/contracts.js";
@@ -43,6 +46,41 @@ function compactCandidate(candidate: RankedCandidate): Record<string, unknown> {
   };
 }
 
+function isBroadRoot(root: string): boolean {
+  const resolved = path.resolve(root);
+  const homeDir = path.resolve(os.homedir());
+  return resolved === path.parse(resolved).root || resolved === path.dirname(homeDir) || resolved === homeDir;
+}
+
+function findProjectRoot(cwd: string): string | null {
+  let current = path.resolve(cwd);
+  while (true) {
+    if (fs.existsSync(path.join(current, ".git")) || fs.existsSync(path.join(current, "package.json"))) {
+      return current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return null;
+    }
+    current = parent;
+  }
+}
+
+function resolveSearchRoot(input: CodeSearchInput, context: ToolCallContext): string {
+  if (input.path) {
+    return validateFilePath(input.path, context.cwd).resolved;
+  }
+  const projectRoot = findProjectRoot(context.cwd);
+  if (projectRoot && !isBroadRoot(projectRoot)) {
+    return projectRoot;
+  }
+  const resolvedCwd = path.resolve(context.cwd);
+  if (isBroadRoot(resolvedCwd)) {
+    throw new Error(`code_search requires a project working directory or an explicit path; refused broad root "${resolvedCwd}".`);
+  }
+  throw new Error(`code_search requires a project working directory or an explicit path; no project root found from "${resolvedCwd}".`);
+}
+
 export class CodeSearchTool implements ITool<CodeSearchInput, unknown> {
   readonly metadata: ToolMetadata = {
     name: "code_search",
@@ -64,7 +102,18 @@ export class CodeSearchTool implements ITool<CodeSearchInput, unknown> {
 
   async call(input: CodeSearchInput, context: ToolCallContext): Promise<ToolResult> {
     const startTime = Date.now();
-    const cwd = input.path ? validateFilePath(input.path, context.cwd).resolved : context.cwd;
+    let cwd: string;
+    try {
+      cwd = resolveSearchRoot(input, context);
+    } catch (err) {
+      return {
+        success: false,
+        data: { candidates: [], candidateIds: [], totalCandidates: 0, warnings: [(err as Error).message] },
+        summary: `Code search failed: ${(err as Error).message}`,
+        error: (err as Error).message,
+        durationMs: Date.now() - startTime,
+      };
+    }
     const orchestrator = new SearchOrchestrator(cwd);
     const session = await orchestrator.searchWithState({ ...input, cwd });
     saveCodeSearchSession(session, cwd);
@@ -89,7 +138,15 @@ export class CodeSearchTool implements ITool<CodeSearchInput, unknown> {
   }
 
   async checkPermissions(input: CodeSearchInput, context?: ToolCallContext): Promise<PermissionCheckResult> {
-    if (!context || !input.path) return { status: "allowed" };
+    if (!context) return { status: "allowed" };
+    if (!input.path) {
+      try {
+        resolveSearchRoot(input, context);
+      } catch (err) {
+        return { status: "denied", reason: (err as Error).message };
+      }
+      return { status: "allowed" };
+    }
     const validation = validateFilePath(input.path, context.cwd, context.executionPolicy?.protectedPaths);
     if (!validation.valid) {
       return { status: "needs_approval", reason: `Searching outside the working directory: ${validation.resolved}` };

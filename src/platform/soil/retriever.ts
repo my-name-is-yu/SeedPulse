@@ -35,15 +35,81 @@ export interface SoilQueryHit {
   snippet: string;
 }
 
+export interface SoilScanStats {
+  rootDir: string;
+  scannedDirs: number;
+  matchedFiles: number;
+  maxFiles: number;
+  maxDepth: number;
+  deadlineMs: number;
+  truncated: boolean;
+  reason?: "max_files" | "max_depth" | "deadline";
+}
+
+export interface SoilScanOptions {
+  maxFiles?: number;
+  maxDepth?: number;
+  deadlineMs?: number;
+  ignoredDirectoryNames?: readonly string[];
+}
+
 export interface SoilPageStore {
   listMarkdownFiles(rootDir: string): Promise<string[]>;
   readMarkdownFile(filePath: string): Promise<string>;
+  getLastScanStats?(): SoilScanStats | null;
 }
 
+const DEFAULT_SOIL_SCAN_OPTIONS = {
+  maxFiles: 500,
+  maxDepth: 8,
+  deadlineMs: 5_000,
+  ignoredDirectoryNames: [
+    "node_modules",
+    "dist",
+    "build",
+    "coverage",
+    "tmp",
+    "temp",
+    "vendor",
+    "Library",
+    "Applications",
+    "Downloads",
+    "Movies",
+    "Music",
+    "Pictures",
+  ],
+} satisfies Required<SoilScanOptions>;
+
 export class FileSoilPageStore implements SoilPageStore {
+  private readonly options: Required<SoilScanOptions>;
+  private lastScanStats: SoilScanStats | null = null;
+
+  constructor(options: SoilScanOptions = {}) {
+    this.options = {
+      maxFiles: options.maxFiles ?? DEFAULT_SOIL_SCAN_OPTIONS.maxFiles,
+      maxDepth: options.maxDepth ?? DEFAULT_SOIL_SCAN_OPTIONS.maxDepth,
+      deadlineMs: options.deadlineMs ?? DEFAULT_SOIL_SCAN_OPTIONS.deadlineMs,
+      ignoredDirectoryNames: options.ignoredDirectoryNames ?? DEFAULT_SOIL_SCAN_OPTIONS.ignoredDirectoryNames,
+    };
+  }
+
   async listMarkdownFiles(rootDir: string): Promise<string[]> {
     const files: string[] = [];
-    await this.walk(rootDir, files);
+    const resolvedRoot = path.resolve(rootDir);
+    const startedAt = Date.now();
+    this.lastScanStats = {
+      rootDir: resolvedRoot,
+      scannedDirs: 0,
+      matchedFiles: 0,
+      maxFiles: this.options.maxFiles,
+      maxDepth: this.options.maxDepth,
+      deadlineMs: this.options.deadlineMs,
+      truncated: false,
+    };
+    await this.walk(resolvedRoot, files, 0, startedAt + this.options.deadlineMs);
+    if (this.lastScanStats) {
+      this.lastScanStats.matchedFiles = files.length;
+    }
     return files;
   }
 
@@ -51,20 +117,64 @@ export class FileSoilPageStore implements SoilPageStore {
     return fsp.readFile(filePath, "utf-8");
   }
 
-  private async walk(dir: string, files: string[]): Promise<void> {
+  getLastScanStats(): SoilScanStats | null {
+    return this.lastScanStats;
+  }
+
+  private async walk(dir: string, files: string[], depth: number, deadlineAt: number): Promise<void> {
+    if (this.shouldStop(files, deadlineAt)) {
+      return;
+    }
+    if (depth > this.options.maxDepth) {
+      this.markTruncated("max_depth");
+      return;
+    }
+    this.lastScanStats!.scannedDirs += 1;
     const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
-      if (entry.name.startsWith(".")) {
+      if (this.shouldStop(files, deadlineAt)) {
+        return;
+      }
+      if (entry.name.startsWith(".") || this.options.ignoredDirectoryNames.includes(entry.name)) {
         continue;
       }
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        await this.walk(fullPath, files);
+        await this.walk(fullPath, files, depth + 1, deadlineAt);
         continue;
       }
       if (entry.isFile() && entry.name.endsWith(".md")) {
         files.push(fullPath);
+        if (files.length >= this.options.maxFiles) {
+          this.markTruncated("max_files");
+          return;
+        }
       }
+    }
+  }
+
+  private shouldStop(files: string[], deadlineAt: number): boolean {
+    if (files.length >= this.options.maxFiles) {
+      this.markTruncated("max_files");
+      return true;
+    }
+    if (Date.now() >= deadlineAt) {
+      this.markTruncated("deadline");
+      return true;
+    }
+    return false;
+  }
+
+  private markTruncated(reason: SoilScanStats["reason"]): void {
+    if (!this.lastScanStats) {
+      return;
+    }
+    if (!this.lastScanStats.truncated) {
+      this.lastScanStats = {
+        ...this.lastScanStats,
+        truncated: true,
+        ...(reason ? { reason } : {}),
+      };
     }
   }
 }
@@ -74,6 +184,7 @@ export interface SoilManifest {
   pages: SoilPageRecord[];
   bySoilId: Map<string, SoilPageRecord[]>;
   byRelativePath: Map<string, SoilPageRecord>;
+  scan?: SoilScanStats;
 }
 
 export async function loadSoilManifest(
@@ -123,7 +234,8 @@ export async function loadSoilManifest(
     byRelativePath.set(relativePath, record);
   }
 
-  return { rootDir: config.rootDir, pages, bySoilId, byRelativePath };
+  const scan = store.getLastScanStats?.() ?? undefined;
+  return { rootDir: config.rootDir, pages, bySoilId, byRelativePath, ...(scan ? { scan } : {}) };
 }
 
 function buildSearchText(frontmatter: SoilPageFrontmatter, body: string): string {
@@ -260,6 +372,10 @@ export class SoilRetriever {
   async list(): Promise<SoilPageRecord[]> {
     const manifest = await this.getManifest();
     return [...manifest.pages];
+  }
+
+  getLastScanStats(): SoilScanStats | null {
+    return this.manifest?.scan ?? this.store.getLastScanStats?.() ?? null;
   }
 
   async getBySoilId(soilId: string): Promise<SoilPageRecord | null> {

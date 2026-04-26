@@ -35,6 +35,8 @@ import {
   type AgentLoopModelInfo,
   type AgentLoopModelRequest,
   type AgentLoopModelResponse,
+  type AgentLoopToolOutput,
+  type AgentLoopTurnContext,
 } from "../index.js";
 
 class EchoTool implements ITool<{ value: string }> {
@@ -492,6 +494,65 @@ describe("agentloop phase 1", () => {
     expect(result.success).toBe(false);
     expect(result.stopReason).toBe("cancelled");
     expect(executeBatch).not.toHaveBeenCalled();
+  });
+
+  it("bounds native tool execution with the remaining wall-clock budget", async () => {
+    const modelInfo = makeModelInfo();
+    const modelClient = new ScriptedModelClient(modelInfo, [
+      {
+        content: "",
+        toolCalls: [{ id: "call-1", name: "echo", input: { value: "hello" } }],
+        stopReason: "tool_use",
+      },
+      { content: finalJson(), toolCalls: [], stopReason: "end_turn" },
+    ]);
+    const { router } = makeToolRuntime();
+    let capturedTimeoutMs: number | undefined;
+    let capturedSignalAborted = false;
+    const runtime = {
+      executeBatch: vi.fn(async (_calls, turn: AgentLoopTurnContext<unknown>): Promise<AgentLoopToolOutput[]> => {
+        capturedTimeoutMs = turn.toolCallContext.timeoutMs;
+        await new Promise<void>((resolve) => turn.abortSignal?.addEventListener("abort", () => resolve(), { once: true }));
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        capturedSignalAborted = turn.abortSignal?.aborted === true;
+        return [{
+          callId: "call-1",
+          toolName: "echo",
+          success: false,
+          content: "aborted",
+          durationMs: capturedTimeoutMs ?? 0,
+          disposition: "cancelled",
+        }];
+      }),
+    };
+    const runner = new BoundedAgentLoopRunner({ modelClient, toolRouter: router, toolRuntime: runtime });
+
+    const result = await runner.run({
+      session: createAgentLoopSession(),
+      turnId: "turn-1",
+      goalId: "goal-1",
+      taskId: "task-1",
+      cwd: process.cwd(),
+      model: modelInfo.ref,
+      modelInfo,
+      messages: [{ role: "user", content: "do it" }],
+      outputSchema: z.object({ status: z.literal("done"), finalAnswer: z.string() }),
+      budget: withDefaultBudget({ maxWallClockMs: 150, maxModelTurns: 4 }),
+      toolPolicy: {},
+      toolCallContext: {
+        cwd: process.cwd(),
+        goalId: "goal-1",
+        trustBalance: 0,
+        preApproved: true,
+        approvalFn: async () => false,
+      },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.stopReason).toBe("timeout");
+    expect(capturedTimeoutMs).toBeGreaterThan(0);
+    expect(capturedTimeoutMs).toBeLessThanOrEqual(150);
+    expect(capturedSignalAborted).toBe(true);
   });
 
   it("falls back to a text protocol when the LLM client cannot use native tools", async () => {

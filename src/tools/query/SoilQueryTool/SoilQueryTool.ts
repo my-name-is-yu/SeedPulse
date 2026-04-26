@@ -1,3 +1,5 @@
+import * as os from "node:os";
+import * as path from "node:path";
 import { z } from "zod";
 import type {
   ITool,
@@ -17,7 +19,7 @@ import {
 } from "../../../platform/soil/index.js";
 import { DESCRIPTION } from "./prompt.js";
 import { ALIASES, MAX_OUTPUT_CHARS, PERMISSION_LEVEL, READ_ONLY, TAGS, TOOL_NAME } from "./constants.js";
-import type { SoilPageRecord, SoilQueryHit } from "../../../platform/soil/retriever.js";
+import type { SoilPageRecord, SoilQueryHit, SoilScanStats } from "../../../platform/soil/retriever.js";
 import type { SoilCandidate, SoilPage } from "../../../platform/soil/contracts.js";
 import {
   OllamaEmbeddingClient,
@@ -223,6 +225,37 @@ function dedupeByKey<T>(records: T[], keyFn: (record: T) => string): T[] {
   return deduped;
 }
 
+function isUnsafeBroadRoot(rootDir: string): boolean {
+  const resolved = path.resolve(rootDir);
+  const homeDir = path.resolve(os.homedir());
+  const homeParent = path.dirname(homeDir);
+  const filesystemRoot = path.parse(homeDir).root;
+  return resolved === filesystemRoot || resolved === homeParent || resolved === homeDir;
+}
+
+function resolveSoilQueryRoot(input: SoilQueryInput, warnings: string[]): string {
+  const defaultRoot = createSoilConfig().rootDir;
+  if (!input.rootDir) {
+    return defaultRoot;
+  }
+  const requestedRoot = path.resolve(input.rootDir);
+  if (!isUnsafeBroadRoot(requestedRoot)) {
+    return requestedRoot;
+  }
+  warnings.push(`Ignored unsafe Soil rootDir "${requestedRoot}"; using default Soil root "${defaultRoot}".`);
+  return defaultRoot;
+}
+
+function appendScanWarnings(warnings: string[], scan: SoilScanStats | null): void {
+  if (!scan?.truncated) {
+    return;
+  }
+  const reason = scan.reason ?? "scan_limit";
+  warnings.push(
+    `Soil manifest scan stopped early (${reason}; matched ${scan.matchedFiles}/${scan.maxFiles} Markdown files, scanned ${scan.scannedDirs} dirs).`
+  );
+}
+
 export class SoilQueryTool implements ITool<SoilQueryInput, SoilQueryOutput> {
   private readonly queryEmbedding: QueryEmbeddingConfig | null;
 
@@ -259,35 +292,37 @@ export class SoilQueryTool implements ITool<SoilQueryInput, SoilQueryOutput> {
 
     try {
       const parsedInput = this.inputSchema.parse(input);
-      const retriever = SoilRetriever.create({ rootDir: parsedInput.rootDir });
-      const config = createSoilConfig({ rootDir: parsedInput.rootDir });
+      const warnings: string[] = [];
+      const effectiveRootDir = resolveSoilQueryRoot(parsedInput, warnings);
+      const effectiveInput = { ...parsedInput, rootDir: effectiveRootDir };
+      const retriever = SoilRetriever.create({ rootDir: effectiveRootDir });
+      const config = createSoilConfig({ rootDir: effectiveRootDir });
       const pages: SoilQueryPageItem[] = [];
       const hits: SoilQueryHitItem[] = [];
       let retrievalSource: SoilQueryOutput["retrievalSource"] = "manifest";
-      const warnings: string[] = [];
 
       if (parsedInput.soil_id || parsedInput.path) {
-        const directRecords = await this.lookupDirectRecords(retriever, parsedInput);
+        const directRecords = await this.lookupDirectRecords(retriever, effectiveInput);
         for (const record of directRecords) {
           pages.push(toDirectItem(record));
         }
       }
 
       if (parsedInput.query) {
-        const sqliteResult = await this.querySqlite(parsedInput);
+        const sqliteResult = await this.querySqlite(effectiveInput);
         warnings.push(...sqliteResult.warnings);
         if (sqliteResult.hits.length > 0) {
           retrievalSource = "sqlite";
           hits.push(...sqliteResult.hits);
         }
 
-        const indexSnapshot = hits.length === 0 ? await loadSoilIndexSnapshot({ rootDir: parsedInput.rootDir }) : null;
+        const indexSnapshot = hits.length === 0 ? await loadSoilIndexSnapshot({ rootDir: effectiveRootDir }) : null;
         const freshness = indexSnapshot
-          ? await checkSoilIndexFresh({ rootDir: parsedInput.rootDir })
+          ? await checkSoilIndexFresh({ rootDir: effectiveRootDir })
           : null;
         if (hits.length === 0 && indexSnapshot && freshness?.fresh) {
           retrievalSource = "index";
-          const queried = await querySoilIndexSnapshot(parsedInput.query, parsedInput.limit, { rootDir: parsedInput.rootDir });
+          const queried = await querySoilIndexSnapshot(parsedInput.query, parsedInput.limit, { rootDir: effectiveRootDir });
           for (const hit of queried) {
             hits.push(toIndexHitItem(hit));
           }
@@ -308,6 +343,7 @@ export class SoilQueryTool implements ITool<SoilQueryInput, SoilQueryOutput> {
           pages.push(toSummaryItem(record));
         }
       }
+      appendScanWarnings(warnings, retriever.getLastScanStats());
 
       const dedupedPages = dedupeByKey(pages, (record) => `${record.soilId}:${record.relativePath}`);
       const output: SoilQueryOutput = {
@@ -387,7 +423,10 @@ export class SoilQueryTool implements ITool<SoilQueryInput, SoilQueryOutput> {
     let repository: SqliteSoilRepository | null = null;
     const warnings: string[] = [];
     try {
-      repository = await SqliteSoilRepository.create({ rootDir: input.rootDir });
+      repository = await SqliteSoilRepository.openExisting({ rootDir: input.rootDir });
+      if (!repository) {
+        return { hits: [], warnings };
+      }
       const embedding = await this.embedQuery(input.query);
       if (embedding.warning) {
         warnings.push(embedding.warning);

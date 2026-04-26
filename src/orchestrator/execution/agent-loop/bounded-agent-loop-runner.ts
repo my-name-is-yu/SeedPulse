@@ -306,7 +306,7 @@ export class BoundedAgentLoopRunner {
         });
       }
 
-      const toolResults = await this.deps.toolRuntime.executeBatch(response.toolCalls, turn as AgentLoopTurnContext<unknown>);
+      const { results: toolResults, timedOut: toolBatchTimedOut } = await this.executeToolBatchWithinBudget(response.toolCalls, turn, startedAt);
       for (const result of toolResults) {
         calledTools.add(result.toolName);
         toolCalls++;
@@ -372,7 +372,7 @@ export class BoundedAgentLoopRunner {
           return this.stop(turn, "fatal_error", startedAt, modelTurns, toolCalls, finalText, null, false, compactions, await this.collectChangedFiles(turn.cwd, initialWorkspaceSnapshot), commandResults, messages, calledTools, lastToolLoopSignature, repeatedToolLoopCount);
         }
         if (result.disposition === "cancelled") {
-          return this.stop(turn, "cancelled", startedAt, modelTurns, toolCalls, finalText, null, false, compactions, await this.collectChangedFiles(turn.cwd, initialWorkspaceSnapshot), commandResults, messages, calledTools, lastToolLoopSignature, repeatedToolLoopCount);
+          return this.stop(turn, toolBatchTimedOut ? "timeout" : "cancelled", startedAt, modelTurns, toolCalls, finalText, null, false, compactions, await this.collectChangedFiles(turn.cwd, initialWorkspaceSnapshot), commandResults, messages, calledTools, lastToolLoopSignature, repeatedToolLoopCount);
         }
         if (consecutiveToolErrors >= turn.budget.maxConsecutiveToolErrors) {
           return this.stop(turn, "consecutive_tool_errors", startedAt, modelTurns, toolCalls, finalText, null, false, compactions, await this.collectChangedFiles(turn.cwd, initialWorkspaceSnapshot), commandResults, messages, calledTools, lastToolLoopSignature, repeatedToolLoopCount);
@@ -583,6 +583,44 @@ export class BoundedAgentLoopRunner {
     }
     const contextLimit = turn.modelInfo.capabilities.contextLimitTokens;
     return contextLimit && contextLimit > 0 ? Math.floor(contextLimit * 0.9) : undefined;
+  }
+
+  private async executeToolBatchWithinBudget<TOutput>(
+    calls: Parameters<AgentLoopToolRuntime["executeBatch"]>[0],
+    turn: AgentLoopTurnContext<TOutput>,
+    startedAt: number,
+  ): Promise<{ results: Awaited<ReturnType<AgentLoopToolRuntime["executeBatch"]>>; timedOut: boolean }> {
+    const remainingMs = Math.max(1, turn.budget.maxWallClockMs - (Date.now() - startedAt));
+    const controller = new AbortController();
+    const parentSignal = turn.abortSignal;
+    let timedOut = false;
+    const abortFromParent = () => controller.abort();
+    if (parentSignal?.aborted) {
+      controller.abort();
+    } else {
+      parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+    }
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, remainingMs);
+    const timeoutMs = Math.min(turn.toolCallContext.timeoutMs ?? remainingMs, remainingMs);
+    const boundedTurn = {
+      ...turn,
+      abortSignal: controller.signal,
+      toolCallContext: {
+        ...turn.toolCallContext,
+        abortSignal: controller.signal,
+        timeoutMs,
+      },
+    } as AgentLoopTurnContext<unknown>;
+
+    try {
+      return { results: await this.deps.toolRuntime.executeBatch(calls, boundedTurn), timedOut };
+    } finally {
+      clearTimeout(timer);
+      parentSignal?.removeEventListener("abort", abortFromParent);
+    }
   }
 
   private responseUsageTokens(response: { usage?: { inputTokens: number; outputTokens: number } }): number | undefined {

@@ -463,6 +463,19 @@ export class SqliteSoilRepository implements SoilRepository {
     return new SqliteSoilRepository(db, indexPath);
   }
 
+  static async openExisting(configInput: SoilConfigInput = {}): Promise<SqliteSoilRepository | null> {
+    const rootDir = resolveSoilRootDir(configInput.rootDir);
+    const indexPath = configInput.indexPath ? path.resolve(configInput.indexPath) : getDefaultSoilSqliteIndexPath(rootDir);
+    try {
+      await fsp.access(indexPath);
+    } catch {
+      return null;
+    }
+    const db = new Database(indexPath, { readonly: true, fileMustExist: true });
+    db.pragma("query_only = ON");
+    return new SqliteSoilRepository(db, indexPath);
+  }
+
   close(): void {
     this.db.close();
   }

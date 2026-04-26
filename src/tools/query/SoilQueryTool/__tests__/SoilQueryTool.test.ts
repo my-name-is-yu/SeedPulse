@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import * as fsp from "node:fs/promises";
+import * as os from "node:os";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { SoilCompiler } from "../../../../platform/soil/compiler.js";
 import { rebuildSoilIndex } from "../../../../platform/soil/index-store.js";
@@ -252,6 +253,24 @@ describe("SoilQueryTool", () => {
       expect(data.hits).toHaveLength(1);
       expect(data.hits[0].score).toBeGreaterThan(0);
       expect(data.pages).toHaveLength(0);
+    });
+
+    it("does not create a SQLite index while querying an unindexed root", async () => {
+      const result = await tool.call({ query: "missing", limit: 10, rootDir }, makeContext());
+
+      expect(result.success).toBe(true);
+      await expect(fsp.access(path.join(rootDir, ".index", "soil.sqlite"))).rejects.toThrow();
+    });
+
+    it("ignores unsafe broad home roots from model input", async () => {
+      const homeDir = os.homedir();
+
+      const result = await tool.call({ query: "missing", limit: 10, rootDir: homeDir }, makeContext());
+
+      expect(result.success).toBe(true);
+      const data = result.data as { rootDir: string; warnings: string[] };
+      expect(path.resolve(data.rootDir)).not.toBe(path.resolve(homeDir));
+      expect(data.warnings[0]).toContain("Ignored unsafe Soil rootDir");
     });
 
     it("uses SQLite retrieval when the SQLite soil index has hits", async () => {
