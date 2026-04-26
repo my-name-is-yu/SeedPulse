@@ -48,6 +48,13 @@ function getToolLogId(turnId: string): string {
   return `tool-log:${turnId}`;
 }
 
+function getActivityMessageId(event: Extract<ChatEvent, { type: "activity" }>): string {
+  if (event.transient === false && event.sourceId) {
+    return `activity:${event.turnId}:${event.sourceId}`;
+  }
+  return `activity:${event.turnId}`;
+}
+
 function summarizeValue(value: unknown): string {
   if (typeof value === "string") {
     const normalized = value.replace(/\s+/g, " ").trim();
@@ -253,7 +260,7 @@ export function applyChatEventToMessages(
 
   if (event.type === "activity") {
     return upsertMessage(messages, {
-      id: `activity:${event.turnId}`,
+      id: getActivityMessageId(event),
       role: "pulseed",
       text: event.message,
       timestamp,

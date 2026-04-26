@@ -233,6 +233,11 @@ function formatToolActivity(action: "Running" | "Finished" | "Failed", toolName:
   return preview ? `${action} tool: ${toolName} - ${preview}` : `${action} tool: ${toolName}`;
 }
 
+function formatIntentInput(input: string, maxChars = 96): string {
+  const normalized = input.replace(/\s+/g, " ").trim();
+  return normalized.length > maxChars ? `${normalized.slice(0, maxChars - 3)}...` : normalized;
+}
+
 function resolveSelfIdentityResponse(input: string, baseDir: string): string | null {
   const normalized = input.trim().toLowerCase().replace(/\s+/g, "");
   if (!normalized) return null;
@@ -1716,6 +1721,11 @@ export class ChatRunner {
       ? null
       : (options.selectedRoute ?? this.resolveRouteFromInput(input, runtimeControlContext));
     const directPrompt = historyBlock ? `${historyBlock}${input}` : input;
+    if (!resumeOnly) {
+      this.emitIntent(input, selectedRoute, eventContext);
+    } else if (resumeOnly) {
+      this.emitIntent(input, null, eventContext);
+    }
 
     const start = Date.now();
     const assistantBuffer: AssistantBuffer = { text: "" };
@@ -2667,7 +2677,8 @@ export class ChatRunner {
     kind: ActivityKind,
     message: string,
     eventContext: ChatEventContext,
-    sourceId?: string
+    sourceId?: string,
+    transient = true
   ): void {
     if (!message.trim()) return;
     this.emitEvent({
@@ -2675,9 +2686,42 @@ export class ChatRunner {
       kind,
       message,
       ...(sourceId ? { sourceId } : {}),
-      transient: true,
+      transient,
       ...this.eventBase(eventContext),
     });
+  }
+
+  private emitIntent(
+    input: string,
+    selectedRoute: SelectedChatRoute | null,
+    eventContext: ChatEventContext
+  ): void {
+    const subject = formatIntentInput(input);
+    let nextStep = "resume the saved agent loop state before continuing.";
+    let reason = "resume needs the prior runtime context before any further action.";
+    if (selectedRoute?.kind === "runtime_control") {
+      nextStep = `prepare the ${selectedRoute.intent.kind} runtime-control request.`;
+      reason = "runtime changes need an explicit operation plan and approval path.";
+    } else if (selectedRoute?.kind === "direct_answer") {
+      nextStep = "ask the lightweight model for a concise direct answer.";
+      reason = "the router classified this as a simple question that does not need tools.";
+    } else if (selectedRoute?.kind === "agent_loop") {
+      nextStep = "gather workspace context, then let the agent loop inspect or change files with visible tool activity.";
+      reason = "this request may require multiple tool-backed steps.";
+    } else if (selectedRoute?.kind === "tool_loop") {
+      nextStep = "call the model with the tool catalog, then execute selected tools with visible activity.";
+      reason = "the available tools are needed to answer from current project state.";
+    } else if (selectedRoute?.kind === "adapter") {
+      nextStep = "prepare project context before handing the turn to the configured adapter.";
+      reason = "the adapter needs the current workspace context to act correctly.";
+    }
+    const message = [
+      "Intent",
+      `- Confirm: ${subject || "the current request"}`,
+      `- Next: ${nextStep}`,
+      `- Why: ${reason}`,
+    ].join("\n");
+    this.emitActivity("commentary", message, eventContext, "intent:first-step", false);
   }
 
   private pushAssistantDelta(

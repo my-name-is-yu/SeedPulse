@@ -156,6 +156,47 @@ describe("applyChatEventToMessages", () => {
     expect(afterEnd[0]!.text).toBe("Pinned note");
   });
 
+  it("keeps non-transient sourced activity separate from transient status updates", () => {
+    const withIntent = applyChatEventToMessages([], {
+      type: "activity",
+      runId: "run-1",
+      turnId: "turn-1",
+      createdAt: "2026-04-08T00:00:00.000Z",
+      kind: "commentary",
+      message: "Intent\n- Confirm: inspect the repo",
+      sourceId: "intent:first-step",
+      transient: false,
+    }, 20);
+
+    const withStatus = applyChatEventToMessages(withIntent, {
+      type: "activity",
+      runId: "run-1",
+      turnId: "turn-1",
+      createdAt: "2026-04-08T00:00:01.000Z",
+      kind: "lifecycle",
+      message: "Preparing context...",
+      sourceId: "lifecycle:context",
+      transient: true,
+    }, 20);
+
+    const afterEnd = applyChatEventToMessages(withStatus, {
+      type: "lifecycle_end",
+      runId: "run-1",
+      turnId: "turn-1",
+      createdAt: "2026-04-08T00:00:02.000Z",
+      status: "completed",
+      elapsedMs: 2000,
+      persisted: true,
+    }, 20);
+
+    expect(afterEnd).toHaveLength(1);
+    expect(afterEnd[0]!).toMatchObject({
+      id: "activity:turn-1:intent:first-step",
+      text: "Intent\n- Confirm: inspect the repo",
+      transient: false,
+    });
+  });
+
   it("preserves the latest few tool events and keeps tool logs after the turn ends", () => {
     let messages = [] as ReturnType<typeof applyChatEventToMessages>;
     for (let index = 1; index <= 6; index += 1) {

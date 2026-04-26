@@ -226,7 +226,8 @@ describe("ChatRunner", () => {
 
       await runner.execute("Do something", "/repo");
 
-      expect(events[0]).toBe("lifecycle:Preparing context...");
+      expect(events[0]).toContain("commentary:Intent\n- Confirm: Do something");
+      expect(events.indexOf("lifecycle:Preparing context...")).toBeGreaterThan(0);
       expect(events).toContain("lifecycle:Calling adapter...");
     });
 
@@ -1716,7 +1717,7 @@ describe("ChatRunner", () => {
 
   describe("agent loop and native tool protocol routing", () => {
     it("routes to chatAgentLoopRunner when configured", async () => {
-      const seenEvents: string[] = [];
+      const seenEvents: ChatEvent[] = [];
       const approvalFn = vi.fn().mockResolvedValue(true);
       const adapter = makeMockAdapter();
       const chatAgentLoopRunner = {
@@ -1777,7 +1778,7 @@ describe("ChatRunner", () => {
         chatAgentLoopRunner,
         llmClient: llmClient as never,
         approvalFn,
-        onEvent: (event) => { seenEvents.push(event.type); },
+        onEvent: (event) => { seenEvents.push(event); },
       }));
       const result = await runner.execute("Do something", "/repo");
 
@@ -1787,9 +1788,23 @@ describe("ChatRunner", () => {
       expect(result.success).toBe(true);
       expect(result.output).toBe("Native agentloop response");
       expect(approvalFn).toHaveBeenCalledWith("needs confirmation");
-      expect(seenEvents).toContain("tool_start");
-      expect(seenEvents).toContain("tool_end");
-      expect(seenEvents).toContain("tool_update");
+      const eventTypes = seenEvents.map((event) => event.type);
+      const intentIndex = seenEvents.findIndex((event) =>
+        event.type === "activity" && event.sourceId === "intent:first-step"
+      );
+      const firstToolIndex = eventTypes.indexOf("tool_start");
+      expect(intentIndex).toBeGreaterThanOrEqual(0);
+      expect(firstToolIndex).toBeGreaterThanOrEqual(0);
+      expect(intentIndex).toBeLessThan(firstToolIndex);
+      expect(seenEvents[intentIndex]).toMatchObject({
+        type: "activity",
+        kind: "commentary",
+        transient: false,
+        message: expect.stringContaining("Intent\n- Confirm: Do something"),
+      });
+      expect(eventTypes).toContain("tool_start");
+      expect(eventTypes).toContain("tool_end");
+      expect(eventTypes).toContain("tool_update");
     });
 
     it("routes simple questions through chatAgentLoopRunner when configured", async () => {
@@ -2105,14 +2120,35 @@ describe("ChatRunner", () => {
         }),
         parseJSON: vi.fn(),
       };
+      const events: ChatEvent[] = [];
 
       try {
-        const runner = new ChatRunner(makeDeps({ adapter, stateManager, llmClient: llmClient as never }));
+        const runner = new ChatRunner(makeDeps({
+          adapter,
+          stateManager,
+          llmClient: llmClient as never,
+          onEvent: (event) => { events.push(event); },
+        }));
         const result = await runner.execute("What is this lane?", "/repo");
 
         expect(result.success).toBe(true);
         expect(result.output).toBe("Plain answer");
         expect(llmClient.sendMessage).toHaveBeenCalledOnce();
+        const intentIndex = events.findIndex((event) =>
+          event.type === "activity" && event.sourceId === "intent:first-step"
+        );
+        const modelIndex = events.findIndex((event) =>
+          event.type === "activity" && event.sourceId === "lifecycle:model"
+        );
+        expect(intentIndex).toBeGreaterThanOrEqual(0);
+        expect(modelIndex).toBeGreaterThanOrEqual(0);
+        expect(intentIndex).toBeLessThan(modelIndex);
+        expect(events[intentIndex]).toMatchObject({
+          type: "activity",
+          kind: "commentary",
+          transient: false,
+          message: expect.stringContaining("the router classified this as a simple question"),
+        });
         const options = llmClient.sendMessage.mock.calls[0]?.[1] as { system?: string } | undefined;
         expect(options?.system).toContain("StaticPromptSeed");
         expect(options?.system).toContain("configured agent identity running PulSeed");
