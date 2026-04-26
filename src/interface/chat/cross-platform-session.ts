@@ -525,6 +525,9 @@ export class CrossPlatformChatSessionManager {
       hasAgentLoop: this.deps.chatAgentLoopRunner !== undefined,
       hasToolLoop: this.deps.llmClient !== undefined,
       hasRuntimeControlService: this.deps.runtimeControlService !== undefined,
+      hasDaemonTend: this.deps.llmClient !== undefined
+        && this.deps.goalNegotiator !== undefined
+        && this.deps.daemonClient !== undefined,
     });
     session.lastRoute = selectedRoute;
 

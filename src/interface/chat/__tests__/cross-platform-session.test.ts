@@ -234,6 +234,58 @@ describe("CrossPlatformChatSessionManager", () => {
     });
   });
 
+  it("routes long-running work through durable tend with the current session target", async () => {
+    const stateManager = makeMockStateManager();
+    const adapter = makeMockAdapter();
+    const llmClient = {
+      supportsToolCalling: () => true,
+      sendMessage: vi.fn().mockResolvedValue({
+        content: "Keep improving the requested work until the target is reached.",
+        usage: { input_tokens: 7, output_tokens: 9 },
+        stop_reason: "stop",
+      }),
+      parseJSON: vi.fn(),
+    };
+    const goalNegotiator = {
+      negotiate: vi.fn().mockResolvedValue({
+        goal: {
+          id: "goal-long",
+          title: "Reach the long-running target",
+          description: "Keep improving the requested work.",
+          dimensions: [],
+          constraints: [],
+          created_at: "2026-04-26T00:00:00.000Z",
+          updated_at: "2026-04-26T00:00:00.000Z",
+        },
+      }),
+    };
+    const daemonClient = {
+      startGoal: vi.fn().mockResolvedValue(undefined),
+    };
+    const manager = new CrossPlatformChatSessionManager(makeDeps({
+      stateManager,
+      adapter,
+      llmClient: llmClient as never,
+      goalNegotiator: goalNegotiator as never,
+      daemonClient: daemonClient as never,
+    }));
+
+    const result = await manager.execute("coreloopの方でscore0.98行くまで取り組んで", {
+      identity_key: "owner",
+      channel: "tui",
+      platform: "local_tui",
+      conversation_id: "tui-session",
+      cwd: "/repo",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain("Tend to this goal?");
+    expect(result.output).toContain("Reach the long-running target");
+    expect(adapter.execute).not.toHaveBeenCalled();
+    expect(llmClient.sendMessage).toHaveBeenCalledOnce();
+    expect(daemonClient.startGoal).not.toHaveBeenCalled();
+  });
+
   it("serializes concurrent turns for the same shared session across channels", async () => {
     let activeCalls = 0;
     let maxConcurrentCalls = 0;

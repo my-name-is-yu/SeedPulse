@@ -556,12 +556,16 @@ export class ChatRunner {
     hasAgentLoop: boolean;
     hasToolLoop: boolean;
     hasRuntimeControlService: boolean;
+    hasDaemonTend: boolean;
   } {
     return {
       hasLightweightLlm: this.deps.llmClient !== undefined,
       hasAgentLoop: this.deps.chatAgentLoopRunner !== undefined,
       hasToolLoop: this.deps.llmClient !== undefined,
       hasRuntimeControlService: this.deps.runtimeControlService !== undefined,
+      hasDaemonTend: this.deps.llmClient !== undefined
+        && this.deps.goalNegotiator !== undefined
+        && this.deps.daemonClient !== undefined,
     };
   }
 
@@ -1369,7 +1373,7 @@ export class ChatRunner {
       "Turn context",
       `- last_selected_route: ${this.formatRoute(this.lastSelectedRoute)}`,
       `- reply_target: ${replyTargetParts.length > 0 ? replyTargetParts.join(":") : "none"}`,
-      `- route_capabilities: light_llm=${routeCapabilities.hasLightweightLlm}, agent_loop=${routeCapabilities.hasAgentLoop}, tool_loop=${routeCapabilities.hasToolLoop}, runtime_control=${routeCapabilities.hasRuntimeControlService}`,
+      `- route_capabilities: light_llm=${routeCapabilities.hasLightweightLlm}, agent_loop=${routeCapabilities.hasAgentLoop}, tool_loop=${routeCapabilities.hasToolLoop}, runtime_control=${routeCapabilities.hasRuntimeControlService}, daemon_tend=${routeCapabilities.hasDaemonTend}`,
       "",
       "Working assumptions",
       "- this view exposes operational context, not hidden reasoning",
@@ -2066,6 +2070,27 @@ export class ChatRunner {
         this.emitLifecycleEndEvent("error", runtimeControlResult.elapsed_ms, eventContext, false);
       }
       return runtimeControlResult;
+    }
+
+    if (selectedRoute?.kind === "daemon_tend") {
+      this.emitCheckpoint("Durable goal selected", "This long-running request is being prepared for daemon-backed CoreLoop execution.", eventContext, "route");
+      const tendResult = await this.handleTend("", start);
+      if (tendResult.success) {
+        await history.appendAssistantMessage(tendResult.output);
+        this.emitCheckpoint("Durable goal prepared", "The daemon-backed goal confirmation is ready.", eventContext, "complete");
+        this.emitActivity("lifecycle", "Finalizing response...", eventContext, "lifecycle:finalizing");
+        this.emitEvent({
+          type: "assistant_final",
+          text: tendResult.output,
+          persisted: true,
+          ...this.eventBase(eventContext),
+        });
+        this.emitLifecycleEndEvent("completed", tendResult.elapsed_ms, eventContext, true);
+      } else {
+        tendResult.output = this.emitLifecycleErrorEvent(tendResult.output, assistantBuffer.text, eventContext);
+        this.emitLifecycleEndEvent("error", tendResult.elapsed_ms, eventContext, false);
+      }
+      return tendResult;
     }
 
     if (selectedRoute?.kind === "direct_answer") {
@@ -3106,6 +3131,9 @@ export class ChatRunner {
     if (selectedRoute?.kind === "runtime_control") {
       nextStep = `prepare the ${selectedRoute.intent.kind} runtime-control request.`;
       reason = "runtime changes need an explicit operation plan and approval path.";
+    } else if (selectedRoute?.kind === "daemon_tend") {
+      nextStep = "convert the request into a daemon-backed CoreLoop goal confirmation.";
+      reason = "long-running work should survive chat turn timeouts and run through durable runtime state.";
     } else if (selectedRoute?.kind === "direct_answer") {
       nextStep = "ask the lightweight model for a concise direct answer.";
       reason = "the router classified this as a simple question that does not need tools.";

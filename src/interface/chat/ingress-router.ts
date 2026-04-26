@@ -79,6 +79,15 @@ export type SelectedChatRoute =
       eventProjectionPolicy: EventProjectionPolicy;
       concurrencyPolicy: ConcurrencyPolicy;
       daemonChatPolicy: DaemonChatPolicy;
+    }
+  | {
+      lane: "durable";
+      kind: "daemon_tend";
+      reason: "long_running_goal_intent";
+      replyTargetPolicy: ReplyTargetPolicy;
+      eventProjectionPolicy: EventProjectionPolicy;
+      concurrencyPolicy: ConcurrencyPolicy;
+      daemonChatPolicy: DaemonChatPolicy;
     };
 
 export interface IngressRouterCapabilities {
@@ -86,6 +95,7 @@ export interface IngressRouterCapabilities {
   hasAgentLoop: boolean;
   hasToolLoop: boolean;
   hasRuntimeControlService?: boolean;
+  hasDaemonTend?: boolean;
 }
 
 function shouldUseDirectAnswerRoute(input: string): boolean {
@@ -113,6 +123,31 @@ function shouldUseDirectAnswerRoute(input: string): boolean {
   return !workSignals.some((pattern) => pattern.test(lowered));
 }
 
+function shouldUseDaemonTendRoute(input: string): boolean {
+  const normalized = input.trim();
+  if (!normalized || normalized.startsWith("/")) return false;
+
+  const lowered = normalized.toLowerCase();
+  const durableSignals = [
+    /\b(core\s*loop|coreloop|daemon|background|durable|autonomous|long[-\s]?running|overnight)\b/i,
+    /(コア\s*ループ|coreloop|デーモン|daemon|バックグラウンド|長期|常駐|自律|継続実行|数時間|数日|数週間)/,
+  ];
+  const actionSignals = [
+    /\b(work on|keep working|continue|run|start|execute|optimi[sz]e|improve|pursue|tend)\b/i,
+    /\b(until|to completion|in the background|as a background run)\b/i,
+    /(取り組んで|進めて|回して|走らせて|実行して|続けて|改善して|最適化して|任せて|達成して|完了まで|終わるまで|行くまで|到達するまで)/,
+  ];
+  const explanationSignals = [
+    /[?？]/,
+    /\b(why|how|what|explain|describe)\b/i,
+    /(なぜ|なんで|どうして|説明|教えて|どう思う)/,
+  ];
+
+  if (!durableSignals.some((pattern) => pattern.test(lowered))) return false;
+  if (!actionSignals.some((pattern) => pattern.test(lowered))) return false;
+  return !explanationSignals.some((pattern) => pattern.test(lowered));
+}
+
 function selectRouteForText(
   text: string,
   runtimeControl: ChatIngressRuntimeControl,
@@ -130,8 +165,10 @@ function selectRouteForText(
     concurrencyPolicy: "session_serial" as const,
     daemonChatPolicy: "compatibility_only" as const,
   };
+  const canUseDurableControl =
+    runtimeControl.allowed && runtimeControl.approvalMode !== "disallowed";
 
-  if (runtimeControl.allowed && runtimeControl.approvalMode !== "disallowed") {
+  if (canUseDurableControl) {
     const intent = recognizeRuntimeControlIntent(text);
     if (intent !== null) {
       return {
@@ -142,6 +179,15 @@ function selectRouteForText(
         ...baseDurablePolicy,
       };
     }
+  }
+
+  if (canUseDurableControl && deps.hasDaemonTend && shouldUseDaemonTendRoute(text)) {
+    return {
+      lane: "durable",
+      kind: "daemon_tend",
+      reason: "long_running_goal_intent",
+      ...baseDurablePolicy,
+    };
   }
 
   if (!deps.hasAgentLoop && deps.hasLightweightLlm && shouldUseDirectAnswerRoute(text)) {

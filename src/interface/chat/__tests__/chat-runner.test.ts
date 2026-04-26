@@ -2145,6 +2145,76 @@ describe("ChatRunner", () => {
       expect(result.diagnostics).toBeUndefined();
     });
 
+    it("routes explicit long-running work to daemon-backed tend instead of chatAgentLoopRunner", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pulseed-daemon-tend-route-"));
+      try {
+        const adapter = makeMockAdapter();
+        const chatAgentLoopRunner = {
+          execute: vi.fn().mockResolvedValue({
+            success: true,
+            output: "Agentloop should not run",
+            error: null,
+            exit_code: null,
+            elapsed_ms: 42,
+            stopped_reason: "completed",
+          }),
+        } as unknown as ChatAgentLoopRunner;
+        const llmClient = {
+          supportsToolCalling: () => true,
+          sendMessage: vi.fn().mockResolvedValue({
+            content: "Improve the long-running task until the target metric is reached.",
+            usage: { input_tokens: 10, output_tokens: 12 },
+            stop_reason: "stop",
+          }),
+          parseJSON: vi.fn(),
+        };
+        const goal = makeGoal("goal-long", {
+          title: "Reach the long-running score target",
+          description: "Improve the task until score target is reached.",
+        });
+        const goalNegotiator = {
+          negotiate: vi.fn().mockResolvedValue({ goal }),
+        };
+        const daemonClient = {
+          startGoal: vi.fn().mockResolvedValue(undefined),
+        };
+        const stateManager = {
+          ...makeMockStateManager(),
+          getBaseDir: vi.fn().mockReturnValue(tmpDir),
+        } as unknown as StateManager;
+        const runner = new ChatRunner(makeDeps({
+          adapter,
+          stateManager,
+          chatAgentLoopRunner,
+          llmClient: llmClient as never,
+          goalNegotiator: goalNegotiator as never,
+          daemonClient: daemonClient as never,
+        }));
+        runner.startSession("/repo");
+
+        const result = await runner.execute("coreloopの方でscore0.98行くまで取り組んで", "/repo");
+
+        expect(result.success).toBe(true);
+        expect(result.output).toContain("Tend to this goal?");
+        expect(result.output).toContain("Reach the long-running score target");
+        expect(chatAgentLoopRunner.execute).not.toHaveBeenCalled();
+        expect(adapter.execute).not.toHaveBeenCalled();
+        expect(llmClient.sendMessage).toHaveBeenCalledOnce();
+        expect(goalNegotiator.negotiate).toHaveBeenCalledWith(
+          "Improve the long-running task until the target metric is reached.",
+          expect.objectContaining({
+            constraints: expect.arrayContaining(["source: tend (auto-generated from chat)"]),
+          })
+        );
+        expect(daemonClient.startGoal).not.toHaveBeenCalled();
+        expect((runner as unknown as { pendingTend: unknown }).pendingTend).toMatchObject({
+          goalId: "goal-long",
+        });
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
     it("interruptAndRedirect aborts an active native agent loop and returns a summary", async () => {
       let capturedSignal: AbortSignal | undefined;
       const chatAgentLoopRunner = {

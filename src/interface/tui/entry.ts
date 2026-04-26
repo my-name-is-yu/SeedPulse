@@ -604,16 +604,19 @@ async function startTUIDaemonMode(): Promise<void> {
 
   try {
     let daemonClient: InstanceType<typeof DaemonClient>;
+    let daemonPort: number;
 
     try {
       const existingConnection = await resolveRunningDaemonConnection(baseDir);
 
       if (existingConnection) {
         daemonClient = new DaemonClient({ host: "127.0.0.1", ...existingConnection, baseDir });
+        daemonPort = existingConnection.port;
       } else {
         await startDaemonDetached(baseDir);
         const ready = await waitForDaemon(baseDir, 10_000);
         daemonClient = new DaemonClient({ host: "127.0.0.1", port: ready.port, authToken: ready.authToken, baseDir });
+        daemonPort = ready.port;
       }
 
       daemonClient.connect();
@@ -721,8 +724,23 @@ async function startTUIDaemonMode(): Promise<void> {
         createNativeReviewAgentLoopRunner,
         shouldUseNativeTaskAgentLoop,
       } = await import("../../orchestrator/execution/agent-loop/index.js");
+      const { GoalNegotiator } = await import("../../orchestrator/goal/goal-negotiator.js");
+      const { EthicsGate } = await import("../../platform/traits/ethics-gate.js");
+      const { ObservationEngine } = await import("../../platform/observation/observation-engine.js");
       const llmClient = await buildLLMClient();
       const adapterRegistry = await buildAdapterRegistry(llmClient);
+      const observationEngine = new ObservationEngine(stateManager, dataSourceRegistry.getAllSources(), llmClient);
+      const ethicsGate = new EthicsGate(stateManager, llmClient);
+      const goalNegotiator = new GoalNegotiator(
+        stateManager,
+        llmClient,
+        ethicsGate,
+        observationEngine,
+        undefined,
+        undefined,
+        undefined,
+        adapterRegistry.getAdapterCapabilities()
+      );
       const adapterType = providerConfig.adapter ?? "claude_code_cli";
       const adapter = adapterRegistry.getAdapter(adapterType);
       const chatAgentLoopRunner = shouldUseNativeTaskAgentLoop(providerConfig, llmClient)
@@ -754,6 +772,9 @@ async function startTUIDaemonMode(): Promise<void> {
         toolExecutor,
         chatAgentLoopRunner,
         reviewAgentLoopRunner,
+        goalNegotiator,
+        daemonClient,
+        daemonBaseUrl: `http://127.0.0.1:${daemonPort}`,
         approvalFn: chatToolApprovalFn,
       });
     } catch (err) {
