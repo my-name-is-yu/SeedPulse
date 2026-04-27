@@ -188,6 +188,14 @@ export class ChatHistory {
     }
   }
 
+  resetAgentLoopState(statePath: string | null): void {
+    this.setAgentLoopStatePath(statePath);
+    delete this.session.agentLoopStatus;
+    delete this.session.agentLoopResumable;
+    delete this.session.agentLoopUpdatedAt;
+    delete this.session.agentLoop;
+  }
+
   recordUsage(phase: string, usage: ChatUsageCounter): void {
     const normalized = normalizeUsageCounter(usage);
     const nextTotals = sumUsage(

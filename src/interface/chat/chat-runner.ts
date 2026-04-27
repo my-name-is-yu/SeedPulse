@@ -414,7 +414,7 @@ export class ChatRunner {
     this.sessionCwd = gitRoot;
     this.sessionActive = true;
     this.nativeAgentLoopStatePath = `chat/agentloop/${sessionId}.state.json`;
-    this.history.setAgentLoopStatePath(this.nativeAgentLoopStatePath);
+    this.history.resetAgentLoopState(this.nativeAgentLoopStatePath);
     this.sessionExecutionPolicy = null;
   }
 
@@ -1661,7 +1661,7 @@ export class ChatRunner {
     this.sessionCwd = resolveGitRoot(cwd);
     this.sessionActive = true;
     this.nativeAgentLoopStatePath = `chat/agentloop/${sessionId}.state.json`;
-    this.history.setAgentLoopStatePath(this.nativeAgentLoopStatePath);
+    this.history.resetAgentLoopState(this.nativeAgentLoopStatePath);
     await this.history.persist();
     return {
       success: true,
@@ -1947,7 +1947,7 @@ export class ChatRunner {
       const sessionId = crypto.randomUUID();
       this.history = new ChatHistory(this.deps.stateManager, sessionId, gitRoot);
       this.nativeAgentLoopStatePath = `chat/agentloop/${sessionId}.state.json`;
-      this.history.setAgentLoopStatePath(this.nativeAgentLoopStatePath);
+      this.history.resetAgentLoopState(this.nativeAgentLoopStatePath);
     }
     const executionCwd = this.sessionCwd ?? resolvedCwd;
     const gitRoot = this.sessionCwd ?? resolvedCwd;

@@ -341,6 +341,48 @@ describe("ChatSessionCatalog", () => {
     expect(dryRun.retainedSessionIds).toContain("old-chat-fresh-agentloop");
   });
 
+  it("prefers the top-level agentloop path and does not fall back to stale nested metadata", async () => {
+    await stateManager.writeRaw(
+      "chat/sessions/forked-session.json",
+      {
+        ...makeSession({
+          id: "forked-session",
+          cwd: "/repo",
+          createdAt: "2026-04-01T00:00:00.000Z",
+          updatedAt: "2026-04-01T00:01:00.000Z",
+          messages: [],
+        }),
+        agentLoopStatePath: "chat/agentloop/forked-session.state.json",
+        agentLoop: {
+          statePath: "chat/agentloop/source-session.state.json",
+          status: "running",
+          resumable: true,
+          updatedAt: "2026-04-01T00:02:00.000Z",
+        },
+      }
+    );
+    await stateManager.writeRaw(
+      "chat/agentloop/source-session.state.json",
+      makeAgentLoopState({
+        sessionId: "source-session",
+        traceId: "trace-source",
+        turnId: "turn-source",
+        goalId: "goal-source",
+        cwd: "/repo",
+        modelRef: "model",
+        status: "failed",
+        updatedAt: "2026-04-01T00:02:00.000Z",
+      })
+    );
+
+    const loaded = await catalog.loadSession("forked-session");
+
+    expect(loaded).not.toBeNull();
+    expect(loaded?.agentLoopStatePath).toBe(path.join("chat", "agentloop", "forked-session.state.json"));
+    expect(loaded?.agentLoopStatus).toBe("missing");
+    expect(loaded?.agentLoopResumable).toBe(false);
+  });
+
   it("cleans up old sessions in dry-run and enforce modes while protecting the active session", async () => {
     const oldSession = makeSession({
       id: "old-session",

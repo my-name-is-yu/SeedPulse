@@ -1,10 +1,15 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatRunner } from "../chat-runner.js";
 import type { ChatRunnerDeps } from "../chat-runner.js";
+import { StateManager as RealStateManager } from "../../../base/state/state-manager.js";
 import type { StateManager } from "../../../base/state/state-manager.js";
 import type { IAdapter } from "../../../orchestrator/execution/adapter-layer.js";
 import type { ChatAgentLoopRunner } from "../../../orchestrator/execution/agent-loop/chat-agent-loop-runner.js";
 import type { ReviewAgentLoopRunner } from "../../../orchestrator/execution/agent-loop/review-agent-loop-runner.js";
+import { ChatSessionCatalog } from "../chat-session-store.js";
 
 vi.mock("../../../platform/observation/context-provider.js", () => ({
   resolveGitRoot: (cwd: string) => cwd,
@@ -137,6 +142,106 @@ describe("ChatRunner policy commands", () => {
     expect(result.success).toBe(true);
     expect(after).not.toBe(before);
     expect(result.output).toContain("Forked chat session");
+  });
+
+  it("/fork clears stale native agentloop metadata from the new session", async () => {
+    const stateManager = makeMockStateManager();
+    const runner = new ChatRunner(makeDeps({ stateManager }));
+    runner.startSessionFromLoadedSession({
+      id: "source-session",
+      cwd: "/repo",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:01:00.000Z",
+      title: "Source",
+      messages: [
+        { role: "user", content: "continue", timestamp: "2026-04-01T00:00:00.000Z", turnIndex: 0 },
+      ],
+      agentLoopStatePath: "chat/agentloop/source-session.state.json",
+      agentLoopStatus: "running",
+      agentLoopResumable: true,
+      agentLoopUpdatedAt: "2026-04-01T00:02:00.000Z",
+      agentLoop: {
+        statePath: "chat/agentloop/source-session.state.json",
+        status: "running",
+        resumable: true,
+        updatedAt: "2026-04-01T00:02:00.000Z",
+      },
+    });
+
+    const result = await runner.execute("/fork Branch copy", "/repo");
+
+    expect(result.success).toBe(true);
+    const writeCalls = vi.mocked(stateManager.writeRaw).mock.calls;
+    expect(writeCalls.length).toBeGreaterThan(0);
+    const persistedSession = writeCalls.at(-1)?.[1] as Record<string, unknown>;
+    expect(persistedSession["id"]).not.toBe("source-session");
+    expect(persistedSession["agentLoopStatePath"]).toBe(`chat/agentloop/${persistedSession["id"]}.state.json`);
+    expect(persistedSession["agentLoopStatus"]).toBeUndefined();
+    expect(persistedSession["agentLoopResumable"]).toBeUndefined();
+    expect(persistedSession["agentLoopUpdatedAt"]).toBeUndefined();
+    expect(persistedSession["agentLoop"]).toBeUndefined();
+  });
+
+  it("loaded sessions do not rewrite stale nested agentloop metadata on the next persist", async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pulseed-chat-fork-load-persist-"));
+    try {
+      const stateManager = new RealStateManager(tmpDir);
+      await stateManager.init();
+      await stateManager.writeRaw("chat/sessions/forked-session.json", {
+        id: "forked-session",
+        cwd: "/repo",
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: "2026-04-01T00:01:00.000Z",
+        title: "Forked Session",
+        messages: [],
+        agentLoopStatePath: "chat/agentloop/forked-session.state.json",
+        agentLoop: {
+          statePath: "chat/agentloop/source-session.state.json",
+          status: "running",
+          resumable: true,
+          updatedAt: "2026-04-01T00:02:00.000Z",
+        },
+      });
+      await stateManager.writeRaw("chat/agentloop/source-session.state.json", {
+        sessionId: "source-session",
+        traceId: "trace-source",
+        turnId: "turn-source",
+        goalId: "chat",
+        cwd: "/repo",
+        modelRef: "native:test",
+        messages: [],
+        modelTurns: 1,
+        toolCalls: 0,
+        compactions: 0,
+        completionValidationAttempts: 0,
+        calledTools: [],
+        lastToolLoopSignature: null,
+        repeatedToolLoopCount: 0,
+        finalText: "",
+        status: "failed",
+        updatedAt: "2026-04-01T00:02:00.000Z",
+      });
+
+      const catalog = new ChatSessionCatalog(stateManager);
+      const loaded = await catalog.loadSession("forked-session");
+      expect(loaded).not.toBeNull();
+
+      const runner = new ChatRunner(makeDeps({ stateManager, adapter: makeMockAdapter() }));
+      runner.startSessionFromLoadedSession(loaded!);
+      const result = await runner.execute("/title Renamed Session", "/repo");
+
+      expect(result.success).toBe(true);
+      const persisted = await stateManager.readRaw("chat/sessions/forked-session.json") as Record<string, unknown>;
+      expect(persisted["agentLoopStatePath"]).toBe("chat/agentloop/forked-session.state.json");
+      expect(persisted["agentLoopStatus"]).toBeUndefined();
+      expect(persisted["agentLoopResumable"]).toBeUndefined();
+      expect(persisted["agentLoopUpdatedAt"]).toBeUndefined();
+      expect(persisted["agentLoop"]).toEqual({
+        statePath: "chat/agentloop/forked-session.state.json",
+      });
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 
   it("/undo removes the latest turn from chat history", async () => {
