@@ -88,6 +88,19 @@ interface AgentLoopDiscovery {
   updatedAt: string | null;
 }
 
+function buildNormalizedAgentLoopMetadata(agentLoop: AgentLoopDiscovery): ChatSession["agentLoop"] | undefined {
+  if (!agentLoop.statePath && agentLoop.status === "missing" && !agentLoop.resumable && !agentLoop.updatedAt) {
+    return undefined;
+  }
+
+  return {
+    ...(agentLoop.statePath ? { statePath: agentLoop.statePath } : {}),
+    ...(agentLoop.status !== "missing" ? { status: agentLoop.status } : {}),
+    ...(agentLoop.resumable ? { resumable: true } : {}),
+    ...(agentLoop.updatedAt ? { updatedAt: agentLoop.updatedAt } : {}),
+  };
+}
+
 function optionalString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
@@ -224,6 +237,7 @@ async function loadAgentLoopState(
 }
 
 function normalizeSessionRecord(session: LoadedChatSession, filePath: string, fileMtimeMs: number, agentLoop: AgentLoopDiscovery): SessionRecord {
+  const normalizedAgentLoop = buildNormalizedAgentLoopMetadata(agentLoop);
   return {
     session: {
       ...session,
@@ -232,6 +246,7 @@ function normalizeSessionRecord(session: LoadedChatSession, filePath: string, fi
       agentLoopStatus: agentLoop.status,
       agentLoopResumable: agentLoop.resumable,
       agentLoopUpdatedAt: agentLoop.updatedAt,
+      ...(normalizedAgentLoop ? { agentLoop: normalizedAgentLoop } : { agentLoop: undefined }),
     },
     filePath,
     activityAtMs: extractSessionActivityAtMs(session, fileMtimeMs),

@@ -1,10 +1,15 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatRunner } from "../chat-runner.js";
 import type { ChatRunnerDeps } from "../chat-runner.js";
+import { StateManager as RealStateManager } from "../../../base/state/state-manager.js";
 import type { StateManager } from "../../../base/state/state-manager.js";
 import type { IAdapter } from "../../../orchestrator/execution/adapter-layer.js";
 import type { ChatAgentLoopRunner } from "../../../orchestrator/execution/agent-loop/chat-agent-loop-runner.js";
 import type { ReviewAgentLoopRunner } from "../../../orchestrator/execution/agent-loop/review-agent-loop-runner.js";
+import { ChatSessionCatalog } from "../chat-session-store.js";
 
 vi.mock("../../../platform/observation/context-provider.js", () => ({
   resolveGitRoot: (cwd: string) => cwd,
@@ -177,6 +182,129 @@ describe("ChatRunner policy commands", () => {
     expect(persistedSession["agentLoop"]).toBeUndefined();
   });
 
+  it("loaded sessions do not rewrite stale nested agentloop metadata on the next persist", async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pulseed-chat-fork-load-persist-"));
+    try {
+      const stateManager = new RealStateManager(tmpDir);
+      await stateManager.init();
+      await stateManager.writeRaw("chat/sessions/forked-session.json", {
+        id: "forked-session",
+        cwd: "/repo",
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: "2026-04-01T00:01:00.000Z",
+        title: "Forked Session",
+        messages: [],
+        agentLoopStatePath: "chat/agentloop/forked-session.state.json",
+        agentLoop: {
+          statePath: "chat/agentloop/source-session.state.json",
+          status: "running",
+          resumable: true,
+          updatedAt: "2026-04-01T00:02:00.000Z",
+        },
+      });
+      await stateManager.writeRaw("chat/agentloop/source-session.state.json", {
+        sessionId: "source-session",
+        traceId: "trace-source",
+        turnId: "turn-source",
+        goalId: "chat",
+        cwd: "/repo",
+        modelRef: "native:test",
+        messages: [],
+        modelTurns: 1,
+        toolCalls: 0,
+        compactions: 0,
+        completionValidationAttempts: 0,
+        calledTools: [],
+        lastToolLoopSignature: null,
+        repeatedToolLoopCount: 0,
+        finalText: "",
+        status: "failed",
+        updatedAt: "2026-04-01T00:02:00.000Z",
+      });
+
+      const catalog = new ChatSessionCatalog(stateManager);
+      const loaded = await catalog.loadSession("forked-session");
+      expect(loaded).not.toBeNull();
+
+      const runner = new ChatRunner(makeDeps({ stateManager, adapter: makeMockAdapter() }));
+      runner.startSessionFromLoadedSession(loaded!);
+      const result = await runner.execute("/title Renamed Session", "/repo");
+
+      expect(result.success).toBe(true);
+      const persisted = await stateManager.readRaw("chat/sessions/forked-session.json") as Record<string, unknown>;
+      expect(persisted["agentLoopStatePath"]).toBe("chat/agentloop/forked-session.state.json");
+      expect(persisted["agentLoopStatus"]).toBeUndefined();
+      expect(persisted["agentLoopResumable"]).toBeUndefined();
+      expect(persisted["agentLoopUpdatedAt"]).toBeUndefined();
+      expect(persisted["agentLoop"]).toEqual({
+        statePath: "chat/agentloop/forked-session.state.json",
+      });
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("loaded sessions keep stale nested agentloop metadata cleared on a normal chat turn", async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pulseed-chat-normal-persist-"));
+    try {
+      const stateManager = new RealStateManager(tmpDir);
+      await stateManager.init();
+      await stateManager.writeRaw("chat/sessions/forked-session.json", {
+        id: "forked-session",
+        cwd: "/repo",
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: "2026-04-01T00:01:00.000Z",
+        title: "Forked Session",
+        messages: [],
+        agentLoopStatePath: "chat/agentloop/forked-session.state.json",
+        agentLoop: {
+          statePath: "chat/agentloop/source-session.state.json",
+          status: "running",
+          resumable: true,
+          updatedAt: "2026-04-01T00:02:00.000Z",
+        },
+      });
+      await stateManager.writeRaw("chat/agentloop/source-session.state.json", {
+        sessionId: "source-session",
+        traceId: "trace-source",
+        turnId: "turn-source",
+        goalId: "chat",
+        cwd: "/repo",
+        modelRef: "native:test",
+        messages: [],
+        modelTurns: 1,
+        toolCalls: 0,
+        compactions: 0,
+        completionValidationAttempts: 0,
+        calledTools: [],
+        lastToolLoopSignature: null,
+        repeatedToolLoopCount: 0,
+        finalText: "",
+        status: "failed",
+        updatedAt: "2026-04-01T00:02:00.000Z",
+      });
+
+      const catalog = new ChatSessionCatalog(stateManager);
+      const loaded = await catalog.loadSession("forked-session");
+      expect(loaded).not.toBeNull();
+
+      const runner = new ChatRunner(makeDeps({ stateManager, adapter: makeMockAdapter() }));
+      runner.startSessionFromLoadedSession(loaded!);
+      const result = await runner.execute("Continue from here", "/repo");
+
+      expect(result.success).toBe(true);
+      const persisted = await stateManager.readRaw("chat/sessions/forked-session.json") as Record<string, unknown>;
+      expect(persisted["agentLoopStatePath"]).toBe("chat/agentloop/forked-session.state.json");
+      expect(persisted["agentLoopStatus"]).toBeUndefined();
+      expect(persisted["agentLoopResumable"]).toBeUndefined();
+      expect(persisted["agentLoopUpdatedAt"]).toBeUndefined();
+      expect(persisted["agentLoop"]).toEqual({
+        statePath: "chat/agentloop/forked-session.state.json",
+      });
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
   it("/undo removes the latest turn from chat history", async () => {
     const runner = new ChatRunner(makeDeps());
     runner.startSession("/repo");
