@@ -8,11 +8,23 @@ import { consolidateDreamEventWorkflows, loadDreamWorkflowRecords } from "./drea
 import type { DreamSoilSyncService } from "./dream-soil-sync.js";
 import { DEFAULT_DREAM_CONFIG } from "./dream-config.js";
 import {
+  collectBacklogMetrics,
+  countAgentMemoryEntries,
+  countEventLines,
+  countFilesNamed,
+  countGoalDirs,
+  countGoalPairs,
+  countJsonFiles,
+  countJsonlLines,
+  countLearnedPatterns,
+  countTrustDomains,
+  countVerificationArtifacts,
+} from "./dream-consolidator/fs-metrics.js";
+import {
   ConsolidationCategoryResultSchema,
   DreamActivationArtifactSchema,
   DreamOperationalReportSchema,
   DreamReportSchema,
-  WatermarkStateSchema,
   type DreamActivationArtifact,
   type ConsolidationCategoryResult,
   type DreamLogConfig,
@@ -246,13 +258,13 @@ export class DreamConsolidator {
   ): Promise<DreamConsolidationPassResult> {
     const collectors: Record<DreamConsolidationCategory, CategoryCollector> = {
       memory: async (tier) => ({ metrics: {
-          goalsConsidered: await this.countGoalDirs(tier),
+          goalsConsidered: await countGoalDirs(this.deps.baseDir, tier),
           latentFactsExtracted: 0,
           lessonsDistilled: 0,
           archivalItemsCollected: 0,
         } }),
       agentMemory: async () => ({ metrics: {
-          agentMemoryEntriesScanned: await this.countAgentMemoryEntries(),
+          agentMemoryEntriesScanned: await countAgentMemoryEntries(this.deps.baseDir),
           ...(await this.collectDreamSoilSyncMetrics()),
           autoAppliedConsolidations: 0,
           duplicatesMerged: 0,
@@ -261,36 +273,36 @@ export class DreamConsolidator {
       decisionHistory: () => this.collectDecisionHistoryResult(),
       stallHistory: () => this.collectStallHistoryResult(),
       sessionData: async () => ({ metrics: {
-          sessionsScanned: await this.countJsonlLines(path.join("dream", "session-logs.jsonl")),
+          sessionsScanned: await countJsonlLines(this.deps.baseDir, path.join("dream", "session-logs.jsonl")),
           coldSessionsArchived: 0,
           bundlesCreated: 0,
           indexEntriesUpdated: 0,
         } }),
       iterationLogs: async () => ({ metrics: {
-          iterationLogsScanned: await this.countFilesNamed("iteration-logs.jsonl"),
+          iterationLogsScanned: await countFilesNamed(this.deps.baseDir, "iteration-logs.jsonl"),
           rotatedLogSegments: 0,
           archivedCompletedGoalLogs: 0,
           indexEntriesUpdated: 0,
         } }),
       gapHistory: async () => ({ metrics: {
-          goalsAnalyzed: await this.countFilesNamed("gap-history.json"),
+          goalsAnalyzed: await countFilesNamed(this.deps.baseDir, "gap-history.json"),
           dimensionsModeled: 0,
           falseProgressCasesDetected: 0,
           archetypesEmitted: 0,
         } }),
       observationLogs: async () => ({ metrics: {
-          observationsScanned: await this.countFilesNamed("observations.json"),
+          observationsScanned: await countFilesNamed(this.deps.baseDir, "observations.json"),
           flakyMethodsDetected: 0,
           driftAlertsProduced: 0,
         } }),
       reports: async () => ({ metrics: {
-          reportsScanned: await this.countJsonFiles(path.join(this.deps.baseDir, "dream", "reports")),
+          reportsScanned: await countJsonFiles(path.join(this.deps.baseDir, "dream", "reports")),
           sequencesExtracted: 0,
           summaryReportsCreated: 0,
           lowSignalReportsCleanedUp: 0,
         } }),
       trustScores: async () => ({ metrics: {
-          trustDomainsAnalyzed: await this.countTrustDomains(),
+          trustDomainsAnalyzed: await countTrustDomains(this.deps.baseDir),
           overrideEventsReplayed: 0,
           oscillationsDetected: 0,
           recalibrationRecommendations: 0,
@@ -298,7 +310,7 @@ export class DreamConsolidator {
       strategyHistory: () => this.collectStrategyHistoryResult(),
       verificationArtifacts: () => this.collectVerificationArtifactsResult(),
       archive: async () => ({ metrics: {
-          archivesScanned: await this.countJsonFiles(path.join(this.deps.baseDir, "archive")),
+          archivesScanned: await countJsonFiles(path.join(this.deps.baseDir, "archive")),
           postmortemLessonsExtracted: 0,
           solvedBeforeEntriesAdded: 0,
           reusableTemplatesEmitted: 0,
@@ -362,7 +374,7 @@ export class DreamConsolidator {
     return {
       metrics: {
         ...eventMetrics,
-        stallEventsScanned: await this.countEventLines("StallDetected"),
+        stallEventsScanned: await countEventLines(this.deps.baseDir, "StallDetected"),
         recurringLoopsDetected: stallWorkflows.filter((workflow) => workflow.failure_count > 1).length,
         precursorsExtracted: stallWorkflows.length,
         activationArtifactsEmitted: activationArtifacts.length,
@@ -391,7 +403,7 @@ export class DreamConsolidator {
     return {
       metrics: {
         ...eventMetrics,
-        artifactsScanned: await this.countVerificationArtifacts(),
+        artifactsScanned: await countVerificationArtifacts(this.deps.baseDir),
         criterionFailurePatternsDetected: verificationWorkflows.filter((workflow) => workflow.failure_count > 0).length,
         verdictDistributionsComputed: verificationWorkflows.length,
         activationArtifactsEmitted: activationArtifacts.length,
@@ -417,7 +429,7 @@ export class DreamConsolidator {
     );
     return {
       metrics: {
-        decisionRecordsScanned: await this.countFilesNamed("decision-history.json"),
+        decisionRecordsScanned: await countFilesNamed(this.deps.baseDir, "decision-history.json"),
         heuristicsAvailable: heuristics.length,
         clustersBuilt: heuristics.length > 0 ? 1 : 0,
         pivotCausesPromoted: 0,
@@ -443,7 +455,7 @@ export class DreamConsolidator {
     );
     return {
       metrics: {
-        timelinesReconstructed: await this.countFilesNamed("strategy-history.json"),
+        timelinesReconstructed: await countFilesNamed(this.deps.baseDir, "strategy-history.json"),
         strategyTemplatesAvailable: templates.length,
         successfulPivotLaddersFound: templates.length,
         wastefulStrategyFamiliesFlagged: 0,
@@ -454,7 +466,7 @@ export class DreamConsolidator {
   }
 
   private async collectCrossGoalTransferResult(): Promise<DreamConsolidationPassResult> {
-    const learnedPatterns = await this.countLearnedPatterns();
+    const learnedPatterns = await countLearnedPatterns(this.deps.baseDir);
     const activationArtifacts = this.activationArtifactIf(
       learnedPatterns > 0,
       {
@@ -467,7 +479,7 @@ export class DreamConsolidator {
     );
     return {
       metrics: {
-        goalPairsScanned: Math.max(0, await this.countGoalPairs()),
+        goalPairsScanned: Math.max(0, await countGoalPairs(this.deps.baseDir)),
         candidatesFound: learnedPatterns,
         transfersApplied: 0,
         transfersRejected: 0,
@@ -500,7 +512,7 @@ export class DreamConsolidator {
     };
   }
 
-  private async collectKnowledgeOptimizationResult(tier: DreamTier): Promise<DreamConsolidationPassResult> {
+  private async collectKnowledgeOptimizationResult(_tier: DreamTier): Promise<DreamConsolidationPassResult> {
     const config = this.config.knowledgeOptimization;
     const baseMetrics = {
       revalidationTasksGenerated: 0,
@@ -575,29 +587,21 @@ export class DreamConsolidator {
     timestamp: string,
     results: ConsolidationCategoryResult[]
   ): Promise<DreamOperationalReport> {
-    const backlog = await this.collectBacklogMetrics();
+    const backlog = await collectBacklogMetrics(this.deps.baseDir);
     const workflows = await loadDreamWorkflowRecords(this.deps.baseDir);
     const activationArtifacts = await loadDreamActivationArtifacts(this.deps.baseDir);
-    const failures = results.flatMap((result) =>
-      result.errors.map((error) => ({
-        category: result.category,
-        source_ref: null,
-        reason: error,
-      }))
-    );
-    const metricSum = (key: string) => results.reduce((sum, result) => sum + (result.metrics[key] ?? 0), 0);
-    const legacy = results.find((result) => result.category === "legacyReflectionCompatibility")?.metrics ?? {};
+    const failures = this.collectOperationalFailures(results);
+    const metricSum = (key: string) => this.sumMetric(results, key);
+    const legacy = this.findLegacyMetrics(results);
+    const laggingSources = this.collectLaggingSources(backlog);
+    const hasNoBacklog = laggingSources.length === 0;
 
     return DreamOperationalReportSchema.parse({
       run_id: `dream-${timestamp.replaceAll(":", "-")}`,
       watermarks: {
         advanced: metricSum("eventWorkflowWatermarksAdvanced"),
-        unchanged: backlog.iteration_lines_pending + backlog.event_lines_pending + backlog.importance_entries_pending === 0 ? 1 : 0,
-        lagging_sources: [
-          ...(backlog.iteration_lines_pending > 0 ? ["iteration"] : []),
-          ...(backlog.event_lines_pending > 0 ? ["event"] : []),
-          ...(backlog.importance_entries_pending > 0 ? ["importance"] : []),
-        ],
+        unchanged: hasNoBacklog ? 1 : 0,
+        lagging_sources: laggingSources,
       },
       consolidation: {
         records_created: metricSum("soilSyncRecordsWritten"),
@@ -621,116 +625,41 @@ export class DreamConsolidator {
     });
   }
 
+  private collectOperationalFailures(results: ConsolidationCategoryResult[]): Array<{
+    category: string;
+    source_ref: null;
+    reason: string;
+  }> {
+    return results.flatMap((result) =>
+      result.errors.map((error) => ({
+        category: result.category,
+        source_ref: null,
+        reason: error,
+      }))
+    );
+  }
+
+  private sumMetric(results: ConsolidationCategoryResult[], key: string): number {
+    return results.reduce((sum, result) => sum + (result.metrics[key] ?? 0), 0);
+  }
+
+  private findLegacyMetrics(results: ConsolidationCategoryResult[]): Record<string, number> {
+    return results.find((result) => result.category === "legacyReflectionCompatibility")?.metrics ?? {};
+  }
+
+  private collectLaggingSources(backlog: DreamOperationalReport["backlog"]): string[] {
+    return [
+      ...(backlog.iteration_lines_pending > 0 ? ["iteration"] : []),
+      ...(backlog.event_lines_pending > 0 ? ["event"] : []),
+      ...(backlog.importance_entries_pending > 0 ? ["importance"] : []),
+    ];
+  }
+
   private async persistReport(report: DreamReport): Promise<void> {
     const reportsDir = path.join(this.deps.baseDir, "dream", "reports");
     await fsp.mkdir(reportsDir, { recursive: true });
     const safeTimestamp = report.timestamp.replaceAll(":", "-");
     await writeJsonFileAtomic(path.join(reportsDir, `${safeTimestamp}.json`), report);
-  }
-
-  private async countGoalDirs(tier: DreamTier): Promise<number> {
-    const goalsDir = path.join(this.deps.baseDir, "goals");
-    const entries = await fsp.readdir(goalsDir, { withFileTypes: true }).catch(() => []);
-    return entries.filter((entry) => entry.isDirectory()).length * (tier === "deep" ? 1 : 1);
-  }
-
-  private async countGoalPairs(): Promise<number> {
-    const count = await this.countGoalDirs("deep");
-    return count < 2 ? 0 : (count * (count - 1)) / 2;
-  }
-
-  private async countLearnedPatterns(): Promise<number> {
-    const learningDir = path.join(this.deps.baseDir, "learning");
-    const files = await fsp.readdir(learningDir).catch(() => [] as string[]);
-    let total = 0;
-    for (const fileName of files.filter((file) => file.endsWith("_patterns.json"))) {
-      const raw = await readJsonFileOrNull(path.join(learningDir, fileName));
-      if (Array.isArray(raw)) {
-        total += raw.length;
-      }
-    }
-    return total;
-  }
-
-  private async collectBacklogMetrics(): Promise<DreamOperationalReport["backlog"]> {
-    const raw = await readJsonFileOrNull(path.join(this.deps.baseDir, "dream", "watermarks.json"));
-    const watermarks = raw === null ? WatermarkStateSchema.parse({}) : WatermarkStateSchema.safeParse(raw).success
-      ? WatermarkStateSchema.parse(raw)
-      : WatermarkStateSchema.parse({});
-    let iterationLinesPending = 0;
-    const goalsDir = path.join(this.deps.baseDir, "goals");
-    const goalEntries = await fsp.readdir(goalsDir, { withFileTypes: true }).catch(() => []);
-    for (const entry of goalEntries.filter((candidate) => candidate.isDirectory())) {
-      const total = await this.countFileLines(path.join(goalsDir, entry.name, "iteration-logs.jsonl"));
-      const lastProcessed = watermarks.goals[entry.name]?.lastProcessedLine ?? 0;
-      iterationLinesPending += Math.max(0, total - Math.min(lastProcessed, total));
-    }
-
-    let eventLinesPending = 0;
-    const eventDir = path.join(this.deps.baseDir, "dream", "events");
-    const eventFiles = await fsp.readdir(eventDir).catch(() => [] as string[]);
-    for (const fileName of eventFiles.filter((file) => file.endsWith(".jsonl"))) {
-      const total = await this.countFileLines(path.join(eventDir, fileName));
-      const lastProcessed = watermarks.goals[`event:${fileName}`]?.lastProcessedLine ?? 0;
-      eventLinesPending += Math.max(0, total - Math.min(lastProcessed, total));
-    }
-
-    const importanceLines = await this.countFileLines(path.join(this.deps.baseDir, "dream", "importance-buffer.jsonl"));
-    const importanceProcessed = watermarks.importanceBuffer.lastProcessedLine ?? 0;
-    const importanceEntriesPending = Math.max(0, importanceLines - Math.min(importanceProcessed, importanceLines));
-
-    return {
-      iteration_lines_pending: iterationLinesPending,
-      event_lines_pending: eventLinesPending,
-      importance_entries_pending: importanceEntriesPending,
-    };
-  }
-
-  private async countFileLines(filePath: string): Promise<number> {
-    const raw = await fsp.readFile(filePath, "utf8").catch(() => "");
-    return raw.split(/\r?\n/).filter((line) => line.trim().length > 0).length;
-  }
-
-  private async countFilesNamed(fileName: string): Promise<number> {
-    let count = 0;
-    for await (const filePath of this.walk(this.deps.baseDir)) {
-      if (path.basename(filePath) === fileName) {
-        count += 1;
-      }
-    }
-    return count;
-  }
-
-  private async countJsonFiles(root: string): Promise<number> {
-    let count = 0;
-    for await (const filePath of this.walk(root)) {
-      if (filePath.endsWith(".json")) {
-        count += 1;
-      }
-    }
-    return count;
-  }
-
-  private async countJsonlLines(relativePath: string): Promise<number> {
-    const filePath = path.join(this.deps.baseDir, relativePath);
-    const raw = await fsp.readFile(filePath, "utf8").catch(() => "");
-    return raw.split(/\r?\n/).filter((line) => line.trim().length > 0).length;
-  }
-
-  private async countJsonArrayEntries(relativePath: string): Promise<number> {
-    const filePath = path.join(this.deps.baseDir, relativePath);
-    const raw = await fsp.readFile(filePath, "utf8").catch(() => "");
-    if (!raw) return 0;
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? parsed.length : 0;
-  }
-
-  private async countAgentMemoryEntries(): Promise<number> {
-    const filePath = path.join(this.deps.baseDir, "memory", "agent-memory", "entries.json");
-    const raw = await fsp.readFile(filePath, "utf8").catch(() => "");
-    if (!raw) return 0;
-    const parsed = JSON.parse(raw) as { entries?: unknown[] };
-    return Array.isArray(parsed.entries) ? parsed.entries.length : 0;
   }
 
   private async collectDreamSoilSyncMetrics(): Promise<Record<string, number>> {
@@ -793,45 +722,4 @@ export class DreamConsolidator {
     return this.eventWorkflowMetricsPromise;
   }
 
-  private async countEventLines(eventType: string): Promise<number> {
-    const dreamDir = path.join(this.deps.baseDir, "dream", "events");
-    let total = 0;
-    for await (const filePath of this.walk(dreamDir)) {
-      if (!filePath.endsWith(".jsonl")) continue;
-      const raw = await fsp.readFile(filePath, "utf8").catch(() => "");
-      total += raw
-        .split(/\r?\n/)
-        .filter((line) => line.includes(`"eventType":"${eventType}"`)).length;
-    }
-    return total;
-  }
-
-  private async countTrustDomains(): Promise<number> {
-    const filePath = path.join(this.deps.baseDir, "trust", "trust-store.json");
-    const raw = await fsp.readFile(filePath, "utf8").catch(() => "");
-    if (!raw) return 0;
-    const parsed = JSON.parse(raw) as { balances?: Record<string, unknown> };
-    return parsed.balances ? Object.keys(parsed.balances).length : 0;
-  }
-
-  private async countVerificationArtifacts(): Promise<number> {
-    const verificationDir = path.join(this.deps.baseDir, "verification");
-    let count = 0;
-    for await (const _ of this.walk(verificationDir)) {
-      count += 1;
-    }
-    return count;
-  }
-
-  private async *walk(root: string): AsyncGenerator<string> {
-    const entries = await fsp.readdir(root, { withFileTypes: true }).catch(() => []);
-    for (const entry of entries) {
-      const fullPath = path.join(root, entry.name);
-      if (entry.isDirectory()) {
-        yield* this.walk(fullPath);
-      } else {
-        yield fullPath;
-      }
-    }
-  }
 }

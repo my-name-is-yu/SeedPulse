@@ -1,19 +1,16 @@
-import { StateManager } from "../../base/state/state-manager.js";
-import { ProgressPredictor } from "./progress-predictor.js";
-import { StallReportSchema, StallStateSchema, StallAnalysisSchema } from "../../base/types/stall.js";
+import type { StateManager } from "../../base/state/state-manager.js";
+import type { ProgressPredictor } from "./progress-predictor.js";
+import { StallReportSchema, StallStateSchema } from "../../base/types/stall.js";
 import type { StallReport, StallState, StallAnalysis } from "../../base/types/stall.js";
 import type { CharacterConfig } from "../../base/types/character.js";
 import { DEFAULT_CHARACTER_CONFIG } from "../../base/types/character.js";
-
-// ─── Base feedback category → N loops mapping (at stall_flexibility=1, multiplier=1.0) ───
-
-const BASE_FEEDBACK_CATEGORY_N: Record<string, number> = {
-  immediate: 6,
-  medium_term: 5,
-  long_term: 10,
-};
-
-const BASE_DEFAULT_N = 5;
+import { analyzeStallCause as analyzeGapHistory } from "./stall-detector/analysis.js";
+import { detectRepetitivePatterns as detectTaskRepetition } from "./stall-detector/repetitive.js";
+import {
+  computeTimeThreshold,
+  getAdjustedN,
+  isZeroProgress,
+} from "./stall-detector/thresholds.js";
 
 // ─── Minimum score-improvement delta to reset stall detection ───
 // Improvements smaller than this are treated as noise (no reset).
@@ -26,24 +23,6 @@ const MIN_IMPROVEMENT_DELTA = 0.05;
 // effectively meets its threshold. Kept separate from MIN_IMPROVEMENT_DELTA
 // because the two concepts are distinct: noise vs. completion.
 const ACHIEVED_GAP_THRESHOLD = 0.02;
-
-// ─── Time thresholds ───
-
-const DEFAULT_DURATION_HOURS_BY_CATEGORY: Record<string, number> = {
-  coding: 2,
-  implementation: 2,
-  research: 4,
-  investigation: 4,
-};
-
-const DEFAULT_DURATION_HOURS_FALLBACK = 3;
-
-// ─── Early zero-progress detection window ───
-// When gap stays near-maximum (>=0.95) with negligible variance for this many loops,
-// detect stall immediately without waiting for the full adjusted-N window.
-const ZERO_PROGRESS_WINDOW = 3;
-const ZERO_PROGRESS_GAP_FLOOR = 0.90;
-const ZERO_PROGRESS_MAX_VARIANCE = 0.01;
 
 // ─── Stall thresholds ───
 
@@ -58,12 +37,6 @@ const RECOVERY_SCHEDULE: Array<{ loops: number; factor: number }> = [
   { loops: 2, factor: 0.9 },
   { loops: 4, factor: 1.0 },
 ];
-
-// ─── Repetitive pattern detection constants ───
-
-const REPETITIVE_WINDOW = 3;
-const SIMILARITY_THRESHOLD = 0.8;
-const NO_CHANGE_PATTERNS = ["no changes made", "no modifications", "nothing to change", "no action taken"];
 
 // ─── Exported interfaces ───
 
@@ -93,65 +66,12 @@ export class StallDetector {
     this.predictor = predictor;
   }
 
-  /**
-   * Return the adjusted N value for a given feedback category.
-   * stall_flexibility=1 (default, most flexible) → multiplier=1.0 (pivot fast)
-   * stall_flexibility=5 (most persistent) → multiplier=2.0
-   * Formula: multiplier = 0.75 + (stall_flexibility * 0.25)
-   */
   private getAdjustedN(category?: string): number {
-    const multiplier = 0.75 + this.characterConfig.stall_flexibility * 0.25;
-    const base = category
-      ? (BASE_FEEDBACK_CATEGORY_N[category] ?? BASE_DEFAULT_N)
-      : BASE_DEFAULT_N;
-    return Math.round(base * multiplier);
+    return getAdjustedN(this.characterConfig, category);
   }
 
-  /**
-   * Check if recent gap history shows zero progress (gap stuck near maximum).
-   */
   private isZeroProgress(gapHistory: Array<{ normalized_gap: number }>): boolean {
-    if (gapHistory.length < ZERO_PROGRESS_WINDOW) return false;
-    const recent = gapHistory.slice(-ZERO_PROGRESS_WINDOW);
-    const gaps = recent.map(e => e.normalized_gap);
-    if (!gaps.every(g => g >= ZERO_PROGRESS_GAP_FLOOR)) return false;
-    return Math.max(...gaps) - Math.min(...gaps) < ZERO_PROGRESS_MAX_VARIANCE;
-  }
-
-  /**
-   * Compute bigram Dice coefficient similarity between two strings.
-   * Returns 2 * |intersection| / (|bigrams_a| + |bigrams_b|).
-   */
-  private stringSimilarity(a: string, b: string): number {
-    if (a.length === 0 || b.length === 0) return 0;
-
-    const getBigrams = (s: string): string[] => {
-      const bigrams: string[] = [];
-      for (let i = 0; i < s.length - 1; i++) {
-        bigrams.push(s.slice(i, i + 2));
-      }
-      return bigrams;
-    };
-
-    const bigramsA = getBigrams(a);
-    const bigramsB = getBigrams(b);
-    if (bigramsA.length === 0 || bigramsB.length === 0) return 0;
-
-    const setB = new Map<string, number>();
-    for (const bg of bigramsB) {
-      setB.set(bg, (setB.get(bg) ?? 0) + 1);
-    }
-
-    let intersection = 0;
-    for (const bg of bigramsA) {
-      const count = setB.get(bg) ?? 0;
-      if (count > 0) {
-        intersection++;
-        setB.set(bg, count - 1);
-      }
-    }
-
-    return (2 * intersection) / (bigramsA.length + bigramsB.length);
+    return isZeroProgress(gapHistory);
   }
 
   /**
@@ -159,46 +79,7 @@ export class StallDetector {
    * Checks for: identical_actions, oscillating, no_change patterns.
    */
   detectRepetitivePatterns(taskHistory: StallTaskHistoryEntry[]): RepetitivePatternResult {
-    if (taskHistory.length < REPETITIVE_WINDOW) {
-      return { isRepetitive: false, pattern: null, confidence: 0 };
-    }
-
-    const recent = taskHistory.slice(-REPETITIVE_WINDOW);
-    const outputs = recent.map(e => e.output);
-
-    // 1. no_change: last 3 outputs contain any NO_CHANGE_PATTERNS string (case-insensitive)
-    const noChangeCount = recent.filter(entry =>
-      NO_CHANGE_PATTERNS.some(p => entry.output.toLowerCase().includes(p))
-    ).length;
-    if (noChangeCount >= REPETITIVE_WINDOW) {
-      return { isRepetitive: true, pattern: "no_change", confidence: 0.95 };
-    }
-
-    // 2. identical_actions: same strategy_id (non-null) and high output similarity
-    const strategyIds = recent.map(e => e.strategy_id);
-    const allSameStrategy = strategyIds[0] !== null && strategyIds.every(id => id === strategyIds[0]);
-    if (allSameStrategy) {
-      const sim01 = this.stringSimilarity(outputs[0], outputs[1]);
-      const sim12 = this.stringSimilarity(outputs[1], outputs[2]);
-      const avgSim = (sim01 + sim12) / 2;
-      if (avgSim >= SIMILARITY_THRESHOLD) {
-        return { isRepetitive: true, pattern: "identical_actions", confidence: avgSim };
-      }
-    }
-
-    // 3. oscillating: A→B→A→B pattern (need 4+ entries)
-    if (taskHistory.length >= 4) {
-      const last4 = taskHistory.slice(-4);
-      const o = last4.map(e => e.output);
-      const sim02 = this.stringSimilarity(o[0], o[2]);
-      const sim13 = this.stringSimilarity(o[1], o[3]);
-      const sim01 = this.stringSimilarity(o[0], o[1]);
-      if (sim02 >= SIMILARITY_THRESHOLD && sim13 >= SIMILARITY_THRESHOLD && sim01 < SIMILARITY_THRESHOLD) {
-        return { isRepetitive: true, pattern: "oscillating", confidence: Math.min(sim02, sim13) };
-      }
-    }
-
-    return { isRepetitive: false, pattern: null, confidence: 0 };
+    return detectTaskRepetition(taskHistory);
   }
 
   // ─── Public Methods ───
@@ -446,81 +327,7 @@ export class StallDetector {
    *   - fallback (unclear) → strategy_wrong → PIVOT
    */
   analyzeStallCause(gapHistory: Array<{ normalized_gap: number }>): StallAnalysis {
-    const MIN_ENTRIES = 3;
-
-    if (gapHistory.length < MIN_ENTRIES) {
-      return StallAnalysisSchema.parse({
-        cause: "strategy_wrong",
-        confidence: 0.3,
-        evidence: `Insufficient history (${gapHistory.length} entries, need ${MIN_ENTRIES})`,
-        recommended_action: "pivot",
-      });
-    }
-
-    const gaps = gapHistory.map((e) => e.normalized_gap);
-    const n = gaps.length;
-
-    // Mean
-    const mean = gaps.reduce((s, v) => s + v, 0) / n;
-
-    // Variance
-    const variance =
-      gaps.reduce((s, v) => s + (v - mean) ** 2, 0) / n;
-
-    // Delta (latest − oldest, positive means gap grew = worse)
-    const delta = gaps[n - 1] - gaps[0];
-
-    // Check divergence: monotonically increasing (gap grows each step)
-    let monotonicallyIncreasing = true;
-    for (let i = 1; i < n; i++) {
-      if (gaps[i] <= gaps[i - 1]) {
-        monotonicallyIncreasing = false;
-        break;
-      }
-    }
-
-    if (monotonicallyIncreasing && delta > 0.05) {
-      return StallAnalysisSchema.parse({
-        cause: "goal_unreachable",
-        confidence: 0.8,
-        evidence: `Gap is monotonically increasing (delta=${delta.toFixed(3)})`,
-        recommended_action: "escalate",
-      });
-    }
-
-    // Check oscillation: high variance + mean stays stable (|delta| small)
-    const HIGH_VARIANCE_THRESHOLD = 0.01;
-    const STABLE_DELTA_THRESHOLD = 0.05;
-
-    if (variance > HIGH_VARIANCE_THRESHOLD && Math.abs(delta) < STABLE_DELTA_THRESHOLD) {
-      return StallAnalysisSchema.parse({
-        cause: "parameter_issue",
-        confidence: 0.75,
-        evidence: `Oscillating gap (variance=${variance.toFixed(4)}, delta=${delta.toFixed(3)})`,
-        recommended_action: "refine",
-      });
-    }
-
-    // Check flat: very low variance + small delta
-    const LOW_VARIANCE_THRESHOLD = 0.005;
-    const LOW_DELTA_THRESHOLD = 0.05;
-
-    if (variance <= LOW_VARIANCE_THRESHOLD && Math.abs(delta) < LOW_DELTA_THRESHOLD) {
-      return StallAnalysisSchema.parse({
-        cause: "strategy_wrong",
-        confidence: 0.75,
-        evidence: `Flat gap with no progress (variance=${variance.toFixed(4)}, delta=${delta.toFixed(3)})`,
-        recommended_action: "pivot",
-      });
-    }
-
-    // Default fallback
-    return StallAnalysisSchema.parse({
-      cause: "strategy_wrong",
-      confidence: 0.5,
-      evidence: `Unclear pattern (variance=${variance.toFixed(4)}, delta=${delta.toFixed(3)})`,
-      recommended_action: "pivot",
-    });
+    return analyzeGapHistory(gapHistory);
   }
 
   /**
@@ -674,36 +481,6 @@ export class StallDetector {
     estimatedDuration: { value: number; unit: string } | null | undefined,
     taskCategory?: string
   ): number {
-    if (estimatedDuration) {
-      const estimatedHours = this.durationToHours(estimatedDuration);
-      return estimatedHours * 2;
-    }
-
-    if (taskCategory) {
-      const defaultHours = DEFAULT_DURATION_HOURS_BY_CATEGORY[taskCategory];
-      if (defaultHours !== undefined) {
-        return defaultHours;
-      }
-    }
-
-    return DEFAULT_DURATION_HOURS_FALLBACK;
-  }
-
-  /**
-   * Convert a duration object to hours.
-   */
-  private durationToHours(duration: { value: number; unit: string }): number {
-    switch (duration.unit) {
-      case "minutes":
-        return duration.value / 60;
-      case "hours":
-        return duration.value;
-      case "days":
-        return duration.value * 24;
-      case "weeks":
-        return duration.value * 24 * 7;
-      default:
-        return duration.value; // assume hours as fallback
-    }
+    return computeTimeThreshold(estimatedDuration, taskCategory);
   }
 }

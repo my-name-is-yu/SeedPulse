@@ -3,9 +3,6 @@
 // Central coordinator for 1-shot chat execution (Tier 1).
 // Bypasses TaskLifecycle — calls adapter.execute() directly.
 
-import { execFile } from "node:child_process";
-import * as fsp from "node:fs/promises";
-import * as path from "node:path";
 import type { StateManager } from "../../base/state/state-manager.js";
 import type { IAdapter, AgentTask } from "../../orchestrator/execution/adapter-layer.js";
 import type { ILLMClient } from "../../base/llm/llm-client.js";
@@ -74,6 +71,22 @@ import type {
   RuntimeSessionRegistrySnapshot,
   RuntimeSessionRegistryWarning,
 } from "../../runtime/session-registry/types.js";
+import {
+  checkGitChanges,
+  classifyInterruptRedirect,
+  collectGitDiffArtifact,
+  DIFF_ARTIFACT_MAX_LINES,
+  formatIntentInput,
+  formatToolActivity,
+  previewActivityText,
+  type GitDiffArtifact,
+} from "./chat-runner-support.js";
+import {
+  collectGoalUsage,
+  collectScheduleUsage,
+  listRecoverableArchivedGoalIds,
+  readTasksForGoal,
+} from "./chat-runner-state.js";
 
 // ─── Types ───
 
@@ -148,8 +161,6 @@ interface AssistantBuffer {
   text: string;
 }
 
-type ChatInterruptRedirectKind = "diff" | "review" | "summary" | "background" | "redirect";
-
 interface ActiveChatTurn {
   context: ChatEventContext;
   cwd: string;
@@ -178,8 +189,6 @@ interface ProviderConfigSummary {
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_VERIFY_RETRIES = 2;
 const MAX_TOOL_LOOPS = 5;
-const ACTIVITY_PREVIEW_CHARS = 40;
-const DIFF_ARTIFACT_MAX_LINES = 80;
 const standaloneIngressRouter = createIngressRouter();
 
 // ─── Command help text ───
@@ -220,134 +229,6 @@ Review and branching
 
 Deferred
   /retry is intentionally not supported yet.`;
-
-// ─── Helpers ───
-
-function checkGitChanges(cwd: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    execFile("git", ["diff", "HEAD", "--stat"], { cwd, timeout: 5_000 }, (err, stdout, stderr) => {
-      resolve(err ? null : (stdout + stderr).trim());
-    });
-  });
-}
-
-function runGit(cwd: string, args: string[], timeout = 5_000): Promise<string | null> {
-  return new Promise((resolve) => {
-    execFile("git", args, { cwd, timeout }, (err, stdout, stderr) => {
-      if (err) {
-        resolve(null);
-        return;
-      }
-      resolve((stdout + stderr).trim());
-    });
-  });
-}
-
-interface GitDiffArtifact {
-  stat: string;
-  nameStatus: string;
-  patch: string;
-  truncated: boolean;
-}
-
-function parseGitLines(output: string | null): string[] {
-  return output ? output.split("\n").map((line) => line.trim()).filter(Boolean) : [];
-}
-
-async function buildUntrackedFilePatch(cwd: string, relativePath: string): Promise<string> {
-  const absolutePath = path.resolve(cwd, relativePath);
-  const relativeFromCwd = path.relative(cwd, absolutePath);
-  if (relativeFromCwd.startsWith("..") || path.isAbsolute(relativeFromCwd)) {
-    return `diff --git a/${relativePath} b/${relativePath}\nnew file skipped: path outside workspace`;
-  }
-  try {
-    const stat = await fsp.stat(absolutePath);
-    if (!stat.isFile()) {
-      return `diff --git a/${relativePath} b/${relativePath}\nnew file skipped: not a regular file`;
-    }
-    if (stat.size > 100_000) {
-      return `diff --git a/${relativePath} b/${relativePath}\nnew file skipped: ${stat.size} bytes`;
-    }
-    const content = await fsp.readFile(absolutePath, "utf-8");
-    const lines = content.split("\n");
-    const body = lines.map((line) => `+${line}`).join("\n");
-    return [
-      `diff --git a/${relativePath} b/${relativePath}`,
-      "new file mode 100644",
-      "--- /dev/null",
-      `+++ b/${relativePath}`,
-      `@@ -0,0 +1,${lines.length} @@`,
-      body,
-    ].join("\n");
-  } catch {
-    return `diff --git a/${relativePath} b/${relativePath}\nnew file skipped: unreadable`;
-  }
-}
-
-async function collectGitDiffArtifact(cwd: string): Promise<GitDiffArtifact | null> {
-  const trackedStat = await runGit(cwd, ["diff", "HEAD", "--stat"]);
-  const untrackedFiles = parseGitLines(await runGit(cwd, ["ls-files", "--others", "--exclude-standard"]));
-  if (!trackedStat && untrackedFiles.length === 0) return null;
-  const trackedNameStatus = await runGit(cwd, ["diff", "HEAD", "--name-status"]) ?? "";
-  const trackedPatch = await runGit(cwd, ["diff", "HEAD", "--patch", "--unified=3"], 10_000) ?? "";
-  const untrackedPatchParts = await Promise.all(
-    untrackedFiles.slice(0, 10).map((file) => buildUntrackedFilePatch(cwd, file))
-  );
-  if (untrackedFiles.length > 10) {
-    untrackedPatchParts.push(`... ${untrackedFiles.length - 10} additional untracked file(s) omitted`);
-  }
-  const stat = [
-    trackedStat,
-    untrackedFiles.length > 0
-      ? ["Untracked files:", ...untrackedFiles.map((file) => `  ${file}`)].join("\n")
-      : "",
-  ].filter(Boolean).join("\n");
-  const nameStatus = [
-    trackedNameStatus,
-    ...untrackedFiles.map((file) => `A\t${file}`),
-  ].filter(Boolean).join("\n");
-  const patch = [trackedPatch, ...untrackedPatchParts].filter(Boolean).join("\n");
-  const patchLines = patch.split("\n");
-  const truncated = patchLines.length > DIFF_ARTIFACT_MAX_LINES;
-  return {
-    stat,
-    nameStatus,
-    patch: patchLines.slice(0, DIFF_ARTIFACT_MAX_LINES).join("\n"),
-    truncated,
-  };
-}
-
-function previewActivityText(value: string, maxChars = ACTIVITY_PREVIEW_CHARS): string {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  return normalized.length > maxChars ? `${normalized.slice(0, maxChars)}...` : normalized;
-}
-
-function classifyInterruptRedirect(input: string): ChatInterruptRedirectKind {
-  const normalized = input.trim().toLowerCase();
-  if (/\b(background|bg)\b|バックグラウンド|裏で|裏側|continue.*background/.test(normalized)) {
-    return "background";
-  }
-  if (/\b(review|read.?only|readonly)\b|レビュー|確認だけ|読むだけ/.test(normalized)) {
-    return "review";
-  }
-  if (/\b(diff|changes?|patch)\b|差分|変更.*見|変更内容/.test(normalized)) {
-    return "diff";
-  }
-  if (/\b(stop|pause|summary|summarize|interrupt)\b|止め|停止|中断|一旦|要約/.test(normalized)) {
-    return "summary";
-  }
-  return "redirect";
-}
-
-function formatToolActivity(action: "Running" | "Finished" | "Failed", toolName: string, detail?: string): string {
-  const preview = detail ? previewActivityText(detail) : "";
-  return preview ? `${action} tool: ${toolName} - ${preview}` : `${action} tool: ${toolName}`;
-}
-
-function formatIntentInput(input: string, maxChars = 96): string {
-  const normalized = input.replace(/\s+/g, " ").trim();
-  return normalized.length > maxChars ? `${normalized.slice(0, maxChars - 3)}...` : normalized;
-}
 
 function resolveSelfIdentityResponse(input: string, baseDir: string): string | null {
   const normalized = input.trim().toLowerCase().replace(/\s+/g, "");
@@ -566,9 +447,6 @@ export class ChatRunner {
         : runtimeControlContext?.replyTarget?.surface === "gateway"
           ? "plugin_gateway"
           : "cli";
-    const runtimeApprovalFn = runtimeControlContext?.approvalFn
-      ?? this.deps.runtimeControlApprovalFn
-      ?? this.deps.approvalFn;
     const replyTarget = runtimeControlContext?.replyTarget ?? this.deps.runtimeReplyTarget;
     const replyTargetInput: Partial<IngressReplyTarget> | undefined = replyTarget
       ? {
@@ -762,40 +640,11 @@ export class ChatRunner {
   private async listAllGoalIds(): Promise<string[]> {
     const activeIds = await this.deps.stateManager.listGoalIds();
     const archivedIds = await this.deps.stateManager.listArchivedGoals();
-    const recoverableArchivedIds = await this.listRecoverableArchivedGoalIds();
-    return [...new Set([...activeIds, ...archivedIds, ...recoverableArchivedIds])];
-  }
-
-  private resolveStatePath(baseDir: string, ...segments: string[]): string | null {
-    const base = path.resolve(baseDir);
-    const resolved = path.resolve(base, ...segments);
-    if (!resolved.startsWith(base + path.sep)) return null;
-    return resolved;
-  }
-
-  private async listRecoverableArchivedGoalIds(): Promise<string[]> {
     const stateManager = this.deps.stateManager as StateManager & { getBaseDir?: () => string };
-    if (typeof stateManager.getBaseDir !== "function") return [];
-    const archiveDir = this.resolveStatePath(stateManager.getBaseDir(), "archive");
-    if (archiveDir === null) return [];
-    let entries: Array<{ name: string; isDirectory(): boolean }> = [];
-    try {
-      entries = await fsp.readdir(archiveDir, { withFileTypes: true });
-    } catch {
-      return [];
-    }
-
-    const goalIds: string[] = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name === ".staging") continue;
-      try {
-        await fsp.access(path.join(archiveDir, entry.name, "goal", "goal.json"));
-        goalIds.push(entry.name);
-      } catch {
-        continue;
-      }
-    }
-    return goalIds;
+    const recoverableArchivedIds = typeof stateManager.getBaseDir === "function"
+      ? await listRecoverableArchivedGoalIds(stateManager.getBaseDir())
+      : [];
+    return [...new Set([...activeIds, ...archivedIds, ...recoverableArchivedIds])];
   }
 
   private activeGoals(goals: Goal[]): Goal[] {
@@ -862,39 +711,10 @@ export class ChatRunner {
     };
   }
 
-  private async readTasksFromDir(tasksDir: string): Promise<Task[]> {
-    let entries: string[] = [];
-    try {
-      entries = await fsp.readdir(tasksDir);
-    } catch {
-      return [];
-    }
-
-    const tasks: Task[] = [];
-    for (const entry of entries) {
-      if (!entry.endsWith(".json") || entry === "task-history.json" || entry === "last-failure-context.json") continue;
-      let raw: unknown;
-      try {
-        raw = JSON.parse(await fsp.readFile(path.join(tasksDir, entry), "utf-8"));
-      } catch {
-        continue;
-      }
-      const parsed = TaskSchema.safeParse(raw);
-      if (parsed.success) tasks.push(parsed.data);
-    }
-    return tasks.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
-  }
-
   private async readTasksForGoal(goalId: string): Promise<Task[]> {
     const stateManager = this.deps.stateManager as StateManager & { getBaseDir?: () => string };
     if (typeof stateManager.getBaseDir !== "function") return [];
-    const baseDir = stateManager.getBaseDir();
-    const activeTasksDir = this.resolveStatePath(baseDir, "tasks", goalId);
-    const archiveTasksDir = this.resolveStatePath(baseDir, "archive", goalId, "tasks");
-    if (activeTasksDir === null || archiveTasksDir === null) return [];
-    const activeTasks = await this.readTasksFromDir(activeTasksDir);
-    if (activeTasks.length > 0) return activeTasks;
-    return this.readTasksFromDir(archiveTasksDir);
+    return readTasksForGoal(stateManager.getBaseDir(), goalId);
   }
 
   private async resolveGoalForTasks(selector: string): Promise<{ goalId?: string; error?: string }> {
@@ -1104,100 +924,6 @@ export class ChatRunner {
     ];
   }
 
-  private parseUsagePeriodMs(period: string): number {
-    const match = /^(\d+)([dhw])$/i.exec(period.trim());
-    if (!match) {
-      throw new Error("period must be one of 24h, 7d, 2w");
-    }
-    const value = Number(match[1]);
-    const unit = match[2]?.toLowerCase();
-    if (!Number.isFinite(value) || value <= 0) {
-      throw new Error("period value must be positive");
-    }
-    if (unit === "h") return value * 60 * 60 * 1000;
-    if (unit === "w") return value * 7 * 24 * 60 * 60 * 1000;
-    return value * 24 * 60 * 60 * 1000;
-  }
-
-  private async collectGoalUsage(goalId: string): Promise<{
-    goalId: string;
-    totalTokens: number;
-    taskCount: number;
-    terminalTaskCount: number;
-  }> {
-    const baseDir = this.deps.stateManager.getBaseDir();
-    const ledgerDir = path.join(baseDir, "tasks", goalId, "ledger");
-    let entries: string[] = [];
-    try {
-      entries = await fsp.readdir(ledgerDir);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-      return { goalId, totalTokens: 0, taskCount: 0, terminalTaskCount: 0 };
-    }
-
-    let totalTokens = 0;
-    let taskCount = 0;
-    let terminalTaskCount = 0;
-    for (const entry of entries) {
-      if (!entry.endsWith(".json")) continue;
-      taskCount += 1;
-      try {
-        const raw = await fsp.readFile(path.join(ledgerDir, entry), "utf-8");
-        const parsed = JSON.parse(raw) as {
-          summary?: { latest_event_type?: string; tokens_used?: number };
-        };
-        if (typeof parsed.summary?.tokens_used === "number") {
-          totalTokens += parsed.summary.tokens_used;
-        }
-        if (parsed.summary?.latest_event_type === "succeeded"
-          || parsed.summary?.latest_event_type === "failed"
-          || parsed.summary?.latest_event_type === "abandoned") {
-          terminalTaskCount += 1;
-        }
-      } catch {
-        // Ignore malformed records.
-      }
-    }
-
-    return { goalId, totalTokens, taskCount, terminalTaskCount };
-  }
-
-  private async collectScheduleUsage(period: string): Promise<{
-    period: string;
-    runs: number;
-    totalTokens: number;
-  }> {
-    const periodMs = this.parseUsagePeriodMs(period);
-    const since = Date.now() - periodMs;
-    const historyPath = path.join(this.deps.stateManager.getBaseDir(), "schedule-history.json");
-    let raw: unknown;
-    try {
-      raw = JSON.parse(await fsp.readFile(historyPath, "utf-8"));
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        return { period, runs: 0, totalTokens: 0 };
-      }
-      throw err;
-    }
-    if (!Array.isArray(raw)) {
-      return { period, runs: 0, totalTokens: 0 };
-    }
-    let runs = 0;
-    let totalTokens = 0;
-    for (const record of raw) {
-      if (!record || typeof record !== "object") continue;
-      const finishedAt = (record as Record<string, unknown>)["finished_at"];
-      const firedAt = typeof finishedAt === "string" ? Date.parse(finishedAt) : Number.NaN;
-      if (!Number.isFinite(firedAt) || firedAt < since) continue;
-      runs += 1;
-      const tokensUsed = (record as Record<string, unknown>)["tokens_used"];
-      if (typeof tokensUsed === "number" && Number.isFinite(tokensUsed)) {
-        totalTokens += tokensUsed;
-      }
-    }
-    return { period, runs, totalTokens };
-  }
-
   private async handleUsage(args: string, start: number): Promise<ChatRunResult> {
     const tokens = args.trim().split(/\s+/).filter(Boolean);
     const scope = tokens[0]?.toLowerCase();
@@ -1231,7 +957,7 @@ export class ChatRunner {
       if (!goalId) {
         return { success: false, output: "Usage: /usage goal <goal-id>", elapsed_ms: Date.now() - start };
       }
-      const summary = await this.collectGoalUsage(goalId);
+      const summary = await collectGoalUsage(this.deps.stateManager.getBaseDir(), goalId);
       const lines = [
         `Usage summary (${scope} scope)`,
         `Goal: ${summary.goalId}`,
@@ -1245,7 +971,7 @@ export class ChatRunner {
     if (scope === "schedule") {
       const period = tokens[1] ?? "7d";
       try {
-        const summary = await this.collectScheduleUsage(period);
+        const summary = await collectScheduleUsage(this.deps.stateManager.getBaseDir(), period);
         const lines = [
           `Usage summary (schedule, ${summary.period})`,
           `Runs: ${summary.runs}`,
@@ -1865,36 +1591,13 @@ export class ChatRunner {
     // Intercept commands before any adapter call
     const commandResult = resumeOnly ? null : await this.handleCommand(input, resolvedCwd);
     if (commandResult !== null) {
-      if (commandResult.output) {
-        this.emitEvent({
-          type: "assistant_final",
-          text: commandResult.output,
-          persisted: false,
-          ...this.eventBase(eventContext),
-        });
-      }
-      this.emitLifecycleEndEvent(commandResult.success ? "completed" : "error", commandResult.elapsed_ms, eventContext, false);
-      return commandResult;
+      return this.finalizeNonPersistentResult(commandResult, eventContext);
     }
 
     // Intercept plain Y/n responses (and any other input) when a /tend confirmation is pending
     if (this.pendingTend !== null && !resumeOnly) {
       const confirmationResult = await this.handleTendConfirmation(input.trim(), Date.now());
-      if (confirmationResult.output) {
-        this.emitEvent({
-          type: "assistant_final",
-          text: confirmationResult.output,
-          persisted: false,
-          ...this.eventBase(eventContext),
-        });
-      }
-      this.emitLifecycleEndEvent(
-        confirmationResult.success ? "completed" : "error",
-        confirmationResult.elapsed_ms,
-        eventContext,
-        false
-      );
-      return confirmationResult;
+      return this.finalizeNonPersistentResult(confirmationResult, eventContext);
     }
 
     if (resumeOnly && resumeCommand.selector) {
@@ -1903,41 +1606,20 @@ export class ChatRunner {
         if (selectorResolution.nonResumableMessage) {
           const elapsed_ms = 0;
           const output = selectorResolution.nonResumableMessage;
-          this.emitEvent({
-            type: "assistant_final",
-            text: output,
-            persisted: false,
-            ...this.eventBase(eventContext),
-          });
-          this.emitLifecycleEndEvent("error", elapsed_ms, eventContext, false);
-          return { success: false, output, elapsed_ms };
+          return this.finalizeNonPersistentResult({ success: false, output, elapsed_ms }, eventContext);
         }
         const catalog = new ChatSessionCatalog(this.deps.stateManager);
         const session = await catalog.loadSessionBySelector(selectorResolution.chatSelector);
         if (!session) {
           const elapsed_ms = 0;
           const output = `No chat session matched selector "${selectorResolution.chatSelector}".`;
-          this.emitEvent({
-            type: "assistant_final",
-            text: output,
-            persisted: false,
-            ...this.eventBase(eventContext),
-          });
-          this.emitLifecycleEndEvent("error", elapsed_ms, eventContext, false);
-          return { success: false, output, elapsed_ms };
+          return this.finalizeNonPersistentResult({ success: false, output, elapsed_ms }, eventContext);
         }
         this.startSessionFromLoadedSession(session);
       } catch (err) {
         const elapsed_ms = 0;
         const output = err instanceof ChatSessionSelectorError ? err.message : `Failed to load chat session: ${err instanceof Error ? err.message : String(err)}`;
-        this.emitEvent({
-          type: "assistant_final",
-          text: output,
-          persisted: false,
-          ...this.eventBase(eventContext),
-        });
-        this.emitLifecycleEndEvent("error", elapsed_ms, eventContext, false);
-        return { success: false, output, elapsed_ms };
+        return this.finalizeNonPersistentResult({ success: false, output, elapsed_ms }, eventContext);
       }
     }
 
@@ -2912,6 +2594,19 @@ export class ChatRunner {
       this.pushAssistantDelta(response.content, assistantBuffer, eventContext);
     }
     return response;
+  }
+
+  private finalizeNonPersistentResult(result: ChatRunResult, eventContext: ChatEventContext): ChatRunResult {
+    if (result.output) {
+      this.emitEvent({
+        type: "assistant_final",
+        text: result.output,
+        persisted: false,
+        ...this.eventBase(eventContext),
+      });
+    }
+    this.emitLifecycleEndEvent(result.success ? "completed" : "error", result.elapsed_ms, eventContext, false);
+    return result;
   }
 
   private createEventContext(): ChatEventContext {

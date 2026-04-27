@@ -305,7 +305,6 @@ describe("ChatRunner policy commands", () => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
-
   it("/undo removes the latest turn from chat history", async () => {
     const runner = new ChatRunner(makeDeps());
     runner.startSession("/repo");

@@ -1,17 +1,12 @@
 import { z } from "zod";
-import * as path from "node:path";
-import { StateManager } from "../../base/state/state-manager.js";
+import type { StateManager } from "../../base/state/state-manager.js";
 import type { ILLMClient } from "../../base/llm/llm-client.js";
 import type { IPromptGateway } from "../../prompt/gateway.js";
-import { TaskSchema } from "../../base/types/task.js";
 import type { Task } from "../../base/types/task.js";
 import {
   KnowledgeEntrySchema,
   DomainKnowledgeSchema,
-  KnowledgeGapSignalSchema,
-  ContradictionResultSchema,
   SharedKnowledgeEntrySchema,
-  REVALIDATION_SCHEDULE,
 } from "../../base/types/knowledge.js";
 import type {
   KnowledgeEntry,
@@ -55,25 +50,20 @@ import type { ToolExecutor } from "../../tools/executor.js";
 import type { ToolCallContext } from "../../tools/types.js";
 import {
   AgentMemoryEntrySchema,
-  AgentMemoryStoreSchema,
 } from "./types/agent-memory.js";
-import type { AgentMemoryEntry, AgentMemoryType } from "./types/agent-memory.js";
+import type { AgentMemoryEntry, AgentMemoryStore, AgentMemoryType } from "./types/agent-memory.js";
 import {
-  projectAgentMemoryToSoil,
-  projectDomainKnowledgeToSoil,
-  projectSharedKnowledgeToSoil,
-  rebuildSoilIndex,
-} from "../soil/index.js";
-
+  AGENT_MEMORY_PATH,
+  SHARED_KB_PATH,
+  loadAgentMemoryStore,
+  projectAgentMemory,
+  projectDomainKnowledge,
+  projectSharedKnowledge,
+} from "./knowledge-manager-internals.js";
 
 export * from "./public-api.js";
 
 // ─── KnowledgeManager ───
-
-const AGENT_MEMORY_PATH = "memory/agent-memory/entries.json";
-
-/** Key used to store all SharedKnowledgeEntries as a flat array. */
-const SHARED_KB_PATH = "memory/shared-knowledge/entries.json";
 
 /**
  * KnowledgeManager detects knowledge gaps, generates research tasks,
@@ -538,7 +528,7 @@ export class KnowledgeManager {
 
     // Keyword search mode (default)
     const lower = query.toLowerCase();
-    let results = candidates.filter((e) => {
+    const results = candidates.filter((e) => {
       return exact
         ? e.key === query
         : e.key.toLowerCase().includes(lower) ||
@@ -569,7 +559,7 @@ export class KnowledgeManager {
     const store = await this._loadAgentMemoryStore();
     const { category, memory_type, limit = 10, include_archived = false } = opts ?? {};
 
-    let results = store.entries.filter((e) => {
+    const results = store.entries.filter((e) => {
       // Exclude archived entries unless explicitly requested
       if (!include_archived && e.status === "archived") return false;
       const matchesCategory = category ? e.category === category : true;
@@ -801,10 +791,8 @@ export class KnowledgeManager {
 
     // ─── Private Helpers ───
 
-  private async _loadAgentMemoryStore(): Promise<import('./types/agent-memory.js').AgentMemoryStore> {
-    const raw = await this.stateManager.readRaw(AGENT_MEMORY_PATH);
-    if (!raw) return AgentMemoryStoreSchema.parse({ entries: [], last_consolidated_at: null });
-    return AgentMemoryStoreSchema.parse(raw);
+  private async _loadAgentMemoryStore(): Promise<AgentMemoryStore> {
+    return loadAgentMemoryStore(this.stateManager);
   }
 
   private async _loadDomainKnowledge(goalId: string): Promise<DomainKnowledge> {
@@ -812,39 +800,15 @@ export class KnowledgeManager {
   }
 
   private async _projectDomainKnowledgeToSoil(goalId: string, domainKnowledge: DomainKnowledge): Promise<void> {
-    try {
-      const baseDir = this.stateManager.getBaseDir();
-      await projectDomainKnowledgeToSoil({ baseDir, goalId, domainKnowledge });
-      await rebuildSoilIndex({ rootDir: path.join(baseDir, "soil") });
-    } catch (error) {
-      console.warn(
-        `[soil] Failed to project domain knowledge for ${goalId}: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
+    await projectDomainKnowledge(this.stateManager, goalId, domainKnowledge);
   }
 
   private async _projectSharedKnowledgeToSoil(entries: SharedKnowledgeEntry[]): Promise<void> {
-    try {
-      const baseDir = this.stateManager.getBaseDir();
-      await projectSharedKnowledgeToSoil({ baseDir, entries });
-      await rebuildSoilIndex({ rootDir: path.join(baseDir, "soil") });
-    } catch (error) {
-      console.warn(
-        `[soil] Failed to project shared knowledge: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
+    await projectSharedKnowledge(this.stateManager, entries);
   }
 
-  private async _projectAgentMemoryToSoil(store: import('./types/agent-memory.js').AgentMemoryStore): Promise<void> {
-    try {
-      const baseDir = this.stateManager.getBaseDir();
-      await projectAgentMemoryToSoil({ baseDir, store });
-      await rebuildSoilIndex({ rootDir: path.join(baseDir, "soil") });
-    } catch (error) {
-      console.warn(
-        `[soil] Failed to project agent memory: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
+  private async _projectAgentMemoryToSoil(store: AgentMemoryStore): Promise<void> {
+    await projectAgentMemory(this.stateManager, store);
   }
 
 

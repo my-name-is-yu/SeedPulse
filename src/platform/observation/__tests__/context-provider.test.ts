@@ -269,6 +269,31 @@ describe("buildWorkspaceContext (integration)", () => {
     expect(typeof result).toBe("string");
     expect(result).toBe("(No workspace context available)");
   });
+
+  it("surfaces failing test output from execFile path as failure status", async () => {
+    execFileMock.mockImplementation(
+      makeExecFileMock((file) => {
+        if (file === "grep") {
+          return new Error("grep: no matches");
+        }
+        if (file === "git") {
+          return { stdout: "" };
+        }
+        if (file === "npx") {
+          const error = new Error("tests failed") as Error & { stdout?: string };
+          error.stdout = "FAIL one test\nError: assertion failed\n";
+          return error;
+        }
+        return { stdout: "" };
+      })
+    );
+
+    const items = await buildWorkspaceContextItems("goal-failure-status", "unknown_xyz", {
+      cwd: projectRoot,
+    });
+
+    expect(items.some((item) => item.label === "[Test status (failures detected)]")).toBe(true);
+  });
 });
 
 // ─── Tier-aware context ───
@@ -521,6 +546,42 @@ describe("collectContextItems with toolExecutor", () => {
     // Should not throw, and should include test status from raw string
     const testItem = items.find((i) => i.label.includes("Test"));
     expect(testItem).toBeDefined();
+  });
+
+  it("includes sanitized code_search ranges when toolExecutor returns structured context", async () => {
+    const executor = createMockExecutor({
+      code_search: {
+        success: true,
+        data: {
+          candidates: [{ id: "cand-1", file: "src/platform/observation/context-provider.ts" }],
+        },
+        summary: "1 candidate",
+        durationMs: 4,
+      },
+      code_read_context: {
+        success: true,
+        data: {
+          ranges: [
+            {
+              file: "src/platform/observation/context-provider.ts",
+              content: "10\tconst alpha = 1;\n11\tconst beta = 2;",
+            },
+          ],
+        },
+        summary: "1 range",
+        durationMs: 5,
+      },
+    });
+
+    const result = await buildWorkspaceContext("goal-tool-code-search", "todo_count", {
+      cwd: projectRoot,
+      toolExecutor: executor,
+    });
+
+    expect(result).toContain('[code_search "TODO"');
+    expect(result).toContain("[CodeSearch: src/platform/observation/context-provider.ts]");
+    expect(result).toContain("const alpha = 1;");
+    expect(result).not.toContain("10\tconst alpha = 1;");
   });
 });
 
