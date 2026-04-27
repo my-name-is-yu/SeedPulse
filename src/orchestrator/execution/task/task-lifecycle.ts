@@ -4,17 +4,17 @@ import {
   runShellCommand as _runShellCommand,
   runPostExecutionHealthCheck as _runPostExecutionHealthCheck,
 } from "./task-health-check.js";
-import { StateManager } from "../../../base/state/state-manager.js";
+import type { StateManager } from "../../../base/state/state-manager.js";
 import type { ILLMClient } from "../../../base/llm/llm-client.js";
-import { SessionManager } from "../session-manager.js";
-import { TrustManager } from "../../../platform/traits/trust-manager.js";
-import { StrategyManager } from "../../strategy/strategy-manager.js";
-import { StallDetector } from "../../../platform/drive/stall-detector.js";
+import type { SessionManager } from "../session-manager.js";
+import type { TrustManager } from "../../../platform/traits/trust-manager.js";
+import type { StrategyManager } from "../../strategy/strategy-manager.js";
+import type { StallDetector } from "../../../platform/drive/stall-detector.js";
 import {
   selectTargetDimension as _selectTargetDimension,
   type DimensionSelectionOptions,
 } from "../context/dimension-selector.js";
-import { VerificationResultSchema, type Task, type VerificationResult } from "../../../base/types/task.js";
+import type { Task, VerificationResult } from "../../../base/types/task.js";
 import type { GapVector } from "../../../base/types/gap.js";
 import type { DriveContext } from "../../../base/types/drive.js";
 import type { Dimension } from "../../../base/types/goal.js";
@@ -44,20 +44,16 @@ import type { TaskPipeline } from "../../../base/types/pipeline.js";
 
 export { LLMGeneratedTaskSchema } from "./task-generation.js";
 import { generateTask as _generateTask } from "./task-generation.js";
-import { reloadTaskFromDisk, durationToMs } from "./task-executor.js";
+import { durationToMs } from "./task-executor.js";
 import { executeTaskWithGuards, verifyExecutionWithGitDiff } from "./task-execution-helpers.js";
-import { runPreExecutionChecks } from "./task-approval.js";
 import { checkIrreversibleApproval as _checkIrreversibleApproval } from "./task-approval-check.js";
 import { runPipelineTaskCycle as runPipelineTaskCycleFn } from "./task-pipeline-cycle.js";
 import type { PipelineCycleOptions } from "./task-pipeline-types.js";
 import type { KnowledgeTransfer } from "../../../platform/knowledge/transfer/knowledge-transfer.js";
 import type { KnowledgeManager } from "../../../platform/knowledge/knowledge-manager.js";
 import type { MemoryLifecycleManager } from "../../../platform/knowledge/memory/memory-lifecycle.js";
-import { buildEnrichedKnowledgeContext } from "./task-context-enricher.js";
-import { persistTaskCycleSideEffects } from "./task-side-effects.js";
-import { finalizeSuccessfulExecution } from "./task-post-execution.js";
 import { captureExecutionDiffArtifacts } from "./task-diff-capture.js";
-import { GuardrailRunner } from "../../../platform/traits/guardrail-runner.js";
+import type { GuardrailRunner } from "../../../platform/traits/guardrail-runner.js";
 import type { HookManager } from "../../../runtime/hook-manager.js";
 import type { ToolExecutor } from "../../../tools/executor.js";
 import type { TaskAgentLoopRunner } from "../agent-loop/task-agent-loop-runner.js";
@@ -84,8 +80,8 @@ export type {
   GenerateTaskFn,
 } from "./task-pipeline-types.js";
 import type { TaskCycleResult } from "./task-execution-types.js";
-import { createSkippedTaskResult } from "./task-execution-types.js";
-import { appendTaskOutcomeEvent, setTaskOutcomeTokens } from "./task-outcome-ledger.js";
+import { appendTaskOutcomeEvent } from "./task-outcome-ledger.js";
+import { runTaskLifecycleCycle } from "./task-lifecycle-runner.js";
 
 export interface TaskLifecycleCoreDeps {
   stateManager: StateManager;
@@ -521,219 +517,42 @@ export class TaskLifecycle {
     workspaceContext?: string,
     options?: TaskCycleRunOptions
   ): Promise<TaskCycleResult> {
-    const runPhase = async <T>(phase: string, fn: () => Promise<T>): Promise<T> => {
-      const phaseStart = Date.now();
-      this.logger?.info("TaskLifecycle: phase started", { goalId, phase });
-      try {
-        const value = await fn();
-        this.logger?.info("TaskLifecycle: phase completed", {
-          goalId,
-          phase,
-          duration_ms: Date.now() - phaseStart,
-        });
-        return value;
-      } catch (err) {
-        this.logger?.warn("TaskLifecycle: phase failed", {
-          goalId,
-          phase,
-          duration_ms: Date.now() - phaseStart,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        throw err;
-      }
-    };
-    // 1. Select target dimension (with confidence-tier weighting when available)
-    let goalDimensions: Dimension[] | undefined;
-    try {
-      const goal = await this.stateManager.loadGoal(goalId);
-      goalDimensions = goal?.dimensions ?? undefined;
-    } catch (err) {
-      // If goal load fails, fall back to unweighted selection
-      this.logger?.warn(`[TaskLifecycle] Failed to load goal "${goalId}" for dimension selection, using unweighted fallback: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    const dimensionSelectionOptions = await this.buildDimensionSelectionBackoff(goalId);
-    const targetDimension = options?.targetDimensionOverride
-      ?? await runPhase("select-target-dimension", async () =>
-        this.selectTargetDimension(gapVector, driveContext, goalDimensions, dimensionSelectionOptions)
-      );
-    if (options?.targetDimensionOverride) {
-      this.logger?.info("TaskLifecycle: using target dimension override", {
-        goalId,
-        targetDimension,
-      });
-    }
-
-    const baseKnowledgeContext = options?.knowledgeContextPrefix
-      ? [options.knowledgeContextPrefix, knowledgeContext].filter(Boolean).join("\n\n")
-      : knowledgeContext;
-
-    const enrichedKnowledgeContext = await runPhase("enrich-knowledge-context", () =>
-      buildEnrichedKnowledgeContext({
-        goalId,
-        knowledgeContext: baseKnowledgeContext,
-        ...this.enrichmentDeps(),
-      })
-    );
-
-    // 3. Generate task (optionally with injected knowledge context)
-    void this.hookManager?.emit("PreTaskCreate", { goal_id: goalId, data: { task_type: targetDimension } });
-    const genResult = await runPhase("generate-task", () =>
-      this._generateTaskWithTokens(
-        goalId,
-        targetDimension,
-        undefined,
-        enrichedKnowledgeContext,
-        adapter.adapterType,
-        existingTasks,
-        workspaceContext
-      )
-    );
-    let taskCycleTokens = genResult.tokensUsed;
-    const playbookIdsUsed = genResult.playbookIdsUsed;
-    const task = genResult.task;
-    if (task === null) {
-      this.logger?.warn("TaskLifecycle: task generation returned null (duplicate detected), skipping cycle");
-      return createSkippedTaskResult(goalId, targetDimension, taskCycleTokens);
-    }
-    void this.hookManager?.emit("PostTaskCreate", { goal_id: goalId, data: { task_id: task.id } });
-    this.logger?.info(`[task] created: ${task.work_description?.substring(0, 120)}`, { taskId: task.id });
-
-    // 4. Pre-execution checks: ethics, capability, irreversible approval
-    const preCheckResult = await runPhase("pre-execution-checks", () =>
-      runPreExecutionChecks(
-        {
-          ethicsGate: this.ethicsGate,
-          capabilityDetector: this.capabilityDetector,
-          approvalFn: this.approvalFn,
-          checkIrreversibleApproval: (t) => this.checkIrreversibleApproval(t),
-        },
-        task
-      )
-    );
-    if (preCheckResult !== null) {
-      await appendTaskOutcomeEvent(this.stateManager, {
-        task,
-        type: "abandoned",
-        attempt: task.consecutive_failure_count + 1,
-        action: preCheckResult.action,
-        verificationResult: preCheckResult.verificationResult,
-        reason: preCheckResult.verificationResult.evidence[0]?.description,
-      });
-      await setTaskOutcomeTokens(this.stateManager, task, taskCycleTokens);
-      return {
-        ...preCheckResult,
-        tokensUsed: taskCycleTokens,
-      };
-    }
-
-    await appendTaskOutcomeEvent(this.stateManager, {
-      task,
-      type: "acked",
-      attempt: task.consecutive_failure_count + 1,
-    });
-
-    if (!this.agentLoopRunner && this.adapterRegistry && !this.adapterRegistry.isAvailable(adapter.adapterType)) {
-      const reason = `Adapter circuit breaker is open for "${adapter.adapterType}"`;
-      const now = new Date().toISOString();
-      const blockedTask = {
-        ...task,
-        status: "error" as const,
-        completed_at: now,
-        execution_output: reason,
-      };
-      await this.stateManager.writeRaw(`tasks/${task.goal_id}/${task.id}.json`, blockedTask);
-      await appendTaskOutcomeEvent(this.stateManager, {
-        task: blockedTask,
-        type: "failed",
-        attempt: task.consecutive_failure_count + 1,
-        reason,
-      });
-      await setTaskOutcomeTokens(this.stateManager, blockedTask, taskCycleTokens);
-      this.logger?.warn(`[task] skipped: ${reason}`, { taskId: task.id });
-
-      return {
-        task: blockedTask,
-        verificationResult: VerificationResultSchema.parse({
-          task_id: task.id,
-          verdict: "fail",
-          confidence: 1,
-          evidence: [{ layer: "mechanical", description: reason, confidence: 1 }],
-          dimension_updates: [],
-          timestamp: now,
-        }),
-        action: "discard",
-        tokensUsed: taskCycleTokens,
-      };
-    }
-
-    // 4. Execute task
-    this.logger?.debug(`[DEBUG-TL] Executing task ${task.id} via adapter ${adapter.adapterType}`);
-    void this.hookManager?.emit("PreExecute", { goal_id: goalId, data: { task_id: task.id } });
-    const executionResult = await runPhase("execute-task", () =>
-      this.agentLoopRunner
-        ? this.executeTaskWithAgentLoop(task, workspaceContext, enrichedKnowledgeContext)
-        : this.executeTask(task, adapter, workspaceContext)
-    );
-    const nativeExecutionTokens = executionResult.agentLoop?.usage?.totalTokens;
-    if (typeof nativeExecutionTokens === "number" && Number.isFinite(nativeExecutionTokens)) {
-      taskCycleTokens += nativeExecutionTokens;
-    }
-    void this.hookManager?.emit("PostExecute", { goal_id: goalId, data: { task_id: task.id, success: executionResult.success } });
-    this.logger?.info(`[task] executed: ${executionResult.success ? 'success' : 'failed'}`, { taskId: task.id });
-    this.logger?.debug(`[DEBUG-TL] Execution result: success=${executionResult.success}, stopped=${executionResult.stopped_reason}, error=${executionResult.error}, output=${executionResult.output?.substring(0, 200)}`);
-
-    await finalizeSuccessfulExecution({
-      executionResult,
+    return runTaskLifecycleCycle({
       goalId,
-      ...this.postExecutionDeps(),
+      gapVector,
+      driveContext,
+      adapter,
+      knowledgeContext,
+      existingTasks,
+      workspaceContext,
+      options,
+      stateManager: this.stateManager,
       logger: this.logger,
+      hookManager: this.hookManager,
+      toolExecutor: this.toolExecutor,
+      healthCheckEnabled: this.healthCheckEnabled,
+      healthCheckCwd: this.healthCheckCwd,
+      runPostExecutionHealthCheck: () => this.runPostExecutionHealthCheck(),
+      verificationDeps: (preferredAdapterType) => this.verifierDeps(preferredAdapterType),
+      sideEffectDeps: () => this.sideEffectDeps(),
+      buildDimensionSelectionBackoff: (runGoalId) => this.buildDimensionSelectionBackoff(runGoalId),
+      selectTargetDimension: (runGapVector, runDriveContext, dimensions, selectionOptions) =>
+        this.selectTargetDimension(runGapVector, runDriveContext, dimensions, selectionOptions),
+      generateTaskWithTokens: (runGoalId, targetDimension, strategyId, runKnowledgeContext, adapterType, runExistingTasks, runWorkspaceContext) =>
+        this._generateTaskWithTokens(runGoalId, targetDimension, strategyId, runKnowledgeContext, adapterType, runExistingTasks, runWorkspaceContext),
+      enrichmentDeps: () => this.enrichmentDeps(),
+      checkIrreversibleApproval: (task) => this.checkIrreversibleApproval(task),
+      preExecution: {
+        ethicsGate: this.ethicsGate,
+        capabilityDetector: this.capabilityDetector,
+        approvalFn: this.approvalFn,
+      },
+      hasNativeAgentLoop: Boolean(this.agentLoopRunner),
+      executeTask: (task, runAdapter, runWorkspaceContext) => this.executeTask(task, runAdapter, runWorkspaceContext),
+      executeTaskWithAgentLoop: (task, runWorkspaceContext, runKnowledgeContext) =>
+        this.executeTaskWithAgentLoop(task, runWorkspaceContext, runKnowledgeContext),
+      handleVerdict: (task, verificationResult) => this.handleVerdict(task, verificationResult),
     });
-
-    // Reload task from disk to get accurate status/started_at/completed_at set by executeTask
-    const taskForVerification = await reloadTaskFromDisk(this.stateManager, task);
-
-    // 5. Verify task — use token accumulator to capture LLM tokens consumed during verification
-    const verifierTokenAccumulator = { tokensUsed: 0 };
-    const verifierDepsWithAccumulator = {
-      ...this.verifierDeps(adapter.adapterType),
-      _tokenAccumulator: verifierTokenAccumulator,
-    };
-    const verificationResult = await runPhase("verify-task", () =>
-      _verifyTask(verifierDepsWithAccumulator, taskForVerification, executionResult)
-    );
-    taskCycleTokens += verifierTokenAccumulator.tokensUsed;
-    this.logger?.debug(`[DEBUG-TL] Verification: verdict=${verificationResult.verdict}, evidence=${verificationResult.evidence.map(e => e.description).join('; ').substring(0, 300)}`);
-
-    // 6. Handle verdict
-    const verdictResult = await runPhase("handle-verdict", () =>
-      this.handleVerdict(taskForVerification, verificationResult)
-    );
-    this.logger?.info(`[task] verdict: ${verdictResult.action}`, { taskId: task.id });
-
-    await runPhase("persist-task-side-effects", () =>
-      persistTaskCycleSideEffects({
-        goalId,
-        targetDimension,
-        task: verdictResult.task,
-        action: verdictResult.action,
-        verificationResult,
-        executionResult,
-        adapter,
-        ...this.sideEffectDeps(),
-        gapValue: gapVector?.gaps?.[0]?.normalized_gap,
-        reusedPlaybookIds: playbookIdsUsed,
-      })
-    );
-    await runPhase("persist-usage-telemetry", async () => {
-      await setTaskOutcomeTokens(this.stateManager, verdictResult.task, taskCycleTokens);
-    });
-
-    return {
-      task: verdictResult.task,
-      verificationResult,
-      action: verdictResult.action,
-      tokensUsed: taskCycleTokens,
-    };
   }
 
   /**

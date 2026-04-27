@@ -1,12 +1,8 @@
-import { z } from "zod";
 import type { StateManager } from "../../base/state/state-manager.js";
 import type { ILLMClient } from "../../base/llm/llm-client.js";
 import type { IPromptGateway } from "../../prompt/gateway.js";
 import type { Task } from "../../base/types/task.js";
 import {
-  KnowledgeEntrySchema,
-  DomainKnowledgeSchema,
-  SharedKnowledgeEntrySchema,
 } from "../../base/types/knowledge.js";
 import type {
   KnowledgeEntry,
@@ -19,20 +15,17 @@ import type {
 } from "../../base/types/knowledge.js";
 import type { VectorIndex } from "./vector-index.js";
 import type { IEmbeddingClient } from "./embedding-client.js";
-import { cosineSimilarity } from "./embedding-client.js";
 import {
   searchKnowledge,
   searchAcrossGoals,
   searchByEmbedding,
   querySharedKnowledge,
-  loadSharedEntries,
   loadDomainKnowledge,
 } from "./knowledge-search.js";
 import {
   classifyDomainStability,
   getStaleEntries,
   generateRevalidationTasks,
-  computeRevalidationDue,
 } from "./knowledge-revalidation.js";
 import {
   recordDecision,
@@ -48,18 +41,28 @@ import {
 } from "./knowledge-manager-query.js";
 import type { ToolExecutor } from "../../tools/executor.js";
 import type { ToolCallContext } from "../../tools/types.js";
-import {
-  AgentMemoryEntrySchema,
-} from "./types/agent-memory.js";
 import type { AgentMemoryEntry, AgentMemoryStore, AgentMemoryType } from "./types/agent-memory.js";
 import {
   AGENT_MEMORY_PATH,
-  SHARED_KB_PATH,
   loadAgentMemoryStore,
   projectAgentMemory,
   projectDomainKnowledge,
   projectSharedKnowledge,
 } from "./knowledge-manager-internals.js";
+import {
+  archiveAgentMemoryEntries,
+  autoConsolidateAgentMemory,
+  consolidateAgentMemoryEntries,
+  deleteAgentMemoryEntry,
+  getAgentMemoryStatsForHost,
+  listAgentMemoryEntries,
+  recallAgentMemoryEntries,
+  saveAgentMemoryEntry,
+} from "./knowledge-manager-agent-memory.js";
+import {
+  saveDomainKnowledgeEntry,
+  saveSharedKnowledgeEntry,
+} from "./knowledge-manager-store.js";
 
 export * from "./public-api.js";
 
@@ -126,36 +129,7 @@ export class KnowledgeManager {
    * Persist a KnowledgeEntry to ~/.pulseed/goals/<goal_id>/domain_knowledge.json
    */
   async saveKnowledge(goalId: string, entry: KnowledgeEntry): Promise<void> {
-    const parsed = KnowledgeEntrySchema.parse(entry);
-    const domainKnowledge = await this._loadDomainKnowledge(goalId);
-
-    domainKnowledge.entries.push(parsed);
-    domainKnowledge.last_updated = new Date().toISOString();
-
-    const validated = DomainKnowledgeSchema.parse(domainKnowledge);
-
-    // Phase 2: index in VectorIndex first so writeRaw is the commit point.
-    // If writeRaw fails, roll back the vector index entry to keep consistency.
-    if (this.vectorIndex) {
-      await this.vectorIndex.add(
-        parsed.entry_id,
-        `${parsed.question} ${parsed.answer}`,
-        { goal_id: goalId, tags: parsed.tags }
-      );
-    }
-
-    try {
-      await this.stateManager.writeRaw(
-        `goals/${goalId}/domain_knowledge.json`,
-        validated
-      );
-      await this._projectDomainKnowledgeToSoil(goalId, validated);
-    } catch (err) {
-      if (this.vectorIndex) {
-        await this.vectorIndex.remove(parsed.entry_id);
-      }
-      throw err;
-    }
+    await saveDomainKnowledgeEntry(this.knowledgeStoreHost(), goalId, entry);
   }
 
   // ─── loadKnowledge ───
@@ -252,58 +226,7 @@ export class KnowledgeManager {
     entry: KnowledgeEntry,
     goalId: string
   ): Promise<SharedKnowledgeEntry> {
-    const now = new Date();
-
-    // Build shared entry (default stability: moderate)
-    const shared = SharedKnowledgeEntrySchema.parse({
-      ...entry,
-      source_goal_ids: [goalId],
-      domain_stability: "moderate" as DomainStability,
-      revalidation_due_at: computeRevalidationDue(now, "moderate"),
-      embedding_id: null,
-    });
-
-    // Load existing entries and merge / append
-    const all = await loadSharedEntries(this.stateManager);
-    const existingIdx = all.findIndex((e) => e.entry_id === entry.entry_id);
-
-    let merged: SharedKnowledgeEntry;
-    if (existingIdx >= 0) {
-      const existing = all[existingIdx]!;
-      const mergedGoalIds = Array.from(
-        new Set([...existing.source_goal_ids, goalId])
-      );
-      merged = SharedKnowledgeEntrySchema.parse({
-        ...existing,
-        source_goal_ids: mergedGoalIds,
-      });
-      all[existingIdx] = merged;
-    } else {
-      merged = shared;
-      all.push(merged);
-    }
-
-    // Auto-register in VectorIndex if available
-    if (this.vectorIndex) {
-      const text = `${entry.question} ${entry.answer} ${entry.tags.join(" ")}`;
-      const vectorEntry = await this.vectorIndex.add(entry.entry_id, text, {
-        goal_id: goalId,
-        tags: entry.tags,
-        shared: true,
-      });
-      // Attach the embedding id (same as entry_id in our VectorIndex)
-      merged = SharedKnowledgeEntrySchema.parse({
-        ...merged,
-        embedding_id: vectorEntry.id,
-      });
-      // Update stored copy with embedding_id (use already-known index to avoid double scan)
-      const targetIdx = existingIdx >= 0 ? existingIdx : all.length - 1;
-      all[targetIdx] = merged;
-    }
-
-    await this.stateManager.writeRaw(SHARED_KB_PATH, all);
-    await this._projectSharedKnowledgeToSoil(all);
-    return merged;
+    return saveSharedKnowledgeEntry(this.knowledgeStoreHost(), entry, goalId);
   }
 
   /**
@@ -444,41 +367,7 @@ export class KnowledgeManager {
     category?: string;
     memory_type?: AgentMemoryType;
   }): Promise<AgentMemoryEntry> {
-    const store = await this._loadAgentMemoryStore();
-    const now = new Date().toISOString();
-    const existing = store.entries.findIndex((e) => e.key === entry.key);
-
-    let saved: AgentMemoryEntry;
-    if (existing >= 0) {
-      const prev = store.entries[existing]!;
-      saved = AgentMemoryEntrySchema.parse({
-        ...prev,
-        value: entry.value,
-        tags: entry.tags ?? prev.tags,
-        category: entry.category ?? prev.category,
-        memory_type: entry.memory_type ?? prev.memory_type,
-        // When updating, explicitly preserve status
-        status: prev.status,
-        updated_at: now,
-      });
-      store.entries[existing] = saved;
-    } else {
-      saved = AgentMemoryEntrySchema.parse({
-        id: crypto.randomUUID(),
-        key: entry.key,
-        value: entry.value,
-        tags: entry.tags ?? [],
-        category: entry.category,
-        memory_type: entry.memory_type ?? "fact",
-        created_at: now,
-        updated_at: now,
-      });
-      store.entries.push(saved);
-    }
-
-    await this.stateManager.writeRaw(AGENT_MEMORY_PATH, store);
-    await this._projectAgentMemoryToSoil(store);
-    return saved;
+    return saveAgentMemoryEntry(this.agentMemoryHost(), entry);
   }
 
   /**
@@ -500,50 +389,7 @@ export class KnowledgeManager {
       semantic?: boolean;
     }
   ): Promise<AgentMemoryEntry[]> {
-    const store = await this._loadAgentMemoryStore();
-    const { exact = false, category, memory_type, limit = 10, include_archived = false, semantic = false } = opts ?? {};
-
-    // Pre-filter by category, memory_type, and archived status (applies to both modes)
-    const candidates = store.entries.filter((e) => {
-      if (!include_archived && e.status === "archived") return false;
-      const matchesCategory = category ? e.category === category : true;
-      const matchesType = memory_type ? e.memory_type === memory_type : true;
-      return matchesCategory && matchesType;
-    });
-
-    // Semantic search mode: use embedding similarity
-    if (semantic && this.embeddingClient) {
-      const texts = candidates.map((e) => {
-        const base = `${e.key}: ${e.value}`;
-        return e.summary ? `${base} (${e.summary})` : base;
-      });
-      const queryVec = await this.embeddingClient.embed(query);
-      const candidateVecs = await this.embeddingClient.batchEmbed(texts);
-      const scored = candidates
-        .map((e, i) => ({ entry: e, score: cosineSimilarity(queryVec, candidateVecs[i]!) }))
-        .filter((s) => s.score >= 0.3);
-      scored.sort((a, b) => b.score - a.score);
-      return scored.slice(0, limit).map((s) => s.entry);
-    }
-
-    // Keyword search mode (default)
-    const lower = query.toLowerCase();
-    const results = candidates.filter((e) => {
-      return exact
-        ? e.key === query
-        : e.key.toLowerCase().includes(lower) ||
-          e.value.toLowerCase().includes(lower) ||
-          e.tags.some((t) => t.toLowerCase().includes(lower));
-    });
-
-    // Tiered sort: compiled entries first, then raw, both sorted by updated_at desc
-    results.sort((a, b) => {
-      const aIsCompiled = a.status === "compiled" ? 0 : 1;
-      const bIsCompiled = b.status === "compiled" ? 0 : 1;
-      if (aIsCompiled !== bIsCompiled) return aIsCompiled - bIsCompiled;
-      return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-    });
-    return results.slice(0, limit);
+    return recallAgentMemoryEntries(this.agentMemoryHost(), query, opts);
   }
 
   /**
@@ -556,22 +402,7 @@ export class KnowledgeManager {
     limit?: number;
     include_archived?: boolean;
   }): Promise<AgentMemoryEntry[]> {
-    const store = await this._loadAgentMemoryStore();
-    const { category, memory_type, limit = 10, include_archived = false } = opts ?? {};
-
-    const results = store.entries.filter((e) => {
-      // Exclude archived entries unless explicitly requested
-      if (!include_archived && e.status === "archived") return false;
-      const matchesCategory = category ? e.category === category : true;
-      const matchesType = memory_type ? e.memory_type === memory_type : true;
-      return matchesCategory && matchesType;
-    });
-
-    results.sort(
-      (a, b) =>
-        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-    );
-    return results.slice(0, limit);
+    return listAgentMemoryEntries(this.agentMemoryHost(), opts);
   }
 
   /**
@@ -579,14 +410,7 @@ export class KnowledgeManager {
    * Returns true if the entry was found and removed, false otherwise.
    */
   async deleteAgentMemory(key: string): Promise<boolean> {
-    const store = await this._loadAgentMemoryStore();
-    const idx = store.entries.findIndex((e) => e.key === key);
-    if (idx < 0) return false;
-
-    store.entries.splice(idx, 1);
-    await this.stateManager.writeRaw(AGENT_MEMORY_PATH, store);
-    await this._projectAgentMemoryToSoil(store);
-    return true;
+    return deleteAgentMemoryEntry(this.agentMemoryHost(), key);
   }
 
   // ─── consolidateAgentMemory ───
@@ -602,119 +426,7 @@ export class KnowledgeManager {
     max_entries?: number;
     llmCall: (prompt: string) => Promise<string>;
   }): Promise<{ compiled: AgentMemoryEntry[]; archived: number }> {
-    const store = await this._loadAgentMemoryStore();
-    const now = new Date().toISOString();
-    const maxEntries = opts.max_entries ?? 50;
-
-    // Filter raw entries
-    let rawEntries = store.entries.filter((e) => e.status === "raw");
-    if (opts.category) rawEntries = rawEntries.filter((e) => e.category === opts.category);
-    if (opts.memory_type) rawEntries = rawEntries.filter((e) => e.memory_type === opts.memory_type);
-
-    // Limit number of raw entries processed per consolidation call
-    rawEntries = rawEntries.slice(0, maxEntries);
-
-    // Group by category+memory_type
-    const groups = new Map<string, AgentMemoryEntry[]>();
-    for (const entry of rawEntries) {
-      const groupKey = `${entry.category ?? "_"}::${entry.memory_type}`;
-      const group = groups.get(groupKey) ?? [];
-      group.push(entry);
-      groups.set(groupKey, group);
-    }
-
-    const compiledSchema = z.object({
-      key: z.string(),
-      value: z.string(),
-      summary: z.string(),
-      tags: z.array(z.string()),
-    });
-
-    const compiled: AgentMemoryEntry[] = [];
-    const archivedIds = new Set<string>();
-
-    for (const [, group] of groups) {
-      if (group.length < 2) continue;
-
-      const entryLines = group
-        .map((e) => `- [${e.key}]: ${e.value} (tags: ${e.tags.join(", ")})`)
-        .join("\n");
-
-      const prompt = [
-        "Consolidate the following memory entries into a single entry.",
-        "Return ONLY a JSON object with these fields:",
-        "- key: a descriptive key for the consolidated memory",
-        "- value: the consolidated content (comprehensive but concise)",
-        "- summary: a one-line summary (under 100 chars)",
-        "- tags: relevant tags as string array",
-        "",
-        "Entries to consolidate:",
-        entryLines,
-      ].join("\n");
-
-      let llmRaw: string;
-      try {
-        llmRaw = await opts.llmCall(prompt);
-      } catch (err) {
-        console.warn("[KnowledgeManager] consolidateAgentMemory: llmCall failed, skipping group", err);
-        continue;
-      }
-
-      // Strip markdown fences and find first JSON object
-      let cleaned = llmRaw.trim();
-      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        console.warn("[KnowledgeManager] consolidateAgentMemory: no JSON object found in LLM response, skipping group");
-        continue;
-      }
-      cleaned = jsonMatch[0];
-
-      let parsedResult: z.infer<typeof compiledSchema>;
-      try {
-        parsedResult = compiledSchema.parse(JSON.parse(cleaned));
-      } catch (err) {
-        console.warn("[KnowledgeManager] consolidateAgentMemory: failed to parse LLM response, skipping group", err);
-        continue;
-      }
-
-      const firstEntry = group[0]!;
-      const newEntry = AgentMemoryEntrySchema.parse({
-        id: crypto.randomUUID(),
-        key: parsedResult.key,
-        value: parsedResult.value,
-        summary: parsedResult.summary,
-        tags: parsedResult.tags,
-        category: firstEntry.category,
-        memory_type: firstEntry.memory_type,
-        status: "compiled",
-        compiled_from: group.map((e) => e.id),
-        created_at: now,
-        updated_at: now,
-      });
-
-      compiled.push(newEntry);
-      store.entries.push(newEntry);
-
-      for (const src of group) {
-        archivedIds.add(src.id);
-      }
-    }
-
-    // Archive source entries
-    for (const entry of store.entries) {
-      if (archivedIds.has(entry.id)) {
-        entry.status = "archived";
-        entry.updated_at = now;
-      }
-    }
-
-    if (compiled.length > 0) {
-      store.last_consolidated_at = now;
-      await this.stateManager.writeRaw(AGENT_MEMORY_PATH, store);
-      await this._projectAgentMemoryToSoil(store);
-    }
-
-    return { compiled, archived: archivedIds.size };
+    return consolidateAgentMemoryEntries(this.agentMemoryHost(), opts);
   }
 
   // ─── archiveAgentMemory ───
@@ -724,24 +436,7 @@ export class KnowledgeManager {
    * Returns the count of entries actually archived (skips already-archived).
    */
   async archiveAgentMemory(ids: string[]): Promise<number> {
-    const store = await this._loadAgentMemoryStore();
-    const now = new Date().toISOString();
-    let count = 0;
-    const idSet = new Set(ids);
-
-    for (const entry of store.entries) {
-      if (idSet.has(entry.id) && entry.status !== "archived") {
-        entry.status = "archived";
-        entry.updated_at = now;
-        count++;
-      }
-    }
-
-    if (count > 0) {
-      await this.stateManager.writeRaw(AGENT_MEMORY_PATH, store);
-      await this._projectAgentMemoryToSoil(store);
-    }
-    return count;
+    return archiveAgentMemoryEntries(this.agentMemoryHost(), ids);
   }
 
   // ─── getAgentMemoryStats ───
@@ -755,14 +450,7 @@ export class KnowledgeManager {
     archived: number;
     total: number;
   }> {
-    const store = await this._loadAgentMemoryStore();
-    const stats = { raw: 0, compiled: 0, archived: 0, total: store.entries.length };
-    for (const e of store.entries) {
-      if (e.status === "raw") stats.raw++;
-      else if (e.status === "compiled") stats.compiled++;
-      else if (e.status === "archived") stats.archived++;
-    }
-    return stats;
+    return getAgentMemoryStatsForHost(this.agentMemoryHost());
   }
 
   // ─── autoConsolidate ───
@@ -772,21 +460,7 @@ export class KnowledgeManager {
    * Non-fatal: errors are caught and logged; the loop continues regardless.
    */
   async autoConsolidate(opts?: { rawThreshold?: number }): Promise<{ consolidated: boolean; compiled?: number; archived?: number }> {
-    try {
-      const stats = await this.getAgentMemoryStats();
-      if (stats.raw < (opts?.rawThreshold ?? 20)) {
-        return { consolidated: false };
-      }
-      const llmCall = (prompt: string) =>
-        this.llmClient.sendMessage([{ role: "user", content: prompt }]).then((r) => r.content);
-      const result = await this.consolidateAgentMemory({ llmCall });
-      return { consolidated: true, compiled: result.compiled.length, archived: result.archived };
-    } catch (err) {
-      // Consolidation failure must never crash the loop
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn("KnowledgeManager.autoConsolidate: failed (non-fatal)", msg);
-      return { consolidated: false };
-    }
+    return autoConsolidateAgentMemory(this.agentMemoryHost(), opts);
   }
 
     // ─── Private Helpers ───
@@ -809,6 +483,36 @@ export class KnowledgeManager {
 
   private async _projectAgentMemoryToSoil(store: AgentMemoryStore): Promise<void> {
     await projectAgentMemory(this.stateManager, store);
+  }
+
+  async loadAgentMemoryStore(): Promise<AgentMemoryStore> {
+    return this._loadAgentMemoryStore();
+  }
+
+  async saveAgentMemoryStore(store: AgentMemoryStore): Promise<void> {
+    await this.stateManager.writeRaw(AGENT_MEMORY_PATH, store);
+    await this._projectAgentMemoryToSoil(store);
+  }
+
+  private agentMemoryHost() {
+    return {
+      llmClient: this.llmClient,
+      embeddingClient: this.embeddingClient,
+      loadAgentMemoryStore: () => this._loadAgentMemoryStore(),
+      saveAgentMemoryStore: (store: AgentMemoryStore) => this.saveAgentMemoryStore(store),
+    };
+  }
+
+  private knowledgeStoreHost() {
+    return {
+      stateManager: this.stateManager,
+      vectorIndex: this.vectorIndex,
+      loadDomainKnowledge: (goalId: string) => this._loadDomainKnowledge(goalId),
+      projectDomainKnowledge: (goalId: string, domainKnowledge: DomainKnowledge) =>
+        this._projectDomainKnowledgeToSoil(goalId, domainKnowledge),
+      projectSharedKnowledge: (entries: SharedKnowledgeEntry[]) =>
+        this._projectSharedKnowledgeToSoil(entries),
+    };
   }
 
 

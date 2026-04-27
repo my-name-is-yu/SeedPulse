@@ -6,7 +6,6 @@ import type { IEmbeddingClient } from "../embedding-client.js";
 import type { VectorIndex } from "../vector-index.js";
 import {
   ShortTermEntrySchema,
-  LessonEntrySchema,
   RetentionConfigSchema,
   StatisticalSummarySchema,
 } from "../../../base/types/memory-lifecycle.js";
@@ -14,7 +13,6 @@ import type {
   ShortTermEntry,
   LessonEntry,
   StatisticalSummary,
-  MemoryIndex,
   CompressionResult,
   RetentionConfig,
   MemoryDataType,
@@ -27,25 +25,12 @@ import {
   readJsonFileAsync,
   getDataFile,
   generateId,
-  getRetentionLimit,
 } from "./memory-persistence.js";
 import {
-  initializeIndex,
-  loadIndex,
-  saveIndex,
   updateIndex,
-  removeFromIndex,
-  removeGoalFromIndex,
-  touchIndexEntry,
-  archiveOldestLongTermEntries,
-  storeLessonsLongTerm,
 } from "./memory-index.js";
-import { updateStatistics } from "./memory-stats.js";
-import { queryLessons, queryCrossGoalLessons } from "./memory-query.js";
-import { extractPatterns, distillLessons, validateCompressionQuality } from "./memory-distill.js";
 import {
   compressToLongTerm as _compressToLongTerm,
-  compressAllRemainingToLongTerm as _compressAllRemainingToLongTerm,
   applyRetentionPolicy as _applyRetentionPolicy,
   runGarbageCollection as _runGarbageCollection,
   compressionDelay as _compressionDelay,
@@ -60,6 +45,10 @@ import {
   getDeadlineBonus as _getDeadlineBonus,
   type MemorySelectionDeps,
 } from "./memory-selection.js";
+import {
+  archiveGoalMemory,
+  initializeMemoryDirectories,
+} from "./memory-lifecycle-storage.js";
 
 // ─── MemoryLifecycleManager ───
 // NOTE: This file is ~666 lines. Most methods are thin wrappers delegating to
@@ -137,31 +126,7 @@ export class MemoryLifecycleManager {
 
   /** Create directory structure for memory storage */
   async initializeDirectories(): Promise<void> {
-    const dirs = [
-      path.join(this.memoryDir, "short-term", "goals"),
-      path.join(this.memoryDir, "long-term", "lessons", "by-goal"),
-      path.join(this.memoryDir, "long-term", "lessons", "by-dimension"),
-      path.join(this.memoryDir, "long-term", "statistics"),
-      path.join(this.memoryDir, "archive"),
-    ];
-    for (const dir of dirs) {
-      await fsp.mkdir(dir, { recursive: true });
-    }
-    // Initialize index files if they don't exist
-    await initializeIndex(this.memoryDir, "short-term");
-    await initializeIndex(this.memoryDir, "long-term");
-    // Initialize global lessons file
-    const globalPath = path.join(
-      this.memoryDir,
-      "long-term",
-      "lessons",
-      "global.json"
-    );
-    try {
-      await fsp.access(globalPath);
-    } catch {
-      await atomicWriteAsync(globalPath, []);
-    }
+    await initializeMemoryDirectories(this.memoryDir);
   }
 
   // ─── Short-term Memory ───
@@ -467,133 +432,7 @@ export class MemoryLifecycleManager {
     goalId: string,
     reason: "completed" | "cancelled"
   ): Promise<void> {
-    const dataTypes: MemoryDataType[] = [
-      "experience_log",
-      "observation",
-      "strategy",
-      "task",
-      "knowledge",
-    ];
-
-    // Step 1: Compress all remaining short-term data (best-effort)
-    for (const dataType of dataTypes) {
-      const dataFile = getDataFile(this.memoryDir, goalId, dataType);
-      try { await fsp.access(dataFile); } catch { continue; }
-
-      const entries =
-        (await readJsonFileAsync<ShortTermEntry[]>(
-          dataFile,
-          z.array(ShortTermEntrySchema)
-        )) ?? [];
-      if (entries.length === 0) continue;
-
-      try {
-        // Force-compress all remaining entries regardless of loop count
-        await _compressAllRemainingToLongTerm(this.compressionDeps, goalId, dataType, entries);
-      } catch {
-        // Failure is acceptable on close — proceed to archive anyway
-      }
-    }
-
-    // Step 2: Archive short-term data directory
-    const goalShortTermDir = path.join(
-      this.memoryDir,
-      "short-term",
-      "goals",
-      goalId
-    );
-    const archiveGoalDir = path.join(this.memoryDir, "archive", goalId);
-
-    try {
-      await fsp.access(goalShortTermDir);
-      await fsp.mkdir(archiveGoalDir, { recursive: true });
-
-      // Archive all files from the short-term goal directory
-      const files = await fsp.readdir(goalShortTermDir);
-      for (const file of files) {
-        const srcPath = path.join(goalShortTermDir, file);
-        const destPath = path.join(archiveGoalDir, file);
-        await fsp.copyFile(srcPath, destPath);
-      }
-
-      // Remove from short-term
-      await fsp.rm(goalShortTermDir, { recursive: true, force: true });
-
-      // Remove goal's entries from short-term index
-      await removeGoalFromIndex(this.memoryDir, "short-term", goalId);
-    } catch {
-      // goalShortTermDir doesn't exist, nothing to archive
-    }
-
-    // Step 3: Archive long-term data (lessons + statistics) for this goal
-    const byGoalLessonsPath = path.join(
-      this.memoryDir,
-      "long-term",
-      "lessons",
-      "by-goal",
-      `${goalId}.json`
-    );
-    const statisticsPath = path.join(
-      this.memoryDir,
-      "long-term",
-      "statistics",
-      `${goalId}.json`
-    );
-
-    try {
-      await fsp.access(byGoalLessonsPath);
-      await fsp.mkdir(archiveGoalDir, { recursive: true });
-      const archiveLessonsPath = path.join(archiveGoalDir, "lessons.json");
-      const existingArchive =
-        (await readJsonFileAsync<LessonEntry[]>(
-          archiveLessonsPath,
-          z.array(LessonEntrySchema)
-        )) ?? [];
-      const goalLessons =
-        (await readJsonFileAsync<LessonEntry[]>(
-          byGoalLessonsPath,
-          z.array(LessonEntrySchema)
-        )) ?? [];
-      await atomicWriteAsync(archiveLessonsPath, [
-        ...existingArchive,
-        ...goalLessons,
-      ]);
-    } catch {
-      // byGoalLessonsPath doesn't exist, skip
-    }
-
-    try {
-      await fsp.access(statisticsPath);
-      await fsp.mkdir(archiveGoalDir, { recursive: true });
-      const archiveStatsPath = path.join(archiveGoalDir, "statistics.json");
-      const stats = await readJsonFileAsync<StatisticalSummary>(
-        statisticsPath,
-        StatisticalSummarySchema
-      );
-      if (stats) {
-        await atomicWriteAsync(archiveStatsPath, stats);
-      }
-    } catch {
-      // statisticsPath doesn't exist, skip
-    }
-
-    // Step 4: Mark all goal lessons as archived in long-term
-    try {
-      await fsp.access(byGoalLessonsPath);
-      const lessons =
-        (await readJsonFileAsync<LessonEntry[]>(
-          byGoalLessonsPath,
-          z.array(LessonEntrySchema)
-        )) ?? [];
-      const archived = lessons.map((l) =>
-        LessonEntrySchema.parse({ ...l, status: "archived" })
-      );
-      await atomicWriteAsync(byGoalLessonsPath, archived);
-    } catch {
-      // byGoalLessonsPath doesn't exist, skip
-    }
-
-    void reason; // used for potential future audit logging
+    await archiveGoalMemory(this.memoryDir, this.compressionDeps, goalId, reason);
   }
 
   // ─── Statistics ───

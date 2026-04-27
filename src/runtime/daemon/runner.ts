@@ -1,69 +1,54 @@
 import * as path from "node:path";
-import { CoreLoop } from "../../orchestrator/loop/core-loop.js";
-import type { LoopResult } from "../../orchestrator/loop/core-loop.js";
+import type { CoreLoop } from "../../orchestrator/loop/core-loop.js";
 import type { GoalNegotiator } from "../../orchestrator/goal/goal-negotiator.js";
 import type { Goal } from "../../base/types/goal.js";
-import { DriveSystem } from "../../platform/drive/drive-system.js";
-import { StateManager } from "../../base/state/state-manager.js";
+import type { DriveSystem } from "../../platform/drive/drive-system.js";
+import type { StateManager } from "../../base/state/state-manager.js";
 import { getProviderRuntimeFingerprint } from "../../base/llm/provider-config.js";
 import type { CuriosityEngine } from "../../platform/traits/curiosity-engine.js";
-import { PIDManager } from "../pid-manager.js";
-import { Logger } from "../logger.js";
-import { EventServer } from "../event/server.js";
+import type { PIDManager } from "../pid-manager.js";
+import type { Logger } from "../logger.js";
+import type { EventServer } from "../event/server.js";
 import type { PulSeedEvent } from "../../base/types/drive.js";
 import type { DaemonConfig, DaemonState, ResidentActivity } from "../../base/types/daemon.js";
-import { DaemonConfigSchema, DaemonStateSchema, ResidentActivitySchema } from "../../base/types/daemon.js";
+import { DaemonConfigSchema } from "../../base/types/daemon.js";
 import type { ILLMClient } from "../../base/llm/llm-client.js";
-import { CronScheduler } from "../cron-scheduler.js";
-import { ScheduleEngine } from "../schedule/engine.js";
-import { resolveScheduleEntry } from "../schedule/entry-resolver.js";
+import type { CronScheduler } from "../cron-scheduler.js";
+import type { ScheduleEngine } from "../schedule/engine.js";
 import type { MemoryLifecycleManager } from "../../platform/knowledge/memory/memory-lifecycle.js";
 import type { KnowledgeManager } from "../../platform/knowledge/knowledge-manager.js";
-import { lintAgentMemory } from "../../platform/knowledge/knowledge-manager-lint.js";
-import { DreamAnalyzer } from "../../platform/dream/dream-analyzer.js";
-import { DreamConsolidator, type DreamLegacyConsolidationReport } from "../../platform/dream/dream-consolidator.js";
-import { DreamScheduleSuggestionStore } from "../../platform/dream/dream-schedule-suggestions.js";
-import { createRuntimeDreamSoilSyncService } from "../../platform/dream/dream-soil-sync.js";
+import type { DreamLegacyConsolidationReport } from "../../platform/dream/dream-consolidator.js";
 import type { DreamReport, DreamRunReport, DreamTier } from "../../platform/dream/dream-types.js";
-import { runDreamConsolidation } from "../../reflection/dream-consolidation.js";
 import { generateCronEntry } from "./signals.js";
-import { rotateDaemonLog, calculateAdaptiveInterval as calcAdaptiveInterval } from "./health.js";
-import { IngressGateway } from "../gateway/index.js";
+import type { IngressGateway } from "../gateway/index.js";
 import type { Envelope } from "../types/envelope.js";
-import { LoopSupervisor } from "../executor/index.js";
-import {
-  ApprovalStore,
-  OutboxStore,
-  RuntimeHealthStore,
-  RuntimeOperationStore,
-  createRuntimeStorePaths,
-} from "../store/index.js";
+import type { LoopSupervisor } from "../executor/index.js";
+import type { ApprovalStore, OutboxStore, RuntimeHealthStore } from "../store/index.js";
 import type { RuntimeControlOperationKind } from "../store/index.js";
-import { LeaderLockManager } from "../leader-lock-manager.js";
-import { GoalLeaseManager } from "../goal-lease-manager.js";
-import { JournalBackedQueue, type JournalBackedQueueAcceptResult } from "../queue/journal-backed-queue.js";
-import { QueueClaimSweeper } from "../queue/queue-claim-sweeper.js";
-import { ApprovalBroker } from "../approval-broker.js";
-import { CommandDispatcher } from "../command-dispatcher.js";
-import { EventDispatcher } from "../event/dispatcher.js";
+import type { LeaderLockManager } from "../leader-lock-manager.js";
+import type { GoalLeaseManager } from "../goal-lease-manager.js";
+import type { JournalBackedQueue } from "../queue/journal-backed-queue.js";
+import type { QueueClaimSweeper } from "../queue/queue-claim-sweeper.js";
+import type { ApprovalBroker } from "../approval-broker.js";
+import type { CommandDispatcher } from "../command-dispatcher.js";
+import type { EventDispatcher } from "../event/dispatcher.js";
+import type { RuntimeOwnershipCoordinator, RuntimeHealthComponents } from "./runtime-ownership.js";
 import {
-  RuntimeOwnershipCoordinator,
-  type RuntimeHealthComponents,
-} from "./runtime-ownership.js";
-import {
-  type ProcessSignalTarget,
-  ProcessShutdownCoordinator,
-} from "./runner-lifecycle.js";
+  createInitialDaemonState,
+  createRuntimeWiring,
+  resolveRuntimeRoot as resolveConfiguredRuntimeRoot,
+  RUNTIME_LEADER_HEARTBEAT_MS,
+  RUNTIME_LEADER_LEASE_MS,
+} from "./runner-bootstrap.js";
+import type { ProcessSignalTarget, ProcessShutdownCoordinator } from "./runner-lifecycle.js";
 import {
   runCommandWithHealth as runCommandWithHealthFn,
 } from "./runner-errors.js";
 import { reconcileInterruptedExecutions as reconcileInterruptedExecutionsFn } from "./runner-recovery.js";
 import type { ShutdownMarker } from "./index.js";
 import {
-  checkCrashRecoveryMarker,
   cleanupDaemonRun,
   collectGoalCycleScheduleSnapshot,
-  deleteShutdownMarkerFile,
   determineActiveGoalsForCycle,
   expireOldCronTasks,
   getMaxGapScoreForGoals,
@@ -71,12 +56,9 @@ import {
   processCronTasksForDaemon,
   processScheduleEntriesForDaemon,
   runRuntimeStoreMaintenanceCycle,
-  readShutdownMarkerFile,
   restoreInterruptedGoals,
-  runProactiveMaintenance,
   runSupervisorMaintenanceCycleForDaemon,
   saveDaemonStateFile,
-  writeShutdownMarkerFile,
 } from "./index.js";
 import type { GoalCycleScheduleSnapshotEntry } from "./maintenance.js";
 import {
@@ -102,13 +84,11 @@ import {
   startDaemonRunner,
 } from "./runner-startup.js";
 import {
-  gatherResidentWorkspaceContext,
   legacyReportFromPlatformDream as legacyReportFromPlatformDreamFn,
   loadExistingGoalTitles as loadExistingGoalTitlesFn,
   loadKnownGoals as loadKnownGoalsFn,
   persistResidentActivity as persistResidentActivityFn,
   proactiveTick as proactiveTickFn,
-  resolveResidentWorkspaceDir,
   runDreamAnalysis as runDreamAnalysisFn,
   runPlatformDreamConsolidation as runPlatformDreamConsolidationFn,
   runResidentCuriosityCycle as runResidentCuriosityCycleFn,
@@ -120,10 +100,16 @@ import {
   triggerResidentPreemptiveCheck as triggerResidentPreemptiveCheckFn,
   tryApplyPendingDreamSuggestion as tryApplyPendingDreamSuggestionFn,
 } from "./runner-resident.js";
-const RUNTIME_JOURNAL_MAX_ATTEMPTS = 1_000;
-const RUNTIME_LEADER_LEASE_MS = 30_000;
-const RUNTIME_LEADER_HEARTBEAT_MS = 10_000;
-
+import {
+  calculateDaemonAdaptiveInterval,
+  checkDaemonCrashRecovery,
+  deleteDaemonShutdownMarker,
+  readDaemonShutdownMarker,
+  refreshDaemonOperationalState,
+  rotateDaemonRunnerLog,
+  sleepWithAbort,
+  writeDaemonShutdownMarker,
+} from "./runner-runtime.js";
 // Re-exports for callers that imported these from daemon-runner
 export { generateCronEntry } from "./signals.js";
 export { rotateDaemonLog, calculateAdaptiveInterval } from "./health.js";
@@ -282,70 +268,35 @@ export class DaemonRunner {
     this.logPath = path.join(this.logDir, "pulseed.log");
 
     this.runtimeRoot = this.resolveRuntimeRoot();
-    const runtimePaths = createRuntimeStorePaths(this.runtimeRoot);
-    this.approvalStore = new ApprovalStore(runtimePaths);
-    this.outboxStore = new OutboxStore(runtimePaths);
-    this.runtimeHealthStore = new RuntimeHealthStore(runtimePaths);
-    this.leaderLockManager = new LeaderLockManager(this.runtimeRoot);
-    this.goalLeaseManager = new GoalLeaseManager(this.runtimeRoot);
-    this.approvalBroker = new ApprovalBroker({
-      store: this.approvalStore,
-      logger: this.logger,
-    });
-    this.coreLoop.setWaitApprovalBroker?.(this.approvalBroker);
-    this.journalQueue = new JournalBackedQueue({
-      journalPath: path.join(this.runtimeRoot, "queue.json"),
-      maxAttempts: RUNTIME_JOURNAL_MAX_ATTEMPTS,
-    });
-    this.queueClaimSweeper = new QueueClaimSweeper({
-      queue: this.journalQueue,
-    });
-    this.runtimeOwnership = new RuntimeOwnershipCoordinator({
-      baseDir: this.baseDir,
-      runtimeRoot: this.runtimeRoot,
-      logger: this.logger,
-      approvalStore: this.approvalStore,
-      outboxStore: this.outboxStore,
-      runtimeHealthStore: this.runtimeHealthStore,
-      leaderLockManager: this.leaderLockManager,
-      onLeadershipLost: (reason) => this.failRuntimeLeadership(reason),
-    });
+    const runtimeWiring = createRuntimeWiring(
+      this.baseDir,
+      this.runtimeRoot,
+      this.logger,
+      (reason: string) => this.failRuntimeLeadership(reason)
+    );
+    this.approvalStore = runtimeWiring.approvalStore;
+    this.outboxStore = runtimeWiring.outboxStore;
+    this.runtimeHealthStore = runtimeWiring.runtimeHealthStore;
+    this.leaderLockManager = runtimeWiring.leaderLockManager;
+    this.goalLeaseManager = runtimeWiring.goalLeaseManager;
+    this.approvalBroker = runtimeWiring.approvalBroker;
+    this.coreLoop.setWaitApprovalBroker?.(this.approvalBroker ?? undefined);
+    this.journalQueue = runtimeWiring.journalQueue;
+    this.queueClaimSweeper = runtimeWiring.queueClaimSweeper;
+    this.runtimeOwnership = runtimeWiring.runtimeOwnership;
     this.getProviderRuntimeFingerprintFn =
       deps.getProviderRuntimeFingerprint ?? getProviderRuntimeFingerprint;
     this.refreshResidentDeps = deps.refreshResidentDeps;
 
-    // Initialize daemon state
-    this.state = DaemonStateSchema.parse({
-      pid: process.pid,
-      started_at: new Date().toISOString(),
-      last_loop_at: null,
-      loop_count: 0,
-      active_goals: [],
-      status: "stopped",
-      runtime_root: this.runtimeRoot,
-      crash_count: 0,
-      last_error: null,
-      last_resident_at: null,
-      resident_activity: null,
-    });
+    this.state = createInitialDaemonState(this.runtimeRoot);
   }
 
   private refreshOperationalState(): void {
-    this.state.active_goals = [...this.currentGoalIds];
-    if (this.state.status === "crashed" || this.state.status === "stopping") {
-      return;
-    }
-    this.state.status = this.currentGoalIds.length === 0 ? "idle" : "running";
+    refreshDaemonOperationalState(this.state, this.currentGoalIds);
   }
 
   private resolveRuntimeRoot(): string {
-    const configuredRoot = this.config.runtime_root;
-    if (!configuredRoot || configuredRoot.trim() === "") {
-      return path.join(this.baseDir, "runtime");
-    }
-    return path.isAbsolute(configuredRoot)
-      ? configuredRoot
-      : path.resolve(this.baseDir, configuredRoot);
+    return resolveConfiguredRuntimeRoot(this.baseDir, this.config);
   }
 
   // ─── Public API ───
@@ -614,16 +565,8 @@ export class DaemonRunner {
    * Can be aborted early via sleepAbortController (e.g. when an event arrives).
    */
   private sleep(ms: number): Promise<void> {
-    this.sleepAbortController = new AbortController();
-    const abortController = this.sleepAbortController;
-    return new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, ms);
-      abortController.signal.addEventListener("abort", () => {
-        clearTimeout(timer);
-        resolve();
-      });
-    }).finally(() => {
-      this.sleepAbortController = null;
+    return sleepWithAbort(ms, (controller) => {
+      this.sleepAbortController = controller;
     });
   }
 
@@ -967,12 +910,12 @@ export class DaemonRunner {
     maxGapScore: number,
     consecutiveIdleCycles: number
   ): number {
-    return calcAdaptiveInterval(
+    return calculateDaemonAdaptiveInterval(
+      this.config,
       baseInterval,
       goalsActivatedThisCycle,
       maxGapScore,
-      consecutiveIdleCycles,
-      this.config.adaptive_sleep
+      consecutiveIdleCycles
     );
   }
 
@@ -982,7 +925,7 @@ export class DaemonRunner {
    * Write shutdown-state.json to baseDir (async, atomic).
    */
   private async writeShutdownMarker(marker: ShutdownMarker): Promise<void> {
-    await writeShutdownMarkerFile(this.baseDir, marker, this.logger);
+    await writeDaemonShutdownMarker(this.baseDir, marker, this.logger);
   }
 
   /**
@@ -990,14 +933,14 @@ export class DaemonRunner {
    * Returns null if file doesn't exist or fails to parse.
    */
   async readShutdownMarker(): Promise<ShutdownMarker | null> {
-    return readShutdownMarkerFile(this.baseDir);
+    return readDaemonShutdownMarker(this.baseDir);
   }
 
   /**
    * Delete shutdown-state.json (after successful resume).
    */
   async deleteShutdownMarker(): Promise<void> {
-    await deleteShutdownMarkerFile(this.baseDir);
+    await deleteDaemonShutdownMarker(this.baseDir);
   }
 
   /**
@@ -1005,7 +948,7 @@ export class DaemonRunner {
    * Called at startup before the main loop begins.
    */
   private async checkCrashRecovery(): Promise<void> {
-    await checkCrashRecoveryMarker(this.baseDir, this.logger);
+    await checkDaemonCrashRecovery(this.baseDir, this.logger);
   }
 
   // ─── Log Rotation (delegates to daemon-health) ───
@@ -1016,9 +959,7 @@ export class DaemonRunner {
    * Called at daemon startup.
    */
   async rotateLog(): Promise<void> {
-    const maxSizeBytes = this.config.log_rotation.max_size_mb * 1024 * 1024;
-    const maxFiles = this.config.log_rotation.max_files;
-    await rotateDaemonLog(this.logPath, this.logDir, maxSizeBytes, maxFiles, this.logger);
+    await rotateDaemonRunnerLog(this.config, this.logPath, this.logDir, this.logger);
   }
 
   // ─── Static Utilities (delegates to daemon-signals) ───
